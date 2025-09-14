@@ -22,7 +22,7 @@ Create a branch and commit.
     git push -u origin my-new-feature
 
 while on a branch, commit
-    # You have to be in the folder.
+    # You have to be in the folder.`
     cd /var/www/html/blankee
 
     # Push the changes
