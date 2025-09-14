@@ -7,11 +7,39 @@ Restart mysql ( In case it hangs)
 Backup to Dev ( Sends all files to be backed up including DB)
     backupapp
 
+Create a branch and commit.
+    # You have to be in the folder.
+    cd /var/www/html/blankee
+
+    # Create and switch to a new branch
+    git checkout -b <branch-name>
+
+    # Do your edits, then stage and commit
+    git add .
+    git commit -m "Work on new feature"
+
+    # Push it to GitHub
+    git push -u origin my-new-feature
+
+while on a branch, commit
+    # You have to be in the folder.
+    cd /var/www/html/blankee
+
+    # Push the changes
+    git push -u origin <branch-name>
+
+Switch betweek branches
+    git checkout main
+    git checkout <branch-name>
+
+See all branches
+    git branch -a
+
 Push latest stable ( All files get pushed to the NAS so other servers can pull it)
     pushupdatestable
 
 Pull latest stable ( All files get pulled from the NAS. The files are the ones pushed above)
-    pullupdatestable
+    git pull origin main
 
 Check Python logs
     cat /var/log/apache2/budget_error.log
