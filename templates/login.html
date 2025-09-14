@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee Login</title>
+    <!-- Link to the external stylesheet for custom styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="login-body">
+    <!-- Top navigation bar -->
+    <div class="nav-bar nav-bar-login">
+        <div class="nav-bar-container nav-bar-container-login">
+            <div class="nav-left-content nav-left-content-login">
+                <a href="https://blankee.io">
+                    <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo nav-logo-login">
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar navigation section (currently empty) -->
+    <div class="calendarnav">
+        <!-- Placeholder for calendar navigation content -->
+    </div>
+
+    <!-- Main container for the login form -->
+    <div class="logincontainer" id="logincontainer">
+        <h1>Log In</h1>
+
+        <!-- Login Error Modal -->
+        <div id="loginModal" class="modal">
+            <div class="modal-content">
+                <p id="loginMessage"></p>
+            </div>
+        </div>
+
+        {% if mfa_step %}
+            <form method="POST" action="{{ url_for('login_mfa') }}">
+                <div class="mfa-row">
+                    <label for="mfa_code">Enter 6-digit code from your authenticator app:</label>
+                    <input type="text" name="mfa_code" id="mfa_code" class="mfa-input" maxlength="6" required autofocus>
+                </div>
+                <button type="submit" class="login-button">Verify</button>
+            </form>
+            <p><a href="{{ url_for('login') }}">Back to Login</a></p>
+        {% else %}
+            <form method="POST" action="{{ url_for('login') }}">
+                <div class="login-row">
+                    <label for="username">Email Address:</label>
+                    <input type="text" name="username" class="login-input" required>
+                </div>
+                <div class="login-row">
+                    <label for="password">Password:</label>
+                    <input type="password" name="password" class="login-input" required>
+                </div>
+                <div class="login-row remember-me">
+                    <input type="checkbox" name="remember" id="remember">
+                    <label for="remember">Remember Me</label>
+                </div>
+                <button type="submit" class="login-button">Login</button>
+            </form>
+            <p>Don't have an account? <a href="{{ url_for('register') }}" class="register-link">Create account</a>.</p>
+        {% endif %}
+
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="login-error">{{ messages[0] }}</div>
+        {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Link to the external JavaScript file -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

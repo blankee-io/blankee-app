@@ -1,0 +1,101 @@
+<!-- Top navigation bar -->
+<div class="nav-bar">
+    <div class="nav-bar-container">
+        <div class="nav-left-content">
+            <a href="https://blankee.io/">
+                <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo">
+            </a>
+        </div>
+
+        <!-- Profile dropdown container -->
+        <div class="sidenav-profile"> <!-- Use JavaScript to toggle the dropdown -->
+            <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}" 
+                alt="Profile Picture" class="sidenav-profile-pic">
+            <!-- Dropdown Menu moved inside sidenav-profile for pure CSS width matching -->
+            <div id="profileDropdown" class="dropdown-content" style="display: none;">
+                <div class="dropdown-profile-label"><span>Profile</span></div>
+                <div class="dropdown-profile-section" id="dropdownProfileSection">
+                    <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}" 
+                        alt="Profile Picture" class="dropdown-profile-pic">
+                    <div class="dropdown-username">{{ current_user.username }}</div>
+                </div>
+                <div class="dropdown-menu-section">
+                    <div class="dropdown-link"><a href="{{ url_for('profile') }}">Profile and security</a><i class="fa-regular fa-user"></i></div>
+                </div>
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-menu-section">
+                    <div class="dropdown-profile-label"><span>Blankee</span></div>
+                    <div class="dropdown-link"><a href="{{ url_for(landing_page) }}">Blankee Views</a><i class="fa-light fa-table-list"></i></div>
+                    <div class="dropdown-link">
+                        <a href="javascript:void(0);" id="toggle-recurring-btn">Manage Recurring Categories</a>
+                        <i class="fa-solid fa-arrows-repeat"></i>
+                    </div>
+                    <div id="recurring-sections" class="collapsed">
+                        <div class="dropdown-link dropdown-sublink">
+                            <a href="{{ url_for('recurring_income') }}">Income</a>
+                            <i class="fa-solid fa-plus-large"></i>
+                        </div>
+                        <div class="dropdown-link dropdown-sublink">
+                            <a href="{{ url_for('recurring_expense') }}">Expenses</a>
+                            <i class="fa-solid fa-minus"></i>
+                        </div>
+                        <div class="dropdown-link dropdown-sublink">
+                            <a href="{{ url_for('recurring_ca_expense') }}">Credit Expenses</a>
+                            <i class="fa-kit fa-light-credit-card-circle-minus"></i>
+                        </div>
+                    </div>
+                    <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Manage Credit Accounts</a><i class="fa-solid fa-credit-card"></i></div>
+                    <div class="dropdown-link"><a href="{{ url_for('buds') }}">Manage Buds&trade;</a><i class="fa-regular fa-seedling"></i></div>
+                    <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-regular fa-sliders"></i></div>
+                </div>
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-menu-section">
+                    <div class="dropdown-link"><a href="{{ url_for('logout') }}">Log out</a><i class="fa-regular fa-arrow-left-from-bracket"></i></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const profile = document.querySelector('.sidenav-profile');
+        const dropdown = document.getElementById('profileDropdown');
+
+        if (profile && dropdown) {
+            // Toggle the dropdown menu on profile click
+            profile.addEventListener('click', function(event) {
+                event.stopPropagation();
+                if (dropdown.style.display === "block") {
+                    dropdown.style.display = "none";
+                } else {
+                    dropdown.style.display = "block";
+                }
+            });
+
+            // Prevent dropdown from closing when clicking inside it
+            dropdown.addEventListener('click', function(event) {
+                event.stopPropagation();
+            });
+
+            // Close dropdown only if clicking outside the dropdown-content
+            window.addEventListener('click', function(event) {
+                if (!event.target.closest('.dropdown-content') && dropdown.style.display === "block") {
+                    dropdown.style.display = "none";
+                }
+            });
+        } else {
+            console.error("Error: .sidenav-profile or #profileDropdown not found.");
+        }
+
+        // Toggle Recurring Income/Expense sections with animation
+        const toggleRecurringBtn = document.getElementById('toggle-recurring-btn');
+        const recurringSections = document.getElementById('recurring-sections');
+        if (toggleRecurringBtn && recurringSections) {
+            toggleRecurringBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                recurringSections.classList.toggle('expanded');
+            });
+        }
+    });
+</script>

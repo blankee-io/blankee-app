@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"> <!-- Character encoding for the document -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Setup Profile</title>
+    <!-- Link to the external stylesheet for styling the page -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Link to Font Awesome for icons -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
+    <!-- Link to jQuery library for JavaScript functionality -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="setup-profile-body">
+    <div class="nav-bar">
+        <div class="nav-bar-container">
+            <div class="nav-left-content">
+                <a href="https://blankee.io">
+                    <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo">
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar navigation section (currently empty) -->
+    <div class="calendarnav">
+        <!-- Placeholder for calendar navigation content -->
+    </div>
+
+    <!-- Welcome Modal -->
+    <div id="welcome-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Welcome to Blankee!</h2>
+            <p>We're excited to help you take control of your finances. To get started, we just need some basic information. Don't worry—it's only two quick steps!</p>
+            <div class="setup-profile-button-container">
+                <button type="button" class="setup-profile-next-button" id="welcome-next-button">Get Started</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Currency Selection Modal -->
+    <div id="currency-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Step 1: Choose Your Currency</h2>
+            <form id="setup-profile-currency-form" class="setup-profile-form">
+                <label for="setup-profile-currency-type">Select your preferred currency. You can change this later in your profile.</label>
+                <div class="currency-input-container">
+                    <select id="setup-profile-currency-type" name="currency_type" required>
+                        <option value="USD" selected>USD (&#36;)</option>
+                        <option value="EUR">EUR (&euro;)</option>
+                    </select>
+                </div>
+                <div class="setup-profile-button-container">
+                    <button type="button" class="setup-profile-previous-button">Previous</button> <!-- Previous button -->
+                    <button type="submit" class="setup-profile-next-button">Next</button> <!-- Next button -->
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Starting Balance Modal -->
+    <div id="starting-balance-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Step 1: Enter Starting Balance</h2>
+            <form id="setup-profile-balance-form" class="setup-profile-form">
+                <label for="setup-profile-starting-balance">The starting balance is the amount currently in your bank account. It serves as the initial balance in the Blankee app and helps set the foundation for tracking your finances. By entering your starting balance, Blankee can accurately calculate your remaining funds as you log income and expenses moving forward.</label>
+                <div class="currency-input-container">
+                    <div>
+                        <label for="setup-profile-starting-balance">Checking:</label>
+                        <span class="s-p-sb-currency-symbol">$</span>
+                        <input type="number" step="1" id="setup-profile-starting-balance" inputmode="decimal" name="starting_balance" placeholder="0" required min="0" pattern="\\d*">
+                    </div>
+                    <div>
+                        <label for="setup-profile-starting-savings">Savings:</label>
+                        <span class="s-p-ss-currency-symbol">$</span>
+                        <input type="number" step="1" id="setup-profile-starting-savings" inputmode="decimal" name="starting_savings" placeholder="0" required min="0" pattern="\\d*">
+                    </div>
+                </div>
+                <!-- Button container -->
+                <div class="setup-profile-button-container">
+                    <button type="button" class="setup-profile-previous-button">Previous</button> <!-- Previous button -->
+                    <button type="submit" class="setup-profile-next-button">Next</button> <!-- Next button -->
+                </div>
+            </form>            
+        </div>
+    </div>
+
+    <!-- Balance Threshold Modal -->
+    <div id="balance-threshold-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Step 2: Set Your Minimum Threshold</h2>
+            <form id="setup-profile-threshold-form" class="setup-profile-form">
+                <label for="setup-profile-balance-threshold">The balance threshold is the minimum amount you'd like to keep in your account. If your available balance falls below this number, Blankee will notify you with a warning. This helps you avoid overdrafts or dipping too far into your funds, giving you better control over your financial cushion.</label>
+                <div class="currency-input-container">
+                    <span class="s-p-bt-currency-symbol">$</span>
+                    <input type="number" step="1" id="setup-profile-balance-threshold" inputmode="decimal" name="balance_threshold" placeholder="0" required min="0" pattern="\\d*">
+                </div>
+                <!-- Button container -->
+                <div class="setup-profile-button-container">
+                    <button type="button" class="setup-profile-previous-button">Previous</button> <!-- Previous button -->
+                    <button type="submit" class="setup-profile-submit-button">Submit</button> <!-- Submit button -->
+                </div>
+            </form>            
+        </div>
+    </div>
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <!-- Link to external JavaScript -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script>
+        $(document).ready(function () {
+            document.getElementById('loading-screen').style.display = 'none';
+
+            // Show the welcome modal first
+            $('#welcome-modal-setup').show();
+            $('#currency-modal-setup').hide();
+            $('#starting-balance-modal-setup').hide();
+            $('#balance-threshold-modal-setup').hide();
+
+            // Handle welcome next button
+            $('#welcome-next-button').on('click', function () {
+                $('#welcome-modal-setup').hide();
+                $('#currency-modal-setup').show();
+                $('#setup-profile-currency-type').focus();
+            });
+            
+            // Handle previous button click on the starting balance modal
+            $('#setup-profile-currency-form .setup-profile-previous-button').on('click', function () {
+                $('#welcome-modal-setup').show();
+                $('#currency-modal-setup').hide();
+            });
+
+            $('#setup-profile-currency-form').on('submit', function (event) {
+                event.preventDefault();
+                const currencyType = $('#setup-profile-currency-type').val();
+                updateCurrencySymbols(currencyType); // <-- Add this line here
+                $('#currency-modal-setup').hide();
+                $('#starting-balance-modal-setup').show();
+                $('#setup-profile-starting-balance').focus();
+            });
+
+            // Handle previous button click on the starting balance modal
+            $('#starting-balance-modal-setup .setup-profile-previous-button').on('click', function () {
+                $('#starting-balance-modal-setup').hide();
+                $('#currency-modal-setup').show();
+                $('#setup-profile-currency-type').focus();
+            });
+
+            $('#setup-profile-balance-form').on('submit', function(event) {
+                event.preventDefault();
+                $('#starting-balance-modal-setup').hide();
+                $('#balance-threshold-modal-setup').show();
+                $('#setup-profile-balance-threshold').focus();
+            });
+
+            // Handle previous button click on the balance threshold modal
+            $('#balance-threshold-modal-setup .setup-profile-previous-button').on('click', function () {
+                $('#balance-threshold-modal-setup').hide();
+                $('#starting-balance-modal-setup').show();
+                $('#setup-profile-starting-balance').focus();
+            });
+
+            // Handle form submission for balance threshold (final step)
+            $('#setup-profile-threshold-form').on('submit', function (event) {
+                document.getElementById('loading-screen').style.display = 'flex';
+                event.preventDefault();
+
+                setTimeout(function() {
+                    // Get all the form data
+                    const currencyType = $('#setup-profile-currency-type').val();
+                    const startingBalance = $('#setup-profile-starting-balance').val();
+                    const balanceThreshold = $('#setup-profile-balance-threshold').val();
+                    const startingSavings = $('#setup-profile-starting-savings').val();
+
+                    // Calculate the income_entry_date (for example, today minus one day)
+                    const startingBalanceDate = new Date();
+                    startingBalanceDate.setDate(startingBalanceDate.getDate() - 1);
+                    const incomeEntryDate = startingBalanceDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+                    // Submit the data via AJAX to the backend
+                    $.ajax({
+                        url: "{{ url_for('complete_profile_setup') }}",  // Backend route
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({
+                            currency_type: currencyType,
+                            starting_balance: startingBalance,
+                            starting_savings: startingSavings,
+                            balance_threshold: balanceThreshold,
+                            income_entry_date: incomeEntryDate  // Pass the calculated date
+                        }),
+                        async: false,  // Set async to false for synchronous request
+                        success: function (response) {
+                            if (response.status === 'success') {
+                                saveDailyTotalsAndRemainders();
+                                loadDashboard()
+                            } else {
+                                alert('Profile setup failed: ' + response.message);
+                            }
+                        },
+                        error: function (error) {
+                            console.error('Error:', error);
+                            alert('An error occurred during profile setup.');
+                        }
+                    });
+                }, 10); // 10ms delay to allow DOM repaint
+            });
+
+            // Prevent cents in starting balance and threshold fields
+            $('#setup-profile-starting-balance, #setup-profile-balance-threshold').on('input', function() {
+                let val = this.value;
+                if (val.includes('.')) {
+                    this.value = val.split('.')[0];
+                }
+            });
+        });
+
+        function updateCurrencySymbols(currencyType) {
+            const currencySymbols = { USD: "$", EUR: "€" };
+            const symbol = currencySymbols[currencyType] || currencyType;
+            document.querySelectorAll('.s-p-sb-currency-symbol, .s-p-ss-currency-symbol, .s-p-bt-currency-symbol').forEach(function(span) {
+                span.textContent = symbol;
+            });
+        }
+
+        function saveDailyTotalsAndRemainders(startDate = null) {
+
+            $.ajax({
+                url: "/save_totals_remainders_d", // Back-end route
+                type: "POST", // Or "GET" depending on your method
+                contentType: "application/json",
+                async: false,  // Make the request synchronous
+                success: function(response) {
+                    if (response.status === "success") {
+                    } else {
+                        console.error("Failed to save totals and remainders:", response.message);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error("Error during AJAX request:", error);
+                },
+                complete: function() {
+                    // Hide the loading screen after the AJAX request completes
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            });
+        }
+        
+        function loadDashboard() {
+            window.location.href = "{{ url_for('dashboard') }}";
+        }
+    </script>
+
+</body>
+</html>

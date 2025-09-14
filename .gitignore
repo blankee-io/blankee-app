@@ -1,0 +1,27 @@
+# MacOS junk
+.DS_Store
+._*
+
+# Logs
+*.log
+error_log
+
+# Temp/cache
+tmp/
+.cache/
+*.tmp
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build artifacts
+dist/
+build/
+
+# Ignore all WSGI files
+*.wsgi
+
+# Ignore all uploads except the default picture
+static/uploads/*
+!static/uploads/DefaultProfilePicture.svg

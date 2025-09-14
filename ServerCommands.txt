@@ -1,0 +1,25 @@
+Restart Apache ( It forces app to update html, js, and py files)
+    sudo service apache2 restart
+
+Restart mysql ( In case it hangs)
+    sudo service mysql restart
+
+Backup to Dev ( Sends all files to be backed up including DB)
+    backupapp
+
+Push latest stable ( All files get pushed to the NAS so other servers can pull it)
+    pushupdatestable
+
+Pull latest stable ( All files get pulled from the NAS. The files are the ones pushed above)
+    pullupdatestable
+
+Check Python logs
+    cat /var/log/apache2/budget_error.log
+
+Clear python logs (makes it easier to see the latest logs)
+    sudo truncate -s 0 /var/log/apache2/budget_error.log
+
+Access mysql
+    mysql --defaults-extra-file=~/.my.cnf
+    then:    
+        USE budget;

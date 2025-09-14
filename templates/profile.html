@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"> <!-- Character encoding for the document -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Profile</title>
+    <!-- Link to the external stylesheet for styling the page -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Link to Font Awesome for icons -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
+    <!-- Link to jQuery library for JavaScript functionality -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="profile-body">
+    <!-- Include the navigation bar -->
+    {% include 'nav.html' %}
+
+    <!-- Calendar navigation section (currently empty) -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <!-- Main container for the profile section -->
+        <div class="profile-box">
+            <div class="profile-content">
+                <!-- Section for changing email and password -->
+                <div class="profile-actions">
+                    <div class="profile-section">
+                        <div class="section-liner">
+                            <div class="profile-pic-container">
+                                <!-- Display the profile picture if it exists, otherwise show a default picture -->
+                                {% if profile_picture %}
+                                    <img src="{{ url_for('static', filename='uploads/' + profile_picture) }}" alt="Profile Picture" class="profile-pic">
+                                    <!-- Button to remove the profile picture -->
+                                    <button class="remove-pic-button" onclick="removeProfilePicture()">
+                                        <i class="fas fa-times"></i> <!-- Font Awesome icon for 'times' -->
+                                    </button>
+                                {% else %}
+                                    <img src="{{ url_for('static', filename='uploads/DefaultProfilePicture.svg') }}" alt="Default Profile Picture" class="profile-pic">
+                                {% endif %}
+                                <!-- Button to open the upload prompt for a new profile picture -->
+                                <button class="pic-edit-button" onclick="toggleUploadPrompt()">
+                                    <i class="fas fa-plus"></i> <!-- Font Awesome icon for 'plus' -->
+                                </button>
+                                
+                                <!-- Floating prompt for uploading a new profile picture -->
+                                <div id="uploadModalOverlay" class="center-modal-overlay">
+                                    <div id="uploadPrompt" class="center-modal-content">
+                                        <form method="POST" action="{{ url_for('update_profile_picture') }}" enctype="multipart/form-data" style="display: flex; flex-direction: column; align-items: center;">
+                                            <img id="profile-picture-preview" class="profile-pic-preview" src="" alt="Preview" style="display:none;">
+                                            <input type="file" name="profile_picture" id="profile_picture" class="file-input">
+                                            <label for="profile_picture" class="file-input-label profile-pic-placeholder">
+                                                <i class="fas fa-upload"></i>
+                                            </label>
+                                            <button type="submit" class="upload-button">Done</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Form for changing the first name -->
+                            <form method="POST" action="{{ url_for('update_first_name') }}" class="profile-form">
+                                <div class="input-group">
+                                    <label for="first_name">Change First Name:</label>
+                                    <input type="text" name="first_name" id="profile-first-name" class="login-input" value="{{ first_name }}" required> <!-- Input field for first name -->
+                                    <button type="submit" class="submit-button">
+                                        <i id="profile-first-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Form for changing the last name -->
+                            <form method="POST" action="{{ url_for('update_last_name') }}" class="profile-form">
+                                <div class="input-group">
+                                    <label for="last_name">Change Last Name:</label>
+                                    <input type="text" name="last_name" id="profile-last-name" class="login-input" value="{{ last_name }}" required> <!-- Input field for last name -->
+                                    <button type="submit" class="submit-button">
+                                        <i id="profile-last-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>          
+                            <!-- Form for changing the email -->
+                            <form method="POST" action="{{ url_for('update_username') }}" class="profile-form">
+                                <div class="input-group">
+                                    <label for="username">Change Email:</label>
+                                    <input type="text" name="username" id="profile-username" class="login-input" value="{{ current_username }}" required> <!-- Input field for new email -->
+                                    <!-- Submit button, initially disabled -->
+                                    <button type="submit" id="profile-submit-button" class="submit-button disabled">
+                                        <i id="profile-submit-icon" class="fas fa-times"></i> <!-- Icon for the submit button -->
+                                    </button>
+                                    <!-- Container for email validation messages -->
+                                    <div id="profile-email-requirements" class="profile-email-requirements">
+                                        <p id="profile-email-format-requirement"><span class="profile-requirement-icon">✗</span> Valid email format</p>
+                                        <p id="profile-email-availability-requirement"><span class="profile-requirement-icon">✗</span> Email is available</p>
+                                    </div>
+                                </div>
+                            </form>            
+                            <!-- Form for changing the password -->
+                            <form method="POST" action="{{ url_for('update_password') }}" class="profile-form">
+                                <div class="input-group">
+                                    <label for="password">Change Password:</label>
+                                    <input type="password" name="password" id="profile-password" class="login-input" value="************"required> <!-- Input field for new password -->
+                                    <!-- Submit button, initially disabled -->
+                                    <button type="submit" id="profile-password-submit-button" class="submit-button disabled">
+                                        <i id="profile-password-submit-icon" class="fas fa-times"></i> <!-- Icon for the submit button -->
+                                    </button>
+                                    <!-- Container for password validation messages -->
+                                    <div id="profile-password-requirements" class="profile-password-requirements">
+                                        <p id="profile-length-requirement"><span class="profile-requirement-icon">✗</span> At least 8 characters</p>
+                                        <p id="profile-symbol-requirement"><span class="profile-requirement-icon">✗</span> At least 1 symbol</p>
+                                        <p id="profile-capital-requirement"><span class="profile-requirement-icon">✗</span> At least 1 capital letter</p>
+                                        <p id="profile-number-requirement"><span class="profile-requirement-icon">✗</span> At least 1 number</p>
+                                    </div>
+                                </div>
+                            </form>    
+                            <form id="mfa-enable-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="enable-mfa-btn">MFA:</label>
+                                    <span id="mfa-status-message">
+                                        {% if mfa_enabled %}
+                                            <span>Enabled</span>
+                                        {% else %}
+                                            <span>Disabled</span>
+                                        {% endif %}
+                                    </span>
+                                    {% if mfa_enabled %}
+                                        <button type="button" id="disable-mfa-btn" class="submit-button">
+                                            Disable
+                                        </button>
+                                    {% else %}
+                                        <button type="button" id="enable-mfa-btn" class="submit-button">
+                                            Enable
+                                        </button>
+                                    {% endif %}
+                                </div>
+                            </form>
+                            <form id="delete-account-form" class="profile-form">
+                                <div class="input-group">
+                                    <button class="delete-account-button" data-url="{{ url_for('delete_user', username=current_user.username) }}">
+                                        Delete Account
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>                  
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="successModal" class="modal">
+        <div class="modal-content">
+            <p id="successMessage"></p>
+        </div>
+    </div>
+
+    <div id="deleteSuccessModal" class="modal">
+        <div id="delete-account-modal-content"class="modal-content">
+            <p>Your account has been successfully deleted.</p>
+        </div>
+    </div>
+
+    <div id="delete-account-modal" class="modal">
+        <div id="delete-account-modal-content" class="modal-content">
+            <span id="close-delete-account-modal" class="close-modal" style="position:absolute;top:10px;right:18px;font-size:24px;cursor:pointer;">&times;</span>
+            <h2>Delete Account</h2>
+            <p>
+                Are you sure you want to delete your account? This action cannot be undone.
+            </p>
+            <div id="delete-account-modal-buttons" class="modal-buttons">
+                <button id="confirm-delete-account-btn" class="confirm-delete-category-btn">Delete</button>
+                <button id="cancel-delete-account-btn" class="cancel-delete-category-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    
+    <div id="mfa-qr-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <span id="close-mfa-modal">&times;</span>
+            <h3>Enable Multi-Factor Authentication</h3>
+            <ol style="margin-bottom:1em;">
+                <li>Install an authenticator app (like Google Authenticator or Authy) on your phone.</li>
+                <li>Open the app and choose "Add Account" or "Scan QR Code".</li>
+                <li>Scan the QR code below with your app.</li>
+                <li>Enter the 6-digit code from your app to verify.</li>
+            </ol>
+            <div id="mfa-qr-image" style="text-align:center;margin-bottom:1em;"></div>
+            <form id="mfa-verify-form" style="text-align:center;">
+                <input type="text" id="mfa-code" maxlength="6" placeholder="Enter 6-digit code" required style="width:120px;text-align:center;">
+                <button type="submit" class="submit-button">Verify</button>
+            </form>
+            <div id="mfa-verify-message"></div>
+        </div>
+    </div>
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <!-- Include the external JavaScript file for additional functionality -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script type="text/javascript">
+    document.getElementById('loading-screen').style.display = 'none';
+        $(document).ready(function() {
+            $('#enable-mfa-btn').on('click', function() {
+                // Existing enable MFA logic...
+                $.post('/enable_mfa', function(data) {
+                    if (data.status === 'success' && data.qr_url) {
+                        $('#mfa-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code" style="width:200px;height:200px;">');
+                        $('#mfa-verify-message').text('');
+                        $('#mfa-qr-modal').show();
+                    } else {
+                        $('#mfa-status-message').text('Error enabling MFA.');
+                    }
+                });
+            });
+
+            $('#disable-mfa-btn').on('click', function() {
+                if (confirm('Are you sure you want to disable MFA?')) {
+                    $.post('/disable_mfa', function(data) {
+                        if (data.status === 'success') {
+                            $('#mfa-status-message').html('<span>Disabled</span>');
+                            $('#disable-mfa-btn').replaceWith(
+                                '<button type="button" id="enable-mfa-btn" class="submit-button">Enable</button>'
+                            );
+                        } else {
+                            $('#mfa-status-message').text('Error disabling MFA.');
+                        }
+                    });
+                }
+            });
+
+            // Close modal
+            $('#close-mfa-modal').on('click', function() {
+                $('#mfa-qr-modal').hide();
+            });
+
+            // Verify MFA code
+            $('#mfa-verify-form').on('submit', function(e) {
+                e.preventDefault();
+                const code = $('#mfa-code').val();
+                $.post('/verify_mfa', {code: code}, function(data) {
+                    if (data.status === 'success') {
+                        $('#mfa-verify-message').css('color', 'green').text('MFA enabled successfully!');
+                        // Update status and button in the profile section
+                        $('#mfa-status-message').html('<span">Enabled</span>');
+                        $('#enable-mfa-btn').replaceWith(
+                            '<button type="button" id="disable-mfa-btn" class="submit-button">Disable</button>'
+                        );
+                        // Attach the disable handler to the new button
+                        $('#disable-mfa-btn').on('click', function() {
+                            if (confirm('Are you sure you want to disable MFA?')) {
+                                $.post('/disable_mfa', function(data) {
+                                    if (data.status === 'success') {
+                                        $('#mfa-status-message').html('<span>Disabled</span>');
+                                        $('#disable-mfa-btn').replaceWith(
+                                            '<button type="button" id="enable-mfa-btn" class="submit-button">Enable</button>'
+                                        );
+                                        // Re-attach enable handler if needed
+                                    } else {
+                                        $('#mfa-status-message').text('Error disabling MFA.');
+                                    }
+                                });
+                            }
+                        });
+                        setTimeout(function() { $('#mfa-qr-modal').hide(); }, 1500);
+                    } else {
+                        $('#mfa-verify-message').css('color', 'red').text('Invalid code. Please try again.');
+                    }
+                });
+            });
+        });
+
+        $(document).ready(function() {
+            const usernameInput = $('#profile-username');  // Select the email input field
+            const passwordInput = $('#profile-password');  // Select the password input field
+            const submitButton = $('#profile-submit-button');  // Select the email submit button
+            const passwordSubmitButton = $('#profile-password-submit-button');  // Select the password submit button
+            const submitIcon = $('#profile-submit-icon');  // Select the email submit button icon
+            const passwordSubmitIcon = $('#profile-password-submit-icon');  // Select the password submit button icon
+
+            const emailRequirements = $('#profile-email-requirements');  // Select the email requirements container
+            const emailFormatRequirement = $('#profile-email-format-requirement .profile-requirement-icon');  // Select the email format requirement icon
+            const emailAvailabilityRequirement = $('#profile-email-availability-requirement .profile-requirement-icon');  // Select the email availability requirement icon
+
+            const passwordRequirements = $('#profile-password-requirements');  // Select the password requirements container
+            const lengthRequirement = $('#profile-length-requirement .profile-requirement-icon');  // Select the password length requirement icon
+            const symbolRequirement = $('#profile-symbol-requirement .profile-requirement-icon');  // Select the password symbol requirement icon
+            const capitalRequirement = $('#profile-capital-requirement .profile-requirement-icon');  // Select the password capital letter requirement icon
+            const numberRequirement = $('#profile-number-requirement .profile-requirement-icon');  // Select the password number requirement icon
+
+            let isEmailValid = false;  // Track email validity
+            let isPasswordValid = false;  // Track password validity
+
+            // Function to enable a button
+            function enableButton(button, icon) {
+                button.prop('disabled', false);  // Enable the button
+                button.removeAttr('disabled');  // Ensure the disabled attribute is removed
+                button.css('background-color', '#F15025');  // Set the button background color
+                icon.removeClass('fa-times').addClass('fa-check');  // Change the icon to a checkmark
+                button.addClass('hover-enabled');  // Add class for hover effect
+                button.removeClass('disabled');
+
+            }
+
+            // Function to disable a button
+            function disableButton(button, icon) {
+                button.prop('disabled', true);  // Disable the button
+                button.attr('disabled', 'disabled');  // Ensure the disabled attribute is added
+                button.css('background-color', '#ccc');  // Set the button background color
+                icon.removeClass('fa-check').addClass('fa-times');  // Change the icon to a cross
+                button.removeClass('hover-enabled');  // Remove hover effect
+                button.addClass('disabled');
+            }
+
+            // Function to check overall form validity and enable/disable the submit buttons accordingly
+            function checkFormValidity() {
+                if (isEmailValid) {
+                    enableButton(submitButton, submitIcon);  // Enable the email submit button if the email is valid
+                } else {
+                    disableButton(submitButton, submitIcon);  // Disable the email submit button if the email is invalid
+                }
+
+                if (isPasswordValid) {
+                    enableButton(passwordSubmitButton, passwordSubmitIcon);  // Enable the password submit button if the password is valid
+                } else {
+                    disableButton(passwordSubmitButton, passwordSubmitIcon);  // Disable the password submit button if the password is invalid
+                }
+            }
+
+            // Event listener for changes in the email input field
+            usernameInput.on('input', function() {
+                const username = usernameInput.val();  // Get the email input value
+                let emailPatternValid = false;  // Track email pattern validity
+                isEmailValid = true;  // Assume the email is valid initially
+
+                emailRequirements.css('display', 'block').css('opacity', '1');  // Show the email requirements box
+                
+                const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;  // Regular expression for email validation
+                if (emailPattern.test(username)) {
+                    emailFormatRequirement.text('✓').addClass('valid');  // Indicate valid email format
+                    emailPatternValid = true;  // Set the email pattern as valid
+                } else {
+                    emailFormatRequirement.text('✗').removeClass('valid');  // Indicate invalid email format
+                    isEmailValid = false;  // Set the email as invalid
+                }
+
+                // AJAX request to check if the email is already taken
+                $.ajax({
+                    url: "{{ url_for('check_username') }}",  // URL to send the request to
+                    method: "POST",  // Request method
+                    data: { username: username },  // Data to send with the request
+                    success: function(response) {
+                        if (response.status === 'taken' || !emailPatternValid) {
+                            emailAvailabilityRequirement.text('✗').removeClass('valid');  // Indicate email is taken
+                            isEmailValid = false;  // Set the email as invalid
+                        } else {
+                            emailAvailabilityRequirement.text('✓').addClass('valid');  // Indicate email is available
+                        }
+
+                        checkFormValidity();  // Check form validity after the AJAX response
+                    },
+                    error: function() {
+                        emailAvailabilityRequirement.text('✗').removeClass('valid');  // Indicate an error occurred
+                        isEmailValid = false;  // Set the email as invalid
+                        checkFormValidity();  // Check form validity after the AJAX error
+                    }
+                });
+
+                // Position the email requirements box near the email input field
+                const emailOffset = usernameInput.position();
+                emailRequirements.css({
+                    top: emailOffset.top - emailRequirements.outerHeight() - 5 + 'px',
+                    left: emailOffset.left + 'px',
+                    width: usernameInput.outerWidth() + 'px',
+                    position: 'absolute',
+                    borderRadius: usernameInput.css('border-radius')
+                });
+            });
+
+            // Event listener for changes in the password input field
+            passwordInput.on('input', function() {
+                const password = passwordInput.val();  // Get the password input value
+                isPasswordValid = true;  // Assume the password is valid initially
+
+                passwordRequirements.css('display', 'block').css('opacity', '1');  // Show the password requirements box
+
+                // Validate the password length
+                if (password.length >= 8) {
+                    lengthRequirement.text('✓').addClass('valid');  // Indicate valid password length
+                } else {
+                    lengthRequirement.text('✗').removeClass('valid');  // Indicate invalid password length
+                    isPasswordValid = false;  // Set the password as invalid
+                }
+
+                // Validate the presence of a symbol
+                if (/[!@#$%^&*(),.?":{}|<>]/g.test(password)) {
+                    symbolRequirement.text('✓').addClass('valid');  // Indicate valid symbol
+                } else {
+                    symbolRequirement.text('✗').removeClass('valid');  // Indicate missing symbol
+                    isPasswordValid = false;  // Set the password as invalid
+                }
+
+                // Validate the presence of a capital letter
+                if (/[A-Z]/.test(password)) {
+                    capitalRequirement.text('✓').addClass('valid');  // Indicate valid capital letter
+                } else {
+                    capitalRequirement.text('✗').removeClass('valid');  // Indicate missing capital letter
+                    isPasswordValid = false;  // Set the password as invalid
+                }
+
+                // Validate the presence of a number
+                if (/\d/.test(password)) {  
+                    numberRequirement.text('✓').addClass('valid');  // Indicate valid number
+                } else {
+                    numberRequirement.text('✗').removeClass('valid');  // Indicate missing number
+                    isPasswordValid = false;  // Set the password as invalid
+                }
+
+                // Position the password requirements box near the password input field
+                const passwordOffset = passwordInput.position();
+                passwordRequirements.css({
+                    top: passwordOffset.top - passwordRequirements.outerHeight() - 5 + 'px',
+                    left: passwordOffset.left + 'px',
+                    width: passwordInput.outerWidth() + 'px',
+                    position: 'absolute',
+                    borderRadius: passwordInput.css('border-radius')
+                });
+
+                checkFormValidity();  // Check form validity on password input
+            });
+
+            // Hide email requirements when the user focuses out of the email input
+            usernameInput.on('focusout', function() {
+                setTimeout(() => {
+                    emailRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        emailRequirements.css('display', 'none');
+                    }, 300);
+                }, 500);
+            });
+
+            // Hide password requirements when the user focuses out of the password input
+            passwordInput.on('focusout', function() {
+                setTimeout(() => {
+                    passwordRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        passwordRequirements.css('display', 'none');
+                    }, 300);
+                }, 500);
+            });
+        });
+
+        // Remove profile picture functionality
+        function removeProfilePicture() {
+            if (confirm('Are you sure you want to remove your profile picture?')) {
+                $.ajax({
+                    url: "{{ url_for('remove_profile_picture') }}",  // URL to send the request to
+                    method: "POST",  // Request method
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            $('.profile-pic').attr('src', '{{ url_for('static', filename='uploads/DefaultProfilePicture.svg') }}');  // Set default profile picture
+                            $('.remove-pic-button').hide();  // Hide the remove button
+                        } else {
+                            alert('Failed to remove profile picture.');  // Alert if removal failed
+                        }
+                    },
+                    error: function() {
+                        alert('An error occurred while removing the profile picture.');  // Alert if an error occurred
+                    }
+                });
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function() {
+            if (document.body.id === "profile-body") {
+                const deleteSuccessModal = document.getElementById("deleteSuccessModal");
+
+                function showDeleteSuccessModal() {
+                    deleteSuccessModal.style.display = "block";
+
+                    setTimeout(function() {
+                        window.location.href = "{{ url_for('login') }}";
+                    }, 3000); // Show the modal for 3 seconds before redirecting
+                }
+            }
+        });
+
+        function saveTotalsAndRemainders() {
+            $.ajax({
+                url: '/save_totals_remainders_d',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Update the local totals and remainders here or refresh the view
+                        // Optionally: update the totals and remainders in the UI without reloading the page
+                    } else {
+                        console.error('Failed to save totals and remainders:', response.message);
+                    }
+                },
+                error: function(error) {
+                    console.error('An error occurred while saving totals and remainders:', error);
+                }
+            });
+        }        
+
+        document.addEventListener("DOMContentLoaded", function() {
+            const fileInput = document.getElementById('profile_picture');
+            const previewImg = document.getElementById('profile-picture-preview');
+
+            if (fileInput && previewImg) {
+                fileInput.addEventListener('change', function(event) {
+                    const file = event.target.files[0];
+                    if (file && file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            previewImg.src = e.target.result;
+                            previewImg.style.display = 'block';
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        previewImg.src = '';
+                        previewImg.style.display = 'none';
+                    }
+                });
+            }
+        });
+
+        function toggleUploadPrompt() {
+            const overlay = document.getElementById('uploadModalOverlay');
+            if (overlay) {
+                overlay.style.display = (overlay.style.display === 'flex') ? 'none' : 'flex';
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function() {
+            const fileInput = document.getElementById('profile_picture');
+            const previewImg = document.getElementById('profile-picture-preview');
+            const placeholder = document.querySelector('.profile-pic-placeholder');
+
+            if (fileInput && previewImg && placeholder) {
+                fileInput.addEventListener('change', function(event) {
+                    const file = event.target.files[0];
+                    if (file && file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            previewImg.src = e.target.result;
+                            previewImg.style.display = 'block';
+                            placeholder.style.display = 'none';
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        previewImg.src = '';
+                        previewImg.style.display = 'none';
+                        placeholder.style.display = 'flex';
+                    }
+                });
+            }
+        });
+
+        document.addEventListener("DOMContentLoaded", function() {
+            const overlay = document.getElementById('uploadModalOverlay');
+            const modalContent = document.getElementById('uploadPrompt');
+
+            if (overlay && modalContent) {
+                overlay.addEventListener('click', function(e) {
+                    // Only close if clicking directly on the overlay, not inside the modal
+                    if (e.target === overlay) {
+                        overlay.style.display = 'none';
+                    }
+                });
+            }
+        });
+
+        $(document).ready(function() {
+            const deleteAccountButton = $('.delete-account-button');
+            const deleteAccountModal = $('#delete-account-modal');
+            const closeDeleteModal = $('#close-delete-account-modal');
+            const confirmDeleteBtn = $('#confirm-delete-account-btn');
+            const cancelDeleteBtn = $('#cancel-delete-account-btn');
+
+            let deleteUrl = deleteAccountButton.data('url');
+
+            deleteAccountButton.on('click', function(e) {
+                e.preventDefault();
+                deleteAccountModal.show();
+            });
+
+            closeDeleteModal.on('click', function() {
+                deleteAccountModal.hide();
+            });
+
+            cancelDeleteBtn.on('click', function() {
+                deleteAccountModal.hide();
+            });
+
+            // Allow closing modal by clicking the background
+            deleteAccountModal.on('click', function(e) {
+                if (e.target === this) {
+                    deleteAccountModal.hide();
+                }
+            });
+
+            confirmDeleteBtn.on('click', function() {
+                $.ajax({
+                    url: deleteUrl,
+                    method: 'POST',
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            $('#deleteSuccessModal').show();
+                            setTimeout(function() {
+                                window.location.href = "{{ url_for('login') }}";
+                            }, 3000);
+                        } else {
+                            alert('Error deleting account: ' + response.message);
+                        }
+                    },
+                    error: function() {
+                        alert('An error occurred while deleting your account.');
+                    }
+                });
+                deleteAccountModal.hide();
+            });
+        });
+
+    </script>    
+</body>
+</html>

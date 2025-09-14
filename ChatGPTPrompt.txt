@@ -1,0 +1,184 @@
+Hi! I have a LAMP setup with an Ubuntu lxc, apache2, mysql, and python, and an app. The root folder is /var/www/html/budget. Please keep the following files in your memory.
+
+The current schema is:
+
+mysql> SHOW TABLES;
++-------------------------+
+| Tables_in_budget        |
++-------------------------+
+| expense_categories      |
+| expense_category_groups |
+| expense_entries         |
+| income_categories       |
+| income_category_groups  |
+| income_entries          |
+| recurring_expense       |
+| recurring_income        |
+| totals_remainders       |
+| users                   |
++-------------------------+
+10 rows in set (0.00 sec)
+
+DESCRIBE expense_categories;
+DESCRIBE expense_category_groups;
+DESCRIBE expense_entries;
+DESCRIBE income_categories;
+DESCRIBE income_category_groups;
+DESCRIBE income_entries;
+DESCRIBE recurring_expense;
+DESCRIBE recurring_income;
+DESCRIBE totals_remainders; 
+DESCRIBE users;
+
+mysql> DESCRIBE expense_categories
+    -> ;
++---------------+--------------+------+-----+---------+----------------+
+| Field         | Type         | Null | Key | Default | Extra          |
++---------------+--------------+------+-----+---------+----------------+
+| id            | int          | NO   | PRI | NULL    | auto_increment |
+| user_id       | int          | YES  | MUL | NULL    |                |
+| name          | varchar(255) | YES  |     | NULL    |                |
+| display_order | int          | YES  |     | 0       |                |
+| group_id      | int          | YES  | MUL | NULL    |                |
+| is_recurring  | tinyint(1)   | YES  |     | 0       |                |
++---------------+--------------+------+-----+---------+----------------+
+6 rows in set (0.00 sec)
+
+mysql> DESCRIBE expense_category_groups;
++---------------+--------------+------+-----+---------+----------------+
+| Field         | Type         | Null | Key | Default | Extra          |
++---------------+--------------+------+-----+---------+----------------+
+| id            | int          | NO   | PRI | NULL    | auto_increment |
+| user_id       | int          | YES  | MUL | NULL    |                |
+| name          | varchar(255) | YES  |     | NULL    |                |
+| display_order | int          | YES  |     | 0       |                |
++---------------+--------------+------+-----+---------+----------------+
+4 rows in set (0.00 sec)
+
+mysql> DESCRIBE expense_entries;
++--------------+---------------+------+-----+---------+----------------+
+| Field        | Type          | Null | Key | Default | Extra          |
++--------------+---------------+------+-----+---------+----------------+
+| id           | int           | NO   | PRI | NULL    | auto_increment |
+| category_id  | int           | YES  | MUL | NULL    |                |
+| date         | date          | YES  |     | NULL    |                |
+| amount       | decimal(10,2) | YES  |     | NULL    |                |
+| recurring_id | int           | YES  |     | NULL    |                |
++--------------+---------------+------+-----+---------+----------------+
+5 rows in set (0.00 sec)
+
+mysql> DESCRIBE income_categories;
++---------------+--------------+------+-----+---------+----------------+
+| Field         | Type         | Null | Key | Default | Extra          |
++---------------+--------------+------+-----+---------+----------------+
+| id            | int          | NO   | PRI | NULL    | auto_increment |
+| user_id       | int          | YES  | MUL | NULL    |                |
+| name          | varchar(255) | YES  |     | NULL    |                |
+| display_order | int          | YES  |     | 0       |                |
+| group_id      | int          | YES  | MUL | NULL    |                |
+| is_recurring  | tinyint(1)   | YES  |     | 0       |                |
++---------------+--------------+------+-----+---------+----------------+
+6 rows in set (0.00 sec)
+
+mysql> DESCRIBE income_category_groups;
++---------------+--------------+------+-----+---------+----------------+
+| Field         | Type         | Null | Key | Default | Extra          |
++---------------+--------------+------+-----+---------+----------------+
+| id            | int          | NO   | PRI | NULL    | auto_increment |
+| user_id       | int          | YES  | MUL | NULL    |                |
+| name          | varchar(255) | YES  |     | NULL    |                |
+| display_order | int          | YES  |     | 0       |                |
++---------------+--------------+------+-----+---------+----------------+
+4 rows in set (0.00 sec)
+
+mysql> DESCRIBE income_entries;
++--------------+---------------+------+-----+---------+----------------+
+| Field        | Type          | Null | Key | Default | Extra          |
++--------------+---------------+------+-----+---------+----------------+
+| id           | int           | NO   | PRI | NULL    | auto_increment |
+| category_id  | int           | YES  | MUL | NULL    |                |
+| date         | date          | YES  |     | NULL    |                |
+| amount       | decimal(10,2) | YES  |     | NULL    |                |
+| recurring_id | int           | YES  |     | NULL    |                |
++--------------+---------------+------+-----+---------+----------------+
+5 rows in set (0.00 sec)
+
+mysql> DESCRIBE recurring_expense;
++------------------+---------------------------------------+------+-----+---------+----------------+
+| Field            | Type                                  | Null | Key | Default | Extra          |
++------------------+---------------------------------------+------+-----+---------+----------------+
+| id               | int                                   | NO   | PRI | NULL    | auto_increment |
+| user_id          | int                                   | NO   | MUL | NULL    |                |
+| category_id      | int                                   | NO   | MUL | NULL    |                |
+| amount           | decimal(10,2)                         | NO   |     | NULL    |                |
+| cadence_interval | int                                   | NO   |     | 1       |                |
+| cadence_unit     | enum('days','weeks','months','years') | NO   |     | days    |                |
+| start_date       | date                                  | YES  |     | NULL    |                |
+| end_date         | date                                  | YES  |     | NULL    |                |
+| weekdays         | varchar(255)                          | YES  |     | NULL    |                |
+| monthly_days     | varchar(255)                          | YES  |     | NULL    |                |
+| yearly_day       | int                                   | YES  |     | NULL    |                |
+| yearly_month     | int                                   | YES  |     | NULL    |                |
++------------------+---------------------------------------+------+-----+---------+----------------+
+12 rows in set (0.00 sec)
+
+mysql> DESCRIBE recurring_income;
++------------------+---------------------------------------+------+-----+---------+----------------+
+| Field            | Type                                  | Null | Key | Default | Extra          |
++------------------+---------------------------------------+------+-----+---------+----------------+
+| id               | int                                   | NO   | PRI | NULL    | auto_increment |
+| user_id          | int                                   | NO   | MUL | NULL    |                |
+| category_id      | int                                   | NO   | MUL | NULL    |                |
+| amount           | decimal(10,2)                         | NO   |     | NULL    |                |
+| end_date         | date                                  | YES  |     | NULL    |                |
+| start_date       | date                                  | YES  |     | NULL    |                |
+| cadence_interval | int                                   | NO   |     | 1       |                |
+| cadence_unit     | enum('days','weeks','months','years') | NO   |     | days    |                |
+| weekdays         | varchar(255)                          | YES  |     | NULL    |                |
+| monthly_day      | int                                   | YES  |     | NULL    |                |
+| yearly_day       | int                                   | YES  |     | NULL    |                |
+| yearly_month     | int                                   | YES  |     | NULL    |                |
+| monthly_days     | varchar(255)                          | YES  |     | NULL    |                |
++------------------+---------------------------------------+------+-----+---------+----------------+
+13 rows in set (0.00 sec)
+
+mysql> DESCRIBE totals_remainders;
++---------------------+---------------+------+-----+---------+----------------+
+| Field               | Type          | Null | Key | Default | Extra          |
++---------------------+---------------+------+-----+---------+----------------+
+| id                  | int           | NO   | PRI | NULL    | auto_increment |
+| user_id             | int           | NO   | MUL | NULL    |                |
+| date                | date          | NO   |     | NULL    |                |
+| total_income        | decimal(10,2) | YES  |     | NULL    |                |
+| total_expenses      | decimal(10,2) | YES  |     | NULL    |                |
+| remainder           | decimal(10,2) | YES  |     | NULL    |                |
+| last_week_remainder | decimal(10,2) | YES  |     | NULL    |                |
++---------------------+---------------+------+-----+---------+----------------+
+7 rows in set (0.01 sec)
+
+mysql> DESCRIBE users;
++-----------------+--------------+------+-----+---------+----------------+
+| Field           | Type         | Null | Key | Default | Extra          |
++-----------------+--------------+------+-----+---------+----------------+
+| id              | int          | NO   | PRI | NULL    | auto_increment |
+| username        | varchar(100) | YES  |     | NULL    |                |
+| email           | varchar(100) | YES  |     | NULL    |                |
+| password        | varchar(255) | NO   |     | NULL    |                |
+| profile_picture | varchar(255) | YES  |     | NULL    |                |
++-----------------+--------------+------+-----+---------+----------------+
+5 rows in set (0.00 sec)
+
+These are the files in my web app:
+
+/var/www/html/budget/app.py
+/var/www/html/budget/templates/register.html
+/var/www/html/budget/templates/login.html
+/var/www/html/budget/templates/dashboard.html
+/var/www/html/budget/templates/profile.html
+/var/www/html/budget/templates/recurring_i.html
+/var/www/html/budget/templates/recurring_e.html
+/var/www/html/budget/templates/nav.html
+/var/www/html/budget/js/script.js
+/var/www/html/budget/css/style.css
+
+Please ask me to provide the content of each specific file individually so I can enter each to your memory. Ask one by one specifically.

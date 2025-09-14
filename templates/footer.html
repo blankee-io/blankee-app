@@ -1,0 +1,642 @@
+<!-- Main Footer Bar Container -->
+<div id="footer-bar" class="footer-bar">
+    <!-- Main Add Button (FAB) -->
+    <button id="footer-add-button" class="footer-add-button">
+        <i class="fa-solid fa-money-bill-transfer"></i>
+    </button>
+
+    <!-- Sub Button: Add Income Entry -->
+    <button id="footer-income-button" class="footer-sub-button" title="Add Income">
+        <i class="fa-solid fa-plus"></i>
+    </button>
+    <button class="footer-button-label" id="footer-income-label" tabindex="0" type="button">Quick Income Entry</button>
+
+    <!-- Sub Button: Add Expense Entry -->
+    <button id="footer-expense-button" class="footer-sub-button" title="Add Expense">
+        <i class="fa-solid fa-minus"></i>
+    </button>
+    <button class="footer-button-label" id="footer-expense-label" tabindex="0" type="button">Quick Expense Entry</button>
+
+    <!-- Add this after the other sub-buttons in the footer bar -->
+    <button id="footer-ca-button" class="footer-sub-button" title="Quick Credit Entry">
+        <i class="fa-solid fa-credit-card"></i>
+    </button>
+    <button class="footer-button-label" id="footer-ca-label" tabindex="0" type="button">Quick Credit Entry</button>
+
+    <!-- Sub Button: Add Auto Balance Entry -->
+    <button id="footer-autobalance-button" class="footer-sub-button" title="Auto Balance">
+        <i class="fa-solid fa-scale-balanced"></i>
+    </button>
+    <button class="footer-button-label" id="footer-autobalance-label" tabindex="0" type="button">Auto Balance</button>
+</div>
+
+<!-- Modal that pops up to add an income or expense -->
+<div id="footer-addEntryModal" class="footer-modal">
+    <div class="footer-modal-content">
+        <!-- Close (X) button -->
+        <span class="footer-close-modal" onclick="closeAddEntryModal()">&times;</span>
+        <h3>Add Entry</h3>
+        
+        <!-- Entry Form -->
+        <form id="footer-addEntryForm">
+            <!-- Hidden input to store selected type: 'income' or 'expense' -->
+            <input type="hidden" id="footer-entryType" name="entryType">
+
+            <!-- Dropdown for category (populated dynamically via AJAX) -->
+            <div class="footer-form-group">
+                <label for="footer-category">Category:</label>
+                <select id="footer-category" name="category" disabled>
+                    <option value="">Select Category</option>
+                </select>
+            </div>
+
+            <!-- Input field for amount -->
+            <div class="footer-form-group">
+                <label for="footer-amount">Amount:</label>
+                <div class="currency-input-container">
+                    <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                    <input type="number" id="footer-amount" name="amount" step="1" min="0" required inputmode="decimal" placeholder="0" pattern="\\d*">
+                </div>
+            </div>
+
+            <!-- Hidden field for current date (auto-filled on page load) -->
+            <input type="hidden" id="footer-entryDate" name="entryDate">
+
+            <!-- Submit button to post the entry -->
+            <div class="footer-form-group">
+                <button type="submit">Submit Entry</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Quick Credit Entry Modal -->
+<div id="footer-caEntryModal" class="footer-modal">
+    <div class="footer-modal-content">
+        <span class="footer-close-modal" onclick="closeCaEntryModal()">&times;</span>
+        <h3>Quick Credit Entry</h3>
+        <form id="footer-caEntryForm">
+            <!-- Credit Account Dropdown -->
+            <div class="footer-form-group">
+                <label for="footer-ca-account">Credit Account:</label>
+                <select id="footer-ca-account" name="account" required>
+                    <option value="">Select Account</option>
+                </select>
+            </div>
+            <!-- Category Dropdown -->
+            <div class="footer-form-group">
+                <label for="footer-ca-category">Category:</label>
+                <select id="footer-ca-category" name="category" disabled>
+                    <option value="">Select Category</option>
+                </select>
+            </div>
+            <!-- Amount Input -->
+            <div class="footer-form-group">
+                <label for="footer-ca-amount">Amount:</label>
+                <div class="currency-input-container">
+                    <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                    <input type="number" id="footer-ca-amount" name="amount" step="1" min="0" required inputmode="decimal" placeholder="0" pattern="\\d*">
+                </div>
+            </div>
+            <!-- Date Input -->
+            <input type="hidden" id="footer-ca-entryDate" name="entryDate">
+            <div class="footer-form-group">
+                <button type="submit">Submit Entry</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Auto Balance Modal (hidden by default) -->
+<div id="autobalance-modal" class="footer-modal" style="display:none;">
+    <div class="footer-modal-content autobalance-modal-content">
+        <span class="footer-close-modal" id="autobalance-close">&times;</span>
+        <h3>Auto Balance</h3>
+        <p>This will balance Blankee by adding an expense or income entry to the Auto Adjustments category, so that the remainder for today matches your current bank balance.</p>
+        <form id="autobalance-form" autocomplete="off" onsubmit="return false;">
+            <div class="footer-form-group">
+                <label for="autobalance-current-balance">Current Bank Balance:</label>
+                <div class="currency-input-container">
+                    <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                    <input type="number" id="autobalance-current-balance" step="1" required autocomplete="off" inputmode="decimal" placeholder="0" min="0" pattern="\\d*">
+                </div>
+            </div>
+            <div class="footer-form-group">
+                <button id="autobalance-submit" type="button">Submit</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Custom Modal for No Adjustment Needed -->
+<div id="no-adjustment-modal" class="footer-modal" style="display:none;">
+    <div class="footer-modal-content">
+        <span class="footer-close-modal" id="no-adjustment-close">&times;</span>
+        <h3>No Adjustment Needed</h3>
+        <p>Your remainder already matches your bank balance. No adjustment is necessary.</p>
+        <div class="footer-form-group">
+            <button id="no-adjustment-ok" type="button">OK</button>
+        </div>
+    </div>
+</div>
+
+<script>
+
+    // Get references to DOM elements
+    const addButton = document.getElementById('footer-add-button');
+    const footerBar = document.getElementById('footer-bar');
+    const incomeButton = document.getElementById('footer-income-button');
+    const expenseButton = document.getElementById('footer-expense-button');
+    const autobalanceButton = document.getElementById('footer-autobalance-button');
+    const modal = document.getElementById('footer-addEntryModal');
+    const categoryDropdown = document.getElementById('footer-category');
+
+    // Toggle sub-buttons (income & expense) when clicking the FAB
+    addButton.addEventListener('click', function (e) {
+        e.stopPropagation(); // Prevent the click from closing the button
+        footerBar.classList.toggle('active');
+    });
+
+    // Open modal with "income" mode
+    incomeButton.addEventListener('click', () => handleTypeClick('income'));
+    // Make label clickable as well
+    document.getElementById('footer-income-label').addEventListener('click', () => handleTypeClick('income'));
+    document.getElementById('footer-income-label').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') handleTypeClick('income');
+    });
+
+    // Open modal with "expense" mode
+    expenseButton.addEventListener('click', () => handleTypeClick('expense'));
+    // Make label clickable as well
+    document.getElementById('footer-expense-label').addEventListener('click', () => handleTypeClick('expense'));
+    document.getElementById('footer-expense-label').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') handleTypeClick('expense');
+    });
+
+    // Open modal with "auto_balance" mode
+    // autobalanceButton.addEventListener('click', () => handleTypeClick('auto_balance'));
+    autobalanceButton.addEventListener('click', function() {
+        const abModal = document.getElementById('autobalance-modal');
+        abModal.style.display = 'flex';
+    });
+
+    const autobalanceLabel = document.getElementById('footer-autobalance-label');
+    autobalanceLabel.addEventListener('click', function() {
+        autobalanceButton.click();
+    });
+
+
+    // Handle the selection of type and open the modal
+    function handleTypeClick(type) {
+        document.getElementById('footer-entryType').value = type;
+        updateCategoryOptions();              // Fetch and populate categories
+        categoryDropdown.disabled = false;
+        modal.style.display = 'flex';         // Show modal
+        footerBar.classList.remove('active'); // Hide sub-buttons
+    }
+
+    // Close modal
+    function closeAddEntryModal() {
+        modal.style.display = 'none';
+    }
+
+    // Close modal or sub-buttons when clicking outside
+    window.addEventListener('click', function (e) {
+        if (e.target === modal) {
+            closeAddEntryModal(); // Close if clicking outside modal content
+        }
+
+        // Collapse sub-buttons if clicking outside footer or modal
+        if (!footerBar.contains(e.target) && !modal.contains(e.target)) {
+            footerBar.classList.remove('active');
+        }
+    });
+
+    function updateCategoryOptions() {
+        const entryType = document.getElementById('footer-entryType').value;
+        const categoryDropdown = document.getElementById('footer-category');
+        categoryDropdown.innerHTML = '<option value="">Select Category</option>';
+
+        if (!entryType) {
+            categoryDropdown.disabled = true;
+            return;
+        }
+        categoryDropdown.disabled = false;
+
+        // Use global expenseCategories/incomeCategories arrays, filter out is_bud and (for income) Starting Balance
+        if (entryType === 'income') {
+            incomeCategories.forEach(category => {
+                if (!category.hidden && !category.is_bud && category.name !== "Starting Balance") {
+                    const option = document.createElement('option');
+                    option.value = category.id;
+                    option.textContent = category.name;
+                    categoryDropdown.appendChild(option);
+                }
+            });
+        } else if (entryType === 'expense') {
+            expenseCategories.forEach(category => {
+                if (!category.hidden && !category.is_bud) {
+                    const option = document.createElement('option');
+                    option.value = category.id;
+                    option.textContent = category.name;
+                    categoryDropdown.appendChild(option);
+                }
+            });
+        }
+    }
+
+    // Submit the entry via AJAX
+    $('#footer-addEntryForm').on('submit', function(e) {
+        closeAddEntryModal();
+        showDashboardSpinner(true);
+        e.preventDefault();
+
+    setTimeout(function() {
+        // Gather form data
+        const formData = {
+            entryType: $('#footer-entryType').val(),
+            category: $('#footer-category').val(),
+            amount: $('#footer-amount').val(),
+            date: $('#footer-entryDate').val()
+        };
+
+        // Send to backend
+        $.ajax({
+            url: '/footer_add_entry',
+            type: 'POST',
+            data: JSON.stringify(formData),
+            contentType: 'application/json',
+            async: false,  // Synchronous request (not recommended, but matches your code)
+            success: function(response) {
+                if (response.status === 'success') {
+                    if (typeof updateLocalState === "function") {
+                        updateLocalState(
+                            formData.entryType,
+                            formData.category,
+                            formData.date,
+                            Number(formData.amount), // Ensure amount is a number
+                            false,
+                            formData.date,
+                            true
+                        );
+                    }
+                    if (typeof updateLocalEntryAfterAdd === "function") {
+                        updateLocalEntryAfterAdd(
+                            formData.entryType,
+                            formData,
+                            true
+                        );
+                    }
+                    saveDailyTotalsAndRemainders();
+                } else {
+                    alert('Failed to add entry: ' + response.message);
+                }
+            },
+            error: function(error) {
+                console.error('Error adding entry:', error);
+                alert('An error occurred while adding the entry.');
+            },
+            complete: function() {
+                document.getElementById('loading-screen').style.display = 'none'; // Hide loading
+                resetAddEntryForm(); // <-- Add this line
+            }
+        });
+    }, 10);
+    });
+
+    // Auto-fill current date in hidden input on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        document.getElementById('footer-entryDate').value = `${year}-${month}-${day}`;
+    });
+
+    // --- Auto Balance Modal Logic ---
+    (function setupAutoBalanceModal() {
+        const abModal = document.getElementById('autobalance-modal');
+        const noAdjModal = document.getElementById('no-adjustment-modal');
+        if (!abModal) return;
+        // Close logic
+        document.getElementById('autobalance-close').onclick = function() {
+            abModal.style.display = 'none';
+        };
+        abModal.onclick = function(e) {
+            if (e.target === abModal) abModal.style.display = 'none';
+        };
+        // Close logic for no adjustment modal
+        document.getElementById('no-adjustment-close').onclick = function() {
+            noAdjModal.style.display = 'none';
+        };
+        document.getElementById('no-adjustment-ok').onclick = function() {
+            noAdjModal.style.display = 'none';
+        };
+        // Focus input when modal opens
+        autobalanceButton.addEventListener('click', function() {
+            abModal.style.display = 'flex';
+        });
+        // Prevent form submit from refreshing page
+        document.getElementById('autobalance-form').onsubmit = function(e) { e.preventDefault(); };
+        // Submit logic (moved to a function so both Enter and button work)
+        function submitAutoBalance() {
+            const balanceInput = document.getElementById('autobalance-current-balance');
+            const currentBalance = parseFloat(balanceInput.value);
+            if (isNaN(currentBalance)) {
+                alert('Please enter your current bank balance.');
+                return;
+            }
+            abModal.style.display = 'none';
+            showDashboardSpinner(true);
+            // Get today's date
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            const entryDate = `${year}-${month}-${day}`;
+            // Get today's remainder via AJAX
+            $.ajax({
+                url: '/dashboard-d/get_totals_for_day',
+                type: 'GET',
+                data: { date: entryDate },
+                success: function(response) {
+                    if (response.status === 'success' && response.remainder !== undefined) {
+                        const todayRemainder = parseFloat(response.remainder);
+                        const diff = currentBalance - todayRemainder;
+                        if (Math.abs(diff) < 0.01) {
+                            document.getElementById('loading-screen').style.display = 'none';
+                            noAdjModal.style.display = 'flex';
+                            resetAutoBalanceForm();
+                            return;
+                        }
+                        // Get auto adjustment category for income or expense
+                        const entryType = diff > 0 ? 'income' : 'expense';
+                        $.ajax({
+                            url: '/dashboard-d/get_categories',
+                            type: 'GET',
+                            data: { type: entryType },
+                            success: function(catResp) {
+                                if (catResp.status === 'success' && Array.isArray(catResp.categories)) {
+                                    const autoCat = catResp.categories.find(c => c.is_auto_adjustment == 1 || c.is_auto_adjustment === true);
+                                    if (!autoCat) {
+                                        alert('No Auto Adjustments category found for ' + entryType + '.');
+                                        document.getElementById('loading-screen').style.display = 'none';
+                                        return;
+                                    }
+                                    const formData = {
+                                        entryType: entryType,
+                                        category: autoCat.id,
+                                        amount: Math.abs(diff),
+                                        date: entryDate
+                                    };
+                                    // Add entry
+                                    $.ajax({
+                                        url: '/footer_add_entry',
+                                        type: 'POST',
+                                        data: JSON.stringify(formData),
+                                        contentType: 'application/json',
+                                        async: false,  // Make the request synchronous
+                                        success: function(addResp) {
+                                            if (addResp.status === 'success') {
+                                                if (typeof updateLocalState === "function") {
+                                                    updateLocalState(
+                                                        formData.entryType,
+                                                        formData.category,
+                                                        formData.date,
+                                                        Number(formData.amount), // Ensure amount is a number
+                                                        false,
+                                                        formData.date,
+                                                        true
+                                                    );
+                                                }
+                                                if (typeof updateLocalEntryAfterAdd === "function") {
+                                                    updateLocalEntryAfterAdd(
+                                                        formData.entryType,
+                                                        formData,
+                                                        true
+                                                    );
+                                                }
+                                                saveDailyTotalsAndRemainders(); // Optional local function
+                                                document.getElementById('loading-screen').style.display = 'none';
+                                            } else {
+                                                alert('Failed to add auto balance entry: ' + addResp.message);
+                                            }
+                                        },
+                                        error: function(err) {
+                                            alert('Error adding auto balance entry.');
+                                        },
+                                        complete: function() {
+                                            document.getElementById('loading-screen').style.display = 'none';
+                                            resetAutoBalanceForm();
+                                        }
+                                    });
+                                } else {
+                                    alert('Could not find Auto Adjustments category.');
+                                    document.getElementById('loading-screen').style.display = 'none';
+                                }
+                            },
+                            error: function() {
+                                alert('Error fetching categories.');
+                                document.getElementById('loading-screen').style.display = 'none';
+                            }
+                        });
+                    } else {
+                        alert('Could not fetch today\'s remainder.');
+                        document.getElementById('loading-screen').style.display = 'none';
+                    }
+                },
+                error: function() {
+                    alert('Error fetching today\'s remainder.');
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            });
+        }
+        // Prevent form submit from refreshing page and allow Enter to submit
+        document.getElementById('autobalance-form').onsubmit = function(e) {
+            e.preventDefault();
+            submitAutoBalance();
+        };
+        // Submit button click
+        document.getElementById('autobalance-submit').onclick = function() {
+            submitAutoBalance();
+        };
+    })();
+
+    // Add after your other footer JS
+
+    const caButton = document.getElementById('footer-ca-button');
+    const caLabel = document.getElementById('footer-ca-label');
+    const caModal = document.getElementById('footer-caEntryModal');
+    const caAccountDropdown = document.getElementById('footer-ca-account');
+    const caCategoryDropdown = document.getElementById('footer-ca-category');
+
+    // Show modal when button or label is clicked
+    caButton.addEventListener('click', openCaEntryModal);
+    caLabel.addEventListener('click', openCaEntryModal);
+    caLabel.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') openCaEntryModal();
+    });
+
+    function openCaEntryModal() {
+        populateCaAccountDropdown();
+        document.getElementById('footer-ca-entryDate').value = getTodayDate();
+        caModal.style.display = 'flex';
+        caCategoryDropdown.disabled = true;
+        caAccountDropdown.value = '';
+        caCategoryDropdown.innerHTML = '<option value="">Select Category</option>';
+        document.getElementById('footer-bar').classList.remove('active');
+    }
+
+    // Close modal
+    function closeCaEntryModal() {
+        caModal.style.display = 'none';
+    }
+
+    // Populate credit account dropdown
+    function populateCaAccountDropdown() {
+        caAccountDropdown.innerHTML = '<option value="">Select Account</option>';
+        credit_accounts.forEach(account => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            option.textContent = account.name;
+            caAccountDropdown.appendChild(option);
+        });
+    }
+
+    // Update category dropdown for credit accounts (footer-ca-category)
+    caAccountDropdown.addEventListener('change', function() {
+        const accountId = caAccountDropdown.value;
+        caCategoryDropdown.innerHTML = '<option value="">Select Category</option>';
+        if (!accountId) {
+            caCategoryDropdown.disabled = true;
+            return;
+        }
+        caCategoryDropdown.disabled = false;
+        // Filter categories for this account, exclude bud categories
+        c_expense_categories.forEach(category => {
+            if (
+                category.account_id == accountId &&
+                !category.hidden &&
+                category.name !== "Starting Balance" &&
+                !category.is_bud
+            ) {
+                const option = document.createElement('option');
+                option.value = category.id;
+                option.textContent = category.name;
+                caCategoryDropdown.appendChild(option);
+            }
+        });
+    });
+
+    // Submit credit entry
+    $('#footer-caEntryForm').on('submit', function(e) {
+        closeCaEntryModal();
+        showDashboardSpinner(true);
+        e.preventDefault();
+        setTimeout(function() {
+            const formData = {
+                entryType: 'ca_' + $('#footer-ca-account').val(),
+                category: $('#footer-ca-category').val(),
+                amount: $('#footer-ca-amount').val(),
+                date: $('#footer-ca-entryDate').val()
+            };
+            $.ajax({
+                url: '/footer_add_entry',
+                type: 'POST',
+                data: JSON.stringify(formData),
+                contentType: 'application/json',
+                async: false,
+                success: function(response) {
+                    if (response.status === 'success') {
+                        if (typeof updateLocalState === "function") {
+                            console.log('[footer-caEntryForm] Calling updateLocalState with entryType:', formData.entryType); // <-- LOG BEFORE CALL
+                            updateLocalState(
+                                formData.entryType,
+                                formData.category,
+                                formData.date,
+                                Number(formData.amount), // Ensure amount is a number
+                                false,
+                                formData.date,
+                                true
+                            );
+                        }
+                        if (typeof updateLocalEntryAfterAdd === "function") {
+                            updateLocalEntryAfterAdd(
+                                formData.entryType,
+                                formData,
+                                true
+                            );
+                        }
+                        saveDailyTotalsAndRemainders();
+                    } else {
+                        alert('Failed to add entry: ' + response.message);
+                    }
+                },
+                error: function(error) {
+                    console.error('Error adding entry:', error);
+                    alert('An error occurred while adding the entry.');
+                },
+                complete: function() {
+                    document.getElementById('loading-screen').style.display = 'none';
+                    resetCaEntryForm();
+                }
+            });
+        }, 10);
+    });
+
+    // Utility to get today's date in YYYY-MM-DD
+    function getTodayDate() {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    // Auto-fill current date in hidden input on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('footer-ca-entryDate').value = getTodayDate();
+    });
+
+    // Close modal when it loses focus (blur)
+    caModal.addEventListener('blur', function(e) {
+        // Only close if the modal itself is blurred, not a child element
+        if (e.target === caModal) {
+            closeCaEntryModal();
+        }
+    }, true);
+
+    // Also close when clicking outside the modal content
+    caModal.addEventListener('mousedown', function(event) {
+        if (event.target === caModal) {
+            closeCaEntryModal();
+        }
+    });
+
+    function resetAddEntryForm() {
+        document.getElementById('footer-entryType').value = '';
+        document.getElementById('footer-category').innerHTML = '<option value="">Select Category</option>';
+        document.getElementById('footer-category').disabled = true;
+        document.getElementById('footer-amount').value = '';
+        // Reset date to today
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        document.getElementById('footer-entryDate').value = `${year}-${month}-${day}`;
+    }
+
+    function resetCaEntryForm() {
+        document.getElementById('footer-ca-account').value = '';
+        document.getElementById('footer-ca-category').innerHTML = '<option value="">Select Category</option>';
+        document.getElementById('footer-ca-category').disabled = true;
+        document.getElementById('footer-ca-amount').value = '';
+        // Reset date to today
+        document.getElementById('footer-ca-entryDate').value = getTodayDate();
+    }
+
+    function resetAutoBalanceForm() {
+        document.getElementById('autobalance-current-balance').value = '';
+    }
+
+</script>

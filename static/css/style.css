@@ -1,0 +1,6656 @@
+/* General Styles */
+@font-face {
+    font-family: 'Nunito';
+    src: url('/static/fonts/Nunito/static/Nunito-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Nunito';
+    src: url('/static/fonts/Nunito/static/Nunito-SemiBold.ttf') format('truetype');
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Nunito';
+    src: url('/static/fonts/Nunito/static/Nunito-Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
+.category-icon {
+    font-size: 10px;
+}
+
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[readonly][tabindex="-1"] {
+    pointer-events: none;
+}
+
+#dashboard, html {
+    height: 100%;
+    overflow-y: auto;
+}
+
+html {
+    overflow-y: overlay;
+    overflow-x: hidden;
+}
+
+input[type="checkbox"] {
+  appearance: auto !important;
+  -webkit-appearance: checkbox !important;
+  align-self: center;
+  accent-color: #2aaaa8; /* Optional: modern checkmark color styling */
+}
+
+body {
+    font-family: 'Nunito', sans-serif;
+    background-color: #f5fffe;
+    color: #575757;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    min-width: 350px;
+    padding-bottom: 100px;
+    overflow-x: hidden;
+    min-height: 80vh;
+}
+
+/* Full screen loading overlay */
+.loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.7);
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(5px);
+}
+
+/* Spinner container: default center */
+#dashboard-loading-spinner-container {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    transition:
+        left .3s cubic-bezier(.7,0,.2,1),
+        top .3s cubic-bezier(.7,0,.2,1),
+        transform .3s cubic-bezier(.7,0,.2,1);
+    display: none;
+}
+
+/* Spinner container: bottom right */
+#dashboard-loading-spinner-container.spinner-bottom-right {
+    left: calc(100vw - 65px);
+    top: calc(100vh - 65px);
+    transform: none;
+}
+
+.dashboard-spinner-circle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f5fffe;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+}
+
+#dashboard-loading-spinner {
+    font-size: 32px;
+    color: #2AAAA8;
+}
+
+#loading-spinner-container {
+    position: relative;
+    z-index: 9999;
+    pointer-events: none;
+}
+
+.spinner-circle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #2AAAA8;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+    border: 4px solid #f5fffe;
+}
+
+#loading-spinner {
+    font-size: 2em;
+    color: #f5fffe;
+}
+
+.nav-bar {
+    display: flex;
+    align-items: center; /* Vertically center the content */
+    background-color: #2aaaa8;
+    height: 50px; /* Adjusted height */
+    justify-content: center; /* Ensure content is spaced between left and right */
+    padding: 0 10px;
+}
+
+.nav-bar-container {
+    display: flex;
+    align-items: center; /* Vertically center the content */
+    background-color: transparent;
+    width: 100%; /* Extend to the width of the viewport */
+    height: 50px; /* Adjusted height */
+    justify-content: space-between; /* Ensure content is spaced between left and right */
+    max-width: 875px;
+}
+
+.nav-bar-container-login {
+    justify-content: center;
+}
+
+.nav-logo {
+    height: 38px;
+    width: auto;
+    vertical-align: middle;
+}
+
+.nav-left-content {
+    display: flex;
+    align-items: center;
+}
+
+.sidenavheader {
+    height: 75px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    width: 100%;
+}
+
+.sidenavfooter a:hover {
+    color: #575757; /* Change color on hover */
+}
+
+.sidenav-profile {
+    display: flex;
+    align-items: center; /* Vertically center the profile picture and username */
+    background-color: transparent;
+    border-radius: 15px;
+    cursor: pointer;
+    height: 65px;
+    box-sizing: border-box; /* Ensure padding is included in the width */
+    margin-left: auto; /* pushes it to the far right */
+    position: relative;
+}
+
+.sidenav-profile-pic {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    margin-left: 10px; /* Space between picture and username */
+    flex-shrink: 0; /* Prevent the profile picture from shrinking */
+    object-fit: cover; /* Ensures the image covers the container without squashing */
+    object-position: center; /* Center the image within the container */
+}
+
+.sidenavprofileinfo {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end; /* Aligns content to the right */
+}
+
+.sidenav-username {
+    color: white;
+    font-size: 15px;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-grow: 1;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    height: 50%;
+    justify-content: flex-end; /* Aligns text to the right */
+}
+
+.dropdown-divider {
+    width: 90%;
+    height: 1px;
+    background: #e0e0e0;
+    margin: 5px auto;
+    border-radius: 1px;
+    opacity: 0.7;
+}
+
+.dropdown-profile-label {
+    color: #e0e0e0;
+    padding-left: 20px;
+    cursor: default;
+    height: 40px;
+    display: flex;
+    align-items: center; /* Center vertically */
+    font-weight: 700;
+}
+
+/* Profile section in dropdown */
+.dropdown-profile-section {
+    display: flex;
+    flex-direction: row;
+    align-items: center;      /* Center vertically */
+    justify-content: left;  /* Center horizontally */
+    padding: 10px;
+    padding-left: 20px;
+    cursor: default;
+}
+
+.dropdown-menu-section {
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    align-content: center;
+}
+
+/* Profile picture in dropdown */
+.dropdown-profile-pic {
+    width: 45px !important;
+    height: 45px !important;
+    min-width: 45px !important;
+    min-height: 45px !important;
+    max-width: 45px !important;
+    max-height: 45px !important;
+    aspect-ratio: 1 / 1 !important;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+    flex-shrink: 0;
+}
+
+/* Username in dropdown */
+.dropdown-username {
+    display: flex;
+    color: white;
+    font-size: 13px;
+    word-break: break-all;
+    justify-content: left;  /* Center horizontally */
+    width: 100%;
+    text-align: left;
+    padding-left: 10px;
+}
+
+/* Logout row in dropdown */
+.dropdown-logout-row {
+    margin-top: auto;
+    width: 100%;
+    display: flex;
+    justify-content: left;
+    align-content: center;
+    padding-left: 20px
+}
+
+.dropdown-logout-row:hover {
+    background-color: #59D6D4;
+}
+
+/* Logout button in dropdown */
+.dropdown-logout {
+    color: #fff;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: left;
+    height: 40px;
+    display: flex;              /* Use flexbox for vertical centering */
+    align-items: center;        /* Center text vertically */
+}
+
+.sidenav-profile.active + .dropdown-content {
+    display: block;
+}
+
+/* Dropdown container */
+.dropdown-content {
+    display: none;
+    position: absolute;
+    top: 58px;
+    right: -10px;
+    background-color: #2AAAA8;
+    min-width: 320px;
+    z-index: 10;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px -2px rgba(0,0,0,0.18), 0 8px 24px -4px rgba(0,0,0,0.18);
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    align-items: left;
+    gap: 0;
+    padding-top: 20px;
+    padding-bottom: 10px;
+    cursor: default;
+}
+
+.dropdown-link {
+    text-align: left;
+    display: flex;
+    align-items: center;      /* Center text vertically */
+    height: 40px;             /* Ensure a consistent height for vertical alignment */
+    padding: 0;
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.dropdown-link:hover {
+    background-color: #59D6D4;  
+}
+
+.dropdown-link a{
+    display: flex;
+    align-items: center;  
+    color: white;
+    text-decoration: none;
+    height: 40px;
+    width: 100%;
+}
+
+.dropdown-link i{
+    display: flex;
+    align-items: center;
+    color: white;
+    font-weight: 300;
+}
+
+.dropdown-sublink {
+    padding-left: 30px;
+    background-color: #259795;  
+}
+
+#recurring-sections {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+#recurring-sections.expanded {
+    max-height: 120px; /* Adjust as needed for content */
+    opacity: 1;
+}
+
+/* Guided Tour Overlay and Modal */
+#guided-tour-overlay {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 10000;
+    pointer-events: auto;
+}
+
+#guided-tour-highlight {
+    display: block;
+    position: absolute;
+    border-radius: 12px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.6); /* Creates hole-effect */
+    border: 3px solid #575757;
+    background: rgba(255,255,255,0.15);
+    z-index: 10001;
+    pointer-events: none;
+}
+
+#guided-tour-modal {
+    display: block;
+    position: absolute;
+    z-index: 10002;
+    background: rgba(255,255,255,0.98);
+    border-radius: 10px;
+    box-shadow: 0 2px 16px 0 rgba(0,0,0,0.18);
+    padding: 25px 20px;
+    max-width: 340px;
+    font-size: 13px;
+    color: #222;
+    text-align: center;
+}
+
+
+/*/////////////////////////////////  Footer Bar ///////////////////////////*/
+
+/* Footer bar container */
+.footer-bar {
+    position: fixed;
+    bottom: 0px;
+    left: 50%;
+    transform: translateX(-50%);
+    height: 80px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+}
+
+/* Main Add button */
+.footer-add-button {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: #676767;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 103;
+    border: none;
+    outline: none;
+    box-shadow: 0px 0px 6px rgba(0, 0, 0, 0.5);
+}
+
+.footer-add-button:hover {
+    background: #575757;
+}
+
+/* Sub-buttons for Income and Expense */
+.footer-sub-button {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background-color: #E45F1C;
+    color: white;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    transition: transform 0.3s cubic-bezier(.4,2,.6,1), opacity 0.2s;
+    z-index: 102;
+    opacity: 0;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    cursor: pointer;
+}
+
+#footer-income-button {
+    background-color: #2AAAA8;
+    z-index: 102;
+}
+
+#footer-expense-button {
+    background-color: #E45F1C;
+    z-index: 102;
+}
+
+#footer-ca-button {
+    background-color: #E45F1C;
+    z-index: 102;
+}
+
+#footer-autobalance-button {
+    background-color: #676767;
+    z-index: 102;
+}
+
+/* When active, show the sub-buttons and move them */
+.footer-bar.active #footer-income-button {
+    transform: translate(-50%, calc(-50% - 185px));
+    pointer-events: auto;
+    opacity: 1;
+}
+.footer-bar.active #footer-expense-button {
+    transform: translate(-50%, calc(-50% - 125px));
+    pointer-events: auto;
+    opacity: 1;
+}
+
+.footer-bar.active #footer-ca-button {
+    transform: translate(-50%, calc(-50% - 65px));
+    pointer-events: auto;
+    opacity: 1;
+}
+
+.footer-bar.active #footer-autobalance-button {
+    transform: translate(-50%, calc(-50% - 245px));
+    pointer-events: auto;
+    opacity: 1;
+}
+
+.footer-sub-button i {
+    position: relative;
+    z-index: 3;
+}
+
+/* Label Styling */
+.footer-button-label {
+    position: absolute;
+    top: 50%;
+    width: 0;
+    min-width: 0;
+    opacity: 0;
+    transform: translate(0, -50%) scaleX(0.7);
+    transform-origin: left center;
+    height: 50px;
+    line-height: 50px;
+    box-sizing: border-box;
+    color: #575757;
+    padding: 0 12px 0 55px;
+    border-radius: 25px;
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 101;
+    overflow: hidden;
+    font-weight: 700;
+    border: none;
+    outline: none;
+    box-shadow: 0px 0px 6px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+}
+
+.footer-button-label:hover {
+    background-color: #d8fffd;
+}
+
+.footer-bar.active #footer-income-label {
+    background-color: #E6FAF9;
+    left: calc(50% - 24.5px);
+    width: 190px;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(0, calc(-50% - 185px)) scaleX(1);
+    transition-property: width, opacity, transform;
+    transition-duration: 0.3s, 0.1s, 0.3s; /* width is longest now */
+    transition-timing-function: cubic-bezier(.4,2,.6,1), ease, cubic-bezier(.4,2,.6,1);
+    transition-delay: 0.22s, 0.22s, 0s; /* width starts after transform */
+}
+
+.footer-income-label:hover {
+    background-color: #d8fffd;
+}
+
+.footer-bar.active #footer-expense-label {
+    background-color: #FDEEEE;
+    left: calc(50% - 24.5px);
+    width: 199px;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(0, calc(-50% - 125px)) scaleX(1);
+    transition-property: width, opacity, transform;
+    transition-duration: 0.3s, 0.1s, 0.3s; /* width is longest now */
+    transition-timing-function: cubic-bezier(.4,2,.6,1), ease, cubic-bezier(.4,2,.6,1);
+    transition-delay: 0.22s, 0.22s, 0s; /* width starts after transform */
+}
+
+.footer-expense-label:hover {
+    background-color: #d8fffd;
+}
+
+.footer-bar.active #footer-ca-label {
+    background-color: #E6FAF9;
+    left: calc(50% - 24.5px);
+    width: 190px;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(0, calc(-50% - 65px)) scaleX(1);
+    transition-property: width, opacity, transform;
+    transition-duration: 0.3s, 0.1s, 0.3s; /* width is longest now */
+    transition-timing-function: cubic-bezier(.4,2,.6,1), ease, cubic-bezier(.4,2,.6,1);
+    transition-delay: 0.22s, 0.22s, 0s; /* width starts after transform */
+}
+
+.footer-ca-label:hover {
+    background-color: #d8fffd;
+}
+
+.footer-bar.active #footer-autobalance-label {
+    background-color: #A9A9A9;
+    left: calc(50% - 24.5px);
+    width: 199px;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(0, calc(-50% - 245px)) scaleX(1);
+    transition-property: width, opacity, transform;
+    transition-duration: 0.3s, 0.1s, 0.3s; /* width is longest now */
+    transition-timing-function: cubic-bezier(.4,2,.6,1), ease, cubic-bezier(.4,2,.6,1);
+    transition-delay: 0.22s, 0.22s, 0s; /* width starts after transform */
+}
+
+.footer-autobalance-label:hover {
+    background-color: #d8fffd;
+}
+
+#footer-income-label span,
+#footer-expense-label span,
+#footer-autobalance-label span {
+    opacity: 0;
+}
+
+#footer-income-button:hover ~ #footer-income-label span,
+#footer-income-button:focus ~ #footer-income-label span,
+#footer-expense-button:hover ~ #footer-expense-label span,
+#footer-expense-button:focus ~ #footer-expense-label span, 
+#footer-autobalance-button:hover ~ #footer-autobalance-label span,
+#footer-autobalance-button:focus ~ #footer-autobalance-label span {
+    opacity: 1;
+}
+
+/* Modal container */
+.footer-modal {
+    display: none;
+    position: fixed;
+    z-index: 200;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100vh;
+    overflow: auto;
+    background-color: transparent;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0,0,0,0.3);
+}
+
+/* Modal content box */
+.footer-modal-content {
+    background-color: #fff;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #575757;
+    width: 80%;
+    max-width: 350px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Close button */
+.footer-close-modal {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.footer-close-modal:hover,
+.footer-close-modal:focus {
+    color: #575757;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+/* Modal header */
+.footer-modal-content h3 {
+    margin-top: 0;
+    font-size: 1.5rem;
+    color: #575757;
+}
+
+/* Form group */
+.footer-form-group {
+    margin-bottom: 15px;
+}
+
+/* Form labels */
+.footer-form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #555;
+}
+
+/* Inputs and selects */
+.footer-form-group input[type="number"],
+.footer-form-group select {
+    width: 100%;
+    padding: 5px;
+    margin-top: 5px;
+    margin-bottom: 10px;
+    border: 1px solid #A9A9A9;
+    border-radius: 5px;
+    font-size: 12px;
+    box-sizing: border-box;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+/* Submit button */
+.footer-form-group button[type="submit"] {
+    background-color: #E45F1C;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.footer-form-group button[type="submit"]:hover {
+    background-color: #EF9F77;
+}
+
+/* Submit button */
+button#autobalance-submit {
+    background-color: #E45F1C;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+button#autobalance-submit:hover {
+    background-color: #EF9F77;
+}
+
+autobalance-submit
+
+/* Mobile responsiveness */
+@media screen and (max-width: 600px) {
+    .footer-modal-content {
+        width: 350px; /* Make the modal slightly narrower on small screens */
+    }
+}
+
+/* Auto Balance Modal Styles */
+#autobalance-modal {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    left: 0; top: 0; right: 0; bottom: 0;
+    width: 100vw; height: 100vh;
+    background: rgba(0,0,0,0.4);
+    align-items: center;
+    justify-content: center;
+}
+#autobalance-modal .autobalance-modal-content {
+    background: #fff;
+    border-radius: 12px;
+    max-width: 350px;
+    width: 90vw;
+    margin: auto;
+    padding: 2rem 1.5rem 1.5rem 1.5rem;
+    box-shadow: 0 4px 32px rgba(0,0,0,0.18);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    box-sizing: border-box;
+}
+#autobalance-modal .footer-close-modal {
+    position: absolute;
+    top: 12px;
+    right: 18px;
+    font-size: 1.5rem;
+    color: #888;
+    cursor: pointer;
+}
+#autobalance-modal h3 {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    text-align: center;
+}
+#autobalance-modal p {
+    font-size: 1rem;
+    margin-bottom: 1.2rem;
+    text-align: center;
+}
+#autobalance-modal .footer-form-group {
+    margin-bottom: 1rem;
+}
+#autobalance-modal input[type=\"number\"] {
+    width: 100%;
+    padding: 0.5rem;
+    font-size: 1.1rem;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+}
+#autobalance-modal button[type=\"button\"] {
+    width: 100%;
+    padding: 0.7rem;
+    font-size: 1.1rem;
+    border-radius: 6px;
+    background: #2e7d32;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+}
+#autobalance-modal button[type=\"button\"]:hover {
+    background: #256026;
+}
+
+/*/////////////////////////////////  Calendar Nav ///////////////////////////*/
+
+.calendarnav {
+    padding-top: 15px;
+    margin-left: 10px;
+    margin-right: 10px;
+}
+
+.calendarnavbuttonscontainer {
+    margin: 0 auto; /* Centers the container horizontally */
+    display: flex;
+    flex-direction: row; /* Make children horizontal */
+    justify-content: space-between; /* Ensures the left and right containers are on opposite sides */
+    align-items: center; /* Vertically centers the content */
+    max-width: 875px;
+}
+
+.calendarnavbuttons {
+    display: flex;
+    justify-content: flex-end; /* Aligns the buttons to the right inside this container */
+}
+
+.nav-dash-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0px;
+}
+
+#nav-inline-buttons {
+    display: flex;
+    align-items: center;
+    gap: 0px;
+}
+
+#nav-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 110%;
+    left: 0;
+    min-width: 180px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    z-index: 1000;
+    padding: 8px 0;
+}
+
+/* Show dropdown when active (handled by JS) */
+#nav-dropdown-menu.active {
+    display: block;
+}
+
+#current-nav-btn.nav-button {
+    text-align: center;
+    font-weight: bold;
+}
+
+.nav-button {
+    font-size: 20px; /* Adjusted font size */
+    padding: 0px 10px; /* Adjusted padding */
+    margin: 0px 3px;
+    background-color: transparent;
+    color: #2AAAA8;
+    cursor: pointer;
+    border-radius: 15px;
+    align-items: center; /* vertical centering */
+    text-decoration: none;
+    position: relative;
+}
+
+.nav-label {
+    font-size: 15px;
+}
+
+.nav-button:hover {
+    color: #575757;
+}
+
+.nav-button a {
+    margin-top: auto;
+    margin-bottom: auto;
+}
+
+.nav-button-focus {
+    color: #E45F1C !important;
+}
+
+.nav-select {
+    height: 28px;
+    font-size: 16px;
+    margin: 0 8px;
+    padding: 2px 8px;
+    background: transparent;
+    color: #2AAAA8;
+    cursor: pointer;
+    border: none;
+    font-weight: bold;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    text-align: center;
+}
+
+.nav-select:hover {
+    color: #575757;
+}
+
+.nav-tooltip {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 120%;
+    background: #E6FAF9;
+    color: #575757;
+    padding: 4px 12px;
+    border-radius: 5px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    transition-delay: 0.5s;
+    font-weight: normal;
+    visibility: hidden;
+}
+
+/* Arrow */
+.nav-tooltip::after {
+    content: '';
+    position: absolute;
+    top: -7px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 0 7px 7px 7px;
+    border-style: solid;
+    border-color: transparent transparent #E6FAF9 transparent;
+}
+
+/* OR (if :has is not well-supported), do this instead: */
+*:hover > .nav-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 0.5s;
+}
+
+*:not(:hover) > .nav-tooltip {
+    transition-delay: 0s;
+}
+
+
+.dashboard-button {
+    margin: 0px 10px;
+    color: #2AAAA8;
+    text-decoration: none;
+}
+
+.dashboard-button i {
+    font-size: 20px;
+    
+}
+
+.dashboard-button span {
+    font-size: 15px;
+    margin-left: 10px;
+    font-weight: bold;
+}
+
+.dashboard-button:hover {
+    color: #1F7E7C;
+}
+
+.recurring-income-button {
+    color: #2AAAA8;
+}
+
+.recurring-expense-button {
+    color:#E45F1C;
+}
+
+/* Register Page Styles */
+.logincontainer {
+    min-width: 330px;
+    margin: 50px auto;
+    padding: 20px;
+    background-color: #E6FAF9;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    text-align: center;
+}
+
+.logincontainer h1 {
+    margin-bottom: 20px;
+    font-size: 24px;
+    color: #575757;
+}
+
+.logincontainer p {
+    font-size: 12px;
+}
+
+.logincontainer p a {
+    text-decoration: underline;
+    color: #E45F1C;
+}
+
+.logincontainer p a:hover {
+    text-decoration: underline;
+    color: #E45F1C;
+}
+
+.logincontainer form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.login-row#Username {
+    margin-bottom: 20px;;
+}
+
+.logincontainer form .login-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logincontainer form .login-row label {
+    min-width: 100px;
+    margin: 0px 10px;
+    margin-bottom: 0;
+    text-align: right;
+    flex-shrink: 0;
+    font-size: 12px;
+}
+
+.logincontainer form .login-row input[type="text"],
+.logincontainer form .login-row input[type="password"] {
+    width: 80%;
+    min-width: 0px;
+    margin-bottom: 0;
+}
+
+.remember-me {
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.remember-me label{
+    text-align: left !important;
+    min-width: 0px !important;
+}
+
+/* Login Input Fields */
+.login-input {
+    padding: 12.5px; /* Increased padding for larger input fields */
+    border: 1px solid #575757;
+    border-radius: 25px; /* Rounded corners */
+    box-sizing: border-box;
+    font-size: 12px; /* Larger font size */
+    height: 20px;
+}
+
+/* Login Button */
+.login-button {
+    padding: 10px 50px; /* Increased padding for larger input fields */
+    background-color: #E45F1C;
+    color: white;
+    border: none;
+    border-radius: 25px; /* Rounded corners */
+    cursor: pointer;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.login-button#register-button {
+    margin-top: 10px;
+}
+
+.login-button:hover {
+    background-color: #EF9F77;
+}
+
+.register-link {
+    color: #575757;
+    text-decoration: none;
+}
+
+.register-link:hover {
+    text-decoration: underline;
+}
+
+.input-group {
+    width: 100%;
+    display: flex;
+    align-items: center;     /* vertical alignment */
+    justify-content: center;
+    height: 40px;
+}
+
+#gwm-input-group {
+    justify-content: center !important;
+}
+
+label[for="goofy_week_mode"] {
+    font-size: 13px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;      /* Ensure vertical alignment of text */
+}
+
+#goofy_week_mode {
+    margin-right: 5px;        /* Margin to space checkbox from label */
+    cursor: pointer;
+}
+
+#username-status {
+    padding-top: 15px;
+    position: absolute;
+    right: 0px; /* Adjust the distance from the right edge */
+    top: 50%;
+    transform: translateY(-50%);
+    color: #f94449;
+    font-size: 25px;
+}
+
+/* Setup Profile Page Styles */
+
+/* Modal Background */
+.modal-setup-profile {
+    display: none; /* Hidden by default */
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5); /* Black with transparency */
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+}
+
+/* Modal Content */
+.modal-content-setup-profile {
+    position: relative;
+    background-color: #fff;
+    margin: auto;
+    padding: 20px;
+    border: 1px solid #575757;
+    width: 400px;
+    max-width: 90%;
+    top: 130px;
+    border-radius: 10px;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* Target only elements within the setup profile form */
+.setup-profile-form {
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center the form elements */
+    justify-content: center; /* Center vertically */
+}
+
+/* Center the form-group elements */
+.setup-profile-form-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center; /* Align input and label in the middle vertically */
+    margin-bottom: 10px;
+    width: 90%; /* Take full width to center the inputs */
+    justify-content: center;
+    white-space: nowrap; /* Prevent label and input from wrapping */
+}
+
+.setup-profile-form-group label {
+    width: 20%; /* Adjust this width as needed */
+    margin-right: 20px;
+    text-align: right; /* Align text to the right of the label */
+}
+
+.setup-profile-form-group input {
+    flex: 1; /* Input will stretch to fill available space */
+    padding: 8px;
+    border: 1px solid #A9A9A9;
+    border-radius: 4px;
+}
+
+/* Form Inputs */
+#setup-profile-name-form input,
+#setup-profile-balance-form input,
+#setup-profile-threshold-form input {
+    width: 80%; /* Keep input fields at 80% of the container */
+    padding: 10px 0px 10px 25px;
+    margin: 10px 0;
+    border: 1px solid #575757;
+    border-radius: 5px;
+    box-sizing: border-box;
+    font-size: 16px;
+    text-align: right;
+}
+
+.modal-content-setup-profile p {
+    text-align: left !important;
+    margin-bottom: 30px;
+}
+
+label[for="setup-profile-starting-balance"],
+label[for="setup-profile-starting-savings"] {
+    text-align: left !important;
+    margin-bottom: 10px;
+}
+
+label[for="setup-profile-balance-threshold"] {
+    text-align: left !important;
+    margin-bottom: 5px;
+}
+
+input#setup-profile-balance-threshold,
+input#setup-profile-starting-balance {
+    padding-right: 10px;
+}
+
+#autobalance-current-balance,
+#footer-amount,
+#footer-ca-amount {
+    text-align: right;
+}
+
+/* Button Styles */
+.setup-profile-previous-button,
+.setup-profile-next-button,
+.setup-profile-submit-button {
+    padding: 10px;
+    margin-top: 15px;
+    background-color: #E45F1C;
+    color: white;
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 16px;
+    text-align: center;
+}
+
+.setup-profile-previous-button:hover,
+.setup-profile-next-button:hover,
+.setup-profile-submit-button:hover {
+    background-color: #EF9F77;
+}
+
+/* Title Styling */
+.modal-content-setup-profile h2 {
+    font-size: 20px;
+    margin-bottom: 20px;
+    color: #575757;
+    text-align: left;
+}
+
+/* Button container for aligning buttons */
+.setup-profile-button-container {
+    display: flex;
+    justify-content: space-between; /* Align buttons to opposite ends */
+    width: 100%;
+    margin-top: 15px;
+}
+
+/* Button Styles */
+.setup-profile-previous-button,
+.setup-profile-next-button,
+.setup-profile-submit-button {
+    padding: 10px;
+    background-color: #E45F1C;
+    color: white;
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 16px;
+    width: 45%; /* Take up equal space with a margin between */
+}
+
+.setup-profile-next-button#welcome-next-button {
+    margin-left: auto;
+}
+
+.setup-profile-previous-button:hover,
+.setup-profile-next-button:hover,
+.setup-profile-submit-button:hover {
+    background-color: #EF9F77;
+}
+
+/* Adjust the container and button width for mobile devices */
+@media (max-width: 600px) {
+    #nav-inline-buttons {
+        width: 100%;
+    justify-content: space-between; /* Evenly distribute buttons across the parent */
+    }
+
+    #nav-inline-buttons.nav-button {
+        flex: 1 1 0; /* Each button takes equal width */
+    }
+
+    .nav-button i{
+        font-size: 25px;
+    }
+
+    #previous-nav-btn.nav-button,
+    #next-month-btn.nav-button,
+    #next-nav-btn.nav-button,
+    #current-nav-btn.nav-button {
+        padding-top: 0px !important;
+        padding-bottom: 0px !important;
+        margin-top: 0px !important;
+        margin-bottom: 0px !important;
+        font-size: 8px;
+    }
+
+    #current-nav-btn.nav-button {
+        font-size: 20px;
+    }
+
+    .calendarnavbuttonscontainer {
+        flex-direction: column; /* Stack children vertically */
+        justify-content: flex-start; /* Align children to the top */
+        margin-bottom: 0px;
+    }
+
+    .nav-dash-container {
+        width: 100% !important;
+        justify-content: center;
+    }
+
+    .calendarnavbuttons {
+        margin-top: 15px;
+    }
+
+    #nav-dropdown-toggle {
+        display: none;
+    }
+
+    .setup-profile-button-container {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .setup-profile-previous-button,
+    .setup-profile-next-button,
+    .setup-profile-submit-button {
+        width: 100%; /* Buttons will stack on top of each other */
+        margin-bottom: 10px; /* Add space between stacked buttons */
+    }
+    .nav-button, 
+    .nav-select {
+        font-size: 20px;
+        position: flex;
+        margin: 7.5px;
+        padding: 2.5px;
+    }
+    #nav-dropdown-toggle {
+        margin-right: 0px;
+    }
+    #next-indicator span,
+    #previous-indicator span {
+        width: 13px !important;
+        height: 13px !important;
+        font-size: 11px !important;
+        top: 7px !important;
+        left: -35px !important;
+    }
+}
+
+#next-indicator,
+#previous-indicator {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    height: 0;
+    margin: 0;
+    padding: 0;
+}
+
+#next-indicator span,
+#previous-indicator span {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: bold;
+    background: #F7C948; /* default yellow */
+    color: #575757;
+    border: 2px solid #575757;
+    position: absolute;
+    top: -5px;
+    left: -41px;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.below-threshold-indicator span {
+    background: #F7C948 !important;
+    color: #575757 !important;
+}
+
+.negative-indicator span {
+    background: #E74C3C !important;
+    color: #fff !important;
+}
+
+/* Login Page Styles */
+/* (Reuses the styles from the Register section above) */
+
+/*////////////////////// Dashboard Day Styles ///////////////////////////*/
+
+/* Main container for dashboard */
+.dashboard-d-container {
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    flex-direction: column;
+    margin: 0px auto;
+    text-overflow: ellipsis;
+    border-radius: 10px;
+    background-color: transparent;
+    transition: transform 0.3s ease-in-out;
+    will-change: transform;
+    margin-top: 80px;
+    max-width: 875px;
+}
+
+.dashboard-d-container:first-child {
+    margin-top: 25px;
+}
+
+/* Header for each day */
+.dashboard-d-day-header {
+    text-align: center;
+    color: white;
+    background-color: #676767;
+    width: 100%;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    height: 20px;
+    font-size: clamp(14px, 2vw, 18px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Button for adding new entry */
+.dashboard-d-add-entry-btn {
+    background-color: transparent;
+    color: white;
+    border: none;
+    height: 25px;
+    width: 25px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: auto;
+    position: absolute;
+    top: -30px;
+    right: 0px;
+    border-radius: 50%; /* Make the button circular */
+    background-color:#676767;
+}
+
+.dashboard-d-add-entry-btn i {
+    position: relative;
+    top: 1px;
+    right: 2px;
+}
+
+.dashboard-d-add-entry-btn:hover {
+    background-color: #575757
+}
+
+/* Container for rows */
+.dashboard-d-income-entries, .dashboard-d-expense-entries {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    font-size: clamp(10px, 2vw, 14px);
+    position: relative;
+}
+
+/* Row styling */
+.dashboard-d-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0px 0px 0px 10px;
+    box-sizing: border-box;
+    height: 20px;
+}
+
+/* Label cell */
+.dashboard-d-label-cell {
+    flex: 3;
+    text-align: right;
+}
+
+#dashboard-d-amount {
+    text-align: right;
+}
+
+/* Amount cell */
+.dashboard-d-amount-cell {
+    text-align: right;
+    width: 100px;
+    position: relative;
+}
+
+.paid {
+    font-weight: bold;
+}
+
+.paid::after {
+    content: '\2713';
+    font-weight: bolder;
+    pointer-events: none;
+    position: absolute;
+    margin-left: -10px;
+    margin-top: -14px;
+    font-size: 18px;
+}
+
+/* Alternating background colors for income entries */
+.dashboard-d-income-entries .dashboard-d-row:nth-child(odd) {
+    background-color: #59D6D4; /* Green for odd income entries */
+}
+
+.dashboard-d-income-entries .dashboard-d-row:nth-child(even) {
+    background-color: #E6FAF9; /* White for even income entries */
+}
+
+/* Alternating background colors for expense entries */
+.dashboard-d-expense-entries .dashboard-d-row:nth-child(odd) {
+    background-color: #EF9F77; /* Red for odd expense entries */
+}
+
+.dashboard-d-expense-entries .dashboard-d-row:nth-child(even) {
+    background-color: #FDEEEE; /* White for even expense entries */
+}
+
+/* Alternating background colors for expense entries */
+.dashboard-d-credit-row:nth-child(odd) {
+    background-color: #F4F4F4; /* White for even expense entries */
+}
+
+.dashboard-d-credit-row:nth-child(even) {
+    background-color: #D3D3D3; /* Red for odd expense entries */
+}
+
+.dashboard-d-credit-row:last-child {
+    background-color: #A9A9A9; /* White for even expense entries */
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+    color: white !important;
+}
+
+.dashboard-d-credit-row:first-child {
+    background-color: #676767; /* White for even expense entries */
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    color: white !important;
+}
+
+/* Total and remainder rows */
+.dashboard-d-lastremainder,
+.dashboard-d-income-total,
+.dashboard-d-expense-total,
+.dashboard-d-remainder {
+    width: 100%;
+    height: 20px;
+    box-sizing: border-box;
+    padding: 0px 10px;
+    color: white;
+    font-size: clamp(13px, 2vw, 14px);
+    display: flex;
+    align-items: center;
+}
+
+.dashboard-d-credit-divider {
+    width: 80%;
+    border-top: 2px solid #2AAAA8;
+    margin: 18px 0 8px 0;
+    position: relative;
+    text-align: center;
+}
+.dashboard-d-credit-divider-text {
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    background: #f5fffe;
+    color: #2AAAA8;
+    font-weight: bold;
+    padding: 0 16px;
+    font-size: 12px;
+    letter-spacing: 1px;
+}
+
+.dashboard-d-savings {
+    width: 100%;
+    height: 20px;
+    box-sizing: border-box;
+    padding: 0px 10px;
+    color: white;
+    font-size: clamp(13px, 2vw, 14px);
+    display: flex;
+    align-items: center;
+    background-color: #2AAAA8;
+    margin-top: 5px;
+    border-radius: 10px;
+}
+
+.dashboard-d-container.dashboard-d-container-highlight {
+    outline: 4px solid #E45F1C;
+    z-index: 1000;
+    box-sizing: border-box;
+    border-radius: 15px; /* or your desired value */
+}
+
+.dashboard-d-drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: left;
+    height: 100%;
+    cursor: grab;
+}
+
+.dashboard-d-credit-account {
+    width: 100%;
+    min-height: 20px;
+    box-sizing: border-box;
+    padding: 0px 0px;
+    color: white;
+    font-size: clamp(13px, 2vw, 14px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+.dashboard-d-credit-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 20px;
+    padding: 0px 10px;
+    box-sizing: border-box;
+    color: #575757;
+}
+
+/* Specific background colors for totals and remainder rows */
+.dashboard-d-lastremainder {
+    background-color: #A9A9A9;
+    color: white;
+}
+
+.dashboard-d-income-total {
+    background-color: #2AAAA8;
+}
+
+.dashboard-d-expense-total {
+    background-color: #E45F1C;
+}
+
+.dashboard-d-remainder {
+    background-color: #A9A9A9;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+.dashboard-d-move-btn {
+  display: inline-block;
+  margin-left: 15px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.calendar-icon {
+  position: relative;
+  display: inline-block;
+  color: #575757;
+  font-size: 15px;
+}
+.calendar-icon .move-arrows {
+  position: absolute;
+  top: 61%;
+  left: 50%;
+  transform: translate(-50%,-50%);
+  color: #fff;
+  font-size: 6.5px;
+  pointer-events: none;
+}
+#move-date-modal .dashboard-d-modal-content {
+  padding: 18px 18px 12px 18px;
+}
+
+.move-date-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0 0 0;
+}
+#move-date-input {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 35px;
+  width: 100px;
+}
+#move-date-confirm-btn {
+    margin-left: 8px;
+    padding: 8px 8px;
+    border-radius: 50%;
+    border: none;
+    background: #2AAAA8;
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    height: 35px;
+    width: 35px;
+}
+
+/* Modal container */
+.dashboard-d-modal {
+    display: none; /* Hidden by default */
+    position: fixed; /* Stay in place */
+    z-index: 1000; /* Sit on top */
+    left: 0;
+    top: 0;
+    width: 100%; /* Full width */
+    height: 100%; /* Full height */
+    overflow: auto; /* Enable scroll if needed */
+    background-color: rgba(0, 0, 0, 0.4); /* Black background with opacity */
+}
+
+/* Modal content box */
+.dashboard-d-modal-content {
+    background-color: #fff;
+    margin: 15% auto; /* 15% from the top and centered */
+    padding: 20px;
+    border: 1px solid #575757;
+    width: 80%; /* Could be more or less depending on screen size */
+    max-width: 350px; /* Set a max width for larger screens */
+    border-radius: 10px; /* Rounded corners */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); /* Drop shadow */
+}
+
+/* Close button */
+.dashboard-d-close-modal {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.dashboard-d-close-modal:hover,
+.dashboard-d-close-modal:focus {
+    color: #575757;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+/* Modal header */
+.dashboard-d-modal-content h3 {
+    margin-top: 0;
+    font-size: 1.5rem;
+    color: #575757;
+}
+
+/* Form group */
+.dashboard-d-form-group {
+    margin-bottom: 15px;
+}
+
+/* Form labels */
+.dashboard-d-form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #555;
+}
+
+/* Form inputs and select boxes */
+.dashboard-d-form-group input[type="number"],
+.dashboard-d-form-group select {
+    width: 100%;
+    padding: 5px;
+    margin-top: 5px;
+    margin-bottom: 10px;
+    border: 1px solid #A9A9A9;
+    border-radius: 5px;
+    font-size: 12px;
+    box-sizing: border-box; /* Ensure proper sizing */
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+/* Submit button */
+.dashboard-d-form-group button[type="submit"] {
+    background-color: #E45F1C; /* Green */
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.dashboard-d-form-group button[type="submit"]:hover {
+    background-color: #EF9F77; /* Darker green on hover */
+}
+
+/* Mobile responsiveness */
+@media screen and (max-width: 600px) {
+    .dashboard-d-modal-content {
+        width: 90%; /* Make the modal slightly narrower on small screens */
+    }
+    .dashboard-d-lastremainder,
+    .dashboard-d-income-total,
+    .dashboard-d-expense-total,
+    .dashboard-d-remainder,
+    .dashboard-d-row,
+    .dashboard-d-savings {
+        height: 40px;
+        font-size: 13px;
+    }
+    .dashboard-d-drag-handle {
+        font-size: 16px;
+    }
+}
+/* Style for the top "Today" div */
+.dashboard-d-date-top {
+    align-self: center;
+    text-align: center;
+    font-weight: bold;
+    font-size: 7px;
+    color: #2AAAA8;
+    background-color: transparent; /* Light gray background */
+    border: 4px solid #2AAAA8; /* Optional border for separation */
+    border-bottom: 3px solid transparent; /* Optional border for separation */
+    height: 10px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    width: calc(100% - 40px);
+    margin: 0px 20px;
+}
+
+/* Style for the bottom empty div */
+.dashboard-d-date-bottom {
+    height: 10px; /* Adjust the height if needed */
+    border: 4px solid #2AAAA8; /* Optional border for separation */
+    border-top: 4px solid transparent; /* Optional border for separation */
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+    width: calc(100% - 40px);
+    margin: 0px 20px;
+}
+
+/* Animation for the spinner */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+
+/*////////////////////// Dashboard Week Styles ///////////////////////////*/
+.main-container {
+    padding: 10px;
+}
+
+#table-container {
+    align-items: center;
+    display: flex;
+    max-width: 875px;
+    margin: 10px auto 0px; /* This will center the container horizontally */
+    white-space: nowrap; /* Prevents text from wrapping */
+    text-overflow: ellipsis; /* Adds ellipsis (...) if the content is too long */
+}
+
+/* Ensure smooth transitions */
+#table-container {
+    transition: transform 0.3s ease-in-out;
+    will-change: transform;
+}
+
+
+#categories-container {
+    width: 30%; /* Adjust width as necessary */
+    margin-right: 5px;
+    margin-bottom: 10px;
+    z-index: 10;
+    background-color: #f5fffe;
+}
+
+#income-categories-table,
+#expense-categories-table,
+#remainder-categories-table,
+#savings-categories-table,
+.ca-categories-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse; /* Allows borders to be handled separately */
+    margin-bottom: 10px; /* Space between the two categories tables */
+    font-size: clamp(13px, calc(1.13vw + 4.65px), 14px);
+}
+
+#income-categories-table,
+#expense-categories-table,
+.ca-categories-table {
+    margin-top: 5px;
+}
+
+#expenses-table {
+    margin-top: 5px;
+}
+
+#income-table {
+    margin-top: 5px;
+}
+
+.cas-table {
+    margin-top: 5px;
+}
+
+#income-categories-table th:first-child{
+    border-top-left-radius: 10px;
+}
+
+.ca-categories-table th{
+    border-top-left-radius: 10px;
+}
+
+.ca-total-row td{
+    border-bottom-left-radius: 10px;
+}
+
+.cas-table th:last-child {
+    border-top-right-radius: 10px;
+}
+
+.ca-bottom-row td:last-child {
+    border-bottom-right-radius: 10px;
+}
+
+
+.dashboard-this-week {
+    max-height: 10px;
+    min-height: 10px;
+    height: 10px;
+    background-color: #E6FAF9 !important;
+    box-sizing: border-box;
+    padding: 0px; /* Remove any padding */
+    margin: 0; /* Remove any margin */
+    border: none; /* Disable borders */
+    line-height: 0; /* Control the line-height to avoid extra space */
+}
+
+.dashboard-this-week-current {
+    width: 100%;
+    --base-font-size: 3px;
+    --scaling-factor: .7vw; /* Adjust this factor based on the desired responsiveness */
+    font-size: 2px;
+    color: #E6FAF9;
+    margin: 0px;
+    justify-content: center; /* Centers horizontally */
+}
+
+#income-header-row,
+#expenses-header-row,
+.cas-header-row {
+    color: #676767;
+    pointer-events: none;
+    user-select: none;
+    font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
+}
+
+.dashboard-this-week-bottom td {
+    height: 10px;
+    background-color: transparent; /* Optional, in case you want it to be transparent */
+    padding: 0; /* Remove any padding inside the cells */
+    box-sizing: border-box;
+}
+
+#remainder-categories-table td{
+    border-bottom-left-radius: 10px;
+}
+
+#remainder-table td:last-child{
+    border-bottom-right-radius: 10px;
+}
+
+#savings-categories-table td {
+    border-bottom-left-radius: 10px;
+    border-top-left-radius: 10px;
+}
+
+#savings-categories-table {
+    margin-top: 10px;
+}
+
+#savings-table {
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+#savings-table td:last-child{
+    border-bottom-right-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+#income-categories-table th,
+#income-categories-table td,
+#expense-categories-table th,
+#expense-categories-table td,
+#remainder-row th,
+#remainder-row td,
+#savings-row th,
+#savings-row td,
+.ca-categories-table th,
+.ca-categories-table td {
+    text-align: left;
+    height: 20px;
+    width: 100%;
+    padding: 0;
+    --base-padding: .2px;
+    --p-scaling-factor: 0.9vw; /* Adjust this factor based on the desired responsiveness */
+    padding-left: calc(var(--base-padding) + var(--p-scaling-factor));
+}
+
+#income-categories-table th,
+#expense-categories-table th,
+.ca-categories-table th {
+    position: relative;
+    background-color: #676767;
+    color: white;
+}
+
+/* Align the toggle-hidden-btn to the right of the Income Categories text */
+#income-categories-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+}
+
+.income-categories-title {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    text-align: left;
+    white-space: normal;
+}
+
+/* Align the toggle-hidden-btn to the right of the Expense Categories text */
+#expense-categories-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+}
+
+.expense-categories-title {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    text-align: left;
+    white-space: normal;
+}
+
+/* Align the toggle-hidden-btn to the right of the Expense Categories text */
+.ca-categories-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+}
+
+.ca-categories-title {
+    flex-wrap: wrap;
+    flex: 1 1 auto;
+    text-align: left;
+    white-space: normal;
+}
+
+/* Alternate rows for income and expense categories between white and light gray */
+
+.zebra-odd-income { background-color: #59D6D4; }
+.zebra-even-income { background-color: #E6FAF9; }
+.zebra-odd-expense { background-color: #EF9F77; }
+.zebra-even-expense { background-color: #FDEEEE; }
+.zebra-odd-ca { background-color: #d3d3d3; }
+.zebra-even-ca { background-color: #f4f4f4; }
+
+.category-cell {
+    position: relative;
+    padding-right: 20px; /* Space for the delete button */
+    margin-right: 5px;
+}
+
+.search-btn-container {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end; /* Align items to the right */
+    gap: 5px; /* Adjust spacing between buttons as needed */
+    margin-top: 10px;
+}
+
+.category-search-field {
+    height: 25px;
+    border-radius: 12.5px; /* Half of height for pill shape */
+    border: 1px solid #ccc;
+    padding: 0 10px;
+    font-size: 12px;
+    outline: none;
+    background: #fff;
+    color: #575757;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    width: 190px; /* Adjust as needed */
+    box-sizing: border-box;
+}
+
+.clear-filter-btn {
+    position: relative;
+    border: none;
+    width: 25px;
+    height: 25px;
+    display: none; /* Changed from inline-block to flex for centering */
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-size: 12px;
+    background-color: transparent;
+}
+.clear-filter-btn.income {
+    color: #2AAAA8;
+}
+
+.clear-filter-btn.expense {
+    color: #E45F1C;
+}
+
+.clear-filter-btn:hover {
+    color: #575757; /* Darker shade on hover */
+}
+
+.category-btn-container {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end; /* Align items to the right */
+    gap: 5px; /* Adjust spacing between buttons as needed */
+}
+
+.add-category-btn {
+    position: relative;
+    color: white;
+    border: none;
+    border-radius: 50%; /* Make the button circular */
+    width: 25px;
+    height: 25px;
+    display: flex; /* Changed from inline-block to flex for centering */
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-size: 18px;
+    background-color: transparent;
+}
+
+.add-category-btn.income {
+    color: #2AAAA8;
+}
+
+.add-category-btn.expense {
+    color: #E45F1C;
+}
+
+.add-category-btn.ca {
+    color: #575757;
+}
+
+.add-category-btn:hover {
+    color: #434343; /* Darker shade on hover */
+}
+
+.edit-category-btn {
+    position: relative;
+    color: white;
+    border: none;
+    border-radius: 50%; /* Make the button circular */
+    width: 25px;
+    height: 25px;
+    display: flex; /* Changed from inline-block to flex for centering */
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-size: 16px;
+    background-color: transparent;
+}
+
+.edit-category-btn.income {
+    color: #2AAAA8;
+}
+
+.edit-category-btn.expense {
+    color: #E45F1C;
+}
+
+.edit-category-btn.ca {
+    color: #575757;
+}
+
+.edit-category-btn:hover {
+    color: #434343; /* Darker shade on hover */
+}
+
+.add-recurring-btn {
+    position: relative;
+    color: white;
+    border: none;
+    border-radius: 50%; /* Make the button circular */
+    width: 25px;
+    height: 25px;
+    display: flex; /* Changed from inline-block to flex for centering */
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-size: 16px;
+    background-color: transparent;
+}
+
+.add-recurring-btn.income {
+    color: #2AAAA8;
+}
+
+.add-recurring-btn.expense {
+    color: #E45F1C;
+}
+
+.add-recurring-btn.ca {
+    color: #575757;
+}
+
+.add-recurring-btn:hover {
+    color: #434343; /* Darker shade on hover */
+}
+
+.toggle-hidden-btn {
+    position: relative;
+    color: white;
+    border: none;
+    border-radius: 50%; /* Make the button circular */
+    width: 25px;
+    height: 25px;
+    display: flex; /* Changed from inline-block to flex for centering */
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-size: 16px;
+    background-color: transparent;
+}
+
+.toggle-hidden-btn.income {
+    color: #2AAAA8;
+}
+
+.toggle-hidden-btn.expense {
+    color: #E45F1C;
+}
+
+.toggle-hidden-btn.ca {
+    color: #575757;
+}
+
+.toggle-hidden-btn:hover {
+    color: #434343; /* Darker shade on hover */
+}
+
+.editable {
+    cursor: text; /* Change cursor to text-editing mode */
+}
+
+.sort-handle {
+    cursor: move;
+    margin-right: 0px;
+    color: #575757;
+}
+
+.sort-handle i {
+    font-size: 15px; /* Adjust the icon size as needed */
+    vertical-align: middle;
+}
+
+/* Overlay for modal background */
+#category-input-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0,0,0,0.3);
+    z-index: 9998;
+    display: none; /* Shown when modal is open */
+}
+
+/* Modal popup for category input */
+#income-category-input-container,
+#expense-category-input-container,
+#ca-category-input-container {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    width: 320px;
+    box-shadow: 0px 0px 6px rgba(0, 0, 0, 0.5);
+    background: #fff;
+    border-radius: 8px;
+    padding: 24px 16px;
+    box-sizing: border-box;
+    display: none; /* Set to flex when shown */
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    height: 85px;
+}
+
+/* Input field styling inside the modal */
+#income-category-input-container input,
+#expense-category-input-container input,
+#ca-category-input-container input {
+    flex: 1;
+    padding: 8px;
+    font-size: 1rem;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+}
+
+/* Button styling inside the modal */
+#income-category-input-container button,
+#expense-category-input-container button,
+#ca-category-input-container button {
+    margin-left: 8px;
+    padding: 8px 8px;
+    border-radius: 50%;
+    border: none;
+    background: #2AAAA8;
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    height: 35px;
+    width: 35px;
+}
+
+#income-category-input-container button:hover,
+#expense-category-input-container button:hover,
+#ca-category-input-container button:hover {
+    background: #59D6D4;
+}
+
+#income-category-input-container button:disabled,
+#expense-category-input-container button:disabled,
+#ca-category-input-container button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+/* Style for the editable category name */
+.category-name {
+    flex-wrap: wrap;
+    white-space: normal;
+    padding: 2px;
+    outline: none; /* Remove the default focus outline */
+    margin-left: 5px;
+}
+
+/* Ensure the input field is clickable */
+.edit-input {
+    pointer-events: auto;
+    z-index: 100; /* Ensure it appears above other elements */
+    position: relative;
+    outline: none; /* Ensure no browser styles block focus */
+}
+
+.delete-category-btn {
+    position: absolute;
+    right: 0px; /* Move the button 10px further to the right */
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: transparent;
+    border: none;
+    color: #f94449;
+    cursor: pointer;
+    display: none;
+    font-size: 10px;
+}
+
+.rename-category-btn {
+    position: absolute;
+    right: 0px; /* Move the button 10px further to the right */
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: transparent;
+    border: none;
+    color: #575757;
+    cursor: pointer;
+    display: none;
+    font-size: 10px;
+}
+
+.category-cell.editing .category-cell:hover .delete-category-btn {
+    display: inline;
+}
+
+.income-cell-input,
+.expense-cell-input,
+.ca-cell-input {
+    width: 100%;
+    text-align: right;
+    border: none; /* Light gray border */
+    background: transparent;
+    font: inherit;
+    padding: 0;
+    outline: none;
+    color: #575757;
+    border-radius: 5px;
+    box-sizing: border-box;
+    padding-right: 10px;
+}
+.income-cell-input:focus,
+.expense-cell-input:focus,
+.ca-cell-input:focus {
+    outline: 2px solid #575757; /* Use outline instead of border */
+    box-sizing: border-box;
+}
+
+.category-edit-modal {
+    display: none;
+    position: fixed;
+    z-index: 50;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0,0,0,0.3);
+    align-items: center;
+    justify-content: center;
+}
+
+.category-edit-modal-content {
+    background-color: #fff;
+    margin: 15% auto;
+    padding: 10px;
+    border: 1px solid #575757;
+    max-width: 350px;
+    text-align: center;
+    border-radius: 15px;
+    box-shadow: 0px 0px 6px rgba(0, 0, 0, 0.5);
+    box-sizing: border-box;
+}
+
+#editCategoryInput {
+    flex: 1;
+    padding: 8px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    width: 150px;
+}
+
+.confirm-edit-category-btn {
+    margin-left: 8px;
+    padding: 8px 8px;
+    border-radius: 25px;
+    border: none;
+    background: #2AAAA8;
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    height: 35px;
+}
+
+.delete-from-edit-category-btn {
+    margin-left: 8px;
+    padding: 8px 8px;
+    border-radius: 50%;
+    border: none;
+    background: #f94449;
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    height: 35px;
+    width: 35px;
+}
+
+.hide-category-btn {
+    margin-left: 8px;
+    padding: 8px 8px;
+    border-radius: 50%;
+    border: none;
+    background: #A9A9A9;
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    height: 35px;
+    width: 35px;
+}
+
+
+/* The Modal (background) */
+.category-delete-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    /* Centering the modal */
+    justify-content: center;
+    align-items: center;
+}
+
+/* Modal Content */
+.category-delete-modal-content {
+    background-color: #fff;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #575757;
+    max-width: 350px;
+    width: 100%;
+    text-align: center;
+    border-radius: 15px;
+}
+
+/* Close Button */
+.close-delete-modal {
+    color: #aaa;
+    float: right;
+    font-weight: bold;
+}
+
+.close-delete-modal:hover,
+.close-delete-modal:focus {
+    color: #575757;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+/* Buttons */
+.confirm-delete-category-btn, .cancel-delete-category-btn {
+    padding: 5px 10px;
+    margin: 10px;
+    border: none;
+    border-radius: 15px;
+    cursor: pointer;
+}
+
+.confirm-delete-category-btn {
+    background-color: #d73a3a;
+    color: white;
+}
+
+.cancel-delete-category-btn {
+    background-color: #A9A9A9;
+    color: white;
+}
+
+/* General table styling to ensure all tables align */
+.negative {
+    position: relative;
+    color: white !important;
+}
+.negative::before {
+    content: '!';
+    position: absolute;
+    top: -8px;
+    left: -3px;
+    width: 12px;
+    height: 12px;
+    background: #d73a3a;
+    color: #fff;
+    border: 2px solid  #575757;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    pointer-events: none;
+}
+@media (max-width: 600px) {
+    .negative::before {
+        width: 10px;
+        height: 10px;
+        font-size: 9px;
+        top: -7px;
+        left: -2px;
+    }
+    .rename-category-btn {
+        right: -45px;
+        font-size: 18px;
+    }
+    .sort-handle i {
+        font-size: 20px;
+    }
+    .category-name {
+        margin-left: 0px;
+    }
+
+    .income-table,
+    .expenses-table,
+    .cas-table {
+        margin-top: 5px !important;
+    }
+    #income-categories-table,
+    #expense-categories-table,
+    .ca-categories-table {
+        margin-top: 5px !important;
+    }
+    .income-table-3m {
+        margin-top: 5px !important;
+    }
+    .expense-table-3m {
+        margin-top: 5px !important;
+    }
+}
+
+.hidden_style {
+    color: #8e8e8e !important;
+    font-style: italic;
+}
+
+.hidden_style input{
+    color: #8e8e8e !important;
+    font-style: italic;
+}
+
+.hidden-count-bubble {
+    position: absolute;
+    left: -10px;
+    transform: translateY(-1px);
+    width: 12px;
+    height: 12px;
+    background: transparent;
+    color: #fff;
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    pointer-events: none;
+    padding: 0 4px;
+}
+
+#dashboard-context-menu.context-top-right-square {
+    border-top-right-radius: 0 !important;
+    border-top-left-radius: 10px !important;
+    border-bottom-right-radius: 10px !important;
+    border-bottom-left-radius: 10px !important;
+}
+
+/* Modal Container Centering */
+#entryUpdateModal.modal {
+    display: none; /* toggled to flex via JavaScript */
+    position: fixed;
+    z-index: 10000;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    height: 100vh;
+
+    justify-content: center;
+    align-items: center;
+}
+
+/* Modal Content */
+#entryUpdateModal .modal-content {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.2);
+    max-width: 350px;
+    width: 100%;
+    box-sizing: border-box; /* ensures padding is included within width */
+}
+
+#entryUpdateModal .modal-content p {
+    font-size: 14px;
+    width: 100%;
+    margin-bottom: 20px;
+}
+
+#entryUpdateModal h3 {
+    margin-top: 0;
+}
+
+.modal-checkbox-row {
+    font-size: 13px;
+}
+
+/* Checkbox styling */
+#entryUpdateDontShowAgain {
+    accent-color: #2AAAA8;
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+}
+
+#entryUpdateModal .modal-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 15px;
+}
+
+#entryUpdateCancelBtn {
+    margin-right: 12px;
+    border-radius: 15px;
+    border: none;
+    color: #fff;
+    background-color: #676767;
+    padding: 5px 10px;
+}
+
+#entryUpdateCancelBtn:hover {
+    background-color: #A9A9A9;
+}
+
+#entryUpdateConfirmBtn {
+    background-color: #2AAAA8;
+    color: #fff;
+    border-radius: 15px;
+    border: none;
+    padding: 5px 10px;
+}
+
+#entryUpdateConfirmBtn:hover {
+    background-color: #59D6D4;
+}
+
+/* Only show the exclamation bubble for negative cells in the yearly dashboard calendar */
+.dashboard-y-calendar-table .negative {
+    position: relative;
+    color: white !important;
+}
+.dashboard-y-calendar-table .negative::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: 0px;
+    width: 6px;
+    height: 6px;
+    background: #d73a3a;
+    color: #fff;
+    border: 2px solid  #575757;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    pointer-events: none;
+}
+@media (max-width: 600px) {
+    .dashboard-y-calendar-table .negative::before {
+        width: 3px;
+        height: 3px;
+        font-size: 9px;
+        top: -1px;
+        left: 0px;
+    }
+    .hidden-count-bubble {
+        height: 18px;
+        width: 18px;
+    }
+}
+
+/* Move the red exclamation circle up by the height of .dashboard-m-date */
+.dashboard-m-remainder.negative::before {
+    /* Inherit the existing styles for the red circle */
+    /* Move up by the height of .dashboard-m-date (assume 100% of parent for now) */
+    transform: translateY(calc(-1 * var(--dashboard-m-date-height, 0px)) + 2.5vh);
+    left: -3px;
+}
+
+.aligned-table, #remainder-table, #remainder-categories-table, #savings-categories-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+#income-total-row td {
+    text-align: left;
+    font-weight: bold;
+    background-color: #2AAAA8;
+    color: white;
+}
+
+#last-remainder-row td {
+    text-align: left;
+    font-weight: bold;
+    background-color: #A9A9A9;
+    color: white;
+}
+
+#expense-total-row td {
+    text-align: left;
+    font-weight: bold;
+    background-color: #E45F1C;
+    color: white;
+}
+
+#remainder-row td {
+    text-align: left;
+    font-weight: bold;
+    background-color: #A9A9A9;
+    color: white;
+}
+
+.ca-total-row td {
+    text-align: left;
+    font-weight: bold;
+    background-color: #A9A9A9;
+    color: white;
+}
+
+#savings-row td {
+    text-align: left;
+    font-weight: bold;
+    background-color: #2AAAA8;
+    color: white;
+}
+
+#remainder-row-right td {
+    text-align: right;
+    padding-right: 10px;
+}
+
+#savings-row-right td {
+    text-align: right;
+    padding-right: 10px;
+}
+
+.month-year-header {
+    text-align: left;
+    font-size: clamp(15px, 4.5vw, 25px);
+    margin-bottom: 10px;
+    color: #2AAAA8;
+    height: 25px;
+    line-height: 25px; /* Set line-height equal to height */
+    font-weight: bold;
+    --base-padding: .2px;
+    --scaling-factor: 0.9vw; /* Adjust this factor based on the desired responsiveness */
+    padding-left: calc(var(--base-padding) + var(--p-scaling-factor));
+    display: flex; /* Flexbox for alignment */
+    align-items: center; /* Align items vertically */
+    justify-content: space-between;
+    vertical-align: bottom;
+    position: sticky;
+}
+
+/* Style the dropdowns to match the existing look */
+.month-dropdown,
+.year-dropdown {
+    font-size: 25px; /* Use the same font size as the header */
+    height: 25px; /* Match the height of the header */
+    line-height: 25px; /* Center the text vertically */
+    margin-right: 0px; /* Add space between month and year dropdowns */
+    color: #2AAAA8;
+    background-color: transparent; /* Optional: Make background transparent */
+    appearance: none; /* Remove default dropdown appearance for consistency */
+    border: none; /* Explicitly remove the border */
+    outline: none; /* Remove the outline */
+    -webkit-appearance: none; /* For Safari */
+    -moz-appearance: none; /* For Firefox */
+    outline: none;
+    font-weight: bold;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.month-dropdown:hover,
+.year-dropdown:hover {
+    border: 1px solid #A9A9A9;
+    border-radius: 8px;
+}
+
+.month-dropdown::after,
+.year-dropdown::after {
+    content: '\25BC';
+    position: absolute;
+    pointer-events: none;
+}
+
+.month-dropdown {
+    margin-right: 5px;
+}
+
+.year-dropdown {
+    margin-right: auto;
+}
+
+#month-table-container {
+    width: 70%;
+    align-items: center;
+    margin-left: 5px;
+    z-index: 5;
+    margin-bottom: 10px;
+}
+
+/* Ensure stacking context for outline and negative bubbles */
+#month-table-container,
+#month-table-container > * {
+    position: relative;
+    z-index: 0;
+}
+
+.negative {
+    position: relative;
+    z-index: 6 !important;
+}
+.negative::before {
+    position: absolute;
+    z-index: 7 !important;
+}
+
+.current-week-outline {
+    position: absolute;
+    pointer-events: none;
+    border: 4px solid #E45F1C;
+    border-radius: 10px;
+    box-sizing: border-box;
+    background: none;
+    transition: all 0.15s cubic-bezier(.4,0,.2,1);
+    z-index: 5 !important;
+}
+
+#fridays-table {
+    width: 100%; /* Ensure all tables take up the same width */
+    table-layout: fixed; /* Ensure columns stay aligned */
+    border-collapse: collapse; /* Ensure borders are visible */
+    font-size: 14px;
+    background-color: #676767;
+    color: white;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+#fridays-table th {
+    text-align: center;
+    vertical-align: middle;
+    padding: 0;
+    height: 25px;
+    width: 100%;
+    cursor:pointer
+}
+
+#fridays-table th.current-week {
+    color: white;
+}
+
+#income-table,
+#expenses-table,
+.cas-table,
+#remainder-row-right,
+#savings-row-right {
+    width: 100%; /* Ensure all tables take up the same width */
+    table-layout: fixed; /* Ensure columns stay aligned */
+    border-collapse: collapse;
+    font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
+}
+
+/* Style for expense-gap row */
+.expense-gap td {
+    height: 10px !important;           /* Set the height to 10px */
+    background-color: transparent;  /* Set the background to transparent */
+    border: none !important;             /* Remove any borders if needed */
+    padding: 0;               /* Remove padding */
+}
+
+#income-table th, 
+#income-table td,
+#expenses-table th,
+#expenses-table td,
+.cas-table th,
+.cas-table td,
+#remainder-row-right td,
+#savings-row-right td {
+    text-align: center;
+    vertical-align: middle;
+    padding: 0;
+    height: 20px;
+    width: 100%;
+}
+
+#income-table th, 
+#expenses-table th,
+.cas-table th {
+    background-color: #676767;
+    border: none !important;
+}
+
+#income-table td, 
+#expenses-table td,
+.cas-table td {
+    text-align: right;
+}
+
+
+#income-bottom-row td {
+    text-align: right;
+    font-weight: bold;
+    background-color: #2AAAA8;
+    color: white;
+    --base-padding: .2px;
+    --scaling-factor: 0.9vw; /* Adjust this factor based on the desired responsiveness */
+    padding-right: calc(var(--base-padding) + var(--scaling-factor));
+}
+
+#last-remainder-row-right td{
+    text-align: right;
+    font-weight: bold;
+    background-color: #A9A9A9;
+    color: white;
+    --base-padding: .2px;
+    --scaling-factor: 0.9vw; /* Adjust this factor based on the desired responsiveness */
+    padding-right: calc(var(--base-padding) + var(--scaling-factor));
+}
+
+#expenses-bottom-row td {
+    text-align: right;
+    font-weight: bold;
+    background-color: #E45F1C;
+    color: white;
+    --base-padding: .2px;
+    --scaling-factor: 0.9vw; /* Adjust this factor based on the desired responsiveness */
+    padding-right: calc(var(--base-padding) + var(--scaling-factor));
+}
+
+.ca-bottom-row td {
+    text-align: right;
+    font-weight: bold;
+    background-color: #A9A9A9;
+    color: white;
+    --base-padding: .2px;
+    --scaling-factor: 0.9vw; /* Adjust this factor based on the desired responsiveness */
+    padding-right: calc(var(--base-padding) + var(--scaling-factor));
+}
+
+#remainder-row-right td {
+    text-align: right;
+    font-weight: bold;
+    background-color: #A9A9A9;
+    color: white;
+    --base-padding: .2px;
+    --scaling-factor: 0.9vw; /* Adjust this factor based on the desired responsiveness */
+    padding-right: calc(var(--base-padding) + var(--scaling-factor));
+}
+
+#savings-row-right td {
+    text-align: right;
+    font-weight: bold;
+    background-color: #2AAAA8;
+    color: white;
+    --base-padding: .2px;
+    --scaling-factor: 0.9vw; /* Adjust this factor based on the desired responsiveness */
+    padding-right: calc(var(--base-padding) + var(--scaling-factor));
+}
+
+/* Text color for remainder values below the threshold */
+.below-threshold {
+    position: relative;
+    color: white !important;
+}
+.below-threshold::before {
+    content: '!';
+    position: absolute;
+    top: -8px;
+    left: -3px;
+    width: 12px;
+    height: 12px;;
+    background: #f0d341;
+    color: #575757;
+    border: 2px solid  #575757;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    pointer-events: none;
+}
+@media (max-width: 600px) {
+    .below-threshold::before {
+        width: 10px;
+        height: 10px;
+        font-size: 9px;
+        top: -7px;
+        left: -2px;
+    }
+    
+    #income-categories-table th,
+    .ca-categories-table th,
+    #expense-categories-table th,
+    #income-categories-table td,
+    #expense-categories-table td,
+    .ca-categories-table td,
+    #remainder-row th,
+    #remainder-row td,
+    #savings-row th,
+    #savings-row td,
+    #income-table th, 
+    #income-table td,
+    #expenses-table th,
+    #expenses-table td,
+    .cas-table th,
+    .cas-table td,
+    #remainder-row-right td,
+    #savings-row-right td {
+        height: 40px;    
+    }
+
+    #income-categories-table,
+    #expense-categories-table,
+    #remainder-row,
+    #savings-row {
+        white-space: normal;      /* Allow wrapping */
+    }
+    .month-dropdown,
+    .year-dropdown {
+        font-size: 19px;
+    }
+}
+
+.hidden_categories {
+    display: none;
+}
+
+
+/* Only show the exclamation bubble for below-threshold cells in the yearly dashboard calendar */
+.dashboard-y-calendar-table .below-threshold {
+    position: relative;
+    color: white !important;
+}
+.dashboard-y-calendar-table .below-threshold::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: 0px;
+    width: 6px;
+    height: 6px;
+    background: #f0d341;
+    color: #575757;
+    border: 2px solid  #575757;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    pointer-events: none;
+}
+@media (max-width: 600px) {
+    .dashboard-y-calendar-table .below-threshold::before {
+        width: 3px;
+        height: 3px;
+        font-size: 9px;
+        top: -1px;
+        left: 0px;
+    }
+}
+
+/* Move the red exclamation circle up by the height of .dashboard-m-date */
+.dashboard-m-remainder.below-threshold::before {
+    /* Inherit the existing styles for the red circle */
+    /* Move up by the height of .dashboard-m-date (assume 100% of parent for now) */
+    transform: translateY(calc(-1 * var(--dashboard-m-date-height, 0px)) + 2.5vh);
+    left: -3px;
+}
+
+/* Text color for remainder values below the threshold */
+.above-threshold {
+    color: white !important; /* Yellow-orange color */
+}
+
+/* Hide the text cursor in readonly cells */
+.readonly-cell:focus {
+    caret-color: transparent; /* Hides the blinking cursor */
+}
+
+/* Optional: Style for focus highlight without showing the cursor */
+.focus-highlight {
+    caret-color: transparent; /* Also hide the cursor when highlighted */
+}
+
+/* Disable text selection */
+.readonly-cell {
+    user-select: none; /* Prevent text selection */
+}
+
+.dashboard-context-menu ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.dashboard-context-menu ul li {
+    padding: 5px 10px;
+    cursor: pointer;
+}
+
+.dashboard-context-menu ul li:hover {
+    background-color: #EF9F77;
+    border-radius: 10px;
+    border-top-right-radius: 0px !important;
+}
+
+/* Context menu base style (assume .dashboard-context-menu is the menu) */
+.dashboard-context-menu {
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    background: #fff;
+    width: 160px;
+    height: 30px;
+    padding: 0;
+    z-index: 9999;
+    border: none;
+}
+
+/* Arrow for menu to the right of the mouse (arrow on left) */
+.context-menu-arrow-left {
+    left: 12px;
+    /* triangle pointing up-left */
+}
+
+/* Arrow for menu to the left of the mouse (arrow on right) */
+.context-menu-arrow-right {
+    right: 12px;
+    /* triangle pointing up-right */
+}
+
+.context-menu-arrow {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    top: -8px;
+    z-index: 10000;
+    pointer-events: none;
+}
+
+.context-menu-arrow svg {
+    display: block;
+}
+
+.ca-collapsed .category-btn-container.ca,
+.ca-collapsed .search-btn-container.ca,
+.ca-collapsed tbody[id^="ca-categories-body-"],
+.ca-collapsed .ca-bottom-row {
+    display: none !important;
+}
+
+
+
+.ca-collapse-toggle {
+    height: 16px;
+    width: 16px;
+    min-width: 16px;
+    min-height: 16px;
+    max-width: 18px;
+    max-height: 18px;
+    padding: 0;
+    margin-right: 4px;
+    background: transparent;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    vertical-align: middle;
+    color: white;
+}
+
+.ca-collapse-toggle i {
+    font-size: 13px;
+    line-height: 1;
+}
+
+/* Optionally, rotate the chevron when expanded */
+.ca-expanded .ca-collapse-toggle i {
+    transform: rotate(180deg);
+    transition: transform 0.2s;
+}
+.ca-collapsed .ca-collapse-toggle i {
+    transform: rotate(0deg);
+    transition: transform 0.2s;
+}
+
+/* Hide .category-cell in category rows, but not in .ca-bottom-row */
+.ca-collapsed tr[data-category-id]:not(.ca-bottom-row) .category-cell {
+    display: none !important;
+}
+
+/* Always show the ca-bottom-row */
+.ca-collapsed .ca-bottom-row {
+    display: table-row !important;
+}
+
+.cas-table.ca-collapsed {
+    margin-top: 10px !important;
+}
+
+/* Hide the toggle-hidden-btn for CA when the table is collapsed */
+.ca-collapsed .toggle-hidden-btn.ca {
+    display: none !important;
+}
+
+/*/////////////////////////// Dashboard Month ////////////////////////////////////*/
+
+#dashboard-m-body {
+    display: flex;
+    flex-direction: column;
+}
+
+.dashboard-m-month-year-header {
+    text-align: center;
+    font-size: 25px;
+    font-weight: bold;
+    margin: 0px auto;
+    justify-content: center;   /* center children horizontally */
+    display: flex;
+    align-items: center;       /* optional: center vertically */
+}
+
+.month-wrapper,
+.year-wrapper {
+    display: flex;
+    width: 150px;
+}
+
+.year-wrapper {
+    align-content: flex-start;
+}
+
+/* Style the dropdowns to match the existing look */
+.dashboard-m-month-dropdown,
+.dashboard-m-year-dropdown {
+    font-size: inherit; /* Use the same font size as the header */
+    height: 30px; /* Match the height of the header */
+    color: #2AAAA8;
+    background-color: transparent; /* Optional: Make background transparent */
+    appearance: none; /* Remove default dropdown appearance for consistency */
+    border: none; /* Explicitly remove the border */
+    outline: none; /* Remove the outline */
+    -webkit-appearance: none; /* For Safari */
+    -moz-appearance: none; /* For Firefox */
+    outline: none;
+    font-weight: bold;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.dashboard-m-month-dropdown:hover,
+.dashboard-m-year-dropdown:hover {
+    border: 1px solid #A9A9A9;
+    border-radius: 8px;
+}
+
+.dashboard-m-month-dropdown::after,
+.dashboard-m-year-dropdown::after {
+    content: '\25BC';
+    position: absolute;
+    pointer-events: none;
+}
+
+.dashboard-m-month-dropdown {
+    margin-left: auto;
+    text-align: right;
+    padding-right: 5px;
+}
+
+.dashboard-m-year-dropdown {
+    margin-right: auto;
+    text-align: left;
+    padding-left: 5px;
+}
+
+#dashboard-m-calendar {
+    width: 100%;
+    border-collapse: separate;
+    text-align: center;
+    justify-content: center;
+    align-items: center;
+    margin: 0px auto;
+    text-overflow: ellipsis;
+    background-color: transparent;
+    margin-bottom: 10px;
+    max-width: 875px;
+}
+
+#dashboard-m-calendar td {
+    box-sizing: border-box;
+    padding: 0; /* Remove padding */
+    margin: 0;  /* Remove margin */
+    width: 14.2857%;
+}
+
+.dashboard-m-other-month::before {
+    content: '';
+    position: absolute;
+    top: 15px; left: 0; right: 0; bottom: 0;
+    background-color: rgba(57, 57, 57, 0.7); /* Much darker overlay */
+    z-index: 1;
+    border-radius: inherit;
+    border-radius: 10px;
+}
+
+/* Ensure each date div inside the td fits without extra space */
+.dashboard-m-date {
+    display: flex;
+    flex-direction: column; /* Stack child divs vertically */
+    justify-content: space-between; /* Ensure even spacing between divs */
+    height: 100%; /* Make the div fill the td */
+    box-sizing: border-box;
+    margin-top: 20px;
+}
+
+.dashboard-m-day-label {
+    color: white;
+    background-color: #676767;
+    flex: 1 0 18%; /* Ensure this takes up 18% of the total height */
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center; /* Horizontally center the text */
+    font-size: clamp(7px, 2vw, 14px);
+    font-weight: bold; /* Optionally make the text bold */
+}
+
+.dashboard-m-date-number {
+    color: white;
+    background-color: #A9A9A9;
+    flex: 2 0 10%; /* Adjust the height to 10% */
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center; /* Horizontally center the text */
+    font-size: clamp(7px, 2vw, 14px);
+    font-weight: bold; /* Optionally make the text bold */
+}
+
+.dashboard-m-income-total {
+    background-color: #2AAAA8;
+    flex: 3 0 18%; /* Ensure these divs take up 18% each */
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: center; /* Horizontally center the text */
+    font-size: clamp(7px, 2vw, 14px);
+    font-weight: bold; /* Optionally make the text bold */
+    color: white; /* Adjust text color if needed */
+}
+
+.dashboard-m-expense-total {
+    background-color: #E45F1C;
+    flex: 4 0 18%; /* Ensure these divs take up 18% each */
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: center; /* Horizontally center the text */
+    font-size: clamp(7px, 2vw, 14px);
+    font-weight: bold; /* Optionally make the text bold */
+    color: white; /* Adjust text color if needed */
+}
+
+.dashboard-m-remainder {
+    background-color: #A9A9A9;
+    flex: 5 0 18%; /* Ensure these divs take up 18% each */
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: center; /* Horizontally center the text */
+    font-size: clamp(7px, 2vw, 14px);
+    font-weight: bold; /* Optionally make the text bold */
+    color: white; /* Adjust text color if needed */
+}
+
+.dashboard-m-ca-divider {
+    width: 80%;
+    border-top: 2px solid #2AAAA8;
+    margin: 12px auto 8px auto;
+    position: relative;
+    text-align: center;
+}
+.dashboard-m-ca-divider-text {
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    background: #f5fffe;
+    color: #2AAAA8;
+    font-weight: bold;
+    padding: 0 8px;
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+.dashboard-m-s-divider {
+    width: 80%;
+    border-top: 2px solid #2AAAA8;
+    margin: 12px auto 8px auto;
+    position: relative;
+    text-align: center;
+}
+.dashboard-m-s-divider-text {
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    background: #f5fffe;
+    color: #2AAAA8;
+    font-weight: bold;
+    padding: 0 8px;
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+.dashboard-m-ca-balance {
+    background-color: #676767;
+    flex: 6 0 18%; /* Ensure these divs take up 18% each */
+    margin: 0;
+    margin-top: 3px;
+    padding: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: center; /* Horizontally center the text */
+    font-size: clamp(7px, 2vw, 14px);
+    font-weight: bold; /* Optionally make the text bold */
+    color: white; /* Adjust text color if needed */
+    border-radius: 10px;
+}
+
+.dashboard-m-savings {
+    background-color: #2AAAA8;
+    flex: 6 0 18%; /* Ensure these divs take up 18% each */
+    margin: 0;
+    margin-top: 3px;
+    padding: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: center; /* Horizontally center the text */
+    font-size: clamp(7px, 2vw, 14px);
+    font-weight: bold; /* Optionally make the text bold */
+    color: white; /* Adjust text color if needed */
+    border-radius: 10px;
+}
+
+.dashboard-m-label {
+    justify-self: flex-start;
+    text-align: left;
+    padding-left: 5px;
+    flex: 1 1 auto;
+}
+
+.dashboard-m-value {
+    justify-self: flex-end;
+    text-align: right;
+    padding-right: 5px;
+    flex: 1 1 auto;
+}
+
+#dashboard-m-calendar .dashboard-m-remainder {
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+#dashboard-m-calendar .dashboard-m-day-label {
+    border-top-right-radius: 10px;
+    border-top-left-radius: 10px;
+}
+
+.dashboard-m-other-month {
+    position: relative;
+    /* Add a dark semi-transparent overlay using the ::before pseudo-element */
+}
+
+.dashboard-m_other-month::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(157, 157, 157, 0.7); /* Adjust the darkness with the alpha value */
+    z-index: 1;
+    border-radius: inherit; /* Preserve the border radius */
+    border-radius: 10px;
+}
+
+.dashboard-m-today {
+    border: 4px solid #E45F1C; /* Add a border to further emphasize today's date */
+    border-radius: 15px;
+}
+
+.dashboard-d-today-container {
+    height: 15px;
+    font-size: 8px;
+    font-weight: bold;
+    color: #E45F1C;
+    display: flex;
+    justify-content: center; /* Centers horizontally */
+    align-items: flex-end;   /* Aligns content to the bottom */
+    box-sizing: border-box;
+}
+
+/* Outline for today's dashboard-d-container */
+.today-outline {
+    outline: 4px solid #E45F1C;
+    border-radius: 12px;
+    z-index: 2;
+}
+
+/* Today flag for dashboard-d-container */
+.dashboard-d-today-flag {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: #E45F1C;
+    color: #fff;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 4px 14px 4px 10px;
+    border-top-left-radius: 10px;
+    border-bottom-right-radius: 12px;
+    z-index: 20;
+    box-shadow: 0 2px 8px rgba(42,170,168,0.08);
+    letter-spacing: 1px;
+    pointer-events: none;
+}
+
+.category-row-hidden {
+    display: none !important;
+}
+
+/*/////////////////////////// Dashboard Year ////////////////////////////////////*/
+
+/* Center the calendar and make it responsive */
+#year-calendar {
+    width: 100%;
+    margin: 0 auto 0px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr); /* Always 3 columns */
+    grid-auto-rows: 1fr; /* Ensure equal row height for all months */
+    gap: clamp(5px, 10px, 15px);
+    box-sizing: border-box;
+    justify-items: center; /* Center the month containers horizontally */
+    background-color: transparent;
+    padding-bottom: 10px;
+    max-width: 875px;
+}
+
+.dashboard-y-year-header {
+    text-align: center;
+    font-size: 1.5em;
+    font-weight: bold;
+}
+
+/* Style for each month container */
+.dashboard-y-month-container {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    height: auto; /* Ensure height auto-adjusts */
+    display: flex;
+    flex-direction: column; /* Allow content to stack vertically */
+    justify-content: flex-start; /* Align content to the top */
+}
+
+/* Ensure the calendar table is responsive */
+.dashboard-y-calendar-table {
+    border-collapse: collapse;
+    width: 100%;
+    flex-grow: 1; /* Allow the table to take up the remaining space */
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+    color: #2AAAA8;
+}
+
+/* Ensure all day cells have the same resizable size */
+.dashboard-y-calendar-table th,
+.dashboard-y-calendar-table td {
+    padding: 2px 0px;
+    text-align: center;
+    font-size: clamp(8px, 2vw, 12px);
+    height: clamp(15px, 3vw, 25px); /* Responsive height */
+    width: clamp(15px, 3vw, 25px); /* Responsive width */
+    box-sizing: border-box;
+}
+
+.dashboard-y-calendar-table tbody tr {
+    background-color: #2AAAA8;
+}
+
+.dashboard-y-calendar-table th {
+    background-color: transparent;
+}
+
+.dashboard-y-calendar-table td {
+    background-color: transparent;
+    color: white;
+}
+
+.dashboard-y-calendar-table tr:last-child td:last-child {
+    border-bottom-right-radius: 10px;
+}
+
+.dashboard-y-calendar-table tr:last-child td:first-child {
+    border-bottom-left-radius: 10px;
+}
+
+/* Style for each individual day cell */
+.dashboard-y-day-cell {
+    text-align: center;
+    vertical-align: middle;
+    width: 100%;
+    height: 100%;
+}
+
+/* Responsive text size for the month titles */
+.dashboard-y-month-container h3 {
+    font-size: clamp(10px, 2vw, 14px);
+    margin-bottom: 5px; /* Ensure month title doesn't take too much space */
+    margin-top: 5px;
+    background-color: #676767;
+    color: white;
+    border-top-right-radius: 10px;
+    border-top-left-radius: 10px;
+}
+
+.dashboard-y-today {
+    font-weight: bold;
+    border: 4px solid #E45F1C; /* Optional border */
+    border-radius: 15px;
+}
+
+/* Profile Page Styles */
+.profile-box {
+    margin: 0px auto;
+    background-color: transparent;
+    text-align: center;
+    max-width: 100%; /* Set a max-width to ensure it doesn't stretch too far */
+    width: 875px; /* Allow the width to adjust based on content */
+    justify-content: space-between;
+}
+
+.profile-content {
+    display: flex;
+    justify-content: space-between; /* Distribute space between the two sections */
+    align-items: center; /* Align content vertically */
+    width: calc(100%-20px); /* Ensure the container takes up full width */
+    height: 100%; /* Set height for the container (adjust if needed) */
+}
+
+.profile-header, 
+.profile-actions {
+    width: 50%; /* Each container takes up 50% of the width */
+    box-sizing: border-box; /* Ensure padding doesn't affect the width */
+}
+
+.profile-header {
+    display: flex;
+    flex-direction: column; /* Stack the content vertically */
+    justify-content: center; /* Vertically center the content */
+    align-items: center; /* Center items horizontally */
+    padding: 10px; /* Optional padding for spacing */
+}
+
+.profile-pic-container {
+    position: relative;
+    margin: 40px 0px;
+}
+
+.profile-pic {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+    margin: 0 auto;
+}
+
+.pic-edit-button {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    background-color: #2aaaa8;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 25px;
+    height: 25px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.pic-edit-button:hover {
+    background-color: #6BAEAC;
+}
+
+.center-modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0,0,0,0.45);
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+}
+
+.center-modal-content {
+    display: flex;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    height: 300px;
+    width: 350px;
+    text-align: center;
+    animation: modalFadeIn 0.2s;
+    padding: 10px 10px 10px 10px;
+    flex-direction: column;
+    align-items: center;
+}
+
+.upload-button {
+    background-color: #2aaaa8;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: inline-block;
+    pointer-events: auto;
+    opacity: 1;
+    margin: 0px !important;
+}
+
+.upload-button:hover {
+    background-color: #575757;
+}
+
+.center-modal-content form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+
+.profile-pic-preview,
+.profile-pic-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 220px;
+    height: 220px;
+    margin: 10px auto 10px auto;
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    position: relative;
+}
+
+.profile-pic-preview {
+    object-fit: cover;
+}
+
+.profile-pic-placeholder {
+    background: #e0e0e0;
+    color: #2AAAA8;
+    font-size: 38px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.profile-pic-placeholder:hover {
+    background: #c8f6f5;
+}
+
+.file-input {
+    opacity: 0;
+    position: absolute;
+    width: 220px;
+    height: 220px;
+    left: 0;
+    top: 0;
+    cursor: pointer;
+}
+
+/* Custom icon for file input */
+.file-input + label,
+.file-input-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 20px;
+    color: #2AAAA8;
+}
+
+.file-input + label:hover,
+.file-input-label:hover {
+    color: #575757;
+}
+
+.profile-info {
+    margin-bottom: 20px; /* Adjust margin to be closer to input fields */
+    font-size: 18px; /* Increased font size */
+    font-weight: bold; /* Make the text bold */
+    color: white; /* Ensure the text color is prominent */
+    background-color: #2aaaa8; /* Ensure the text color is prominent */
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+.profile-info h2{
+    margin: 0px;
+    padding: 0px;
+}
+
+.profile-actions {
+    display: flex;
+    flex-direction: column; /* Stack the forms vertically */
+    text-align: right;
+}
+
+/* When the screen width is less than 75px, stack the header above the actions */
+@media (max-width: 740px) {
+    .profile-content {
+        flex-direction: column; /* Stack the elements vertically */
+        align-items: center; /* Center them horizontally */
+    }
+
+    .profile-header, 
+    .profile-actions {
+        width: 100%; /* Make each section take full width */
+        text-align: center; /* Center the content within each section */
+    }
+
+    .profile-header {
+        margin-bottom: 20px; /* Add some space between the header and actions */
+    }
+}
+
+.profile-form .input-group {
+    display: flex;
+    align-items: center;
+    width: auto !important; /* Ensure the input group takes up the full width */
+    margin-bottom: 5px;
+    margin-right: auto !important;
+    justify-content: flex-start !important;
+}
+
+.profile-form label {
+    font-size: 12px;
+    flex-shrink: 0;
+    width: 150px; /* Fixed width for labels */
+    text-align: left; /* Align text to the left within the label */
+    margin-right: -5px; /* Further reduce margin to bring the label closer to the input */
+}
+
+.profile-form .login-input {
+    width: 155px; /* Adjusted width to balance the layout */
+    padding: 0px 6px; /* Slightly reduce padding for a more compact appearance */
+    font-size: 12px;
+    border-radius: 5px;
+    height: 25px; /* Fixed height to align with button */
+    color: #575757;
+}
+
+.login-input[type="number"] {
+    text-align: right;
+}
+
+.profile-form .submit-button {
+    padding: 0; /* Remove padding */
+    font-size: 14px;
+    background-color: #E45F1C;
+    color: white;
+    border: none;
+    border-radius: 50%; /* Make the button circular */
+    width: 25px; /* Set width */
+    height: 25px; /* Set height */
+    top: -8px;
+    margin-left: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-sizing: border-box; /* Ensure padding doesn't affect width/height */
+    position: relative;
+}
+
+.profile-form .submit-checkbox {
+    padding: 0; /* Remove padding */
+    font-size: 14px;
+    top: -8px;
+    margin-left: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-sizing: border-box; /* Ensure padding doesn't affect width/height */
+    position: relative;
+}
+
+#enable-mfa-btn {
+    width: 65px !important;
+    border-radius: 25px !important; /* Make the button circular */
+    top: auto !important;
+    margin-left: 0px !important;
+    padding: 0 10px;
+}
+
+#disable-mfa-btn {
+    width: 65px !important;
+    border-radius: 25px !important; /* Make the button circular */
+    top: auto !important;
+    margin-left: 0px !important;
+    padding: 0 10px;
+}
+
+#mfa-status-message {
+    width: 135px;
+    padding-right: 30px;
+    font-size: 12px;
+}
+
+.profile-form .submit-button i {
+    font-size: 14px; /* Ensure the icon inside the button fits well */
+}
+
+.profile-form .submit-button:hover {
+    background-color: #EF9F77;
+}
+
+.input-status {
+    position: absolute;
+    right: 10px; /* Position the status icon inside the input field */
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none; /* Prevent the icon from blocking clicks */
+    font-size: 14px;
+    color: inherit; /* Ensure the icon matches the text color */
+    display: flex; /* Use flexbox to ensure proper alignment */
+    align-items: center;
+    height: 100%; /* Ensure the icon is aligned with the height of the input field */
+}
+
+/* Initial disabled state: gray button with white cross */
+.profile-form .submit-button.disabled {
+    background-color: #A9A9A9; /* Gray background */
+    color: white; /* White icon color */
+    border: none;
+    border-radius: 50%; /* Circular shape */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: not-allowed; /* Show disabled cursor */
+    pointer-events: none; /* Prevent clicking */
+}
+
+.profile-form .submit-button.disabled i {
+    content: '\f00d'; /* Font Awesome cross icon */
+}
+
+/* Enabled state: orange button with white checkmark */
+.profile-form .submit-button.enabled {
+    background-color: #E45F1C; /* Orange background */
+    color: white;
+    cursor: pointer; /* Show clickable cursor */
+    pointer-events: auto; /* Allow clicking */
+}
+
+.profile-form .submit-button.enabled i {
+    content: '\f00c'; /* Font Awesome check icon */
+}
+
+.profile-page-bottom-divider {
+    height: 20px;
+    background-color: #2aaaa8;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+.floating-message {
+    position: absolute;
+    padding: 15px;  /* Match the padding of the input field */
+    color: white;
+    border-radius: 25px;  /* Match the rounded corners of the input field */
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    z-index: 1000;
+    opacity: 0;  /* Start hidden */
+    transition: opacity 0.5s ease-in-out;
+    pointer-events: none;  /* Prevent interactions */
+    font-size: 16px;  /* Match the font size of the input field */
+    box-sizing: border-box;  /* Include padding in the width and height calculation */
+    display: flex;
+    align-items: center;  /* Vertically center the text */
+    justify-content: center;  /* Horizontally center the text */
+    height: auto;  /* Ensure the height adjusts based on content */
+    width: 100%;  /* Match the width of the input field */
+}
+
+.floating-message.show {
+    opacity: 1;  /* Show the message */
+}
+
+.password-requirements {
+    display: none; /* Hidden by default */
+    position: absolute;
+    background-color: #E6FAF9;
+    color: #575757;
+    border-radius: 25px; /* Match the rounded edges of the input field */
+    padding: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    width: 100%; /* Match the width of the input field */
+    box-sizing: border-box; /* Ensure padding doesn't affect the width */
+    font-size: 12px; /* Smaller font size */
+    text-align: left; /* Align text to the left */
+    opacity: 0; /* Start hidden */
+    transition: opacity 0.3s ease; /* Smooth fade-in effect */
+}
+
+.email-requirements {
+    display: none; /* Hidden by default */
+    position: absolute;
+    background-color: #E6FAF9;
+    color: #575757;
+    border-radius: 25px; /* Match the rounded edges of the input field */
+    padding: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    width: 100%; /* Match the width of the input field */
+    box-sizing: border-box; /* Ensure padding doesn't affect the width */
+    font-size: 12px; /* Smaller font size */
+    text-align: left; /* Align text to the left */
+    opacity: 0; /* Start hidden */
+    transition: opacity 0.3s ease; /* Smooth fade-in effect */
+}
+
+.requirement-icon {
+    margin-right: 5px; /* Less space between icon and text */
+    color: #f94449;
+}
+
+.requirement-icon.valid {
+    color: green;
+}
+
+.password-requirements p {
+    margin: 5px 0; /* Decrease space between requirements */
+}
+
+.profile-password-requirements {
+    display: none;
+    position: absolute;
+    background-color: #E6FAF9;
+    color: #575757;
+    border-radius: 25px;
+    padding: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 12px;
+    text-align: left;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.profile-requirement-icon {
+    margin-right: 5px;
+    color: #f94449;
+}
+
+.profile-requirement-icon.valid {
+    color: green;
+}
+
+.profile-password-requirements p {
+    margin: 5px 0;
+}
+
+.profile-email-requirements {
+    display: none;
+    position: absolute;
+    background-color: #E6FAF9;
+    color: #575757;
+    border-radius: 25px;
+    padding: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.profile-requirement-icon {
+    margin-right: 5px;
+    color: #f94449;
+}
+
+.profile-requirement-icon.valid {
+    color: green;
+}
+
+.profile-email-requirements p {
+    margin: 5px 0;
+}
+
+.remove-pic-button {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background-color: #f94449;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 25px;
+    height: 25px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.remove-pic-button:hover {
+    background-color: #ee6b6e;
+}
+
+.delete-account-button {
+    background-color: #f94449; /* Pink color for delete action */
+    color: white;
+    border: none;
+    border-radius: 25px; /* Rounded corners to match the register button */
+    height: 25px;
+    cursor: pointer;
+    width: 150px; /* Same width as the register button */
+    font-size: 14px; /* Font size to match */
+    margin: 10px auto; /* Center the button and add some space above */
+    display: block; /* Ensure it behaves as a block-level element like the register button */
+    text-align: center;
+}
+
+.delete-account-button:hover {
+    background-color: #ee6b6e; /* Darker pink on hover */
+}
+
+.profile-section {
+    border: 1px solid #2AAAA8;
+    border-radius: 10px;
+    padding: 10px 0px; /* top right bottom left */
+    margin: 10px 0 25px 0; /* top right bottom left */
+    position: relative; /* Needed for absolute ::before */
+}
+
+.data-section {
+    border: 1px solid #2AAAA8;
+    border-radius: 10px;
+    padding: 10px 0px; /* top right bottom left */
+    margin: 10px 0 35px 0; /* top right bottom left */
+    position: relative; /* Needed for absolute ::before */
+}
+
+/* Profile label */
+.profile-section::before {
+    content: "Profile";
+    position: absolute;
+    top: -10px;
+    left: 10px;
+    background-color: #f5fffe;
+    padding: 0 5px;
+    font-size: 12px;
+    color: #2AAAA8;
+}
+
+/* Data label */
+.data-section::before {
+    content: "Data";
+    position: absolute;
+    top: -10px;
+    left: 10px;
+    background-color: #f5fffe;
+    padding: 0 5px;
+    font-size: 12px;
+    color: #2AAAA8;
+}
+
+.section-liner {
+    display: flex;
+    flex-direction: column; /* or 'row' depending on layout */
+    align-items: center;
+    justify-content: center !important;
+    min-width: 370px;
+}
+
+/* MFA QR Modal Styles */
+#mfa-qr-modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0,0,0,0.45);
+    justify-content: center;
+    align-items: center;
+}
+
+#mfa-qr-modal .modal-content {
+    background: #fff;
+    margin: auto;
+    padding: 2em 1.5em 1.5em 1.5em;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    max-width: 95vw;
+    width: 100%;
+    max-width: 400px;
+    position: relative;
+    animation: modalFadeIn 0.2s;
+}
+
+#mfa-qr-modal #close-mfa-modal {
+    position: absolute;
+    top: 0.7em;
+    right: 1em;
+    font-size: 1.5em;
+    color: #888;
+    cursor: pointer;
+    transition: color 0.2s;
+    z-index: 10;
+}
+#mfa-qr-modal #close-mfa-modal:hover {
+    color: #F15025;
+}
+
+#mfa-qr-modal #mfa-qr-image img {
+    margin: 0 auto;
+    display: block;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    background: #fafafa;
+    padding: 8px;
+}
+
+#mfa-qr-modal #mfa-verify-form input[type="text"] {
+    font-size: 1.2em;
+    padding: 0.4em 0.6em;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    margin-bottom: 0.5em;
+}
+#mfa-qr-modal #mfa-verify-form .submit-button {
+    margin-left: 0.5em;
+    padding: 0.4em 1.2em;
+    font-size: 1em;
+    border-radius: 6px;
+    background: #F15025;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+#mfa-qr-modal #mfa-verify-form .submit-button:hover {
+    background: #d13e13;
+}
+
+#mfa-qr-modal #mfa-verify-message {
+    margin-top: 1em;
+    font-size: 1.1em;
+    min-height: 1.2em;
+    text-align: center;
+}
+
+#mfa-qr-modal ol {
+    margin-bottom: 1em;
+    padding-left: 1.2em;
+    font-size: 1em;
+}
+
+#starting-balance-modal-content {
+    display: flex;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    height: 300px;
+    width: 350px;
+    text-align: center;
+    animation: modalFadeIn 0.2s;
+    padding: 10px 10px 10px 10px;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    margin: 10% auto;
+}
+
+#close-starting-balance-modal {
+    position: absolute;
+    right: 16px;
+    top: 12px;
+    font-size: 24px;
+    cursor: pointer;
+}
+
+#delete-account-modal-content {
+    display: flex;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    width: 350px;
+    text-align: center;
+    animation: modalFadeIn 0.2s;
+    padding: 10px 10px 10px 10px;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    margin: 10% auto;
+}
+
+.delete-account-modal-buttons {
+    display: flex;
+    justify-content: center;
+    flex-direction: row;
+    margin-top: 15px;
+}
+
+@keyframes modalFadeIn {
+    from { transform: translateY(40px) scale(0.97); opacity: 0; }
+    to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@media (max-width: 500px) {
+    #mfa-qr-modal .modal-content {
+        padding: 1em 0.5em 1em 0.5em;
+        max-width: 98vw;
+    }
+}
+
+/*/////////////////////////////  Recurring Income ///////////////////////////*/
+/* General Styles */
+#recurring-i-body {
+    min-width: 340px !important;
+}
+
+.recurring-income-container {
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    flex-direction: column; /* Stack header and table vertically */
+    max-width: 650px;
+    min-width: 350px;
+    margin: 0px auto;
+    text-overflow: ellipsis;
+    border-radius: 10px;
+    background-color: transparent;
+    transition: transform 0.3s ease-in-out;
+    will-change: transform;
+}
+
+.recurring-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 20px auto;
+    width: 100%;
+}
+
+.recurring-header span {
+    position: relative;
+    color: #2AAAA8;
+    font-size: 19px;
+    font-weight: bold;
+    text-align: center;
+    padding-left: 120px;
+    flex: 1;  /* Take up remaining space */
+}
+
+.recurring-header.income{
+    color: #2AAAA8;
+}
+
+.recurring-header.expenses{
+    color: #E45F1C;
+}
+
+.income-recurring-table {
+    width: 100%; /* Subtract 20px from each side */
+    border-collapse: collapse;
+    --base-font-size: 7.5px;
+
+
+    --scaling-factor: 0.5vw; /* Adjust this factor based on the desired responsiveness */
+    font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    text-align: left;
+}
+
+.income-recurring-table th, .income-recurring-table td {
+    height: 20px;
+    padding-left: 10px;
+    padding-right: 10px;
+    box-sizing: border-box;
+    height: 20px;
+}
+
+.income-recurring-table th:first-child {
+    border-top-left-radius: 10px; /* Round bottom-left corner */
+}
+
+.income-recurring-table th:last-child {
+    border-top-right-radius: 10px; /* Round bottom-right corner */
+}
+
+.income-recurring-table tfoot tr:last-child td:first-child {
+    border-bottom-left-radius: 10px; /* Round bottom-left corner */
+}
+
+.income-recurring-table tfoot tr:last-child td:last-child {
+    border-bottom-right-radius: 10px; /* Round bottom-right corner */
+}
+
+.income-recurring-table thead {
+    background-color: #2aaaa8;
+    color: white;
+}
+
+.income-recurring-table tbody tr:nth-child(even) {
+    background-color: #E6FAF9; /* White for odd rows */
+}
+
+.income-recurring-table tbody tr:nth-child(odd) {
+    background-color: #59D6D4;
+}
+
+/* Set column widths */
+.income-recurring-table th.income-category-col,
+.income-recurring-table td.income-category-col {
+    width: 20%;
+}
+
+.income-recurring-table th.income-amount-col,
+.income-recurring-table td.income-amount-col {
+    width: 10%;
+}
+
+.income-recurring-table th.income-cadence-col,
+.income-recurring-table td.income-cadence-col {
+    width: 30%;
+}
+
+.income-recurring-table th.income-start-date-col,
+.income-recurring-table td.income-start-date-col {
+    width: 15%;
+}
+
+.income-recurring-table th.income-end-date-col,
+.income-recurring-table td.income-end-date-col {
+    width: 15%;
+}
+
+.income-recurring-table th.income-action-col,
+.income-recurring-table td.income-action-col {
+    width: 10%;
+}
+
+.income-action-col {
+    text-align: right !important; /* Aligns content to the right */
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+}    
+
+.income-actions {
+    text-align: right !important; /* Aligns content to the right */
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+}   
+
+.income-recurring-table tfoot tr {
+    background-color: #A9A9A9;
+}
+
+.add-income-btn {
+    position: relative;
+    background-color: transparent;
+    color: white;
+    border: none;
+    cursor: pointer;
+    height: 35px;
+    width: 125px;
+    border-radius: 50%;
+    color: #E45F1C;
+    padding: 0px;
+}
+
+.edit-recurring-btn {
+    position: relative;
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    color: #676767;
+    margin-right: 5px;
+    padding: auto;
+}
+
+.edit-recurring-btn:hover {
+    color: #3a3a3a; /* Add a hover effect if desired */
+}
+
+/* Responsive design */
+@media (max-width: 900px) {
+
+    /* Set column widths */
+    .income-recurring-table th.income-category-col,
+    .income-recurring-table td.income-category-col {
+        width: 20%;
+    }
+
+    .income-recurring-table th.income-amount-col,
+    .income-recurring-table td.income-amount-col {
+        width: 5%;
+    }
+
+    .income-recurring-table th.income-cadence-col,
+    .income-recurring-table td.income-cadence-col {
+        width: 25%;
+    }
+
+    .income-recurring-table th.income-start-date-col,
+    .income-recurring-table td.income-start-date-col {
+        width: 15%;
+    }
+
+    .income-recurring-table th.income-end-date-col,
+    .income-recurring-table td.income-end-date-col {
+        width: 15%;
+    }
+
+    .income-recurring-table th.income-action-col,
+    .income-recurring-table td.income-action-col {
+        width: 20%;
+    }
+}
+
+/* General Reset */
+* {
+    box-sizing: border-box;
+}
+
+/* Modal Centering */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.4);
+    justify-content: center;
+    align-items: center;
+}
+
+/* Form Container Styling */
+.expense-form-container,
+.income-form-container,
+.ca-form-container {
+    background-color: #fff;
+    border-radius: 12px;
+    padding: 24px 32px;
+    width: 350px;
+    max-width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    display: flex;
+    flex-direction: column;
+}
+
+.expense-form-container h2,
+.income-form-container h2,
+.ca-form-container h2 {
+    font-size: 16px;
+    margin: 0 0 10px;
+}
+
+/* General Label & Input Layout */
+form label {
+    font-weight: 600;
+    display: block;
+    margin: 10px 0 5px;
+    font-size: 14px;
+    text-align: left;
+}
+
+form input,
+form select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 12px;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    height: 30px;
+}
+
+/* Special Widths for Category and Amount */
+#category_name,
+#amount,
+#edit-category-name,
+#edit-amount {
+    max-width: 100%;
+}
+
+/* Amount Input */
+.recurring-amount {
+    padding-left: 24px;
+    text-align: right;
+}
+
+.currency-input-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.currency-symbol {
+    position: absolute;
+    font-weight: bold;
+    color: #888;
+    font-size: 14px;
+    top: 2px;
+    transform: translateX(10px);
+}
+
+.s-p-sb-currency-symbol {
+    position: absolute;
+    font-weight: bold;
+    color: #888;
+    font-size: 14px;
+    top: 55px;
+    transform: translateX(10px);
+}
+
+.s-p-ss-currency-symbol {
+    position: absolute;
+    font-weight: bold;
+    color: #888;
+    font-size: 14px;
+    top: 55px;
+    transform: translateX(10px);
+}
+
+.s-p-bt-currency-symbol {
+    position: absolute;
+    font-weight: bold;
+    color: #888;
+    font-size: 14px;
+    top: 15px;
+    transform: translateX(10px);
+}
+
+.d-d-currency-symbol {
+    position: absolute;
+    font-weight: bold;
+    color: #888;
+    font-size: 14px;
+    top: 10px;
+    transform: translateX(10px);
+}
+
+.f-currency-symbol {
+    position: absolute;
+    font-weight: bold;
+    color: #888;
+    font-size: 14px;
+    top: 10px;
+    transform: translateX(10px);
+}
+
+.r-currency-symbol {
+    position: absolute;
+    font-weight: bold;
+    color: #888;
+    font-size: 14px;
+    top: 5px;
+    transform: translateX(10px);
+}
+
+.p-currency-symbol {
+    position: absolute;
+    font-weight: bold;
+    color: #888;
+    font-size: 12px;
+    top: 5px;
+    transform: translateX(10px);
+}
+
+/* Cadence Inputs */
+#cadence-interval,
+#edit-cadence-interval,
+#cadence-unit,
+#edit-cadence-unit {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+#cadence-interval,
+#edit-cadence-interval {
+    width: 60px;
+    margin-right: 3px;
+}
+
+#cadence-unit,
+#edit-cadence-unit {
+    width: 215px;
+    margin-left: 3px;
+}
+
+/* Weekly Options */
+#weekly-options .weekday,
+#edit-weekly-options .weekday {
+    display: flex;
+    margin: 5px 0;
+    font-size: 12px;
+    align-items: center;
+}
+
+.weekday input {
+    width: 20px;
+}
+
+/* Monthly Option Row */
+#monthly-day-container div,
+#edit-monthly-day-container div {
+    display: flex;
+    align-items: center;
+    margin-top: 6px;
+}
+
+#monthly-day-container select,
+#edit-monthly-day-container select {
+    flex: 1;
+    width: 100%;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+.add-day-btn {
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: none;
+    background-color: #e0e0e0;
+    cursor: pointer;
+    width: 25px;
+    height: 25px;
+}
+
+.remove-day-btn {
+    margin-left: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: none;
+    background-color: #e0e0e0;
+    cursor: pointer;
+    width: 25px;
+    height: 25px;
+}
+
+/* Yearly Options */
+#yearly-options,
+#edit-yearly-options {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+#yearly-options input,
+#edit-yearly-options input,
+#yearly-options select,
+#edit-yearly-options select {
+    width: 100%;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+/* Date Section Layout */
+.date-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+    align-items: flex-start;
+}
+
+.date-label-row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    gap: 12px;
+}
+
+.date-label-row label {
+    font-size: 14px;
+}
+
+.date-input-row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    gap: 12px;
+    height: 30px;
+}
+
+.date-input-row input[type="date"] {
+    flex: 1;
+    font-size: 12px;
+    padding: 6px 8px;
+    max-width: 120px;
+}
+
+#start_date,
+#end_date {
+    width: 110px;
+}
+
+.date-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    width: 100%;
+    justify-content: right;
+}
+
+.date-checkbox-row input{
+    width: 20px;
+}
+
+.date-checkbox-row label{
+    font-size: 10px;
+    margin: 5px 0 5px !important;
+}
+
+.date-checkbox-label {
+    font-size: 12px;
+    display: flex;
+    position: relative;
+    left: 0px;
+}
+
+/* Submit Button */
+form button[type="submit"] {
+    margin-top: 15px;
+    padding: 10px 16px;
+    font-size: 10px;
+    border: none;
+    border-radius: 8px;
+    background-color: #2aaaa8;
+    color: white;
+    cursor: pointer;
+}
+
+/* Match the color of your table row (adjust as needed) */
+#recurring-income-callout {
+    margin: 20px 0px 0px auto; /* Align to the right */
+    padding: 16px 24px;
+    background: #59D6D4; /* Example income color */
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    position: relative;
+    width: fit-content;
+    color: white;
+    font-size: 16px;
+    gap: 16px;
+    max-width: 350px;
+}
+
+#recurring-income-callout .add-income-btn {
+    margin-right: 8px;
+}
+#recurring-income-callout .callout-arrow {
+    width: 0;
+    height: 0;
+    border-left: 18px solid transparent;
+    border-right: 18px solid transparent;
+    border-bottom: 18px solid #59D6D4; /* Same as background */
+    position: absolute;
+    top: -16px;
+    right: 6px;
+}
+
+#recurring-income-callout .callout-text {
+    font-weight: 500;
+}
+
+.recurring-income-empty-info {
+    max-width: 500px;
+    margin: 40px auto;
+    background: #E6FAF9;
+    border-radius: 12px;
+    padding: 32px 24px;
+    box-shadow: 0 2px 8px rgba(42,170,168,0.08);
+    text-align: center;
+    color: #575757;
+}
+.recurring-income-empty-info h2 {
+    color: #E45F1C;
+    font-size: 22px;
+    margin-bottom: 18px;
+}
+.recurring-income-empty-info p {
+    font-size: 15px;
+    margin-bottom: 14px;
+}
+.recurring-income-empty-info strong {
+    color: #E45F1C;
+}
+
+/*/////////////////////////////  Recurring Expenses ///////////////////////////*/
+
+/* General Styles */
+
+.recurring-expense-container {
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    flex-direction: column; /* Stack header and table vertically */
+    max-width: 650px;
+    min-width: 350px;
+    margin: 0px auto;
+    text-overflow: ellipsis;
+    border-radius: 10px;
+    background-color: transparent;
+    transition: transform 0.3s ease-in-out;
+    will-change: transform;
+}
+
+.expense-recurring-table {
+    width: 100%; /* Subtract 20px from each side */
+    border-collapse: collapse;
+    font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
+    text-align: left;
+}
+
+.expense-recurring-table th, .expense-recurring-table td {
+    padding-left: 10px;
+    padding-right: 10px;
+    box-sizing: border-box;
+    height: 20px;
+}
+
+.expense-recurring-table th {
+    color: white;
+}
+
+.recurring-header.expenses span {
+    color: #E45F1C !important;
+}
+
+.expense-recurring-table thead {
+    background-color: #E45F1C;
+}
+
+.expense-recurring-table th:first-child {
+    border-top-left-radius: 10px; /* Round bottom-left corner */
+}
+
+.expense-recurring-table th:last-child {
+    border-top-right-radius: 10px; /* Round bottom-right corner */
+}
+
+.expense-recurring-table tfoot tr:last-child td:first-child {
+    border-bottom-left-radius: 10px; /* Round bottom-left corner */
+}
+
+.expense-recurring-table tfoot tr:last-child td:last-child {
+    border-bottom-right-radius: 10px; /* Round bottom-right corner */
+}
+
+.expense-recurring-table tbody tr:nth-child(even) {
+    background-color: #FDEEEE; /* White for odd rows */
+}
+
+.expense-recurring-table tbody tr:nth-child(odd) {
+    background-color: #EF9F77;
+}
+
+.expense-recurring-table tfoot tr {
+    background-color: #A9A9A9;
+}
+
+/* Set column widths */
+.expense-recurring-table th.expense-category-col,
+.expense-recurring-table td.expense-category-col {
+    width: 20%;
+}
+
+.expense-recurring-table th.expense-amount-col,
+.expense-recurring-table td.expense-amount-col {
+    width: 10%;
+}
+
+.expense-recurring-table th.expense-cadence-col,
+.expense-recurring-table td.expense-cadence-col {
+    width: 30%;
+}
+
+.expense-recurring-table th.expense-start-date-col,
+.expense-recurring-table td.expense-start-date-col {
+    width: 15%;
+}
+
+.expense-recurring-table th.expense-end-date-col,
+.expense-recurring-table td.expense-end-date-col {
+    width: 15%;
+}
+
+.expense-recurring-table th.expense-action-col,
+.expense-recurring-table td.expense-action-col {
+    width: 10%;
+}
+
+.expense-action-col {
+    text-align: right !important; /* Aligns content to the right */
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+    white-space: nowrap !important;
+}    
+
+.expense-actions {
+    text-align: right !important; /* Aligns content to the right */
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+}    
+
+.add-expense-btn {
+    position: relative;
+    background-color: transparent;
+    color: white;
+    border: none;
+    cursor: pointer;
+    height: 35px;
+    width: 120px;
+    border-radius: 50%;
+    color: #2AAAA8;
+    padding: 0px;
+}
+
+.delete-recurring-btn {
+    position: relative;
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+    width: 20px;
+    height: 20px;
+    color: #d73a3a;
+    margin-right: 5px;
+    padding: auto;
+}
+
+.delete-recurring-btn:hover {
+    color: #575757; /* Add a hover effect if desired */
+}
+
+/* Cadence Inputs */
+#expense-cadence-interval,
+#expensecadence-unit {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+#expense-cadence-interval {
+    width: 60px;
+    margin-right: 3px;
+}
+
+#expense-cadence-unit {
+    width: 215px;
+    margin-left: 3px;
+}
+
+/* Expense Weekly Options */
+#expense-weekly-options .weekday {
+    display: flex;
+    margin: 5px 0;
+    font-size: 12px;
+    align-items: center;
+}
+
+#expense-weekly-options input {
+    width: 20px;
+}
+
+/* Expense Monthly Option Row */
+#expense-monthly-day-container div {
+    display: flex;
+    align-items: center;
+    margin-top: 6px;
+}
+
+#expense-monthly-day-container select {
+    flex: 1;
+    width: 100%;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+#expense-add-monthly-day-btn {
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: none;
+    background-color: #e0e0e0;
+    cursor: pointer;
+    width: 25px;
+    height: 25px;
+}
+
+#expense-monthly-day-container .remove-day-btn {
+    margin-left: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: none;
+    background-color: #e0e0e0;
+    cursor: pointer;
+    width: 25px;
+    height: 25px;
+}
+
+/* Expense Yearly Options */
+#expense-yearly-options {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+#expense-yearly-options input,
+#expense-yearly-options select {
+    width: 100%;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+/* Responsive design */
+@media (max-width: 900px) {
+
+    /* Set column widths */
+    .expense-recurring-table th.expense-category-col,
+    .expense-recurring-table td.expense-category-col {
+        width: 20%;
+    }
+
+    .expense-recurring-table th.expense-amount-col,
+    .expense-recurring-table td.expense-amount-col {
+        width: 5%;
+    }
+
+    .expense-recurring-table th.expense-cadence-col,
+    .expense-recurring-table td.expense-cadence-col {
+        width: 25%;
+    }
+
+    .expense-recurring-table th.expense-start-date-col,
+    .expense-recurring-table td.expense-start-date-col {
+        width: 15%;
+    }
+
+    .expense-recurring-table th.expense-end-date-col,
+    .expense-recurring-table td.expense-end-date-col {
+        width: 15%;
+    }
+
+    .expense-recurring-table th.expense-action-col,
+    .expense-recurring-table td.expense-action-col {
+        width: 20%;
+    }
+}
+
+@media (max-width: 507px) {
+    .edit-recurring-btn {
+        margin-bottom: 5px;
+    }
+    .expense-recurring-table td,
+    .income-recurring-table td  {
+        height: 90px;
+    }
+}
+
+/* Floating hint for add-category buttons - right of button, with red arrow */
+.floating-hint {
+    position: absolute;
+    z-index: 1000;
+    border-radius: 8px;
+    padding: 0px 10px;
+    font-size: clamp(10px, calc(1.13vw + 4.65px), 13px);
+    color: white;
+    font-weight: bold;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    opacity: 0.98;
+    white-space: pre-line;
+    left: unset;
+    top: unset;
+    box-shadow: 0px 0px 6px rgba(0, 0, 0, 0.5);
+}
+
+.floating-hint#expense-add-hint {
+    background-color: #EF9F77;
+}
+
+.floating-hint#income-add-hint {
+    background-color: #59D6D4;
+}
+
+.floating-hint-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.floating-hint::after {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 10px solid transparent;
+    border-bottom: 10px solid transparent;
+}
+.floating-hint#expense-add-hint::after {
+    border-right: 14px solid #EF9F77; /* Red arrow */
+    filter: drop-shadow(-1.5px 0 0 #EF9F77);
+}
+
+.floating-hint#income-add-hint::after {
+    border-right: 14px solid #59D6D4; /* Red arrow */
+    filter: drop-shadow(-1.5px 0 0 #59D6D4);  
+}
+
+.recurring-hint-container {
+    display: flex;
+    margin: 0px auto;
+    justify-content: center;
+}
+
+.recurring-hint {
+    display: flex;
+    width: 100%;
+    max-width: 650px;
+    min-width: 350px;
+}
+
+/* Match the color of your table row (adjust as needed) */
+#recurring-expense-callout {
+    margin: 20px 0px 0px auto; /* Align to the right */
+    padding: 16px 24px;
+    background: #EF9F77;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    position: relative;
+    width: fit-content;
+    color: white;
+    font-size: 16px;
+    gap: 16px;
+    max-width: 350px;
+}
+
+#recurring-expense-callout .add-expense-btn {
+    margin-right: 8px;
+}
+#recurring-expense-callout .callout-arrow {
+    width: 0; height: 0;
+    border-left: 18px solid transparent;
+    border-right: 18px solid transparent;
+    border-bottom: 18px solid #EF9F77; /* Same as background */
+    position: absolute;
+    top: -16px;
+    right: 6px;
+}
+#recurring-expense-callout .callout-text {
+    font-weight: 500;
+}
+
+@media (max-width: 600px) {
+    .floating-hint {
+        /* ...existing code... */
+    }
+    .floating-hint::after {
+        left: -10px;
+        border-right-width: 10px;
+    }
+}
+
+.recurring-expense-empty-info {
+    max-width: 500px;
+    margin: 40px auto;
+    background: #E6FAF9;
+    border-radius: 12px;
+    padding: 32px 24px;
+    box-shadow: 0 2px 8px rgba(42,170,168,0.08);
+    text-align: center;
+    color: #575757;
+}
+.recurring-expense-empty-info h2 {
+    color: #2AAAA8;
+    font-size: 22px;
+    margin-bottom: 18px;
+}
+.recurring-expense-empty-info p {
+    font-size: 15px;
+    margin-bottom: 14px;
+}
+.recurring-expense-empty-info strong {
+    color: #2AAAA8;
+}
+
+.recurring-expense-credit-link {
+    color: #2AAAA8;
+    text-decoration: underline;
+    font-weight: bold;
+}
+
+
+/*/////////////////////////////  Recurring Credit Expenses ///////////////////////////*/
+
+/* General Styles */
+
+.recurring-ca-container {
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    flex-direction: column; /* Stack header and table vertically */
+    max-width: 650px;
+    min-width: 350px;
+    margin: 0px auto;
+    text-overflow: ellipsis;
+    border-radius: 10px;
+    background-color: transparent;
+    transition: transform 0.3s ease-in-out;
+    will-change: transform;
+}
+
+.ca-recurring-table {
+    width: 100%; /* Subtract 20px from each side */
+    border-collapse: collapse;
+    font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
+    text-align: left;
+    margin-bottom: 50px;
+}
+
+.ca-recurring-table th, .ca-recurring-table td {
+    padding-left: 10px;
+    padding-right: 10px;
+    box-sizing: border-box;
+    height: 20px;
+}
+
+.ca-recurring-table th {
+    color: white;
+}
+
+.ca-recurring-table thead tr:last-child {
+    background-color: #E45F1C;
+}
+
+.ca-recurring-title {
+    background-color: #575757;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    position: relative;
+    padding: 0;
+    width: 100%;
+    text-align: center;
+    vertical-align: middle;
+}
+
+/* Center the span, but leave space for the button on the right */
+.ca-recurring-title span {
+    display: inline-block;
+    font-weight: bold;
+    padding-left: 0px; /* reserve space for the button */
+    padding-right: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Absolutely position the add button to the right */
+.ca-recurring-title .add-ca-btn {
+    position: absolute;
+    right: 0;
+    top: 0;
+    height: 100%;
+    min-width: 120px;
+    border: none;
+    background: none;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-top-right-radius: 10px;
+    transition: background 0.2s;
+}
+
+.ca-recurring-title .add-ca-btn:hover,
+.ca-recurring-title .add-ca-btn:focus {
+    color: #898989;
+}
+
+.recurring-header.ca span {
+    padding: 0px !important;
+}
+
+.ca-recurring-table tr:last-child td:first-child {
+    border-bottom-left-radius: 10px; /* Round bottom-left corner */
+}
+
+.ca-recurring-table tr:last-child td:last-child {
+    border-bottom-right-radius: 10px; /* Round bottom-right corner */
+}
+
+.ca-recurring-table tr:last-child td:first-child {
+    border-bottom-left-radius: 10px; /* Round bottom-left corner */
+}
+
+.ca-recurring-table tr:last-child td:last-child {
+    border-bottom-right-radius: 10px; /* Round bottom-right corner */
+}
+
+.ca-recurring-table tbody tr:nth-child(even) {
+    background-color: #FDEEEE; /* White for odd rows */
+}
+
+.ca-recurring-table tbody tr:nth-child(odd) {
+    background-color: #EF9F77;
+}
+
+/* Set column widths */
+.ca-recurring-table th.ca-category-col,
+.ca-recurring-table td.ca-category-col {
+    width: 20%;
+}
+
+.ca-recurring-table th.ca-amount-col,
+.ca-recurring-table td.ca-amount-col {
+    width: 10%;
+}
+
+.ca-recurring-table th.ca-cadence-col,
+.ca-recurring-table td.ca-cadence-col {
+    width: 30%;
+}
+
+.ca-recurring-table th.ca-start-date-col,
+.ca-recurring-table td.ca-start-date-col {
+    width: 15%;
+}
+
+.ca-recurring-table th.ca-end-date-col,
+.ca-recurring-table td.ca-end-date-col {
+    width: 15%;
+}
+
+.ca-recurring-table th.ca-action-col,
+.ca-recurring-table td.ca-action-col {
+    width: 10%;
+}
+
+.ca-action-col {
+    text-align: right !important; /* Aligns content to the right */
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+    white-space: nowrap !important;
+}    
+
+.ca-actions {
+    text-align: right !important; /* Aligns content to the right */
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+}    
+
+.add-ca-btn {
+    position: relative;
+    background-color: transparent;
+    color: white;
+    border: none;
+    cursor: pointer;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: #2AAAA8;
+    margin-right: 5px;
+    padding: auto;
+}
+
+/* Cadence Inputs */
+#ca-cadence-interval,
+#cacadence-unit {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+#ca-cadence-interval {
+    width: 60px;
+    margin-right: 3px;
+}
+
+#ca-cadence-unit {
+    width: 215px;
+    margin-left: 3px;
+}
+
+/* ca Weekly Options */
+#ca-weekly-options .weekday {
+    display: flex;
+    margin: 5px 0;
+    font-size: 12px;
+    align-items: center;
+}
+
+#ca-weekly-options input {
+    width: 20px;
+}
+
+/* ca Monthly Option Row */
+#ca-monthly-day-container div {
+    display: flex;
+    align-items: center;
+    margin-top: 6px;
+}
+
+#ca-monthly-day-container select {
+    flex: 1;
+    width: 100%;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+#ca-add-monthly-day-btn {
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: none;
+    background-color: #e0e0e0;
+    cursor: pointer;
+    width: 25px;
+    height: 25px;
+}
+
+#ca-monthly-day-container .remove-day-btn {
+    margin-left: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: none;
+    background-color: #e0e0e0;
+    cursor: pointer;
+    width: 25px;
+    height: 25px;
+}
+
+/* ca Yearly Options */
+#ca-yearly-options {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+#ca-yearly-options input,
+#ca-yearly-options select {
+    width: 100%;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+/* Responsive design */
+@media (max-width: 900px) {
+
+    /* Set column widths */
+    .ca-recurring-table th.ca-category-col,
+    .ca-recurring-table td.ca-category-col {
+        width: 20%;
+    }
+
+    .ca-recurring-table th.ca-amount-col,
+    .ca-recurring-table td.ca-amount-col {
+        width: 5%;
+    }
+
+    .ca-recurring-table th.ca-cadence-col,
+    .ca-recurring-table td.ca-cadence-col {
+        width: 25%;
+    }
+
+    .ca-recurring-table th.ca-start-date-col,
+    .ca-recurring-table td.ca-start-date-col {
+        width: 15%;
+    }
+
+    .ca-recurring-table th.ca-end-date-col,
+    .ca-recurring-table td.ca-end-date-col {
+        width: 15%;
+    }
+
+    .ca-recurring-table th.ca-action-col,
+    .ca-recurring-table td.ca-action-col {
+        width: 20%;
+    }
+}
+
+@media (max-width: 507px) {
+    .edit-recurring-btn {
+        margin-bottom: 5px;
+    }
+    .ca-recurring-table td,
+    .income-recurring-table td  {
+        height: 90px;
+    }
+}
+
+/* Floating hint for add-category buttons - right of button, with red arrow */
+.floating-hint {
+    position: absolute;
+    z-index: 1000;
+    border-radius: 8px;
+    padding: 0px 10px;
+    font-size: clamp(10px, calc(1.13vw + 4.65px), 13px);
+    color: white;
+    font-weight: bold;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    opacity: 0.98;
+    white-space: pre-line;
+    left: unset;
+    top: unset;
+    box-shadow: 0px 0px 6px rgba(0, 0, 0, 0.5);
+}
+
+.floating-hint#ca-add-hint {
+    background-color: #EF9F77;
+}
+
+.floating-hint#income-add-hint {
+    background-color: #59D6D4;
+}
+
+.floating-hint-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.floating-hint::after {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 10px solid transparent;
+    border-bottom: 10px solid transparent;
+}
+.floating-hint#ca-add-hint::after {
+    border-right: 14px solid #EF9F77; /* Red arrow */
+    filter: drop-shadow(-1.5px 0 0 #EF9F77);
+}
+
+.floating-hint#income-add-hint::after {
+    border-right: 14px solid #59D6D4; /* Red arrow */
+    filter: drop-shadow(-1.5px 0 0 #59D6D4);  
+}
+
+.recurring-hint-container {
+    display: flex;
+    margin: 0px auto;
+    justify-content: center;
+}
+
+.recurring-hint {
+    display: flex;
+    width: 100%;
+    max-width: 650px;
+    min-width: 350px;
+}
+
+/* Match the color of your table row (adjust as needed) */
+#recurring-ca-callout {
+    margin: 20px 0px 0px auto; /* Align to the right */
+    padding: 16px 24px;
+    background: #EF9F77;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    position: relative;
+    width: fit-content;
+    color: white;
+    font-size: 16px;
+    gap: 16px;
+    max-width: 350px;
+}
+
+#recurring-ca-callout .add-ca-btn {
+    margin-right: 8px;
+}
+#recurring-ca-callout .callout-arrow {
+    width: 0; height: 0;
+    border-left: 18px solid transparent;
+    border-right: 18px solid transparent;
+    border-bottom: 18px solid #EF9F77; /* Same as background */
+    position: absolute;
+    top: -16px;
+    right: 6px;
+}
+#recurring-ca-callout .callout-text {
+    font-weight: 500;
+}
+
+@media (max-width: 600px) {
+    .floating-hint {
+        /* ...existing code... */
+    }
+    .floating-hint::after {
+        left: -10px;
+        border-right-width: 10px;
+    }
+}
+
+.recurring-ca-empty-info {
+    max-width: 500px;
+    margin: 40px auto;
+    background: #E6FAF9;
+    border-radius: 12px;
+    padding: 32px 24px;
+    box-shadow: 0 2px 8px rgba(42,170,168,0.08);
+    text-align: center;
+    color: #575757;
+}
+.recurring-ca-empty-info h2 {
+    color: #2AAAA8;
+    font-size: 22px;
+    margin-bottom: 18px;
+}
+.recurring-ca-empty-info p {
+    font-size: 15px;
+    margin-bottom: 14px;
+}
+.recurring-ca-empty-info strong {
+    color: #E45F1C;
+}
+
+.recurring-ca-credit-link {
+    color: #E45F1C;
+    text-decoration: underline;
+    font-weight: bold;
+}
+.recurring-ca-credit-link:hover {
+    color: #EF9F77;
+}
+
+/*/////////////////////////////  Buds ///////////////////////////*/
+
+.buds-empty-info {
+    max-width: 500px;
+    margin: 40px auto;
+    background: #E6FAF9;
+    border-radius: 12px;
+    padding: 32px 24px;
+    box-shadow: 0 2px 8px rgba(42,170,168,0.08);
+    text-align: center;
+    color: #575757;
+}
+.buds-empty-info h2 {
+    color: #2AAAA8;
+    font-size: 22px;
+    margin-bottom: 18px;
+}
+.buds-empty-info p {
+    font-size: 15px;
+    margin-bottom: 14px;
+}
+.buds-empty-info strong {
+    color: #E45F1C;
+}
+
+.buds-container {
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    flex-direction: column; /* Stack header and table vertically */
+    max-width: 650px;
+    min-width: 350px;
+    margin: 0px auto;
+    text-overflow: ellipsis;
+    border-radius: 10px;
+    background-color: transparent;
+    transition: transform 0.3s ease-in-out;
+    will-change: transform;
+}
+
+.buds-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 20px auto;
+    max-width: 650px;
+    min-width: 350px;
+}
+
+.buds-title span {
+    position: relative;
+    color: #2AAAA8;
+    font-size: 19px;
+    font-weight: bold;
+    text-align: center;
+    padding-left: 120px;
+    flex: 1;  /* Take up remaining space */
+}
+
+.add-bud-btn {
+    position: relative;
+    background-color: transparent;
+    color: white;
+    border: none;
+    cursor: pointer;
+    height: 35px;
+    width: 120px;
+    border-radius: 50%;
+    color: #E45F1C;
+    padding: 0px;
+    align-self: right;
+}
+
+.add-bud-btn:hover {
+    Color: #575757;
+}
+
+.bud-header {
+    display: flex;
+    justify-content: space-between;
+    background-color: #575757;
+    width: 100%;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px; /* Round bottom-left corner */
+}
+
+.bud-header span {
+    position: relative;
+    color: white;
+    text-align: center;
+    flex: 1;  /* Take up remaining space */
+    left: 18px;
+}
+
+.delete-bud-btn {
+    position: relative;
+    background-color: transparent;
+    color: #f94449;
+    border: none;
+    cursor: pointer;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    padding: 0px;
+    margin-right: 8px;
+    font-size: 12px;
+}
+
+.delete-bud-btn:hover {
+    color: #b63237;
+}
+
+.bud-table {
+    width: 100%; /* Subtract 20px from each side */
+    border-collapse: collapse;
+    font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
+    text-align: left;
+}
+
+.bud-table th, .bud-table td {
+    padding-left: 10px;
+    padding-right: 10px;
+    box-sizing: border-box;
+    height: 20px;
+    width: 20%;
+}
+
+.bud-table th {
+    color: white;
+}
+
+.bud-table thead {
+    background-color: #2AAAA8;
+}
+
+.bud-table tfoot tr td {
+    border-bottom-left-radius: 10px; /* Round bottom-left corner */
+    border-bottom-right-radius: 10px; /* Round bottom-right corner */
+}
+
+.bud-table tbody tr:nth-child(even) {
+    background-color: #E6FAF9;
+}
+
+.bud-table tbody tr:nth-child(odd) {
+    background-color: #59D6D4;
+}
+
+.bud-table tfoot tr {
+    background-color: #A9A9A9;
+}
+
+/* Overlay for modal background */
+.bud-input-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0,0,0,0.3);
+    z-index: 9998;
+    display: none;
+    justify-content: center;
+    align-items: center;
+}
+
+.bud-input-container {
+    background: #fff;
+    border-radius: 8px;
+    padding: 24px 16px;
+    box-shadow: 0px 0px 6px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    height: 85px;
+}
+
+.bud-input-container input {
+    flex: 1;
+    padding: 8px;
+    font-size: 1rem;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+}
+
+.bud-input-container button {
+    margin-left: 8px;
+    padding: 8px 8px;
+    border-radius: 50%;
+    border: none;
+    background: #2AAAA8;
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    height: 35px;
+    width: 35px;
+}
+
+.bud-input-container button:hover {
+    background: #59D6D4;
+}
+
+.bud-item-action-cell {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.bud-table td.bud-item-action-cell {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.delete-bud-item-btn {
+    background: transparent;
+    color: #f94449;
+    border: none;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.delete-bud-item-btn:hover {
+    color: #575757;
+}
+
+.add-bud-items {
+    text-align: left;
+    color: white;
+    font-style: italic;
+}
+
+.add-bud-items a {
+    text-decoration: none;
+    color: white;
+    font-style: normal;
+}
+
+.add-bud-items a:hover {
+    color: #d4d4d4;
+}
+
+.bud-item-input-row td {
+    background: transparent;
+}
+
+.bud-item-input {
+    width: 100%;
+    height: 100%;
+    border: 2px solid #575757;
+    border-radius: 5px;
+    outline: none;
+    background: transparent;
+    box-sizing: border-box;
+    padding: 0;
+}
+
+.bud-item-input:focus {
+    border-color: #575757;
+    background: transparent;
+}
+
+.bud-item-edit-input {
+    width: 100%;
+    height: 100%;
+    border: 2px solid #575757;
+    border-radius: 5px;
+    outline: none;
+    background: transparent;
+    box-sizing: border-box;
+    padding: 0;
+}
+
+.bud-item-edit-input:focus {
+    border-color: #575757;
+    background: transparent;
+}
+
+/* The Modal (background) */
+.delete-bud-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    /* Centering the modal */
+    justify-content: center;
+    align-items: center;
+}
+
+/* Modal Content */
+.delete-bud-modal-content {
+    background-color: #fff;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #575757;
+    max-width: 350px;
+    width: 100%;
+    text-align: center;
+    border-radius: 15px;
+}
+
+/* Buttons */
+.delete-bud-confirm-btn, .delete-bud-cancel-btn {
+    padding: 5px 10px;
+    margin: 10px;
+    border: none;
+    border-radius: 15px;
+    cursor: pointer;
+}
+
+.delete-bud-confirm-btn {
+    background-color: #d73a3a;
+    color: white;
+}
+
+.delete-bud-cancel-btn {
+    background-color: #A9A9A9;
+    color: white;
+}
+
+/* The Modal (background) */
+.delete-bud-item-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    /* Centering the modal */
+    justify-content: center;
+    align-items: center;
+}
+
+/* Modal Content */
+.delete-bud-item-modal-content {
+    background-color: #fff;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #575757;
+    max-width: 350px;
+    width: 100%;
+    text-align: center;
+    border-radius: 15px;
+}
+
+/* Buttons */
+.delete-bud-item-confirm-btn, .delete-bud-item-cancel-btn {
+    padding: 5px 10px;
+    margin: 10px;
+    border: none;
+    border-radius: 15px;
+    cursor: pointer;
+}
+
+.delete-bud-item-confirm-btn {
+    background-color: #d73a3a;
+    color: white;
+}
+
+.delete-bud-item-cancel-btn {
+    background-color: #A9A9A9;
+    color: white;
+}
+
+.bud-total {
+    display: flex;
+    flex-direction: row;
+    margin-top: 10px;
+    color: white;
+    text-align: right;
+    background: #575757;
+    width: 100%;
+    border-radius: 10px;
+}
+
+.bud-total-label {
+    flex: 1;
+}
+
+.bud-total-amount {
+    width: 100px;
+    padding-right: 10px;
+}
+
+.bud-active-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    margin-left: 10px;
+    font-size: 15px;
+    vertical-align: middle;
+    outline: none;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+}
+
+.bud-toggle-on {
+    color: #2AAAA8;
+    transition: color 0.2s;
+}
+
+.bud-toggle-off {
+    color: #ccc;
+    transition: color 0.2s;
+}
+
+.bud-toggle-hidden {
+    display: none !important;
+}
+
+/*/////////////////////////////  Credit Accounts ///////////////////////////*/
+
+.cas-empty-info {
+    max-width: 500px;
+    margin: 40px auto;
+    background: #E6FAF9;
+    border-radius: 12px;
+    padding: 32px 24px;
+    box-shadow: 0 2px 8px rgba(42,170,168,0.08);
+    text-align: center;
+    color: #575757;
+}
+.cas-empty-info h2 {
+    color: #2AAAA8;
+    font-size: 22px;
+    margin-bottom: 18px;
+}
+.cas-empty-info p {
+    font-size: 15px;
+    margin-bottom: 14px;
+}
+.cas-empty-info strong {
+    color: #E45F1C;
+}
+
+.credit-accounts-container {
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    flex-direction: column; /* Stack header and table vertically */
+    max-width: 650px;
+    min-width: 350px;
+    margin: 0px auto;
+    text-overflow: ellipsis;
+    border-radius: 10px;
+    background-color: transparent;
+    transition: transform 0.3s ease-in-out;
+    will-change: transform;
+}
+
+.credit-accounts-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 20px auto;
+    max-width: 650px;
+    min-width: 350px;
+}
+
+.credit-accounts-title span {
+    position: relative;
+    color: #2AAAA8;
+    font-size: 19px;
+    font-weight: bold;
+    text-align: center;
+    padding-left: 150px;
+    flex: 1;  /* Take up remaining space */
+}
+
+.add-cas-btn {
+    position: relative;
+    background-color: transparent;
+    color: white;
+    border: none;
+    cursor: pointer;
+    height: 35px;
+    width: 150px;
+    border-radius: 50%;
+    color: #E45F1C;
+    padding: 0px;
+}
+
+.credit-accounts-header {
+    display: flex;
+    justify-content: space-between;
+    background-color: #575757;
+    width: 100%;
+    height: 20px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px; /* Round bottom-left corner */
+}
+
+.credit-accounts-header span {
+    position: relative;
+    color: white;
+    text-align: center;
+    flex: 1;  /* Take up remaining space */
+    left: 18px;
+}
+
+.credit-accounts-table {
+    width: 100%; /* Subtract 20px from each side */
+    border-collapse: collapse;
+    font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
+    text-align: left;
+}
+
+.credit-accounts-table th, .credit-accounts-table td {
+    padding-left: 10px;
+    padding-right: 10px;
+    box-sizing: border-box;
+    height: 20px;
+    width: 25%;
+}
+
+.credit-accounts-table th {
+    color: white;
+}
+
+.credit-accounts-table thead {
+    background-color: #2AAAA8;
+}
+
+.credit-accounts-table tfoot tr td {
+    border-bottom-left-radius: 10px; /* Round bottom-left corner */
+    border-bottom-right-radius: 10px; /* Round bottom-right corner */
+}
+
+.credit-accounts-table tbody tr:nth-child(even) {
+    background-color: #E6FAF9;
+}
+
+.credit-accounts-table tbody tr:nth-child(odd) {
+    background-color: #59D6D4;
+}
+
+.credit-accounts-table tfoot tr {
+    background-color: #A9A9A9;
+}
+
+.credit-accounts-action-cell {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.credit-accounts-table td.credit-accounts-action-cell {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.delete-credit-account-btn {
+    background: transparent;
+    color: #f94449;
+    border: none;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.delete-credit-account-btn:hover {
+    color: #575757;
+}
+
+.add-credit-account {
+    text-align: left;
+    color: white;
+    font-style: italic;
+}
+
+.add-credit-account a {
+    text-decoration: none;
+    color: white;
+    font-style: normal;
+}
+
+.add-credit-account a:hover {
+    color: #d4d4d4;
+}
+
+.credit-account-input-row td {
+    background: transparent;
+}
+
+.credit-account-input {
+    width: 100%;
+    height: 100%;
+    border: 2px solid #575757;
+    border-radius: 5px;
+    outline: none;
+    background: transparent;
+    box-sizing: border-box;
+    padding: 0;
+}
+
+.credit-account-input:focus {
+    border-color: #575757;
+    background: transparent;
+}
+
+.credit-account-edit-input {
+    width: 100%;
+    height: 100%;
+    border: 2px solid #575757;
+    border-radius: 5px;
+    outline: none;
+    background: transparent;
+    box-sizing: border-box;
+    padding: 0;
+}
+
+.credit-account-edit-input:focus {
+    border-color: #575757;
+    background: transparent;
+}
+
+/* The Modal (background) */
+.delete-credit-account-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    /* Centering the modal */
+    justify-content: center;
+    align-items: center;
+}
+
+/* Modal Content */
+.delete-credit-account-modal-content {
+    background-color: #fff;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #575757;
+    max-width: 350px;
+    width: 100%;
+    text-align: center;
+    border-radius: 15px;
+}
+
+/* Buttons */
+.delete-credit-account-confirm-btn, .delete-credit-account-cancel-btn {
+    padding: 5px 10px;
+    margin: 10px;
+    border: none;
+    border-radius: 15px;
+    cursor: pointer;
+}
+
+.delete-credit-account-confirm-btn {
+    background-color: #d73a3a;
+    color: white;
+}
+
+.delete-credit-account-cancel-btn {
+    background-color: #A9A9A9;
+    color: white;
+}
