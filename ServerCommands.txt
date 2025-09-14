@@ -1,15 +1,7 @@
+All:
+
 Restart Apache ( It forces app to update html, js, and py files)
     sudo service apache2 restart
-
-Backup to Dev ( Sends all files to be backed up including DB)
-    backupapp
-
-pull from existing branch or main
-    gitpullblankee
-
-Push to new, existing branch or main
-    gitpushblankee
-
 
 See all branches
     git branch -a
@@ -23,6 +15,17 @@ Check Python logs
 
 Clear python logs (makes it easier to see the latest logs)
     sudo truncate -s 0 /var/log/apache2/budget_error.log
+
+DEV:
+
+Backup to Dev ( Sends all files to be backed up including DB)
+    backupapp
+
+pull from existing branch or main
+    gitpullblankee
+
+Push to new, existing branch or main
+    gitpushblankee
 
 Access mysql
     mysql --defaults-extra-file=~/.my.cnf
