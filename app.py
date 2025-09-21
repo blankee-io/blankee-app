@@ -2743,6 +2743,76 @@ def dashboard():
         c_a_balances=c_a_balances
     )
 
+@app.route('/get_month_totals', methods=['GET'])
+@login_required
+def get_month_totals():
+    fridays = request.args.getlist('fridays[]')
+    account_ids = request.args.getlist('account_ids[]')
+    user_id = current_user.id
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Income totals
+    income_totals = {}
+    if fridays:
+        format_strings = ','.join(['%s'] * len(fridays))
+        cursor.execute(f'''
+            SELECT date, SUM(amount) as total_income
+            FROM income_entries
+            WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s) AND date IN ({format_strings})
+            GROUP BY date
+        ''', (user_id, *fridays))
+        for row in cursor.fetchall():
+            income_totals[str(row[0])] = float(row[1]) if row[1] is not None else 0.0
+
+    # Expense totals
+    expense_totals = {}
+    if fridays:
+        cursor.execute(f'''
+            SELECT date, SUM(amount) as total_expenses
+            FROM expense_entries
+            WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s) AND date IN ({format_strings})
+            GROUP BY date
+        ''', (user_id, *fridays))
+        for row in cursor.fetchall():
+            expense_totals[str(row[0])] = float(row[1]) if row[1] is not None else 0.0
+
+    # CA balances
+    ca_balances = {}
+    if account_ids and fridays:
+        for account_id in account_ids:
+            ca_balances[account_id] = {}
+            cursor.execute(f'''
+                SELECT date, balance
+                FROM c_a_balances
+                WHERE account_id = %s AND date IN ({format_strings})
+            ''', (account_id, *fridays))
+            for row in cursor.fetchall():
+                ca_balances[account_id][str(row[0])] = float(row[1]) if row[1] is not None else 0.0
+
+    # Remainders
+    remainders = {}
+    last_remainders = {}
+    if fridays:
+        cursor.execute(f'''
+            SELECT date, remainder, last_week_remainder
+            FROM totals_remainders
+            WHERE user_id = %s AND date IN ({format_strings})
+        ''', (user_id, *fridays))
+        for row in cursor.fetchall():
+            remainders[str(row[0])] = float(row[1]) if row[1] is not None else 0.0
+            last_remainders[str(row[0])] = float(row[2]) if row[2] is not None else 0.0
+
+    cursor.close()
+    conn.close()
+    return jsonify({
+        'income_totals': income_totals,
+        'expense_totals': expense_totals,
+        'ca_balances': ca_balances,
+        'remainders': remainders,
+        'last_remainders': last_remainders
+    })
+
 @app.route('/get_total_income', methods=['GET'])
 @login_required
 def get_total_income():

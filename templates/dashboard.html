@@ -1704,205 +1704,79 @@
 
         /////////////////////////// Data Updates //////////////////////////////
 
-        // Function to update the total income in the bottom row
-        function updateIncomeTotals() {
-
-
-            const incomeBottomRow = document.getElementById('income-bottom-row');
-            const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
-            const numberOfColumns = incomeBottomRow.children.length;
-
-            for (let i = 0; i < numberOfColumns; i++) {
-                let total = 0;
-
-                // Get the date associated with the current column
-                const date = lastRemainderRowRight.children[i].getAttribute('data-date');
-
-                // Fetch the total income for this date from the server
-                $.ajax({
-                    url: '/get_total_income',
-                    method: 'GET',
-                    data: { date: date },
-                    async: false, // We make it synchronous to wait for the result (not recommended, but simple)
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            const incomeTotal = parseFloat(response.total_income) || 0;
-                            total += incomeTotal;
-                        } else {
-                            console.error('Failed to fetch total income:', response.message);
-                        }
-                    },
-                    error: function() {
-                        console.error('An error occurred while fetching the total income.');
-                    }
-                });
-
-                // Update the total cell with the calculated sum, formatted to 2 decimal places with a dollar sign
-                incomeBottomRow.children[i].textContent = formatCurrency(total);
-            }
-            
-        }
-
-        function updateExpenseTotals() {
-
-
-            const expensesBottomRow = document.getElementById('expenses-bottom-row');
-            const numberOfColumns = expensesBottomRow.children.length;
-
-            for (let i = 0; i < numberOfColumns; i++) {
-                let total = 0;
-
-                // Get the correct td element and its data-date attribute
-                const tdElement = expensesBottomRow.children[i];
-                const date = tdElement.getAttribute('data-date');
-
-                if (!date || date === 'null') {
-                    console.error('Date is missing or invalid:', date);
-                    continue;
-                }
-
-                // Fetch the total expenses for this date from the server
-                $.ajax({
-                    url: '/get_total_expenses',
-                    method: 'GET',
-                    data: { date: date },
-                    async: false, // Synchronous request (not recommended for production)
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            const expenseTotal = parseFloat(response.total_expenses) || 0;
-                            total += expenseTotal;
-                        } else {
-                            console.error('Failed to fetch total expenses:', response.message);
-                        }
-                    },
-                    error: function() {
-                        console.error('An error occurred while fetching the total expenses.');
-                    }
-                });
-
-                // Update the total cell with the calculated sum, formatted to 2 decimal places with a dollar sign
-                expensesBottomRow.children[i].textContent = formatCurrency(total);
-            }
-        }
-
-        function updateCaBalance() {
-            document.querySelectorAll('table[id^="cas-table-"]').forEach(caTable => {
-                const accountId = caTable.id.replace('cas-table-', '');
-                const caBottomRow = document.getElementById(`cas-bottom-row-${accountId}`);
-                if (!caBottomRow) return;
-
-                const numberOfColumns = caBottomRow.children.length;
-
-                for (let i = 0; i < numberOfColumns; i++) {
-                    const tdElement = caBottomRow.children[i];
-                    const date = tdElement.getAttribute('data-date');
-                    if (!date || date === 'null') {
-                        tdElement.textContent = currencySymbol + '0.00';
-                        continue;
-                    }
-
-                    // Fetch the CA balance for this account and date from the server
-                    $.ajax({
-                        url: '/get_ca_balance',
-                        method: 'GET',
-                        data: { account_id: accountId, date: date },
-                        async: false, // Synchronous for consistency with other totals
-                        success: function(response) {
-                            if (response.status === 'success') {
-                                const balance = parseFloat(response.balance) || 0;
-                                tdElement.textContent = formatCurrency(balance);
-                            } else {
-                                tdElement.textContent = currencySymbol + '0.00';
-                            }
-                        },
-                        error: function() {
-                            tdElement.textContent = currencySymbol + '0.00';
-                        }
-                    });
+        // --- Batch fetch for all totals, balances, and remainders ---
+        function fetchMonthTotals(fridays, accountIds, callback) {
+            $.ajax({
+                url: '/get_month_totals',
+                method: 'GET',
+                data: {
+                    'fridays[]': fridays,
+                    'account_ids[]': accountIds
+                },
+                success: function(response) {
+                    callback(response);
                 }
             });
         }
 
+        function updateAllMonthData(fridays, accountIds) {
+            fetchMonthTotals(fridays, accountIds, function(response) {
+                // Update income totals
+                if (response.income_totals) {
+                    for (const [date, total] of Object.entries(response.income_totals)) {
+                        const cell = document.querySelector(`[data-date='${date}'][data-type='income-total']`);
+                        if (cell) cell.textContent = formatCurrency(total);
+                    }
+                }
+                // Update expense totals
+                if (response.expense_totals) {
+                    for (const [date, total] of Object.entries(response.expense_totals)) {
+                        const cell = document.querySelector(`[data-date='${date}'][data-type='expense-total']`);
+                        if (cell) cell.textContent = formatCurrency(total);
+                    }
+                }
+                // Update CA balances
+                if (response.ca_balances) {
+                    for (const [accountId, balances] of Object.entries(response.ca_balances)) {
+                        for (const [date, balance] of Object.entries(balances)) {
+                            const cell = document.querySelector(`[data-date='${date}'][data-account-id='${accountId}'][data-type='ca-balance']`);
+                            if (cell) cell.textContent = formatCurrency(balance);
+                        }
+                    }
+                }
+                // Update remainders
+                if (response.remainders) {
+                    for (const [date, rem] of Object.entries(response.remainders)) {
+                        const cell = document.querySelector(`[data-date='${date}'][data-type='remainder']`);
+                        if (cell) cell.textContent = formatCurrency(rem);
+                    }
+                }
+                // Update last remainders
+                if (response.last_remainders) {
+                    for (const [date, rem] of Object.entries(response.last_remainders)) {
+                        const cell = document.querySelector(`[data-date='${date}'][data-type='last-remainder']`);
+                        if (cell) cell.textContent = formatCurrency(rem);
+                    }
+                }
+            });
+        }
+
+        // Function to update the total income in the bottom row
+        function updateIncomeTotals() {
+            // Now handled by updateAllMonthData (batch loader)
+        }
+
+        function updateExpenseTotals() {
+            // Now handled by updateAllMonthData (batch loader)
+        }
+
+        function updateCaBalance() {
+            // Now handled by updateAllMonthData (batch loader)
+        }
+
         // Function to update the remainder and last remainder rows
         function updateRemainderRows() {
-
-
-            const remainderRowRight = document.getElementById('remainder-row-right');
-            const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
-            const numberOfColumns = remainderRowRight.children.length;
-
-            for (let i = 0; i < numberOfColumns; i++) {
-                let lastRemainder = 0;
-                let remainder = 0;
-
-                // Get the date associated with the current column
-                const date = remainderRowRight.children[i].getAttribute('data-date');
-
-                // Fetch the last remainder for this date from the server
-                $.ajax({
-                    url: '/get_last_remainder',
-                    method: 'GET',
-                    data: { date: date },
-                    async: false, // Synchronous to wait for the result (not recommended, but simple)
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            lastRemainder = parseFloat(response.last_remainder) || 0;
-                        } else {
-                            console.error('Failed to fetch last remainder:', response.message);
-                        }
-                    },
-                    error: function() {
-                        console.error('An error occurred while fetching the last remainder.');
-                    }
-                });
-
-                // Fetch the remainder for this date from the server
-                $.ajax({
-                    url: '/get_remainder',
-                    method: 'GET',
-                    data: { date: date },
-                    async: false, // Synchronous to wait for the result (not recommended, but simple)
-                    success: function(response) {
-
-                        if (response.status === 'success') {
-                            remainder = parseFloat(response.remainder) || 0;
-                        } else {
-                            console.error('Failed to fetch remainder:', response.message);
-                        }
-                    },
-                    error: function() {
-                        console.error('An error occurred while fetching the remainder.');
-                    }
-                });
-
-                // Update the last remainder cell with the fetched value
-                lastRemainderRowRight.children[i].textContent = formatCurrency(lastRemainder);
-
-                // Update the remainder cell with the fetched value and apply conditional styling
-                const remainderCell = remainderRowRight.children[i];
-                remainderCell.textContent = formatCurrency(remainder);
-
-                // Remove any previous threshold classes
-                remainderCell.classList.remove('below-threshold', 'negative', 'above-threshold');
-                // Only apply threshold classes if the date is on or after member_since
-                let applyThresholdClass = true;
-                if (member_since) {
-                    const cellDate = new Date(remainderCell.getAttribute('data-date'));
-                    const memberSinceDate = new Date(member_since);
-                    if (cellDate < memberSinceDate) {
-                        applyThresholdClass = false;
-                    }
-                }
-                if (applyThresholdClass) {
-                    if (remainder < 0) {
-                        remainderCell.classList.add('negative');
-                    } else if (remainder < balance_threshold) {
-                        remainderCell.classList.add('below-threshold');
-                    } else {
-                        remainderCell.classList.add('above-threshold');
-                    }
-                }
-            }
+            // Now handled by updateAllMonthData (batch loader)
         }
 
         function updateLocalTotalsRemainders(updatedData, updatedSavings = null) {
