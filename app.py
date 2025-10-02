@@ -6,6 +6,10 @@ import pyotp
 import qrcode
 import io
 import base64
+import redis
+import logging
+import json
+import time
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
 from flask_bcrypt import Bcrypt
 from flask import jsonify
@@ -28,6 +32,7 @@ app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
 UPLOAD_FOLDER = '/var/www/html/budget/static/uploads'  # Make sure this folder exists
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.logger.setLevel(logging.INFO)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -40,6 +45,52 @@ def load_user(user_id):
 def unauthorized():
     # Redirect unauthorized users to the login page
     return redirect(url_for('login'))
+
+#################################################################################
+############################### REDIS INTEGRATION ###############################
+#################################################################################
+
+_redis_client = None
+
+def init_redis():
+    global _redis_client
+    if _redis_client:
+        return _redis_client
+    try:
+        _redis_client = redis.Redis(
+            host=os.getenv("REDIS_HOST", "127.0.0.1"),
+            port=int(os.getenv("REDIS_PORT", "6379")),
+            db=int(os.getenv("REDIS_DB", "0")),
+            password=os.getenv("REDIS_PASSWORD") or None,
+            decode_responses=True,
+            socket_timeout=0.5,
+        )
+        _redis_client.ping()
+        app.config['REDIS_OK'] = True
+    except Exception as e:
+        app.logger.warning(f"Redis unavailable: {e}")
+        app.config['REDIS_OK'] = False
+    return _redis_client
+
+def _redis_warmup_on_import():
+    try:
+        init_redis()
+    except Exception:
+        pass
+
+_redis_warmup_on_import()
+
+@app.route('/health/redis', methods=['GET'])
+def health_redis():
+    status = {'ok': bool(app.config.get('REDIS_OK'))}
+    return jsonify(status), 200 if status['ok'] else 503
+
+# --- Dashboard cache helpers ---
+DASHBOARD_CACHE_TTL = int(os.getenv("DASHBOARD_CACHE_TTL", "60"))
+
+#################################################################################
+############################### DB INTEGRATION ##################################
+#################################################################################
 
 def get_db_connection():
     conn = mysql.connector.connect(
@@ -71,13 +122,20 @@ class User(UserMixin):
             return User(id=user[0], username=user[1], password=user[2])
         return None
 
+#################################################################################
+################################### HOME ########################################
+#################################################################################
+
 @app.route('/')
 def home():
     if 'username' in session:
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('dashboard_3m'))
     return redirect(url_for('login'))
 
-### Register ###
+#################################################################################
+################################### REGISTRATION ################################
+#################################################################################
+
 def find_nearest_friday(some_date, round_up=False):
     """
     Finds the nearest Friday to the given date.
@@ -98,7 +156,7 @@ def find_nearest_friday(some_date, round_up=False):
 @app.route('/update_landing_page', methods=['POST'])
 @login_required
 def update_landing_page():
-    landing_page = request.form.get('landing_page', 'dashboard')
+    landing_page = request.form.get('landing_page', 'dashboard_3m')
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET landing_page = %s WHERE id = %s", (landing_page, current_user.id))
@@ -332,7 +390,7 @@ def complete_profile_setup():
         # Return success response
         return jsonify({'status': 'success'})
 
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('dashboard_3m'))
 
 @app.route('/check_username', methods=['POST'])
 def check_username():
@@ -351,7 +409,56 @@ def check_username():
     else:
         return jsonify({'status': 'available'})
 
-### Login ###
+#################################################################################
+############################### LOGIN ###########################################
+#################################################################################
+
+############################## Login Redis ######################################
+
+def _cache_get_user(user_id):
+    """Try to get user profile from Redis cache."""
+    if not app.config.get('REDIS_OK'):
+        return None
+    try:
+        r = init_redis()
+        key = f"user:v1:{user_id}"
+        raw = r.get(key)
+        if raw:
+            return json.loads(raw)
+    except Exception as e:
+        app.logger.warning(f"[CACHE][USER] GET error user={user_id}: {e}")
+    return None
+
+def _cache_set_user(user_id, user_data):
+    """Set user profile in Redis cache."""
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        key = f"user:v1:{user_id}"
+        init_redis().setex(key, DASHBOARD_CACHE_TTL, json.dumps(user_data))
+    except Exception as e:
+        app.logger.warning(f"[CACHE][USER] SET error user={user_id}: {e}")
+
+def get_user_profile(user_id):
+    """Cache-aside: Try cache, then DB, then update cache."""
+    cached = _cache_get_user(user_id)
+    if cached:
+        return cached
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    user_data = cursor.fetchone()
+    conn.close()
+    if user_data:
+        _cache_set_user(user_id, user_data)
+    return user_data
+
+def mark_user_dirty(user_id):
+    if app.config.get('REDIS_OK'):
+        init_redis().sadd("dirty_users", user_id)
+
+############################## Login Route ######################################
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     # If the user is already authenticated, redirect to their preferred landing page
@@ -590,6 +697,8 @@ def login():
     # If it's a GET request, render the login page
     return render_template('login.html')
 
+############################## Login MFA Route ######################################
+
 @app.route('/login_mfa', methods=['POST'])
 def login_mfa():
     code = request.form.get('mfa_code')
@@ -617,6 +726,8 @@ def login_mfa():
     else:
         flash('Invalid MFA code.')
         return render_template('login.html', mfa_step=True, username=user[1])
+
+############################## Login Add One Year of Data ######################################
 
 def add_one_year_of_fridays(user_id):
     conn = get_db_connection()
@@ -881,7 +992,9 @@ def logout():
     logout_user()
     return redirect(url_for('login'))
 
-################################## Dashboard Day ############################################
+#################################################################################
+############################### DASHBOARD DAY ###################################
+#################################################################################
 
 @app.route('/dashboard_d')
 @login_required
@@ -1046,787 +1159,6 @@ def dashboard_d():
         c_expense_entries=c_expense_entries,
         c_a_balances_d=c_a_balances_d
     )
-
-def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
-    conn = get_db_connection()
-    cursor = conn.cursor(buffered=True)
-    cursor.execute("""
-        SELECT date FROM totals_remainders_d
-        WHERE user_id = %s AND date >= %s
-        ORDER BY date ASC
-    """, (user_id, start_date))
-    all_dates = [row[0] for row in cursor.fetchall()]
-
-    prev_date = start_date - timedelta(days=1)
-    cursor.execute("""
-        SELECT remainder FROM totals_remainders_d
-        WHERE user_id = %s AND date = %s
-    """, (user_id, prev_date))
-    prev_remainder_row = cursor.fetchone()
-    last_day_remainder = float(prev_remainder_row[0]) if prev_remainder_row else 0.0
-
-    # Fetch all income for the range
-    cursor.execute("""
-        SELECT ie.date, SUM(ie.amount)
-        FROM income_entries ie
-        JOIN income_categories ic ON ie.category_id = ic.id
-        WHERE ic.user_id = %s AND ie.date >= %s
-        GROUP BY ie.date
-    """, (user_id, start_date))
-    income_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
-
-    # Fetch all expenses for the range
-    cursor.execute("""
-        SELECT ee.date, SUM(ee.amount)
-        FROM expense_entries ee
-        JOIN expense_categories ec ON ee.category_id = ec.id
-        WHERE ec.user_id = %s AND ee.date >= %s
-        GROUP BY ee.date
-    """, (user_id, start_date))
-    expense_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
-
-    for current_date in all_dates:
-        total_income = income_by_date.get(current_date, 0) + last_day_remainder
-        total_expenses = expense_by_date.get(current_date, 0)
-
-        remainder = total_income - total_expenses
-
-        cursor.execute("""
-            INSERT INTO totals_remainders_d (user_id, date, total_income, total_expenses, remainder, last_day_remainder)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                total_income = VALUES(total_income),
-                total_expenses = VALUES(total_expenses),
-                remainder = VALUES(remainder),
-                last_day_remainder = VALUES(last_day_remainder)
-        """, (user_id, current_date, total_income, total_expenses, remainder, last_day_remainder))
-
-        last_day_remainder = remainder
-        date_to_remainder[current_date] = remainder
-
-    conn.commit()
-    conn.close()
-
-def update_daily_ca_totals(user_id, start_date):
-    conn = get_db_connection()
-    cursor = conn.cursor(buffered=True)
-
-    cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
-    account_ids = [row[0] for row in cursor.fetchall()]
-    if not account_ids:
-        conn.close()
-        return
-
-    for account_id in account_ids:
-        cursor.execute("""
-            SELECT date FROM c_a_balances_d
-            WHERE account_id = %s AND date >= %s
-            ORDER BY date ASC
-        """, (account_id, start_date))
-        all_dates = [row[0] for row in cursor.fetchall()]
-
-        prev_date = start_date - timedelta(days=1)
-        cursor.execute("""
-            SELECT balance FROM c_a_balances_d
-            WHERE account_id = %s AND date = %s
-        """, (account_id, prev_date))
-        prev_balance_row = cursor.fetchone()
-        last_day_balance = float(prev_balance_row[0]) if prev_balance_row and prev_balance_row[0] is not None else 0.0
-
-        # Get all c_expense_entries for this account, grouped by date
-        cursor.execute("""
-            SELECT cee.date, SUM(cee.amount)
-            FROM c_expense_entries cee
-            JOIN c_expense_categories cec ON cee.category_id = cec.id
-            WHERE cec.account_id = %s AND cee.date >= %s
-            GROUP BY cee.date
-        """, (account_id, start_date))
-        expense_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
-
-        # Get all payments for this account, grouped by date
-        cursor.execute("""
-            SELECT date, SUM(amount) FROM c_payment_entries
-            WHERE account_id = %s AND date >= %s
-            GROUP BY date
-        """, (account_id, start_date))
-        payments_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
-
-        for current_date in all_dates:
-            total_expenses = expense_by_date.get(current_date, 0.0)
-            total_payments = payments_by_date.get(current_date, 0.0)
-            balance = last_day_balance + total_expenses - total_payments
-
-            cursor.execute("""
-                INSERT INTO c_a_balances_d (account_id, date, total_expenses, total_payments, balance)
-                VALUES (%s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    total_expenses = VALUES(total_expenses),
-                    total_payments = VALUES(total_payments),
-                    balance = VALUES(balance)
-            """, (account_id, current_date, total_expenses, total_payments, balance))
-
-            last_day_balance = balance
-
-    conn.commit()
-    conn.close()
-
-def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
-    conn = get_db_connection()
-    cursor = conn.cursor(buffered=True)
-
-    cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
-    account_ids = [row[0] for row in cursor.fetchall()]
-    if not account_ids:
-        conn.close()
-        return
-
-    for account_id in account_ids:
-        cursor.execute("""
-            SELECT date FROM c_a_balances
-            WHERE account_id = %s AND date >= %s
-            ORDER BY date ASC
-        """, (account_id, start_date))
-        all_week_dates = [row[0] for row in cursor.fetchall()]
-
-        # Build a mapping of week date to all dates in that week
-        week_map = {}
-        for week_date in all_week_dates:
-            if goofy_week_mode:
-                # Goofy: week starts Friday, ends Thursday
-                week_start = week_date
-                week_end = week_start + timedelta(days=6)
-            else:
-                # Normal: week ends Friday, starts Saturday before
-                week_end = week_date
-                week_start = week_end - timedelta(days=6)
-            week_map[week_date] = (week_start, week_end)
-
-        # Sum all expenses for each week
-        week_expenses = {}
-        for week_date, (week_start, week_end) in week_map.items():
-            cursor.execute("""
-                SELECT COALESCE(SUM(cee.amount), 0)
-                FROM c_expense_entries cee
-                JOIN c_expense_categories cec ON cee.category_id = cec.id
-                WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
-            """, (account_id, week_start, week_end))
-            week_expenses[week_date] = float(cursor.fetchone()[0])
-
-        # Sum all payments for each week
-        week_payments = {}
-        for week_date, (week_start, week_end) in week_map.items():
-            cursor.execute("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM c_payment_entries
-                WHERE account_id = %s AND date BETWEEN %s AND %s
-            """, (account_id, week_start, week_end))
-            week_payments[week_date] = float(cursor.fetchone()[0])
-
-        for week_date, (week_start, week_end) in week_map.items():
-            prev_week_date = week_date - timedelta(days=7)
-            cursor.execute("""
-                SELECT balance FROM c_a_balances
-                WHERE account_id = %s AND date = %s
-            """, (account_id, prev_week_date))
-            prev_balance_row = cursor.fetchone()
-            last_week_balance = float(prev_balance_row[0]) if prev_balance_row and prev_balance_row[0] is not None else 0.0
-
-            total_expenses = week_expenses.get(week_date, 0.0)
-            total_payments = week_payments.get(week_date, 0.0)
-            balance = last_week_balance + total_expenses - total_payments
-            cursor.execute("""
-                INSERT INTO c_a_balances (account_id, date, total_expenses, total_payments, balance)
-                VALUES (%s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    total_expenses = VALUES(total_expenses),
-                    total_payments = VALUES(total_payments),
-                    balance = VALUES(balance)
-            """, (account_id, week_date, total_expenses, total_payments, balance))
-
-    conn.commit()
-    conn.close()
-
-def update_monthly_ca_totals(user_id, start_date):
-    conn = get_db_connection()
-    cursor = conn.cursor(buffered=True)
-
-    cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
-    account_ids = [row[0] for row in cursor.fetchall()]
-    if not account_ids:
-        conn.close()
-        return
-
-    for account_id in account_ids:
-        cursor.execute("""
-            SELECT date FROM c_a_balances_m
-            WHERE account_id = %s AND date >= %s
-            ORDER BY date ASC
-        """, (account_id, start_date))
-        all_months = [row[0] for row in cursor.fetchall()]
-
-        # Build a mapping of month-end date to all dates in that month
-        month_map = {}
-        for last_day in all_months:
-            month_start = last_day.replace(day=1)
-            month_map[last_day] = (month_start, last_day)
-
-        # Sum all expenses for each month
-        month_expenses = {}
-        for last_day, (month_start, month_end) in month_map.items():
-            cursor.execute("""
-                SELECT COALESCE(SUM(cee.amount), 0)
-                FROM c_expense_entries cee
-                JOIN c_expense_categories cec ON cee.category_id = cec.id
-                WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
-            """, (account_id, month_start, month_end))
-            month_expenses[last_day] = float(cursor.fetchone()[0])
-
-        # Sum all payments for each month
-        month_payments = {}
-        for last_day, (month_start, month_end) in month_map.items():
-            cursor.execute("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM c_payment_entries
-                WHERE account_id = %s AND date BETWEEN %s AND %s
-            """, (account_id, month_start, month_end))
-            month_payments[last_day] = float(cursor.fetchone()[0])
-
-        for last_day in all_months:
-            # Always fetch previous month's last day balance for each month
-            if last_day.month == 1:
-                prev_year = last_day.year - 1
-                prev_month = 12
-            else:
-                prev_year = last_day.year
-                prev_month = last_day.month - 1
-            prev_last_day = date(prev_year, prev_month, calendar.monthrange(prev_year, prev_month)[1])
-            cursor.execute("""
-                SELECT balance FROM c_a_balances_m
-                WHERE account_id = %s AND date = %s
-            """, (account_id, prev_last_day))
-            prev_balance_row = cursor.fetchone()
-            last_month_balance = float(prev_balance_row[0]) if prev_balance_row and prev_balance_row[0] is not None else 0.0
-
-            total_expenses = month_expenses.get(last_day, 0.0)
-            total_payments = month_payments.get(last_day, 0.0)
-            balance = last_month_balance + total_expenses - total_payments
-            cursor.execute("""
-                INSERT INTO c_a_balances_m (account_id, date, total_expenses, total_payments, balance)
-                VALUES (%s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    total_expenses = VALUES(total_expenses),
-                    total_payments = VALUES(total_payments),
-                    balance = VALUES(balance)
-            """, (account_id, last_day, total_expenses, total_payments, balance))
-
-    conn.commit()
-    conn.close()
-
-def update_daily_savings_for_savings_category(user_id, start_date):
-    conn = get_db_connection()
-    cursor = conn.cursor(buffered=True)
-
-    # Get member_since and starting_savings for this user
-    cursor.execute("SELECT member_since, starting_savings FROM users WHERE id = %s", (user_id,))
-    user_row = cursor.fetchone()
-    if user_row and user_row[0]:
-        member_since = user_row[0]
-        starting_savings = float(user_row[1]) if user_row[1] is not None else 0.0
-    else:
-        member_since = start_date
-        starting_savings = 0.0
-
-    # Get the "Savings" income and expense category IDs for this user
-    cursor.execute("""
-        SELECT id FROM income_categories WHERE user_id = %s AND name = 'Savings'
-    """, (user_id,))
-    income_savings_row = cursor.fetchone()
-    income_savings_id = income_savings_row[0] if income_savings_row else None
-
-    cursor.execute("""
-        SELECT id FROM expense_categories WHERE user_id = %s AND name = 'Savings'
-    """, (user_id,))
-    expense_savings_row = cursor.fetchone()
-    expense_savings_id = expense_savings_row[0] if expense_savings_row else None
-
-    if not income_savings_id and not expense_savings_id:
-        conn.close()
-        return  # No savings categories found
-
-    # Get all dates to update, in order
-    cursor.execute("""
-        SELECT date FROM totals_remainders_d
-        WHERE user_id = %s AND date >= %s
-        ORDER BY date ASC
-    """, (user_id, start_date))
-    all_dates = [row[0] for row in cursor.fetchall()]
-
-    # Get previous day's savings
-    prev_date = start_date - timedelta(days=1)
-    cursor.execute("""
-        SELECT amount FROM savings_entries
-        WHERE user_id = %s AND date = %s
-    """, (user_id, prev_date))
-    prev_savings_row = cursor.fetchone()
-    last_savings = float(prev_savings_row[0]) if prev_savings_row else 0.0
-
-    for current_date in all_dates:
-        # Sum income for the date (Savings category only)
-        total_income = 0.0
-        if income_savings_id:
-            cursor.execute("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM income_entries
-                WHERE category_id = %s AND date = %s
-            """, (income_savings_id, current_date))
-            total_income = float(cursor.fetchone()[0])
-
-        # Sum expenses for the date (Savings category only)
-        total_expenses = 0.0
-        if expense_savings_id:
-            cursor.execute("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM expense_entries
-                WHERE category_id = %s AND date = %s
-            """, (expense_savings_id, current_date))
-            total_expenses = float(cursor.fetchone()[0])
-
-        # Only add starting_savings on the member_since date
-        if current_date == member_since:
-            savings = last_savings + total_expenses - total_income + starting_savings
-        else:
-            savings = last_savings + total_expenses - total_income
-
-        # Insert or update savings_entries for this date
-        cursor.execute("""
-            INSERT INTO savings_entries (user_id, date, amount)
-            VALUES (%s, %s, %s)
-            ON DUPLICATE KEY UPDATE amount = VALUES(amount)
-        """, (user_id, current_date, savings))
-
-        last_savings = savings
-
-    conn.commit()
-    conn.close()
-
-def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
-    conn = get_db_connection()
-    cursor = conn.cursor(buffered=True)
-
-    # Get all relevant Fridays (or week starts) from totals_remainders
-    cursor.execute("""
-        SELECT date FROM totals_remainders
-        WHERE user_id = %s AND date >= %s
-        ORDER BY date ASC
-    """, (user_id, start_date))
-    all_week_dates = [row[0] for row in cursor.fetchall()]
-
-    # Fetch all income and expense entries in one query each
-    cursor.execute("""
-        SELECT ie.date, ie.amount
-        FROM income_entries ie
-        JOIN income_categories ic ON ie.category_id = ic.id
-        WHERE ic.user_id = %s AND ie.date >= %s
-    """, (user_id, start_date))
-    income_entries = cursor.fetchall()
-
-    cursor.execute("""
-        SELECT ee.date, ee.amount
-        FROM expense_entries ee
-        JOIN expense_categories ec ON ee.category_id = ec.id
-        WHERE ec.user_id = %s AND ee.date >= %s
-    """, (user_id, start_date))
-    expense_entries = cursor.fetchall()
-
-    # Helper to get week range for a given week date
-    def get_week_range(week_date):
-        if goofy_week_mode:
-            # Goofy: week starts Friday, ends Thursday
-            week_start = week_date
-            week_end = week_start + timedelta(days=6)
-        else:
-            # Normal: week ends Friday, starts Saturday before
-            week_end = week_date
-            week_start = week_end - timedelta(days=6)
-        return week_start, week_end
-
-    for week_date in all_week_dates:
-        week_start, week_end = get_week_range(week_date)
-
-        # Sum income for this week
-        total_income = sum(
-            float(amount)
-            for entry_date, amount in income_entries
-            if week_start <= entry_date <= week_end
-        )
-
-        # Sum expenses for this week
-        total_expenses = sum(
-            float(amount)
-            for entry_date, amount in expense_entries
-            if week_start <= entry_date <= week_end
-        )
-
-        # Get last week's remainder
-        prev_week_date = week_date - timedelta(days=7)
-        last_week_remainder = date_to_remainder.get(prev_week_date, 0)
-
-        # Add last week's remainder to income
-        total_income_with_remainder = total_income + float(last_week_remainder)
-        week_remainder = total_income_with_remainder - total_expenses
-
-        cursor.execute("""
-            INSERT INTO totals_remainders (user_id, date, total_income, total_expenses, remainder, last_week_remainder)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                total_income = VALUES(total_income),
-                total_expenses = VALUES(total_expenses),
-                remainder = VALUES(remainder),
-                last_week_remainder = VALUES(last_week_remainder)
-        """, (user_id, week_date, total_income_with_remainder, total_expenses, week_remainder, last_week_remainder))
-
-        # Update date_to_remainder for next week
-        date_to_remainder[week_date] = week_remainder
-
-    conn.commit()
-    conn.close()
-
-def update_monthly_totals(user_id, start_date, date_to_remainder):
-    conn = get_db_connection()
-    cursor = conn.cursor(buffered=True)
-
-    # Get all relevant dates from totals_remainders_d
-    cursor.execute("""
-        SELECT date FROM totals_remainders_d
-        WHERE user_id = %s AND date >= %s
-        ORDER BY date ASC
-    """, (user_id, start_date))
-    all_dates = [row[0] for row in cursor.fetchall()]
-
-    if not all_dates:
-        conn.close()
-        return
-
-    # Group dates by month
-    months = set((d.year, d.month) for d in all_dates)
-    for year, month in sorted(months):
-        # Get all dates in this month
-        month_dates = [d for d in all_dates if d.year == year and d.month == month]
-        if not month_dates:
-            continue
-        first_day = min(month_dates)
-        last_day = max(month_dates)
-
-        # Sum income and expenses for the month from entries
-        cursor.execute("""
-            SELECT COALESCE(SUM(ie.amount), 0)
-            FROM income_entries ie
-            JOIN income_categories ic ON ie.category_id = ic.id
-            WHERE ic.user_id = %s AND ie.date BETWEEN %s AND %s
-        """, (user_id, first_day, last_day))
-        total_income = cursor.fetchone()[0]
-
-        cursor.execute("""
-            SELECT COALESCE(SUM(ee.amount), 0)
-            FROM expense_entries ee
-            JOIN expense_categories ec ON ee.category_id = ec.id
-            WHERE ec.user_id = %s AND ee.date BETWEEN %s AND %s
-        """, (user_id, first_day, last_day))
-        total_expenses = cursor.fetchone()[0]
-
-        # Get last month's remainder
-        prev_month = (month - 1) or 12
-        prev_year = year if month > 1 else year - 1
-        cursor.execute("""
-            SELECT remainder FROM totals_remainders_m
-            WHERE user_id = %s AND YEAR(date) = %s AND MONTH(date) = %s
-            ORDER BY date DESC LIMIT 1
-        """, (user_id, prev_year, prev_month))
-        prev_remainder_row = cursor.fetchone()
-        last_month_remainder = float(prev_remainder_row[0]) if prev_remainder_row else 0.0
-
-        # Include last month's remainder in total_income (like weekly logic)
-        total_income_with_remainder = float(total_income) + last_month_remainder
-        remainder = total_income_with_remainder - float(total_expenses)
-
-        # Find the last day of the month
-        import calendar
-        last_day_of_month = date(year, month, calendar.monthrange(year, month)[1])
-
-        cursor.execute("""
-            INSERT INTO totals_remainders_m (user_id, date, total_income, total_expenses, remainder, last_month_remainder)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                total_income = VALUES(total_income),
-                total_expenses = VALUES(total_expenses),
-                remainder = VALUES(remainder),
-                last_month_remainder = VALUES(last_month_remainder)
-        """, (user_id, last_day_of_month, total_income_with_remainder, total_expenses, remainder, last_month_remainder))
-
-    conn.commit()
-    conn.close()
-
-@app.route('/save_totals_remainders_d', methods=['POST'])
-@login_required
-def save_totals_remainders_d():
-    try:
-        data = request.get_json(silent=True) or {}
-        start_date_str = data.get('start_date')
-        user_id = current_user.id
-
-        # Fetch goofy_week_mode for the current user
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-        goofy_week_mode = bool(cursor.fetchone()[0])
-        conn.close()
-
-        # Determine the starting date for incremental update
-        if start_date_str:
-            try:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-            except Exception:
-                return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
-        else:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT MIN(date) FROM totals_remainders_d WHERE user_id = %s", (user_id,))
-            min_date_row = cursor.fetchone()
-            start_date = min_date_row[0] if min_date_row and min_date_row[0] else date.today()
-            conn.close()
-
-        date_to_remainder = {}
-
-        # Run daily, weekly, and monthly updates
-        update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
-        update_daily_savings_for_savings_category(user_id, start_date)
-        update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
-        update_monthly_totals(user_id, start_date, date_to_remainder)
-
-        # Prepare the response: for each date, fetch last_week_remainder from totals_remainders table
-        conn = get_db_connection()
-        cursor = conn.cursor(buffered=True)
-        cursor.execute("""
-            SELECT date FROM totals_remainders_d
-            WHERE user_id = %s AND date >= %s
-            ORDER BY date ASC
-        """, (user_id, start_date))
-        all_dates = [row[0] for row in cursor.fetchall()]
-
-        results = []
-        for current_date in all_dates:
-            # Find the most recent previous Friday
-            if goofy_week_mode:
-                prev_friday = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
-            else:
-                prev_friday = current_date - timedelta(days=7)
-
-            cursor.execute("""
-                SELECT remainder FROM totals_remainders
-                WHERE user_id = %s AND date = %s
-            """, (user_id, prev_friday))
-            last_week_remainder_row = cursor.fetchone()
-            last_week_remainder = float(last_week_remainder_row[0]) if last_week_remainder_row else 0.0
-
-            cursor.execute("""
-                SELECT total_income, total_expenses, remainder, last_day_remainder
-                FROM totals_remainders_d
-                WHERE user_id = %s AND date = %s
-            """, (user_id, current_date))
-            row = cursor.fetchone()
-            if not row:
-                continue
-
-            result = {
-                'date': current_date,
-                'total_income': float(row[0]),
-                'total_expenses': float(row[1]),
-                'remainder': float(row[2]),
-                'last_day_remainder': float(row[3]),
-                'last_week_remainder': float(last_week_remainder)
-            }
-            results.append(result)
-
-        # Fetch updated monthly totals
-        cursor.execute("""
-            SELECT date, total_income, total_expenses, remainder, last_month_remainder
-            FROM totals_remainders_m
-            WHERE user_id = %s AND date >= %s
-            ORDER BY date ASC
-        """, (user_id, start_date))
-        monthly_results = [
-            {
-                'date': row[0],
-                'total_income': float(row[1]),
-                'total_expenses': float(row[2]),
-                'remainder': float(row[3]),
-                'last_month_remainder': float(row[4])
-            }
-            for row in cursor.fetchall()
-        ]
-
-        # --- Fetch updated savings entries ---
-        cursor.execute("""
-            SELECT date, amount FROM savings_entries
-            WHERE user_id = %s AND date >= %s
-            ORDER BY date ASC
-        """, (user_id, start_date))
-        savings_entries = [
-            {'date': row[0], 'amount': float(row[1])}
-            for row in cursor.fetchall()
-        ]
-
-        conn.close()
-        return jsonify({
-            "status": "success",
-            "updated_totals_remainders": results,
-            "updated_monthly_totals_remainders": monthly_results,
-            "updated_savings_entries": savings_entries
-        })
-
-    except mysql.connector.Error as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    
-@app.route('/save_ca_daily_balance', methods=['POST'])
-@login_required
-def save_ca_daily_balance():
-    try:
-        data = request.get_json(silent=True) or {}
-        start_date_str = data.get('start_date')
-        user_id = current_user.id
-
-        # Fetch goofy_week_mode for the current user
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-        goofy_week_mode = bool(cursor.fetchone()[0])
-        conn.close()
-
-        # Determine the starting date for incremental update
-        if start_date_str:
-            try:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-            except Exception:
-                return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
-        else:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT MIN(date) FROM c_a_balances_d
-                WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
-            """, (user_id,))
-            min_date_row = cursor.fetchone()
-            start_date = min_date_row[0] if min_date_row and min_date_row[0] else date.today()
-            conn.close()
-
-        # Update CA balances (daily, weekly, monthly)
-        update_daily_ca_totals(user_id, start_date)
-        update_weekly_ca_totals(user_id, start_date, goofy_week_mode)  # <-- Pass goofy_week_mode here
-        update_monthly_ca_totals(user_id, start_date)
-
-        # Fetch updated daily CA balances
-        conn = get_db_connection()
-        cursor = conn.cursor(buffered=True)
-        cursor.execute("""
-            SELECT * FROM c_a_balances_d
-            WHERE account_id IN (
-                SELECT id FROM credit_accounts WHERE user_id = %s
-            ) AND date >= %s
-            ORDER BY account_id ASC, date ASC
-        """, (user_id, start_date))
-        ca_balances_d = [
-            {
-                'id': row[0],
-                'account_id': row[1],
-                'date': row[2],
-                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
-                'balance': float(row[4]) if row[4] is not None else 0.0
-            }
-            for row in cursor.fetchall()
-        ]
-
-        # Fetch updated weekly CA balances
-        cursor.execute("""
-            SELECT * FROM c_a_balances
-            WHERE account_id IN (
-                SELECT id FROM credit_accounts WHERE user_id = %s
-            ) AND date >= %s
-            ORDER BY account_id ASC, date ASC
-        """, (user_id, start_date))
-        ca_balances = [
-            {
-                'id': row[0],
-                'account_id': row[1],
-                'date': row[2],
-                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
-                'balance': float(row[4]) if row[4] is not None else 0.0
-            }
-            for row in cursor.fetchall()
-        ]
-
-        # Fetch updated monthly CA balances
-        cursor.execute("""
-            SELECT * FROM c_a_balances_m
-            WHERE account_id IN (
-                SELECT id FROM credit_accounts WHERE user_id = %s
-            ) AND date >= %s
-            ORDER BY account_id ASC, date ASC
-        """, (user_id, start_date))
-        ca_balances_m = [
-            {
-                'id': row[0],
-                'account_id': row[1],
-                'date': row[2],
-                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
-                'balance': float(row[4]) if row[4] is not None else 0.0
-            }
-            for row in cursor.fetchall()
-        ]
-
-        conn.close()
-        return jsonify({
-            "status": "success",
-            "updated_ca_balances_d": ca_balances_d,
-            "updated_ca_balances": ca_balances,
-            "updated_ca_balances_m": ca_balances_m
-        })
-
-    except mysql.connector.Error as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/dashboard-d/get_categories', methods=['GET'])
-@login_required
-def get_dashboard_d_categories():
-    entry_type = request.args.get('type')  # 'income' or 'expense'
-
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    if entry_type == 'income':
-        cursor.execute("""
-            SELECT id, name, is_auto_adjustment FROM income_categories
-            WHERE user_id = %s AND name != 'Starting Balance'
-            ORDER BY display_order DESC
-        """, (current_user.id,))
-    elif entry_type == 'expense':
-        cursor.execute("""
-            SELECT id, name, is_auto_adjustment FROM expense_categories
-            WHERE user_id = %s
-            ORDER BY display_order DESC
-        """, (current_user.id,))
-    else:
-        conn.close()
-        return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
-
-    categories = cursor.fetchall()
-    conn.close()
-
-    return jsonify({'status': 'success', 'categories': categories}), 200
-
-
 
 @app.route('/dashboard-d/add_entry', methods=['POST'])
 @login_required
@@ -2153,7 +1485,912 @@ def get_dashboard_d_data():
         "c_expense_entries": c_expense_entries
     })
 
-################################## Dashboard #############################################
+############################################################################################
+############################### TOTALS, REMAINDERS, BALANCES ###############################
+############################################################################################
+
+def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
+    conn = get_db_connection()
+    cursor = conn.cursor(buffered=True)
+    cursor.execute("""
+        SELECT date FROM totals_remainders_d
+        WHERE user_id = %s AND date >= %s
+        ORDER BY date ASC
+    """, (user_id, start_date))
+    all_dates = [row[0] for row in cursor.fetchall()]
+
+    prev_date = start_date - timedelta(days=1)
+    cursor.execute("""
+        SELECT remainder FROM totals_remainders_d
+        WHERE user_id = %s AND date = %s
+    """, (user_id, prev_date))
+    prev_remainder_row = cursor.fetchone()
+    last_day_remainder = float(prev_remainder_row[0]) if prev_remainder_row else 0.0
+
+    # Fetch all income for the range
+    cursor.execute("""
+        SELECT ie.date, SUM(ie.amount)
+        FROM income_entries ie
+        JOIN income_categories ic ON ie.category_id = ic.id
+        WHERE ic.user_id = %s AND ie.date >= %s
+        GROUP BY ie.date
+    """, (user_id, start_date))
+    income_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
+
+    # Fetch all expenses for the range
+    cursor.execute("""
+        SELECT ee.date, SUM(ee.amount)
+        FROM expense_entries ee
+        JOIN expense_categories ec ON ee.category_id = ec.id
+        WHERE ec.user_id = %s AND ee.date >= %s
+        GROUP BY ee.date
+    """, (user_id, start_date))
+    expense_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
+
+    for current_date in all_dates:
+        total_income = income_by_date.get(current_date, 0) + last_day_remainder
+        total_expenses = expense_by_date.get(current_date, 0)
+
+        remainder = total_income - total_expenses
+
+        cursor.execute("""
+            INSERT INTO totals_remainders_d (user_id, date, total_income, total_expenses, remainder, last_day_remainder)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                total_income = VALUES(total_income),
+                total_expenses = VALUES(total_expenses),
+                remainder = VALUES(remainder),
+                last_day_remainder = VALUES(last_day_remainder)
+        """, (user_id, current_date, total_income, total_expenses, remainder, last_day_remainder))
+
+        last_day_remainder = remainder
+        date_to_remainder[current_date] = remainder
+
+    conn.commit()
+    conn.close()
+
+def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
+    conn = get_db_connection()
+    cursor = conn.cursor(buffered=True)
+
+    # Get all relevant Fridays (or week starts) from totals_remainders
+    cursor.execute("""
+        SELECT date FROM totals_remainders
+        WHERE user_id = %s AND date >= %s
+        ORDER BY date ASC
+    """, (user_id, start_date))
+    all_week_dates = [row[0] for row in cursor.fetchall()]
+
+    # Fetch all income and expense entries in one query each
+    cursor.execute("""
+        SELECT ie.date, ie.amount
+        FROM income_entries ie
+        JOIN income_categories ic ON ie.category_id = ic.id
+        WHERE ic.user_id = %s AND ie.date >= %s
+    """, (user_id, start_date))
+    income_entries = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT ee.date, ee.amount
+        FROM expense_entries ee
+        JOIN expense_categories ec ON ee.category_id = ec.id
+        WHERE ec.user_id = %s AND ee.date >= %s
+    """, (user_id, start_date))
+    expense_entries = cursor.fetchall()
+
+    # Helper to get week range for a given week date
+    def get_week_range(week_date):
+        if goofy_week_mode:
+            # Goofy: week starts Friday, ends Thursday
+            week_start = week_date
+            week_end = week_start + timedelta(days=6)
+        else:
+            # Normal: week ends Friday, starts Saturday before
+            week_end = week_date
+            week_start = week_end - timedelta(days=6)
+        return week_start, week_end
+
+    for week_date in all_week_dates:
+        week_start, week_end = get_week_range(week_date)
+
+        # Sum income for this week
+        total_income = sum(
+            float(amount)
+            for entry_date, amount in income_entries
+            if week_start <= entry_date <= week_end
+        )
+
+        # Sum expenses for this week
+        total_expenses = sum(
+            float(amount)
+            for entry_date, amount in expense_entries
+            if week_start <= entry_date <= week_end
+        )
+
+        # Get last week's remainder
+        prev_week_date = week_date - timedelta(days=7)
+        last_week_remainder = date_to_remainder.get(prev_week_date, 0)
+
+        # Add last week's remainder to income
+        total_income_with_remainder = total_income + float(last_week_remainder)
+        week_remainder = total_income_with_remainder - total_expenses
+
+        cursor.execute("""
+            INSERT INTO totals_remainders (user_id, date, total_income, total_expenses, remainder, last_week_remainder)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                total_income = VALUES(total_income),
+                total_expenses = VALUES(total_expenses),
+                remainder = VALUES(remainder),
+                last_week_remainder = VALUES(last_week_remainder)
+        """, (user_id, week_date, total_income_with_remainder, total_expenses, week_remainder, last_week_remainder))
+
+        # Update date_to_remainder for next week
+        date_to_remainder[week_date] = week_remainder
+
+    conn.commit()
+    conn.close()
+
+def update_monthly_totals(user_id, start_date, date_to_remainder):
+    conn = get_db_connection()
+    cursor = conn.cursor(buffered=True)
+
+    # Get all relevant dates from totals_remainders_d
+    cursor.execute("""
+        SELECT date FROM totals_remainders_d
+        WHERE user_id = %s AND date >= %s
+        ORDER BY date ASC
+    """, (user_id, start_date))
+    all_dates = [row[0] for row in cursor.fetchall()]
+
+    if not all_dates:
+        conn.close()
+        return
+
+    # Group dates by month
+    months = set((d.year, d.month) for d in all_dates)
+    for year, month in sorted(months):
+        # Get all dates in this month
+        month_dates = [d for d in all_dates if d.year == year and d.month == month]
+        if not month_dates:
+            continue
+        first_day = min(month_dates)
+        last_day = max(month_dates)
+
+        # Sum income and expenses for the month from entries
+        cursor.execute("""
+            SELECT COALESCE(SUM(ie.amount), 0)
+            FROM income_entries ie
+            JOIN income_categories ic ON ie.category_id = ic.id
+            WHERE ic.user_id = %s AND ie.date BETWEEN %s AND %s
+        """, (user_id, first_day, last_day))
+        total_income = cursor.fetchone()[0]
+
+        cursor.execute("""
+            SELECT COALESCE(SUM(ee.amount), 0)
+            FROM expense_entries ee
+            JOIN expense_categories ec ON ee.category_id = ec.id
+            WHERE ec.user_id = %s AND ee.date BETWEEN %s AND %s
+        """, (user_id, first_day, last_day))
+        total_expenses = cursor.fetchone()[0]
+
+        # Get last month's remainder
+        prev_month = (month - 1) or 12
+        prev_year = year if month > 1 else year - 1
+        cursor.execute("""
+            SELECT remainder FROM totals_remainders_m
+            WHERE user_id = %s AND YEAR(date) = %s AND MONTH(date) = %s
+            ORDER BY date DESC LIMIT 1
+        """, (user_id, prev_year, prev_month))
+        prev_remainder_row = cursor.fetchone()
+        last_month_remainder = float(prev_remainder_row[0]) if prev_remainder_row else 0.0
+
+        # Include last month's remainder in total_income (like weekly logic)
+        total_income_with_remainder = float(total_income) + last_month_remainder
+        remainder = total_income_with_remainder - float(total_expenses)
+
+        # Find the last day of the month
+        import calendar
+        last_day_of_month = date(year, month, calendar.monthrange(year, month)[1])
+
+        cursor.execute("""
+            INSERT INTO totals_remainders_m (user_id, date, total_income, total_expenses, remainder, last_month_remainder)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                total_income = VALUES(total_income),
+                total_expenses = VALUES(total_expenses),
+                remainder = VALUES(remainder),
+                last_month_remainder = VALUES(last_month_remainder)
+        """, (user_id, last_day_of_month, total_income_with_remainder, total_expenses, remainder, last_month_remainder))
+
+    conn.commit()
+    conn.close()
+
+def update_daily_savings_for_savings_category(user_id, start_date):
+    conn = get_db_connection()
+    cursor = conn.cursor(buffered=True)
+
+    # Get member_since and starting_savings for this user
+    cursor.execute("SELECT member_since, starting_savings FROM users WHERE id = %s", (user_id,))
+    user_row = cursor.fetchone()
+    if user_row and user_row[0]:
+        member_since = user_row[0]
+        starting_savings = float(user_row[1]) if user_row[1] is not None else 0.0
+    else:
+        member_since = start_date
+        starting_savings = 0.0
+
+    # Get the "Savings" income and expense category IDs for this user
+    cursor.execute("""
+        SELECT id FROM income_categories WHERE user_id = %s AND name = 'Savings'
+    """, (user_id,))
+    income_savings_row = cursor.fetchone()
+    income_savings_id = income_savings_row[0] if income_savings_row else None
+
+    cursor.execute("""
+        SELECT id FROM expense_categories WHERE user_id = %s AND name = 'Savings'
+    """, (user_id,))
+    expense_savings_row = cursor.fetchone()
+    expense_savings_id = expense_savings_row[0] if expense_savings_row else None
+
+    if not income_savings_id and not expense_savings_id:
+        conn.close()
+        return  # No savings categories found
+
+    # Get all dates to update, in order
+    cursor.execute("""
+        SELECT date FROM totals_remainders_d
+        WHERE user_id = %s AND date >= %s
+        ORDER BY date ASC
+    """, (user_id, start_date))
+    all_dates = [row[0] for row in cursor.fetchall()]
+
+    # Get previous day's savings
+    prev_date = start_date - timedelta(days=1)
+    cursor.execute("""
+        SELECT amount FROM savings_entries
+        WHERE user_id = %s AND date = %s
+    """, (user_id, prev_date))
+    prev_savings_row = cursor.fetchone()
+    last_savings = float(prev_savings_row[0]) if prev_savings_row else 0.0
+
+    for current_date in all_dates:
+        # Sum income for the date (Savings category only)
+        total_income = 0.0
+        if income_savings_id:
+            cursor.execute("""
+                SELECT COALESCE(SUM(amount), 0)
+                FROM income_entries
+                WHERE category_id = %s AND date = %s
+            """, (income_savings_id, current_date))
+            total_income = float(cursor.fetchone()[0])
+
+        # Sum expenses for the date (Savings category only)
+        total_expenses = 0.0
+        if expense_savings_id:
+            cursor.execute("""
+                SELECT COALESCE(SUM(amount), 0)
+                FROM expense_entries
+                WHERE category_id = %s AND date = %s
+            """, (expense_savings_id, current_date))
+            total_expenses = float(cursor.fetchone()[0])
+
+        # Only add starting_savings on the member_since date
+        if current_date == member_since:
+            savings = last_savings + total_expenses - total_income + starting_savings
+        else:
+            savings = last_savings + total_expenses - total_income
+
+        # Insert or update savings_entries for this date
+        cursor.execute("""
+            INSERT INTO savings_entries (user_id, date, amount)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE amount = VALUES(amount)
+        """, (user_id, current_date, savings))
+
+        last_savings = savings
+
+    conn.commit()
+    conn.close()
+
+def update_daily_ca_totals(user_id, start_date):
+    conn = get_db_connection()
+    cursor = conn.cursor(buffered=True)
+
+    cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
+    account_ids = [row[0] for row in cursor.fetchall()]
+    if not account_ids:
+        conn.close()
+        return
+
+    for account_id in account_ids:
+        cursor.execute("""
+            SELECT date FROM c_a_balances_d
+            WHERE account_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (account_id, start_date))
+        all_dates = [row[0] for row in cursor.fetchall()]
+
+        prev_date = start_date - timedelta(days=1)
+        cursor.execute("""
+            SELECT balance FROM c_a_balances_d
+            WHERE account_id = %s AND date = %s
+        """, (account_id, prev_date))
+        prev_balance_row = cursor.fetchone()
+        last_day_balance = float(prev_balance_row[0]) if prev_balance_row and prev_balance_row[0] is not None else 0.0
+
+        # Get all c_expense_entries for this account, grouped by date
+        cursor.execute("""
+            SELECT cee.date, SUM(cee.amount)
+            FROM c_expense_entries cee
+            JOIN c_expense_categories cec ON cee.category_id = cec.id
+            WHERE cec.account_id = %s AND cee.date >= %s
+            GROUP BY cee.date
+        """, (account_id, start_date))
+        expense_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
+
+        # Get all payments for this account, grouped by date
+        cursor.execute("""
+            SELECT date, SUM(amount) FROM c_payment_entries
+            WHERE account_id = %s AND date >= %s
+            GROUP BY date
+        """, (account_id, start_date))
+        payments_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
+
+        for current_date in all_dates:
+            total_expenses = expense_by_date.get(current_date, 0.0)
+            total_payments = payments_by_date.get(current_date, 0.0)
+            balance = last_day_balance + total_expenses - total_payments
+
+            cursor.execute("""
+                INSERT INTO c_a_balances_d (account_id, date, total_expenses, total_payments, balance)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    total_expenses = VALUES(total_expenses),
+                    total_payments = VALUES(total_payments),
+                    balance = VALUES(balance)
+            """, (account_id, current_date, total_expenses, total_payments, balance))
+
+            last_day_balance = balance
+
+    conn.commit()
+    conn.close()
+
+def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
+    conn = get_db_connection()
+    cursor = conn.cursor(buffered=True)
+
+    cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
+    account_ids = [row[0] for row in cursor.fetchall()]
+    if not account_ids:
+        conn.close()
+        return
+
+    for account_id in account_ids:
+        cursor.execute("""
+            SELECT date FROM c_a_balances
+            WHERE account_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (account_id, start_date))
+        all_week_dates = [row[0] for row in cursor.fetchall()]
+
+        # Build a mapping of week date to all dates in that week
+        week_map = {}
+        for week_date in all_week_dates:
+            if goofy_week_mode:
+                # Goofy: week starts Friday, ends Thursday
+                week_start = week_date
+                week_end = week_start + timedelta(days=6)
+            else:
+                # Normal: week ends Friday, starts Saturday before
+                week_end = week_date
+                week_start = week_end - timedelta(days=6)
+            week_map[week_date] = (week_start, week_end)
+
+        # Sum all expenses for each week
+        week_expenses = {}
+        for week_date, (week_start, week_end) in week_map.items():
+            cursor.execute("""
+                SELECT COALESCE(SUM(cee.amount), 0)
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
+            """, (account_id, week_start, week_end))
+            week_expenses[week_date] = float(cursor.fetchone()[0])
+
+        # Sum all payments for each week
+        week_payments = {}
+        for week_date, (week_start, week_end) in week_map.items():
+            cursor.execute("""
+                SELECT COALESCE(SUM(amount), 0)
+                FROM c_payment_entries
+                WHERE account_id = %s AND date BETWEEN %s AND %s
+            """, (account_id, week_start, week_end))
+            week_payments[week_date] = float(cursor.fetchone()[0])
+
+        for week_date, (week_start, week_end) in week_map.items():
+            prev_week_date = week_date - timedelta(days=7)
+            cursor.execute("""
+                SELECT balance FROM c_a_balances
+                WHERE account_id = %s AND date = %s
+            """, (account_id, prev_week_date))
+            prev_balance_row = cursor.fetchone()
+            last_week_balance = float(prev_balance_row[0]) if prev_balance_row and prev_balance_row[0] is not None else 0.0
+
+            total_expenses = week_expenses.get(week_date, 0.0)
+            total_payments = week_payments.get(week_date, 0.0)
+            balance = last_week_balance + total_expenses - total_payments
+            cursor.execute("""
+                INSERT INTO c_a_balances (account_id, date, total_expenses, total_payments, balance)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    total_expenses = VALUES(total_expenses),
+                    total_payments = VALUES(total_payments),
+                    balance = VALUES(balance)
+            """, (account_id, week_date, total_expenses, total_payments, balance))
+
+    conn.commit()
+    conn.close()
+
+def update_monthly_ca_totals(user_id, start_date):
+    conn = get_db_connection()
+    cursor = conn.cursor(buffered=True)
+
+    cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
+    account_ids = [row[0] for row in cursor.fetchall()]
+    if not account_ids:
+        conn.close()
+        return
+
+    for account_id in account_ids:
+        cursor.execute("""
+            SELECT date FROM c_a_balances_m
+            WHERE account_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (account_id, start_date))
+        all_months = [row[0] for row in cursor.fetchall()]
+
+        # Build a mapping of month-end date to all dates in that month
+        month_map = {}
+        for last_day in all_months:
+            month_start = last_day.replace(day=1)
+            month_map[last_day] = (month_start, last_day)
+
+        # Sum all expenses for each month
+        month_expenses = {}
+        for last_day, (month_start, month_end) in month_map.items():
+            cursor.execute("""
+                SELECT COALESCE(SUM(cee.amount), 0)
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
+            """, (account_id, month_start, month_end))
+            month_expenses[last_day] = float(cursor.fetchone()[0])
+
+        # Sum all payments for each month
+        month_payments = {}
+        for last_day, (month_start, month_end) in month_map.items():
+            cursor.execute("""
+                SELECT COALESCE(SUM(amount), 0)
+                FROM c_payment_entries
+                WHERE account_id = %s AND date BETWEEN %s AND %s
+            """, (account_id, month_start, month_end))
+            month_payments[last_day] = float(cursor.fetchone()[0])
+
+        for last_day in all_months:
+            # Always fetch previous month's last day balance for each month
+            if last_day.month == 1:
+                prev_year = last_day.year - 1
+                prev_month = 12
+            else:
+                prev_year = last_day.year
+                prev_month = last_day.month - 1
+            prev_last_day = date(prev_year, prev_month, calendar.monthrange(prev_year, prev_month)[1])
+            cursor.execute("""
+                SELECT balance FROM c_a_balances_m
+                WHERE account_id = %s AND date = %s
+            """, (account_id, prev_last_day))
+            prev_balance_row = cursor.fetchone()
+            last_month_balance = float(prev_balance_row[0]) if prev_balance_row and prev_balance_row[0] is not None else 0.0
+
+            total_expenses = month_expenses.get(last_day, 0.0)
+            total_payments = month_payments.get(last_day, 0.0)
+            balance = last_month_balance + total_expenses - total_payments
+            cursor.execute("""
+                INSERT INTO c_a_balances_m (account_id, date, total_expenses, total_payments, balance)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    total_expenses = VALUES(total_expenses),
+                    total_payments = VALUES(total_payments),
+                    balance = VALUES(balance)
+            """, (account_id, last_day, total_expenses, total_payments, balance))
+
+    conn.commit()
+    conn.close()
+
+@app.route('/save_totals_remainders_d', methods=['POST'])
+@login_required
+def save_totals_remainders_d():
+    try:
+        data = request.get_json(silent=True) or {}
+        start_date_str = data.get('start_date')
+        user_id = current_user.id
+
+        # Fetch goofy_week_mode for the current user
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+        goofy_week_mode = bool(cursor.fetchone()[0])
+        conn.close()
+
+        # Determine the starting date for incremental update
+        if start_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            except Exception:
+                return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
+        else:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT MIN(date) FROM totals_remainders_d WHERE user_id = %s", (user_id,))
+            min_date_row = cursor.fetchone()
+            start_date = min_date_row[0] if min_date_row and min_date_row[0] else date.today()
+            conn.close()
+
+        date_to_remainder = {}
+
+        # Run daily, weekly, and monthly updates
+        update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
+        update_daily_savings_for_savings_category(user_id, start_date)
+        update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
+        update_monthly_totals(user_id, start_date, date_to_remainder)
+
+        # Prepare the response: for each date, fetch last_week_remainder from totals_remainders table
+        conn = get_db_connection()
+        cursor = conn.cursor(buffered=True)
+        cursor.execute("""
+            SELECT date FROM totals_remainders_d
+            WHERE user_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (user_id, start_date))
+        all_dates = [row[0] for row in cursor.fetchall()]
+
+        results = []
+        for current_date in all_dates:
+            # Find the most recent previous Friday
+            if goofy_week_mode:
+                prev_friday = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+            else:
+                prev_friday = current_date - timedelta(days=7)
+
+            cursor.execute("""
+                SELECT remainder FROM totals_remainders
+                WHERE user_id = %s AND date = %s
+            """, (user_id, prev_friday))
+            last_week_remainder_row = cursor.fetchone()
+            last_week_remainder = float(last_week_remainder_row[0]) if last_week_remainder_row else 0.0
+
+            cursor.execute("""
+                SELECT total_income, total_expenses, remainder, last_day_remainder
+                FROM totals_remainders_d
+                WHERE user_id = %s AND date = %s
+            """, (user_id, current_date))
+            row = cursor.fetchone()
+            if not row:
+                continue
+
+            result = {
+                'date': current_date,
+                'total_income': float(row[0]),
+                'total_expenses': float(row[1]),
+                'remainder': float(row[2]),
+                'last_day_remainder': float(row[3]),
+                'last_week_remainder': float(last_week_remainder)
+            }
+            results.append(result)
+
+        # Fetch updated monthly totals
+        cursor.execute("""
+            SELECT date, total_income, total_expenses, remainder, last_month_remainder
+            FROM totals_remainders_m
+            WHERE user_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (user_id, start_date))
+        monthly_results = [
+            {
+                'date': row[0],
+                'total_income': float(row[1]),
+                'total_expenses': float(row[2]),
+                'remainder': float(row[3]),
+                'last_month_remainder': float(row[4])
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # --- Fetch updated savings entries ---
+        cursor.execute("""
+            SELECT date, amount FROM savings_entries
+            WHERE user_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (user_id, start_date))
+        savings_entries = [
+            {'date': row[0], 'amount': float(row[1])}
+            for row in cursor.fetchall()
+        ]
+
+        conn.close()
+        return jsonify({
+            "status": "success",
+            "updated_totals_remainders": results,
+            "updated_monthly_totals_remainders": monthly_results,
+            "updated_savings_entries": savings_entries
+        })
+
+    except mysql.connector.Error as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
+@app.route('/save_ca_daily_balance', methods=['POST'])
+@login_required
+def save_ca_daily_balance():
+    try:
+        data = request.get_json(silent=True) or {}
+        start_date_str = data.get('start_date')
+        user_id = current_user.id
+
+        # Fetch goofy_week_mode for the current user
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+        goofy_week_mode = bool(cursor.fetchone()[0])
+        conn.close()
+
+        # Determine the starting date for incremental update
+        if start_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            except Exception:
+                return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
+        else:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT MIN(date) FROM c_a_balances_d
+                WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+            """, (user_id,))
+            min_date_row = cursor.fetchone()
+            start_date = min_date_row[0] if min_date_row and min_date_row[0] else date.today()
+            conn.close()
+
+        # Update CA balances (daily, weekly, monthly)
+        update_daily_ca_totals(user_id, start_date)
+        update_weekly_ca_totals(user_id, start_date, goofy_week_mode)  # <-- Pass goofy_week_mode here
+        update_monthly_ca_totals(user_id, start_date)
+
+        # Fetch updated daily CA balances
+        conn = get_db_connection()
+        cursor = conn.cursor(buffered=True)
+        cursor.execute("""
+            SELECT * FROM c_a_balances_d
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            ) AND date >= %s
+            ORDER BY account_id ASC, date ASC
+        """, (user_id, start_date))
+        ca_balances_d = [
+            {
+                'id': row[0],
+                'account_id': row[1],
+                'date': row[2],
+                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
+                'balance': float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # Fetch updated weekly CA balances
+        cursor.execute("""
+            SELECT * FROM c_a_balances
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            ) AND date >= %s
+            ORDER BY account_id ASC, date ASC
+        """, (user_id, start_date))
+        ca_balances = [
+            {
+                'id': row[0],
+                'account_id': row[1],
+                'date': row[2],
+                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
+                'balance': float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # Fetch updated monthly CA balances
+        cursor.execute("""
+            SELECT * FROM c_a_balances_m
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            ) AND date >= %s
+            ORDER BY account_id ASC, date ASC
+        """, (user_id, start_date))
+        ca_balances_m = [
+            {
+                'id': row[0],
+                'account_id': row[1],
+                'date': row[2],
+                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
+                'balance': float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in cursor.fetchall()
+        ]
+
+        conn.close()
+        return jsonify({
+            "status": "success",
+            "updated_ca_balances_d": ca_balances_d,
+            "updated_ca_balances": ca_balances,
+            "updated_ca_balances_m": ca_balances_m
+        })
+
+    except mysql.connector.Error as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
+@app.route('/move_entry_d', methods=['POST'])
+@login_required
+def move_entry_d():
+    data = request.get_json()
+    entry_id = data.get('entry_id')
+    new_date = data.get('new_date')
+    entry_type = data.get('type')  # 'income', 'expense', or 'ca'
+
+    if not entry_id or not new_date or not entry_type:
+        return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        if entry_type == 'income':
+            cursor.execute("""
+                SELECT ie.category_id
+                FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ie.id = %s AND ic.user_id = %s
+            """, (entry_id, current_user.id))
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
+            category_id = row['category_id']
+
+            cursor.execute("SELECT amount FROM income_entries WHERE id = %s", (entry_id,))
+            amount_row = cursor.fetchone()
+            amount = amount_row['amount'] if amount_row else 0
+
+            cursor.execute("""
+                SELECT id, amount FROM income_entries
+                WHERE category_id = %s AND date = %s
+            """, (category_id, new_date))
+            existing = cursor.fetchone()
+
+            if existing:
+                new_amount = existing['amount'] + amount
+                cursor.execute("UPDATE income_entries SET amount = %s WHERE id = %s", (new_amount, existing['id']))
+                cursor.execute("DELETE FROM income_entries WHERE id = %s", (entry_id,))
+            else:
+                cursor.execute("UPDATE income_entries SET date = %s WHERE id = %s", (new_date, entry_id))
+
+        elif entry_type == 'expense':
+            cursor.execute("""
+                SELECT ee.category_id, ec.is_credit_account, ec.name
+                FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ee.id = %s AND ec.user_id = %s
+            """, (entry_id, current_user.id))
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
+            category_id = row['category_id']
+            is_credit = row['is_credit_account']
+            payment_category_name = row['name']
+
+            cursor.execute("SELECT amount, date FROM expense_entries WHERE id = %s", (entry_id,))
+            amount_row = cursor.fetchone()
+            amount = amount_row['amount'] if amount_row else 0
+            old_date = amount_row['date'] if amount_row else None
+
+            cursor.execute("""
+                SELECT id, amount FROM expense_entries
+                WHERE category_id = %s AND date = %s
+            """, (category_id, new_date))
+            existing = cursor.fetchone()
+
+            if existing:
+                new_amount = existing['amount'] + amount
+                cursor.execute("UPDATE expense_entries SET amount = %s WHERE id = %s", (new_amount, existing['id']))
+                cursor.execute("DELETE FROM expense_entries WHERE id = %s", (entry_id,))
+            else:
+                cursor.execute("UPDATE expense_entries SET date = %s WHERE id = %s", (new_date, entry_id))
+
+            # If is_credit_account, update c_payment_entries and CA balances
+            if is_credit == 1:
+                cursor.execute("""
+                    SELECT ca.id AS account_id
+                    FROM credit_accounts ca
+                    WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
+                    LIMIT 1
+                """, (current_user.id, payment_category_name))
+                account_row = cursor.fetchone()
+                if account_row:
+                    account_id = account_row['account_id']
+                    # Find the payment entry for the old date
+                    cursor.execute("""
+                        SELECT id FROM c_payment_entries
+                        WHERE account_id = %s AND date = %s
+                    """, (account_id, old_date))
+                    payment_entry = cursor.fetchone()
+                    if payment_entry:
+                        # Just update the date to the new date
+                        cursor.execute("""
+                            UPDATE c_payment_entries SET date = %s WHERE id = %s
+                        """, (new_date, payment_entry['id']))
+                    else:
+                        # If not found, insert a new payment entry at the new date
+                        cursor.execute("""
+                            INSERT INTO c_payment_entries (account_id, date, amount, processed)
+                            VALUES (%s, %s, %s, 1)
+                        """, (account_id, new_date, amount))
+
+        elif entry_type == 'ca':
+            cursor.execute("""
+                SELECT cee.category_id
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE cee.id = %s AND ca.user_id = %s
+            """, (entry_id, current_user.id))
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
+            category_id = row['category_id']
+
+            cursor.execute("SELECT amount FROM c_expense_entries WHERE id = %s", (entry_id,))
+            amount_row = cursor.fetchone()
+            amount = amount_row['amount'] if amount_row else 0
+
+            cursor.execute("""
+                SELECT id, amount FROM c_expense_entries
+                WHERE category_id = %s AND date = %s
+            """, (category_id, new_date))
+            existing = cursor.fetchone()
+
+            if existing:
+                new_amount = existing['amount'] + amount
+                cursor.execute("UPDATE c_expense_entries SET amount = %s WHERE id = %s", (new_amount, existing['id']))
+                cursor.execute("DELETE FROM c_expense_entries WHERE id = %s", (entry_id,))
+            else:
+                cursor.execute("UPDATE c_expense_entries SET date = %s WHERE id = %s", (new_date, entry_id))
+
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
+
+        conn.commit()
+        save_ca_daily_balance()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+##############################################################################
+############################### DASHBOARD WEEK ###############################
+##############################################################################
+
 @app.route('/delete_income_category', methods=['POST'])
 @login_required
 def delete_income_category():
@@ -3289,8 +3526,164 @@ def hide_ca_category():
     conn.close()
     return jsonify({'status': 'success'})
 
+@app.route('/delete-week-entry', methods=['POST'])
+@login_required
+def delete_week_entry():
+    from datetime import datetime
+    data = request.get_json()
+    category_id = data.get('category_id')
+    entry_type = data.get('type')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    friday_date = data.get('friday_date')  # You may need to pass this from frontend
 
-################################## Dashboard 3 Month ##########################################
+    if not all([category_id, entry_type, start_date, end_date]):
+        return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # Determine the correct table for deletion
+    if entry_type == 'income':
+        table_name = 'income_entries'
+        category_table = 'income_categories'
+    elif entry_type == 'expense':
+        table_name = 'expense_entries'
+        category_table = 'expense_categories'
+    elif entry_type == 'ca':
+        table_name = 'c_expense_entries'
+        category_table = 'c_expense_categories'
+    else:
+        conn.close()
+        return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
+
+    # Optionally, check that the category_id exists in the correct category table
+    cursor.execute(f"SELECT * FROM {category_table} WHERE id = %s", (category_id,))
+    cat_row = cursor.fetchone()
+
+    # Delete all entries for this category between start_date and end_date
+    cursor.execute(
+        f"DELETE FROM {table_name} WHERE category_id = %s AND date BETWEEN %s AND %s",
+        (category_id, start_date, end_date)
+    )
+
+    ca_triggered = False
+    # If this is an expense category and is_credit_account=1, delete payment in c_payment_entries for the full range
+    if entry_type == 'expense' and cat_row and cat_row.get('is_credit_account', 0) == 1:
+        payment_category_name = cat_row['name']
+        cursor.execute("""
+            SELECT ca.id AS account_id
+            FROM credit_accounts ca
+            WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
+            LIMIT 1
+        """, (current_user.id, payment_category_name))
+        account_row = cursor.fetchone()
+        if account_row:
+            account_id = account_row['account_id']
+            # Delete payment entries from c_payment_entries for this account and date range
+            cursor.execute("""
+                DELETE FROM c_payment_entries
+                WHERE account_id = %s AND date BETWEEN %s AND %s
+            """, (account_id, start_date, end_date))
+            ca_triggered = True
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    # If a CA payment was updated, trigger CA balance recalculation
+    if ca_triggered:
+        save_ca_daily_balance()
+
+    return jsonify({'status': 'success'})
+
+@app.route('/update-week-entry', methods=['POST'])
+@login_required
+def update_week_entry():
+    data = request.get_json()
+    entry_type = data.get('type')
+    category_id = data.get('category_id')
+    amount = data.get('amount')
+    friday_date = data.get('friday_date')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+
+    if not category_id or not friday_date or amount is None or not entry_type or not start_date or not end_date:
+        return jsonify({"status": "error", "message": "Missing required parameters"}), 400
+
+    # Choose the correct table
+    if entry_type == 'income':
+        table_name = 'income_entries'
+        category_table = 'income_categories'
+    elif entry_type == 'expense':
+        table_name = 'expense_entries'
+        category_table = 'expense_categories'
+    elif entry_type == 'ca':
+        table_name = 'c_expense_entries'
+        category_table = 'c_expense_categories'
+    else:
+        return jsonify({"status": "error", "message": "Invalid entry type"}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # Optionally, check that the category_id exists in the correct category table
+    cursor.execute(f"SELECT * FROM {category_table} WHERE id = %s", (category_id,))
+    cat_row = cursor.fetchone()
+    if not cat_row:
+        return jsonify({"status": "error", "message": "Invalid category_id for this entry type"}), 400
+
+    # Delete all entries for this category between start_date and end_date
+    cursor.execute(
+        f"DELETE FROM {table_name} WHERE category_id = %s AND date BETWEEN %s AND %s",
+        (category_id, start_date, end_date)
+    )
+
+    # Insert the new entry for the friday_date
+    cursor.execute(
+        f"INSERT INTO {table_name} (category_id, date, amount) VALUES (%s, %s, %s)",
+        (category_id, friday_date, amount)
+    )
+
+    # If this is an expense category and is_credit_account=1, add payment record to c_payment_entries and run save_ca_daily_balance_inner
+    ca_triggered = False
+    if entry_type == 'expense' and cat_row.get('is_credit_account', 0) == 1:
+        payment_category_name = cat_row['name']
+        cursor.execute("""
+            SELECT ca.id AS account_id
+            FROM credit_accounts ca
+            WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
+            LIMIT 1
+        """, (current_user.id, payment_category_name))
+        account_row = cursor.fetchone()
+        if account_row:
+            account_id = account_row['account_id']
+            # --- Remove any previous payment entries for this account and date range ---
+            cursor.execute("""
+                DELETE FROM c_payment_entries
+                WHERE account_id = %s AND date BETWEEN %s AND %s
+            """, (account_id, start_date, end_date))
+            # --- Add payment record to c_payment_entries with the new value only ---
+            cursor.execute("""
+                INSERT INTO c_payment_entries (account_id, date, amount, processed)
+                VALUES (%s, %s, %s, 1)
+            """, (account_id, friday_date, amount))
+            ca_triggered = True
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    # If a CA payment was updated, trigger CA balance recalculation
+    if ca_triggered:
+        save_ca_daily_balance()
+
+    return jsonify({"status": "success"})
+
+
+############################################################################################
+############################### DASHBOARD MONTH ############################################
+############################################################################################
 
 @app.route('/dashboard_3m')
 @login_required
@@ -3497,7 +3890,7 @@ def dashboard_3m():
     balance_threshold = user_data['balance_threshold'] if user_data else 0
     member_since = user_data['member_since'] if user_data else None
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
-    landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard'
+    landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard_3m'
 
     return render_template(
         'dashboard_3m.html',
@@ -3716,7 +4109,9 @@ def update_processed_status_month_range():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-################################## Dashboard Month ############################################
+########################################################################################
+############################### DASHBOARD MONTH OVERVIEW ###############################
+########################################################################################
 
 @app.route('/dashboard_m')
 @login_required
@@ -3742,7 +4137,7 @@ def dashboard_m():
     balance_threshold = float(user_data.get('balance_threshold', 0)) if user_data else 0
     member_since = user_data['member_since'] if user_data else None
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
-    landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard'
+    landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard_3m'
 
     # Categories
     cursor.execute("""
@@ -3918,7 +4313,9 @@ def get_dashboard_m_data():
         "savings_entries": savings_entries
     }
 
-################################## Dashboard Year ############################################
+############################################################################################
+############################### DASHBOARD YEAR OVERVIEW ####################################
+############################################################################################
 
 @app.route('/dashboard_y')
 @login_required
@@ -3944,7 +4341,7 @@ def dashboard_y():
     balance_threshold = float(user_data.get('balance_threshold', 0)) if user_data else 0
     member_since = user_data['member_since'] if user_data else None
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
-    landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard'
+    landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard_3m'
 
     # Categories
     cursor.execute("""
@@ -4104,7 +4501,10 @@ def get_dashboard_y_data():
         "savings_entries": savings_entries
     }
 
-################################## Profile #############################################
+############################################################################################
+############################### PROFILE PAGE ###############################################
+############################################################################################
+
 @app.route('/profile', methods=['GET'])
 @login_required
 def profile():
@@ -4138,7 +4538,7 @@ def profile():
     last_name = user_data['last_name'] if user_data else ''
     balance_threshold = int(user_data['balance_threshold']) if user_data and user_data['balance_threshold'] is not None else 0
     goofy_week_mode = user_data['goofy_week_mode'] if user_data else 0
-    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard'
+    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
     starting_balance = int(starting_balance_data['amount']) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
@@ -4191,7 +4591,7 @@ def settings():
     last_name = user_data['last_name'] if user_data else ''
     balance_threshold = int(user_data['balance_threshold']) if user_data and user_data['balance_threshold'] is not None else 0
     goofy_week_mode = user_data['goofy_week_mode'] if user_data else 0
-    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard'
+    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
     starting_balance = int(starting_balance_data['amount']) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
@@ -4564,7 +4964,10 @@ def update_currency_type():
     finally:
         conn.close()
 
-############################# Recurring Income ############################
+################################################################################
+############################### RECURRING INCOME ###############################
+################################################################################
+
 @app.route('/recurring-income')
 @login_required
 def recurring_income():
@@ -4592,7 +4995,7 @@ def recurring_income():
     profile_picture = user_data['profile_picture'] if user_data else None
     first_name = user_data['first_name'] if user_data else ''
     last_name = user_data['last_name'] if user_data else ''
-    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard'
+    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
 
     # Calculate December 31st, 5 years from now
@@ -5083,7 +5486,10 @@ def get_cadence_description(cadence_interval, cadence_unit, weekdays=None, month
     # Fallback for unexpected or custom cadence cases
     return f"Custom Cadence: every {cadence_interval} {cadence_unit}(s)"
 
-################################# Recurring Expense ############################
+####################################################################################
+############################### RECURRING EXPENSES #################################
+####################################################################################
+
 @app.route('/recurring-expense')
 @login_required
 def recurring_expense():
@@ -5111,7 +5517,7 @@ def recurring_expense():
     profile_picture = user_data['profile_picture'] if user_data else None
     first_name = user_data['first_name'] if user_data else ''
     last_name = user_data['last_name'] if user_data else ''
-    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard'
+    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
 
     # Calculate December 31st, 5 years from now
@@ -5601,7 +6007,450 @@ def get_cadence_description(cadence_interval, cadence_unit, weekdays=None, month
     # Fallback for unexpected or custom cadence cases
     return f"Custom Cadence: every {cadence_interval} {cadence_unit}(s)"
 
-################################### Footer ###########################################
+###############################################################################################################
+##################################### RECURRING CREDIT ACCOUNT EXPENSES #######################################
+###############################################################################################################
+
+@app.route('/recurring-ca-expense')
+@login_required
+def recurring_ca_expense():
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # Fetch recurring CA expense records, including no_end_date from c_expense_categories
+    cursor.execute("""
+        SELECT rce.id, rce.category_id, cec.account_id, cec.name as category_name, rce.amount, 
+               rce.cadence_interval, rce.cadence_unit, rce.weekdays, rce.monthly_days, 
+               rce.start_date, rce.end_date, rce.yearly_day, rce.yearly_month,
+               cec.no_end_date
+        FROM recurring_c_expense rce
+        JOIN c_expense_categories cec ON rce.category_id = cec.id
+        JOIN credit_accounts ca ON cec.account_id = ca.id
+        WHERE rce.user_id = %s
+    """, (current_user.id,))
+    recurring_ca_expense_records = cursor.fetchall()
+
+    # Fetch all credit accounts for the current user
+    cursor.execute("""
+        SELECT * FROM credit_accounts
+        WHERE user_id = %s
+        ORDER BY id ASC
+    """, (current_user.id,))
+    credit_accounts = cursor.fetchall()
+
+    # Fetch user profile data
+    cursor.execute("SELECT profile_picture, first_name, last_name, landing_page, currency_type FROM users WHERE id = %s", (current_user.id,))
+    user_data = cursor.fetchone()
+    conn.close()
+
+    profile_picture = user_data['profile_picture'] if user_data else None
+    first_name = user_data['first_name'] if user_data else ''
+    last_name = user_data['last_name'] if user_data else ''
+    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
+    currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
+
+    current_date = date.today()
+    no_end_date = date(current_date.year + 5, 12, 31)
+
+    for record in recurring_ca_expense_records:
+        record['cadence_description'] = get_cadence_description(
+            record['cadence_interval'],
+            record['cadence_unit'],
+            record['weekdays'],
+            record['monthly_days'],
+            record['yearly_day'],
+            record['yearly_month']
+        )
+        if record['end_date'] == no_end_date.strftime('%Y-%m-%d'):
+            record['display_end_date'] = 'No end date'
+        else:
+            record['display_end_date'] = record['end_date']
+
+    return render_template(
+        'recurring_ca_e.html',
+        recurring_ca_expense_records=recurring_ca_expense_records,
+        credit_accounts=credit_accounts,  # <-- Pass this to the template
+        profile_picture=profile_picture,
+        first_name=first_name,
+        last_name=last_name,
+        current_date=current_date,
+        landing_page=landing_page,
+        currency_type=currency_type
+    )
+
+@app.route('/add-recurring-ca-expense', methods=['POST'])
+@login_required
+def add_recurring_ca_expense():
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No data received'}), 400
+
+    account_id = data.get('account_id')
+    category_name = data.get('category_name')
+    amount = data.get('amount')
+    cadence_interval = data.get('cadence_interval')
+    cadence_unit = data.get('cadence_unit')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    weekdays = data.get('weekdays')
+    monthly_days = data.get('monthly_days')
+    yearly_day = data.get('yearly_day')
+    yearly_month = data.get('yearly_month')
+    no_end_date = data.get('no_end_date', 0)
+
+    # Validate the data
+    if not all([account_id, category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
+        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Step 1: Find the current max display order for CA categories for this account
+        cursor.execute("""
+            SELECT COALESCE(MAX(display_order), 0) FROM c_expense_categories WHERE account_id = %s
+        """, (account_id,))
+        max_display_order = cursor.fetchone()[0]
+
+        # Step 2: Insert the new category with the next display order
+        cursor.execute("""
+            INSERT INTO c_expense_categories (account_id, name, display_order, is_recurring, no_end_date)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (account_id, category_name, max_display_order + 1, 1, no_end_date))
+
+        # Get the ID of the newly inserted CA expense category
+        category_id = cursor.lastrowid
+
+        # Step 3: Insert the recurring CA expense record
+        cursor.execute("""
+            INSERT INTO recurring_c_expense 
+            (user_id, category_id, amount, cadence_interval, cadence_unit, weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            current_user.id, category_id, amount, cadence_interval, cadence_unit,
+            ','.join(weekdays) if weekdays else None,
+            ','.join(map(str, monthly_days)) if monthly_days else None,
+            yearly_day if yearly_day else None,
+            yearly_month if yearly_month else None,
+            start_date,
+            end_date
+        ))
+
+        recurring_id = cursor.lastrowid
+        conn.commit()
+
+        # Generate CA expense entries based on the cadence
+        generate_ca_expense_entries(
+            recurring_id, category_id, amount, cadence_interval, cadence_unit,
+            start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
+        )
+
+        return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring CA expense added successfully!'})
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'An error occurred while adding the recurring CA expense: {str(e)}'}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
+def generate_ca_expense_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit, start_date_str, end_date_str, weekdays=None, monthly_days=None, yearly_day=None, yearly_month=None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+    current_date = start_date
+    end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+
+    while current_date <= end_date:
+        delta = None
+
+        if cadence_unit == 'days':
+            cursor.execute("""
+                INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                VALUES (%s, %s, %s, %s)
+            """, (recurring_id, category_id, current_date, amount))
+            delta = timedelta(days=int(cadence_interval))
+
+        elif cadence_unit == 'weeks':
+            for weekday in weekdays:
+                weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
+                weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
+                if start_date <= weekday_date <= end_date:
+                    cursor.execute("""
+                        INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                        VALUES (%s, %s, %s, %s)
+                    """, (recurring_id, category_id, weekday_date, amount))
+            delta = timedelta(weeks=int(cadence_interval))
+
+        elif cadence_unit == 'months':
+            if monthly_days:
+                monthly_days_cleaned = []
+                for day in monthly_days:
+                    if str(day).lower() == 'last day':
+                        monthly_days_cleaned.append('Last Day')
+                    else:
+                        try:
+                            monthly_days_cleaned.append(int(day))
+                        except Exception:
+                            continue
+                year = current_date.year
+                month = current_date.month
+                while True:
+                    for day in monthly_days_cleaned:
+                        try:
+                            if str(day).lower() == 'last day':
+                                day_num = calendar.monthrange(year, month)[1]
+                            else:
+                                day_num = int(day)
+                                last_day_of_month = calendar.monthrange(year, month)[1]
+                                if day_num > last_day_of_month:
+                                    continue
+                            entry_date = date(year=year, month=month, day=day_num)
+                        except Exception:
+                            continue
+                        if entry_date < start_date:
+                            continue
+                        if entry_date > end_date:
+                            continue
+                        cursor.execute("""
+                            INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                            VALUES (%s, %s, %s, %s)
+                        """, (recurring_id, category_id, entry_date, amount))
+                    month += int(cadence_interval)
+                    while month > 12:
+                        month -= 12
+                        year += 1
+                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                        break
+            else:
+                year = current_date.year
+                month = current_date.month
+                while True:
+                    entry_date = date(year=year, month=month, day=1)
+                    if entry_date < start_date:
+                        pass
+                    elif entry_date > end_date:
+                        break
+                    else:
+                        cursor.execute("""
+                            INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                            VALUES (%s, %s, %s, %s)
+                        """, (recurring_id, category_id, entry_date, amount))
+                    month += int(cadence_interval)
+                    while month > 12:
+                        month -= 12
+                        year += 1
+                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                        break
+            break
+
+        elif cadence_unit == 'years':
+            if yearly_day and yearly_month:
+                interval = int(cadence_interval)
+                year = current_date.year
+                while True:
+                    try:
+                        yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
+                    except ValueError:
+                        year += interval
+                        continue
+                    if yearly_entry_date < start_date:
+                        year += interval
+                        continue
+                    if yearly_entry_date > end_date:
+                        break
+                    cursor.execute("""
+                        INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                        VALUES (%s, %s, %s, %s)
+                    """, (recurring_id, category_id, yearly_entry_date, amount))
+                    year += interval
+            else:
+                interval = int(cadence_interval)
+                year = current_date.year
+                while True:
+                    yearly_entry_date = date(year=year, month=1, day=1)
+                    if yearly_entry_date < start_date:
+                        year += interval
+                        continue
+                    if yearly_entry_date > end_date:
+                        break
+                    cursor.execute("""
+                        INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                        VALUES (%s, %s, %s, %s)
+                    """, (recurring_id, category_id, yearly_entry_date, amount))
+                    year += interval
+
+        if delta:
+            current_date += delta
+        else:
+            break
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+@app.route('/delete-recurring-ca-expense', methods=['POST'])
+@login_required
+def delete_recurring_ca_expense():
+    try:
+        data = request.get_json()
+        recurring_id = data.get('recurring_id')
+        if not recurring_id:
+            return jsonify({'status': 'error', 'message': 'Recurring ID not provided.'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get the category_id for this recurring CA expense
+        cursor.execute("""
+            SELECT category_id FROM recurring_c_expense WHERE id = %s AND user_id = %s
+        """, (recurring_id, current_user.id))
+        category = cursor.fetchone()
+        if not category:
+            return jsonify({'status': 'error', 'message': 'Recurring CA expense not found.'}), 404
+        category_id = category[0]
+
+        # Find account_id for this CA category
+        cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (category_id,))
+        account_row = cursor.fetchone()
+        account_id = account_row[0] if account_row else None
+
+        # Find Auto Adjustments CA category for this account
+        cursor.execute("""
+            SELECT id FROM c_expense_categories WHERE account_id = %s AND name = 'Auto Adjustments' LIMIT 1
+        """, (account_id,))
+        auto_adj_row = cursor.fetchone()
+        auto_adj_id = auto_adj_row[0] if auto_adj_row else None
+
+        today = date.today()
+        cursor.execute("""
+            SELECT id, date, amount FROM c_expense_entries
+            WHERE recurring_id = %s AND date < %s
+        """, (recurring_id, today))
+        old_entries = cursor.fetchall()
+        for entry_id, entry_date, amount in old_entries:
+            cursor.execute("""
+                SELECT id, amount FROM c_expense_entries
+                WHERE category_id = %s AND date = %s
+            """, (auto_adj_id, entry_date))
+            auto_entry = cursor.fetchone()
+            if auto_entry:
+                new_amount = auto_entry[1] + amount
+                cursor.execute("""
+                    UPDATE c_expense_entries SET amount = %s, processed = 1 WHERE id = %s
+                """, (new_amount, auto_entry[0]))
+            else:
+                cursor.execute("""
+                    INSERT INTO c_expense_entries (category_id, date, amount, processed)
+                    VALUES (%s, %s, %s, 1)
+                """, (auto_adj_id, entry_date, amount))
+            # Set recurring_id to NULL when moving
+            cursor.execute("UPDATE c_expense_entries SET recurring_id = NULL WHERE id = %s", (entry_id,))
+            cursor.execute("DELETE FROM c_expense_entries WHERE id = %s", (entry_id,))
+
+        # Delete all future entries and the recurring record/category
+        cursor.execute("DELETE FROM c_expense_entries WHERE recurring_id = %s", (recurring_id,))
+        cursor.execute("DELETE FROM recurring_c_expense WHERE id = %s AND user_id = %s", (recurring_id, current_user.id))
+        cursor.execute("DELETE FROM c_expense_categories WHERE id = %s", (category_id,))
+
+        conn.commit()
+        return jsonify({'status': 'success', 'message': 'Recurring CA expense deleted successfully!'})
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': 'An error occurred while deleting the recurring CA expense.'}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route('/update-recurring-ca-expense', methods=['POST'])
+@login_required
+def update_recurring_ca_expense():
+    data = request.get_json()
+    return update_recurring_ca_expense_inner(data, current_user.id)
+
+def update_recurring_ca_expense_inner(data, user_id):
+    conn = None
+    cursor = None
+    try:
+        recurring_id = data.get('recurring_id')
+        amount = data.get('amount')
+        cadence_interval = data.get('cadence_interval')
+        cadence_unit = data.get('cadence_unit')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        weekdays = data.get('weekdays')
+        monthly_days = data.get('monthly_days')
+        yearly_day = data.get('yearly_day')
+        yearly_month = data.get('yearly_month')
+        no_end_date = data.get('no_end_date', 0)
+
+        if not all([recurring_id, amount, cadence_interval, cadence_unit, start_date, end_date]):
+            return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+
+        today = datetime.today().date()
+        if datetime.strptime(start_date, '%Y-%m-%d').date() < today:
+            return jsonify({'status': 'error', 'message': 'Start date cannot be earlier than today'}), 400
+        if datetime.strptime(end_date, '%Y-%m-%d') < datetime.strptime(start_date, '%Y-%m-%d'):
+            return jsonify({'status': 'error', 'message': 'End date cannot be earlier than start date'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Step 1: Fetch the category_id from recurring_c_expense
+        cursor.execute("""
+            SELECT category_id FROM recurring_c_expense WHERE id = %s AND user_id = %s
+        """, (recurring_id, user_id))
+        result = cursor.fetchone()
+        if not result:
+            return jsonify({'status': 'error', 'message': 'Recurring CA expense not found'}), 404
+        category_id = result[0]
+
+        # Step 2: Update the recurring CA expense record in the database
+        cursor.execute("""
+            UPDATE recurring_c_expense
+            SET amount = %s, cadence_interval = %s, cadence_unit = %s, weekdays = %s, monthly_days = %s, yearly_day = %s, yearly_month = %s, start_date = %s, end_date = %s
+            WHERE id = %s AND user_id = %s
+        """, (
+            amount, cadence_interval, cadence_unit,
+            ','.join(weekdays) if weekdays else None,
+            ','.join(map(str, monthly_days)) if monthly_days else None,
+            yearly_day if yearly_day else None,
+            yearly_month if yearly_month else None,
+            start_date, end_date, recurring_id, user_id
+        ))
+
+        # Step 3: Delete old CA expense entries for today and the future related to this recurring record
+        cursor.execute("""
+            DELETE FROM c_expense_entries
+            WHERE recurring_id = %s AND date >= %s
+        """, (recurring_id, today))
+
+        conn.commit()
+
+        # Step 4: Recreate the CA expense entries with the updated details (only for today and future)
+        generate_ca_expense_entries(
+            recurring_id, category_id, amount, cadence_interval, cadence_unit,
+            start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
+        )
+
+        conn.commit()
+
+        return jsonify({'status': 'success', 'message': 'Recurring CA expense updated successfully!'})
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'An error occurred: {str(e)}'}), 500
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
+
+####################################################################################
+##################################### FOOTER #######################################
+####################################################################################
 
 @app.route('/footer_add_entry', methods=['POST'])
 @login_required
@@ -5699,308 +6548,9 @@ def footer_add_entry():
 
     return jsonify({"status": "success"})
 
-@app.route('/update-week-entry', methods=['POST'])
-@login_required
-def update_week_entry():
-    data = request.get_json()
-    entry_type = data.get('type')
-    category_id = data.get('category_id')
-    amount = data.get('amount')
-    friday_date = data.get('friday_date')
-    start_date = data.get('start_date')
-    end_date = data.get('end_date')
-
-    if not category_id or not friday_date or amount is None or not entry_type or not start_date or not end_date:
-        return jsonify({"status": "error", "message": "Missing required parameters"}), 400
-
-    # Choose the correct table
-    if entry_type == 'income':
-        table_name = 'income_entries'
-        category_table = 'income_categories'
-    elif entry_type == 'expense':
-        table_name = 'expense_entries'
-        category_table = 'expense_categories'
-    elif entry_type == 'ca':
-        table_name = 'c_expense_entries'
-        category_table = 'c_expense_categories'
-    else:
-        return jsonify({"status": "error", "message": "Invalid entry type"}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    # Optionally, check that the category_id exists in the correct category table
-    cursor.execute(f"SELECT * FROM {category_table} WHERE id = %s", (category_id,))
-    cat_row = cursor.fetchone()
-    if not cat_row:
-        return jsonify({"status": "error", "message": "Invalid category_id for this entry type"}), 400
-
-    # Delete all entries for this category between start_date and end_date
-    cursor.execute(
-        f"DELETE FROM {table_name} WHERE category_id = %s AND date BETWEEN %s AND %s",
-        (category_id, start_date, end_date)
-    )
-
-    # Insert the new entry for the friday_date
-    cursor.execute(
-        f"INSERT INTO {table_name} (category_id, date, amount) VALUES (%s, %s, %s)",
-        (category_id, friday_date, amount)
-    )
-
-    # If this is an expense category and is_credit_account=1, add payment record to c_payment_entries and run save_ca_daily_balance_inner
-    ca_triggered = False
-    if entry_type == 'expense' and cat_row.get('is_credit_account', 0) == 1:
-        payment_category_name = cat_row['name']
-        cursor.execute("""
-            SELECT ca.id AS account_id
-            FROM credit_accounts ca
-            WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-            LIMIT 1
-        """, (current_user.id, payment_category_name))
-        account_row = cursor.fetchone()
-        if account_row:
-            account_id = account_row['account_id']
-            # --- Remove any previous payment entries for this account and date range ---
-            cursor.execute("""
-                DELETE FROM c_payment_entries
-                WHERE account_id = %s AND date BETWEEN %s AND %s
-            """, (account_id, start_date, end_date))
-            # --- Add payment record to c_payment_entries with the new value only ---
-            cursor.execute("""
-                INSERT INTO c_payment_entries (account_id, date, amount, processed)
-                VALUES (%s, %s, %s, 1)
-            """, (account_id, friday_date, amount))
-            ca_triggered = True
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    # If a CA payment was updated, trigger CA balance recalculation
-    if ca_triggered:
-        save_ca_daily_balance()
-
-    return jsonify({"status": "success"})
-
-@app.route('/delete-week-entry', methods=['POST'])
-@login_required
-def delete_week_entry():
-    from datetime import datetime
-    data = request.get_json()
-    category_id = data.get('category_id')
-    entry_type = data.get('type')
-    start_date = data.get('start_date')
-    end_date = data.get('end_date')
-    friday_date = data.get('friday_date')  # You may need to pass this from frontend
-
-    if not all([category_id, entry_type, start_date, end_date]):
-        return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    # Determine the correct table for deletion
-    if entry_type == 'income':
-        table_name = 'income_entries'
-        category_table = 'income_categories'
-    elif entry_type == 'expense':
-        table_name = 'expense_entries'
-        category_table = 'expense_categories'
-    elif entry_type == 'ca':
-        table_name = 'c_expense_entries'
-        category_table = 'c_expense_categories'
-    else:
-        conn.close()
-        return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
-
-    # Optionally, check that the category_id exists in the correct category table
-    cursor.execute(f"SELECT * FROM {category_table} WHERE id = %s", (category_id,))
-    cat_row = cursor.fetchone()
-
-    # Delete all entries for this category between start_date and end_date
-    cursor.execute(
-        f"DELETE FROM {table_name} WHERE category_id = %s AND date BETWEEN %s AND %s",
-        (category_id, start_date, end_date)
-    )
-
-    ca_triggered = False
-    # If this is an expense category and is_credit_account=1, delete payment in c_payment_entries for the full range
-    if entry_type == 'expense' and cat_row and cat_row.get('is_credit_account', 0) == 1:
-        payment_category_name = cat_row['name']
-        cursor.execute("""
-            SELECT ca.id AS account_id
-            FROM credit_accounts ca
-            WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-            LIMIT 1
-        """, (current_user.id, payment_category_name))
-        account_row = cursor.fetchone()
-        if account_row:
-            account_id = account_row['account_id']
-            # Delete payment entries from c_payment_entries for this account and date range
-            cursor.execute("""
-                DELETE FROM c_payment_entries
-                WHERE account_id = %s AND date BETWEEN %s AND %s
-            """, (account_id, start_date, end_date))
-            ca_triggered = True
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    # If a CA payment was updated, trigger CA balance recalculation
-    if ca_triggered:
-        save_ca_daily_balance()
-
-    return jsonify({'status': 'success'})
-
-@app.route('/move_entry_d', methods=['POST'])
-@login_required
-def move_entry_d():
-    data = request.get_json()
-    entry_id = data.get('entry_id')
-    new_date = data.get('new_date')
-    entry_type = data.get('type')  # 'income', 'expense', or 'ca'
-
-    if not entry_id or not new_date or not entry_type:
-        return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        if entry_type == 'income':
-            cursor.execute("""
-                SELECT ie.category_id
-                FROM income_entries ie
-                JOIN income_categories ic ON ie.category_id = ic.id
-                WHERE ie.id = %s AND ic.user_id = %s
-            """, (entry_id, current_user.id))
-            row = cursor.fetchone()
-            if not row:
-                return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
-            category_id = row['category_id']
-
-            cursor.execute("SELECT amount FROM income_entries WHERE id = %s", (entry_id,))
-            amount_row = cursor.fetchone()
-            amount = amount_row['amount'] if amount_row else 0
-
-            cursor.execute("""
-                SELECT id, amount FROM income_entries
-                WHERE category_id = %s AND date = %s
-            """, (category_id, new_date))
-            existing = cursor.fetchone()
-
-            if existing:
-                new_amount = existing['amount'] + amount
-                cursor.execute("UPDATE income_entries SET amount = %s WHERE id = %s", (new_amount, existing['id']))
-                cursor.execute("DELETE FROM income_entries WHERE id = %s", (entry_id,))
-            else:
-                cursor.execute("UPDATE income_entries SET date = %s WHERE id = %s", (new_date, entry_id))
-
-        elif entry_type == 'expense':
-            cursor.execute("""
-                SELECT ee.category_id, ec.is_credit_account, ec.name
-                FROM expense_entries ee
-                JOIN expense_categories ec ON ee.category_id = ec.id
-                WHERE ee.id = %s AND ec.user_id = %s
-            """, (entry_id, current_user.id))
-            row = cursor.fetchone()
-            if not row:
-                return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
-            category_id = row['category_id']
-            is_credit = row['is_credit_account']
-            payment_category_name = row['name']
-
-            cursor.execute("SELECT amount, date FROM expense_entries WHERE id = %s", (entry_id,))
-            amount_row = cursor.fetchone()
-            amount = amount_row['amount'] if amount_row else 0
-            old_date = amount_row['date'] if amount_row else None
-
-            cursor.execute("""
-                SELECT id, amount FROM expense_entries
-                WHERE category_id = %s AND date = %s
-            """, (category_id, new_date))
-            existing = cursor.fetchone()
-
-            if existing:
-                new_amount = existing['amount'] + amount
-                cursor.execute("UPDATE expense_entries SET amount = %s WHERE id = %s", (new_amount, existing['id']))
-                cursor.execute("DELETE FROM expense_entries WHERE id = %s", (entry_id,))
-            else:
-                cursor.execute("UPDATE expense_entries SET date = %s WHERE id = %s", (new_date, entry_id))
-
-            # If is_credit_account, update c_payment_entries and CA balances
-            if is_credit == 1:
-                cursor.execute("""
-                    SELECT ca.id AS account_id
-                    FROM credit_accounts ca
-                    WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-                    LIMIT 1
-                """, (current_user.id, payment_category_name))
-                account_row = cursor.fetchone()
-                if account_row:
-                    account_id = account_row['account_id']
-                    # Find the payment entry for the old date
-                    cursor.execute("""
-                        SELECT id FROM c_payment_entries
-                        WHERE account_id = %s AND date = %s
-                    """, (account_id, old_date))
-                    payment_entry = cursor.fetchone()
-                    if payment_entry:
-                        # Just update the date to the new date
-                        cursor.execute("""
-                            UPDATE c_payment_entries SET date = %s WHERE id = %s
-                        """, (new_date, payment_entry['id']))
-                    else:
-                        # If not found, insert a new payment entry at the new date
-                        cursor.execute("""
-                            INSERT INTO c_payment_entries (account_id, date, amount, processed)
-                            VALUES (%s, %s, %s, 1)
-                        """, (account_id, new_date, amount))
-
-        elif entry_type == 'ca':
-            cursor.execute("""
-                SELECT cee.category_id
-                FROM c_expense_entries cee
-                JOIN c_expense_categories cec ON cee.category_id = cec.id
-                JOIN credit_accounts ca ON cec.account_id = ca.id
-                WHERE cee.id = %s AND ca.user_id = %s
-            """, (entry_id, current_user.id))
-            row = cursor.fetchone()
-            if not row:
-                return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
-            category_id = row['category_id']
-
-            cursor.execute("SELECT amount FROM c_expense_entries WHERE id = %s", (entry_id,))
-            amount_row = cursor.fetchone()
-            amount = amount_row['amount'] if amount_row else 0
-
-            cursor.execute("""
-                SELECT id, amount FROM c_expense_entries
-                WHERE category_id = %s AND date = %s
-            """, (category_id, new_date))
-            existing = cursor.fetchone()
-
-            if existing:
-                new_amount = existing['amount'] + amount
-                cursor.execute("UPDATE c_expense_entries SET amount = %s WHERE id = %s", (new_amount, existing['id']))
-                cursor.execute("DELETE FROM c_expense_entries WHERE id = %s", (entry_id,))
-            else:
-                cursor.execute("UPDATE c_expense_entries SET date = %s WHERE id = %s", (new_date, entry_id))
-
-        else:
-            return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
-
-        conn.commit()
-        save_ca_daily_balance()
-        return jsonify({'status': 'success'})
-    except Exception as e:
-        conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-############################################## Buds ######################################################
+####################################################################################
+##################################### BUDS #########################################
+####################################################################################
 
 @app.route('/buds')
 @login_required
@@ -6064,7 +6614,7 @@ def buds():
         SELECT landing_page, currency_type FROM users WHERE id = %s
     """, (current_user.id,))
     user_row = cursor.fetchone()
-    landing_page = user_row['landing_page'] if user_row and 'landing_page' in user_row else 'dashboard'
+    landing_page = user_row['landing_page'] if user_row and 'landing_page' in user_row else 'dashboard_3m'
     currency_type = user_row['currency_type'] if user_row and 'currency_type' in user_row else 'USD'
 
     conn.close()
@@ -6743,7 +7293,9 @@ def toggle_bud_active():
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
 
-############################################## Credit Accounts ######################################################
+#############################################################################################
+##################################### CREDIT ACCOUNTS #######################################
+#############################################################################################
 
 @app.route('/credit_accounts')
 @login_required
@@ -6815,7 +7367,7 @@ def credit_accounts():
         SELECT landing_page, currency_type FROM users WHERE id = %s
     """, (current_user.id,))
     user_row = cursor.fetchone()
-    landing_page = user_row['landing_page'] if user_row and 'landing_page' in user_row else 'dashboard'
+    landing_page = user_row['landing_page'] if user_row and 'landing_page' in user_row else 'dashboard_3m'
     currency_type = user_row['currency_type'] if user_row and 'currency_type' in user_row else 'USD'
 
     today_str = date.today().strftime('%Y-%m-%d')
@@ -7072,442 +7624,3 @@ def update_credit_account():
     finally:
         cursor.close()
         conn.close()
-
-################################################## Recurring CA Expense #################################################
-
-@app.route('/recurring-ca-expense')
-@login_required
-def recurring_ca_expense():
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    # Fetch recurring CA expense records, including no_end_date from c_expense_categories
-    cursor.execute("""
-        SELECT rce.id, rce.category_id, cec.account_id, cec.name as category_name, rce.amount, 
-               rce.cadence_interval, rce.cadence_unit, rce.weekdays, rce.monthly_days, 
-               rce.start_date, rce.end_date, rce.yearly_day, rce.yearly_month,
-               cec.no_end_date
-        FROM recurring_c_expense rce
-        JOIN c_expense_categories cec ON rce.category_id = cec.id
-        JOIN credit_accounts ca ON cec.account_id = ca.id
-        WHERE rce.user_id = %s
-    """, (current_user.id,))
-    recurring_ca_expense_records = cursor.fetchall()
-
-    # Fetch all credit accounts for the current user
-    cursor.execute("""
-        SELECT * FROM credit_accounts
-        WHERE user_id = %s
-        ORDER BY id ASC
-    """, (current_user.id,))
-    credit_accounts = cursor.fetchall()
-
-    # Fetch user profile data
-    cursor.execute("SELECT profile_picture, first_name, last_name, landing_page, currency_type FROM users WHERE id = %s", (current_user.id,))
-    user_data = cursor.fetchone()
-    conn.close()
-
-    profile_picture = user_data['profile_picture'] if user_data else None
-    first_name = user_data['first_name'] if user_data else ''
-    last_name = user_data['last_name'] if user_data else ''
-    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard'
-    currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
-
-    current_date = date.today()
-    no_end_date = date(current_date.year + 5, 12, 31)
-
-    for record in recurring_ca_expense_records:
-        record['cadence_description'] = get_cadence_description(
-            record['cadence_interval'],
-            record['cadence_unit'],
-            record['weekdays'],
-            record['monthly_days'],
-            record['yearly_day'],
-            record['yearly_month']
-        )
-        if record['end_date'] == no_end_date.strftime('%Y-%m-%d'):
-            record['display_end_date'] = 'No end date'
-        else:
-            record['display_end_date'] = record['end_date']
-
-    return render_template(
-        'recurring_ca_e.html',
-        recurring_ca_expense_records=recurring_ca_expense_records,
-        credit_accounts=credit_accounts,  # <-- Pass this to the template
-        profile_picture=profile_picture,
-        first_name=first_name,
-        last_name=last_name,
-        current_date=current_date,
-        landing_page=landing_page,
-        currency_type=currency_type
-    )
-
-@app.route('/add-recurring-ca-expense', methods=['POST'])
-@login_required
-def add_recurring_ca_expense():
-    data = request.get_json()
-    if not data:
-        return jsonify({'status': 'error', 'message': 'No data received'}), 400
-
-    account_id = data.get('account_id')
-    category_name = data.get('category_name')
-    amount = data.get('amount')
-    cadence_interval = data.get('cadence_interval')
-    cadence_unit = data.get('cadence_unit')
-    start_date = data.get('start_date')
-    end_date = data.get('end_date')
-    weekdays = data.get('weekdays')
-    monthly_days = data.get('monthly_days')
-    yearly_day = data.get('yearly_day')
-    yearly_month = data.get('yearly_month')
-    no_end_date = data.get('no_end_date', 0)
-
-    # Validate the data
-    if not all([account_id, category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
-        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Step 1: Find the current max display order for CA categories for this account
-        cursor.execute("""
-            SELECT COALESCE(MAX(display_order), 0) FROM c_expense_categories WHERE account_id = %s
-        """, (account_id,))
-        max_display_order = cursor.fetchone()[0]
-
-        # Step 2: Insert the new category with the next display order
-        cursor.execute("""
-            INSERT INTO c_expense_categories (account_id, name, display_order, is_recurring, no_end_date)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (account_id, category_name, max_display_order + 1, 1, no_end_date))
-
-        # Get the ID of the newly inserted CA expense category
-        category_id = cursor.lastrowid
-
-        # Step 3: Insert the recurring CA expense record
-        cursor.execute("""
-            INSERT INTO recurring_c_expense 
-            (user_id, category_id, amount, cadence_interval, cadence_unit, weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            current_user.id, category_id, amount, cadence_interval, cadence_unit,
-            ','.join(weekdays) if weekdays else None,
-            ','.join(map(str, monthly_days)) if monthly_days else None,
-            yearly_day if yearly_day else None,
-            yearly_month if yearly_month else None,
-            start_date,
-            end_date
-        ))
-
-        recurring_id = cursor.lastrowid
-        conn.commit()
-
-        # Generate CA expense entries based on the cadence
-        generate_ca_expense_entries(
-            recurring_id, category_id, amount, cadence_interval, cadence_unit,
-            start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
-        )
-
-        return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring CA expense added successfully!'})
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f'An error occurred while adding the recurring CA expense: {str(e)}'}), 500
-
-    finally:
-        cursor.close()
-        conn.close()
-
-def generate_ca_expense_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit, start_date_str, end_date_str, weekdays=None, monthly_days=None, yearly_day=None, yearly_month=None):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-    current_date = start_date
-    end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
-
-    while current_date <= end_date:
-        delta = None
-
-        if cadence_unit == 'days':
-            cursor.execute("""
-                INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                VALUES (%s, %s, %s, %s)
-            """, (recurring_id, category_id, current_date, amount))
-            delta = timedelta(days=int(cadence_interval))
-
-        elif cadence_unit == 'weeks':
-            for weekday in weekdays:
-                weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
-                weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
-                if start_date <= weekday_date <= end_date:
-                    cursor.execute("""
-                        INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, weekday_date, amount))
-            delta = timedelta(weeks=int(cadence_interval))
-
-        elif cadence_unit == 'months':
-            if monthly_days:
-                monthly_days_cleaned = []
-                for day in monthly_days:
-                    if str(day).lower() == 'last day':
-                        monthly_days_cleaned.append('Last Day')
-                    else:
-                        try:
-                            monthly_days_cleaned.append(int(day))
-                        except Exception:
-                            continue
-                year = current_date.year
-                month = current_date.month
-                while True:
-                    for day in monthly_days_cleaned:
-                        try:
-                            if str(day).lower() == 'last day':
-                                day_num = calendar.monthrange(year, month)[1]
-                            else:
-                                day_num = int(day)
-                                last_day_of_month = calendar.monthrange(year, month)[1]
-                                if day_num > last_day_of_month:
-                                    continue
-                            entry_date = date(year=year, month=month, day=day_num)
-                        except Exception:
-                            continue
-                        if entry_date < start_date:
-                            continue
-                        if entry_date > end_date:
-                            continue
-                        cursor.execute("""
-                            INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, entry_date, amount))
-                    month += int(cadence_interval)
-                    while month > 12:
-                        month -= 12
-                        year += 1
-                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                        break
-            else:
-                year = current_date.year
-                month = current_date.month
-                while True:
-                    entry_date = date(year=year, month=month, day=1)
-                    if entry_date < start_date:
-                        pass
-                    elif entry_date > end_date:
-                        break
-                    else:
-                        cursor.execute("""
-                            INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, entry_date, amount))
-                    month += int(cadence_interval)
-                    while month > 12:
-                        month -= 12
-                        year += 1
-                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                        break
-            break
-
-        elif cadence_unit == 'years':
-            if yearly_day and yearly_month:
-                interval = int(cadence_interval)
-                year = current_date.year
-                while True:
-                    try:
-                        yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
-                    except ValueError:
-                        year += interval
-                        continue
-                    if yearly_entry_date < start_date:
-                        year += interval
-                        continue
-                    if yearly_entry_date > end_date:
-                        break
-                    cursor.execute("""
-                        INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, yearly_entry_date, amount))
-                    year += interval
-            else:
-                interval = int(cadence_interval)
-                year = current_date.year
-                while True:
-                    yearly_entry_date = date(year=year, month=1, day=1)
-                    if yearly_entry_date < start_date:
-                        year += interval
-                        continue
-                    if yearly_entry_date > end_date:
-                        break
-                    cursor.execute("""
-                        INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, yearly_entry_date, amount))
-                    year += interval
-
-        if delta:
-            current_date += delta
-        else:
-            break
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-@app.route('/delete-recurring-ca-expense', methods=['POST'])
-@login_required
-def delete_recurring_ca_expense():
-    try:
-        data = request.get_json()
-        recurring_id = data.get('recurring_id')
-        if not recurring_id:
-            return jsonify({'status': 'error', 'message': 'Recurring ID not provided.'}), 400
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Get the category_id for this recurring CA expense
-        cursor.execute("""
-            SELECT category_id FROM recurring_c_expense WHERE id = %s AND user_id = %s
-        """, (recurring_id, current_user.id))
-        category = cursor.fetchone()
-        if not category:
-            return jsonify({'status': 'error', 'message': 'Recurring CA expense not found.'}), 404
-        category_id = category[0]
-
-        # Find account_id for this CA category
-        cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (category_id,))
-        account_row = cursor.fetchone()
-        account_id = account_row[0] if account_row else None
-
-        # Find Auto Adjustments CA category for this account
-        cursor.execute("""
-            SELECT id FROM c_expense_categories WHERE account_id = %s AND name = 'Auto Adjustments' LIMIT 1
-        """, (account_id,))
-        auto_adj_row = cursor.fetchone()
-        auto_adj_id = auto_adj_row[0] if auto_adj_row else None
-
-        today = date.today()
-        cursor.execute("""
-            SELECT id, date, amount FROM c_expense_entries
-            WHERE recurring_id = %s AND date < %s
-        """, (recurring_id, today))
-        old_entries = cursor.fetchall()
-        for entry_id, entry_date, amount in old_entries:
-            cursor.execute("""
-                SELECT id, amount FROM c_expense_entries
-                WHERE category_id = %s AND date = %s
-            """, (auto_adj_id, entry_date))
-            auto_entry = cursor.fetchone()
-            if auto_entry:
-                new_amount = auto_entry[1] + amount
-                cursor.execute("""
-                    UPDATE c_expense_entries SET amount = %s, processed = 1 WHERE id = %s
-                """, (new_amount, auto_entry[0]))
-            else:
-                cursor.execute("""
-                    INSERT INTO c_expense_entries (category_id, date, amount, processed)
-                    VALUES (%s, %s, %s, 1)
-                """, (auto_adj_id, entry_date, amount))
-            # Set recurring_id to NULL when moving
-            cursor.execute("UPDATE c_expense_entries SET recurring_id = NULL WHERE id = %s", (entry_id,))
-            cursor.execute("DELETE FROM c_expense_entries WHERE id = %s", (entry_id,))
-
-        # Delete all future entries and the recurring record/category
-        cursor.execute("DELETE FROM c_expense_entries WHERE recurring_id = %s", (recurring_id,))
-        cursor.execute("DELETE FROM recurring_c_expense WHERE id = %s AND user_id = %s", (recurring_id, current_user.id))
-        cursor.execute("DELETE FROM c_expense_categories WHERE id = %s", (category_id,))
-
-        conn.commit()
-        return jsonify({'status': 'success', 'message': 'Recurring CA expense deleted successfully!'})
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': 'An error occurred while deleting the recurring CA expense.'}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-
-@app.route('/update-recurring-ca-expense', methods=['POST'])
-@login_required
-def update_recurring_ca_expense():
-    data = request.get_json()
-    return update_recurring_ca_expense_inner(data, current_user.id)
-
-def update_recurring_ca_expense_inner(data, user_id):
-    conn = None
-    cursor = None
-    try:
-        recurring_id = data.get('recurring_id')
-        amount = data.get('amount')
-        cadence_interval = data.get('cadence_interval')
-        cadence_unit = data.get('cadence_unit')
-        start_date = data.get('start_date')
-        end_date = data.get('end_date')
-        weekdays = data.get('weekdays')
-        monthly_days = data.get('monthly_days')
-        yearly_day = data.get('yearly_day')
-        yearly_month = data.get('yearly_month')
-        no_end_date = data.get('no_end_date', 0)
-
-        if not all([recurring_id, amount, cadence_interval, cadence_unit, start_date, end_date]):
-            return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
-
-        today = datetime.today().date()
-        if datetime.strptime(start_date, '%Y-%m-%d').date() < today:
-            return jsonify({'status': 'error', 'message': 'Start date cannot be earlier than today'}), 400
-        if datetime.strptime(end_date, '%Y-%m-%d') < datetime.strptime(start_date, '%Y-%m-%d'):
-            return jsonify({'status': 'error', 'message': 'End date cannot be earlier than start date'}), 400
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Step 1: Fetch the category_id from recurring_c_expense
-        cursor.execute("""
-            SELECT category_id FROM recurring_c_expense WHERE id = %s AND user_id = %s
-        """, (recurring_id, user_id))
-        result = cursor.fetchone()
-        if not result:
-            return jsonify({'status': 'error', 'message': 'Recurring CA expense not found'}), 404
-        category_id = result[0]
-
-        # Step 2: Update the recurring CA expense record in the database
-        cursor.execute("""
-            UPDATE recurring_c_expense
-            SET amount = %s, cadence_interval = %s, cadence_unit = %s, weekdays = %s, monthly_days = %s, yearly_day = %s, yearly_month = %s, start_date = %s, end_date = %s
-            WHERE id = %s AND user_id = %s
-        """, (
-            amount, cadence_interval, cadence_unit,
-            ','.join(weekdays) if weekdays else None,
-            ','.join(map(str, monthly_days)) if monthly_days else None,
-            yearly_day if yearly_day else None,
-            yearly_month if yearly_month else None,
-            start_date, end_date, recurring_id, user_id
-        ))
-
-        # Step 3: Delete old CA expense entries for today and the future related to this recurring record
-        cursor.execute("""
-            DELETE FROM c_expense_entries
-            WHERE recurring_id = %s AND date >= %s
-        """, (recurring_id, today))
-
-        conn.commit()
-
-        # Step 4: Recreate the CA expense entries with the updated details (only for today and future)
-        generate_ca_expense_entries(
-            recurring_id, category_id, amount, cadence_interval, cadence_unit,
-            start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
-        )
-
-        conn.commit()
-
-        return jsonify({'status': 'success', 'message': 'Recurring CA expense updated successfully!'})
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f'An error occurred: {str(e)}'}), 500
-
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if conn is not None:
-            conn.close()

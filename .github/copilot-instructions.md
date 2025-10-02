@@ -64,6 +64,10 @@ This project uses a normalized MySQL schema for budgeting, with strong user isol
 
 - All schema definitions: [`migrations/schema.sql`](../migrations/schema.sql)
 
+### Where to Find Redis keys
+
+- All Redis keys: [`migrations/redis_keys.sql`](../migrations/redis_keys.sql)
+
 ---
 
 **Reminder:**  
