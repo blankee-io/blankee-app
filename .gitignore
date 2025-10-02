@@ -26,7 +26,7 @@ build/
 static/uploads/*
 !static/uploads/DefaultProfilePicture.svg
 
-# Ignore Python Cache
+# Ignore python cache
 __pycache__/
 *.pyc
 
