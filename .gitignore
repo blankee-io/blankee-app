@@ -25,6 +25,13 @@ build/
 # Ignore all uploads except the default picture
 static/uploads/*
 !static/uploads/DefaultProfilePicture.svg
+
+# Ignore Python Cache
 __pycache__/
 *.pyc
+
+# Ignore sensitive environment file
 .env
+
+# Ignore Python virtual environment
+venv/
