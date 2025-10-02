@@ -27,3 +27,4 @@ static/uploads/*
 !static/uploads/DefaultProfilePicture.svg
 __pycache__/
 *.pyc
+.env
