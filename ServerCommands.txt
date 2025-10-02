@@ -32,6 +32,9 @@ Access mysql
     then:    
         USE budget;
 
+Dump mysql to schema.sql
+    mysqldump -u ms_admin -p --no-data budget > schema.sql
+
 PROD:
 
 Update the app to the latest stable on Main DO NOT DO THIS WITHOUT GETTING CONSENSUS!!!
