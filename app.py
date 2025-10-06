@@ -171,17 +171,17 @@ def create_totals_remainders_for_new_user(user_id):
 
     today = date.today()
 
-    # Create entries for weekly totals (totals_remainders) for 1 year back and up to 5 years forward
+    # Create entries for weekly totals (totals_remainders) for 1 year back and up to 3 years forward
     one_year_back = date(today.year - 1, 1, 1)  # Start from January 1st of last year
-    five_years_forward = date(today.year + 5, 12, 31)  # End at December 31st, 5 years from now
+    three_years_forward = date(today.year + 3, 12, 31)  # End at December 31st, 3 years from now
 
     # Find the nearest Friday for the start date
     start_date = find_nearest_friday(one_year_back, round_up=False)
     
     # For the end date, we need to check if it falls beyond December 31st and restrict it to that date
-    end_date = find_nearest_friday(five_years_forward, round_up=True)
-    if end_date > five_years_forward:
-        end_date = five_years_forward
+    end_date = find_nearest_friday(three_years_forward, round_up=True)
+    if end_date > three_years_forward:
+        end_date = three_years_forward
 
     # Create weekly totals (totals_remainders)
     current_date = start_date
@@ -195,7 +195,7 @@ def create_totals_remainders_for_new_user(user_id):
 
     # Create daily totals (totals_remainders_d)
     current_date = one_year_back
-    while current_date <= five_years_forward:
+    while current_date <= three_years_forward:
         cursor.execute("""
             INSERT INTO totals_remainders_d (user_id, date, total_income, total_expenses, remainder, last_day_remainder)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -211,9 +211,9 @@ def create_totals_remainders_for_new_user(user_id):
         current_date += timedelta(days=1)  # Move to the next day
 
     # Create monthly totals (totals_remainders_m)
-    # For each month from one_year_back to five_years_forward, find the last day of the month
+    # For each month from one_year_back to three_years_forward, find the last day of the month
     current_month = one_year_back.replace(day=1)
-    last_month = five_years_forward.replace(day=1)
+    last_month = three_years_forward.replace(day=1)
     while current_month <= last_month:
         # Find the last day of the current month
         year = current_month.year
@@ -223,8 +223,8 @@ def create_totals_remainders_for_new_user(user_id):
         else:
             next_month = date(year, month + 1, 1)
         last_day = next_month - timedelta(days=1)
-        if last_day > five_years_forward:
-            last_day = five_years_forward
+        if last_day > three_years_forward:
+            last_day = three_years_forward
         cursor.execute("""
             INSERT INTO totals_remainders_m (user_id, date, total_income, total_expenses, remainder, last_month_remainder)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -528,8 +528,8 @@ def login():
                 """, (user_obj.id,))
                 last_ca_monthly_date = cursor.fetchone()[0]
 
-                cutoff_date = date.today().replace(month=12, day=31, year=date.today().year + 5)
-                year_5 = date.today().year + 5
+                cutoff_date = date.today().replace(month=12, day=31, year=date.today().year + 3)
+                year_3 = date.today().year + 3
 
                 # 1. Check income categories with no_end_date = 1
                 cursor.execute("""
@@ -546,7 +546,7 @@ def login():
                     cursor.execute("""
                         SELECT 1 FROM income_entries 
                         WHERE category_id = %s AND YEAR(date) = %s LIMIT 1
-                    """, (category_id, year_5))
+                    """, (category_id, year_3))
                     entry_exists = cursor.fetchone()
                     if not entry_exists:
                         cursor.execute("""
@@ -564,7 +564,7 @@ def login():
                                 'cadence_interval': rec[2],
                                 'cadence_unit': rec[3],
                                 'start_date': date.today().strftime('%Y-%m-%d'),
-                                'end_date': date(year_5, 12, 31).strftime('%Y-%m-%d'),
+                                'end_date': date(year_3, 12, 31).strftime('%Y-%m-%d'),
                                 'weekdays': rec[5].split(',') if rec[5] else [],
                                 'monthly_days': [int(x) for x in rec[6].split(',')] if rec[6] else [],
                                 'yearly_day': rec[7],
@@ -589,7 +589,7 @@ def login():
                     cursor.execute("""
                         SELECT 1 FROM expense_entries 
                         WHERE category_id = %s AND YEAR(date) = %s LIMIT 1
-                    """, (category_id, year_5))
+                    """, (category_id, year_3))
                     entry_exists = cursor.fetchone()
                     if not entry_exists:
                         cursor.execute("""
@@ -607,7 +607,7 @@ def login():
                                 'cadence_interval': rec[2],
                                 'cadence_unit': rec[3],
                                 'start_date': date.today().strftime('%Y-%m-%d'),
-                                'end_date': date(year_5, 12, 31).strftime('%Y-%m-%d'),
+                                'end_date': date(year_3, 12, 31).strftime('%Y-%m-%d'),
                                 'weekdays': rec[5].split(',') if rec[5] else [],
                                 'monthly_days': [int(x) for x in rec[6].split(',')] if rec[6] else [],
                                 'yearly_day': rec[7],
@@ -632,7 +632,7 @@ def login():
                     cursor.execute("""
                         SELECT 1 FROM c_expense_entries 
                         WHERE category_id = %s AND YEAR(date) = %s LIMIT 1
-                    """, (category_id, year_5))
+                    """, (category_id, year_3))
                     entry_exists = cursor.fetchone()
                     if not entry_exists:
                         cursor.execute("""
@@ -650,7 +650,7 @@ def login():
                                 'cadence_interval': rec[2],
                                 'cadence_unit': rec[3],
                                 'start_date': date.today().strftime('%Y-%m-%d'),
-                                'end_date': date(year_5, 12, 31).strftime('%Y-%m-%d'),
+                                'end_date': date(year_3, 12, 31).strftime('%Y-%m-%d'),
                                 'weekdays': rec[5].split(',') if rec[5] else [],
                                 'monthly_days': [int(x) for x in rec[6].split(',')] if rec[6] else [],
                                 'yearly_day': rec[7],
@@ -660,7 +660,7 @@ def login():
                             with app.test_request_context():
                                 update_recurring_ca_expense_inner(data, user_obj.id)
 
-                # If the last recorded year is older than the current year + 5, add a new year of Fridays
+                # If the last recorded year is older than the current year + 3, add a new year of Fridays
                 if last_weekly_date is None or last_weekly_date < cutoff_date:
                     add_one_year_of_fridays(user_obj.id)
 
@@ -752,8 +752,8 @@ def add_one_year_of_fridays(user_id):
     # Find the nearest Friday for the end date
     end_date = find_nearest_friday(end_date, round_up=True)
 
-    # Do not go beyond Dec 31st, 5 years from the current year
-    max_end_date = date(date.today().year + 5, 12, 31)
+    # Do not go beyond Dec 31st, 3 years from the current year
+    max_end_date = date(date.today().year + 3, 12, 31)
     end_date = min(end_date, max_end_date)
 
     current_date = start_date
@@ -790,8 +790,8 @@ def add_one_year_of_days(user_id):
     # Get the end date (one year from the start date)
     end_date = date(start_date.year + 1, 12, 31)
 
-    # Do not go beyond Dec 31st, 5 years from the current year
-    max_end_date = date(date.today().year + 5, 12, 31)
+    # Do not go beyond Dec 31st, 3 years from the current year
+    max_end_date = date(date.today().year + 3, 12, 31)
     end_date = min(end_date, max_end_date)
 
     current_date = start_date
@@ -836,8 +836,8 @@ def add_one_year_of_months(user_id):
     # Get the end date (one year from the start month)
     end_month = date(start_month.year + 1, 12, 31)
 
-    # Do not go beyond Dec 31st, 5 years from the current year
-    max_end_date = date(date.today().year + 5, 12, 31)
+    # Do not go beyond Dec 31st, 3 years from the current year
+    max_end_date = date(date.today().year + 3, 12, 31)
     end_month = min(end_month, max_end_date)
 
     current_month = start_month
@@ -878,7 +878,7 @@ def add_one_year_of_savings(user_id):
 
     start_date = last_day + timedelta(days=1)
     end_date = date(start_date.year + 1, 12, 31)
-    max_end_date = date(date.today().year + 5, 12, 31)
+    max_end_date = date(date.today().year + 3, 12, 31)
     end_date = min(end_date, max_end_date)
 
     current_date = start_date
@@ -910,7 +910,7 @@ def add_one_year_of_ca_fridays(user_id):
         end_date = date(start_date.year + 1, 12, 31)
         # Find the nearest Friday for the end date
         end_date = find_nearest_friday(end_date, round_up=True)
-        max_end_date = date(date.today().year + 5, 12, 31)
+        max_end_date = date(date.today().year + 3, 12, 31)
         end_date = min(end_date, max_end_date)
         current_date = start_date
         while current_date <= end_date:
@@ -934,7 +934,7 @@ def add_one_year_of_ca_days(user_id):
             last_day = date.today()
         start_date = last_day + timedelta(days=1)
         end_date = date(start_date.year + 1, 12, 31)
-        max_end_date = date(date.today().year + 5, 12, 31)
+        max_end_date = date(date.today().year + 3, 12, 31)
         end_date = min(end_date, max_end_date)
         current_date = start_date
         while current_date <= end_date:
@@ -967,7 +967,7 @@ def add_one_year_of_ca_months(user_id):
             month += 1
         start_month = date(year, month, 1)
         end_month = date(start_month.year + 1, 12, 31)
-        max_end_date = date(date.today().year + 5, 12, 31)
+        max_end_date = date(date.today().year + 3, 12, 31)
         end_month = min(end_month, max_end_date)
         current_month = start_month
         while current_month <= end_month:
@@ -4998,9 +4998,9 @@ def recurring_income():
     landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
 
-    # Calculate December 31st, 5 years from now
+    # Calculate December 31st, 3 years from now
     current_date = date.today()
-    no_end_date = date(current_date.year + 5, 12, 31)
+    no_end_date = date(current_date.year + 3, 12, 31)
 
     # Format cadence for display and check for 'No end date'
     for record in recurring_income_records:
@@ -5520,9 +5520,9 @@ def recurring_expense():
     landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
 
-    # Calculate December 31st, 5 years from now
+    # Calculate December 31st, 3 years from now
     current_date = date.today()
-    no_end_date = date(current_date.year + 5, 12, 31)
+    no_end_date = date(current_date.year + 3, 12, 31)
 
     # Format cadence for display and check for 'No end date'
     for record in recurring_expense_records:
@@ -6050,7 +6050,7 @@ def recurring_ca_expense():
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
 
     current_date = date.today()
-    no_end_date = date(current_date.year + 5, 12, 31)
+    no_end_date = date(current_date.year + 3, 12, 31)
 
     for record in recurring_ca_expense_records:
         record['cadence_description'] = get_cadence_description(
@@ -7469,9 +7469,9 @@ def add_credit_account():
 def initialize_ca_balances_for_account(account_id):
     today = date.today()
     start_year = today.year - 1
-    end_year = today.year + 5
+    end_year = today.year + 3
 
-    # Daily: every day from Jan 1 of previous year to Dec 31 of year+5
+    # Daily: every day from Jan 1 of previous year to Dec 31 of year+3
     start_date = date(start_year, 1, 1)
     end_date = date(end_year, 12, 31)
 

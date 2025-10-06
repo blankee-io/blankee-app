@@ -769,7 +769,7 @@
 
         // Set the allowed range
         const minStartDate = new Date(currentYear - 1, 0, 1); // January 1st of the previous year
-        const maxEndDate = new Date(currentYear + 5, 11, 31); // December 31st, 5 years from now
+        const maxEndDate = new Date(currentYear + 3, 11, 31); // December 31st, 3 years from now
 
         const start = new Date(startDate);
 
@@ -782,7 +782,7 @@
             const end = new Date(endDate);
 
             if (end > maxEndDate) {
-                alert(`End date cannot be later than December 31, ${currentYear + 5}`);
+                alert(`End date cannot be later than December 31, ${currentYear + 3}`);
                 return false;
             }
 
@@ -797,7 +797,7 @@
 
     function getFiveYearsFromNowEndDateString() {
         var today = new Date();
-        var year = today.getFullYear() + 5;
+        var year = today.getFullYear() + 3;
         return `${year}-12-31`;
     }
 
