@@ -1039,6 +1039,22 @@
                     }
                 }
 
+                // Remove the row from the UI immediately
+                const row = input.closest('.dashboard-d-row');
+                if (row) {
+                    // Check if this is the last entry in its section
+                    const entriesDiv = row.parentElement;
+                    row.remove();
+                    
+                    // If this was the last row, remove the entire entries section
+                    if (entriesDiv && entriesDiv.children.length === 0) {
+                        if (entriesDiv.classList.contains('dashboard-d-income-entries') || 
+                            entriesDiv.classList.contains('dashboard-d-expense-entries')) {
+                            entriesDiv.remove();
+                        }
+                    }
+                }
+
                 const data = {
                     category_id: categoryId,
                     start_date: startDate,
@@ -1053,14 +1069,17 @@
                     data: JSON.stringify(data),
                     success: function(response) {
                         if (response.status === 'success') {
-                            input.value = '';
                             saveDailyTotalsAndRemainders(endDate);
                         } else {
                             console.error('Failed to delete the entry.');
+                            // If delete failed on server, restore the UI by refreshing
+                            updateDashboardDView();
                         }
                     },
                     error: function() {
                         console.error('An error occurred while deleting the entry.');
+                        // If delete failed due to an error, restore the UI by refreshing
+                        updateDashboardDView();
                     }
                 });
             } else {
