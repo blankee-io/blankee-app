@@ -975,7 +975,88 @@
 
         const _origUpdateView = updateView;
         updateView = function(sections = ["all"]) {
+            // Store information about focused/highlighted elements before update
+            let focusedElements = [];
+            
+            // Check for focused input fields in income table body
+            document.querySelectorAll('#income-categories-body input:focus').forEach(input => {
+                const td = input.closest('td');
+                const tr = td.closest('tr');
+                const categoryId = tr ? tr.getAttribute('data-category-id') : null;
+                const date = td ? td.getAttribute('data-date') : null;
+                
+                if (categoryId && date) {
+                    focusedElements.push({
+                        type: 'income',
+                        categoryId: categoryId,
+                        date: date,
+                        value: input.value
+                    });
+                }
+            });
+            
+            // Check for focused input fields in expense table body
+            document.querySelectorAll('#expense-categories-body input:focus').forEach(input => {
+                const td = input.closest('td');
+                const tr = td.closest('tr');
+                const categoryId = tr ? tr.getAttribute('data-category-id') : null;
+                const date = td ? td.getAttribute('data-date') : null;
+                
+                if (categoryId && date) {
+                    focusedElements.push({
+                        type: 'expense',
+                        categoryId: categoryId,
+                        date: date,
+                        value: input.value
+                    });
+                }
+            });
+            
+            // Check for focused input fields in credit account tables
+            document.querySelectorAll('tbody[id^="ca-categories-body-"] input:focus').forEach(input => {
+                const td = input.closest('td');
+                const tr = td.closest('tr');
+                const categoryId = tr ? tr.getAttribute('data-category-id') : null;
+                const date = td ? td.getAttribute('data-date') : null;
+                const tbodyId = tr ? tr.closest('tbody').id : null;
+                const accountId = tbodyId ? tbodyId.replace('ca-categories-body-', '') : null;
+                
+                if (categoryId && date && accountId) {
+                    focusedElements.push({
+                        type: 'ca',
+                        accountId: accountId,
+                        categoryId: categoryId,
+                        date: date,
+                        value: input.value
+                    });
+                }
+            });
+            
+            // Run the original update view function
             _origUpdateView(sections);
+
+            // Restore focus to elements that were focused before
+            setTimeout(() => {
+                focusedElements.forEach(element => {
+                    let selector;
+                    if (element.type === 'income') {
+                        selector = `#income-categories-body tr[data-category-id="${element.categoryId}"] td[data-date="${element.date}"] input`;
+                    } else if (element.type === 'expense') {
+                        selector = `#expense-categories-body tr[data-category-id="${element.categoryId}"] td[data-date="${element.date}"] input`;
+                    } else if (element.type === 'ca') {
+                        selector = `#ca-categories-body-${element.accountId} tr[data-category-id="${element.categoryId}"] td[data-date="${element.date}"] input`;
+                    }
+                    
+                    const input = document.querySelector(selector);
+                    if (input) {
+                        input.focus();
+                        // If the input had a value before, restore it
+                        if (element.value) {
+                            input.value = element.value;
+                        }
+                    }
+                });
+            }, 0);
 
             // Reapply filters for income, expense, and CA categories
             if (currentIncomeFilter) {
@@ -2522,10 +2603,24 @@
                         function() { input.value = originalValue; }
                     );
                 } else {
-                    // Restore $ if not empty
+                    // Restore original value or format properly if it's a number
                     setTimeout(function () {
-                        if (input.value.trim() !== '') {
-                            input.value = currencySymbol + (parseInt(input.value, 10) || 0);
+                        const trimmedValue = input.value.trim();
+                        if (trimmedValue === '') {
+                            // If empty, keep it empty
+                            input.value = '';
+                        } else {
+                            // Parse as int only if it's a number
+                            const numValue = parseInt(trimmedValue, 10);
+                            if (!isNaN(numValue)) {
+                                input.value = currencySymbol + numValue;
+                            } else if (trimmedValue.startsWith(currencySymbol)) {
+                                // Leave currency-formatted values as is
+                                input.value = trimmedValue;
+                            } else {
+                                // Restore original value if not a number and doesn't have currency symbol
+                                input.value = originalValue;
+                            }
                         }
                     }, 0);
                 }
@@ -2602,10 +2697,10 @@
                 }
 
                 // Move month
-                if (direction === 1 && typeof nextMonth === 'function') {
-                    nextMonth();
-                } else if (direction === -1 && typeof previousMonth === 'function') {
-                    previousMonth();
+                if (direction === 1) {
+                    nextCluster();
+                } else if (direction === -1) {
+                    previousCluster();
                 } else {
                     return;
                 }
@@ -2631,7 +2726,7 @@
                             }
                         }
                     }
-                }, 250); // Delay may need tuning depending on your updateView speed
+                }, 300); // Increased delay to ensure DOM updates completely
             }
 
             if (event.key === 'ArrowUp') {
@@ -3265,7 +3360,7 @@
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
-                            updateView();
+                            updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                         } else {
                             console.error('Failed to delete the entries.');
                         }
@@ -3309,7 +3404,7 @@
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
-                            updateView();
+                            updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                         } else {
                             console.error('Failed to update the entry.');
                         }
