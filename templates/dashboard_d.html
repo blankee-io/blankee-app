@@ -495,7 +495,7 @@
                 lastRemainder.classList.add('dashboard-d-lastremainder');
                 lastRemainder.innerHTML = `
                     <div class="dashboard-d-label-cell">Last remainder:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${lastRemainderValue}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(lastRemainderValue)}</div>`;
                 container.appendChild(lastRemainder);
 
                 // Income entries
@@ -539,7 +539,7 @@
                             <input type="text"
                                 class="income-cell-input"
                                 data-processed="${dataProcessed}"
-                                value="${currencySymbol}${parseFloat(entry.amount)}"
+                                value="${formatCurrency(entry.amount)}"
                                 data-entry-id="${entry.id}"
                                 data-category-id="${entry.category_id}"
                                 data-date="${date}"
@@ -556,7 +556,7 @@
                 incomeTotal.classList.add('dashboard-d-income-total');
                 incomeTotal.innerHTML = `
                     <div class="dashboard-d-label-cell">Total Income:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${totalIncomeValue}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(totalIncomeValue)}</div>`;
                 container.appendChild(incomeTotal);
 
                 // Expense entries
@@ -601,7 +601,7 @@
                             <input type="text"
                                 class="expense-cell-input"
                                 data-processed="${dataProcessed}"
-                                value="${currencySymbol}${parseFloat(entry.amount)}"
+                                value="${formatCurrency(entry.amount)}"
                                 data-entry-id="${entry.id}"
                                 data-category-id="${entry.category_id}"
                                 data-date="${date}"
@@ -618,7 +618,7 @@
                 expenseTotal.classList.add('dashboard-d-expense-total');
                 expenseTotal.innerHTML = `
                     <div class="dashboard-d-label-cell">Total Expenses:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${totalExpensesValue}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(totalExpensesValue)}</div>`;
                 container.appendChild(expenseTotal);
 
                 // Remainder
@@ -626,7 +626,7 @@
                 remainder.classList.add('dashboard-d-remainder');
                 remainder.innerHTML = `
                     <div class="dashboard-d-label-cell">Remainder:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${remainderValue}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(remainderValue)}</div>`;
                 const remainderValueCell = remainder.querySelector('.dashboard-d-amount-cell');
                 let applyThresholdClasses = true;
                 let normalizedMemberSince = memberSince;
@@ -1392,6 +1392,176 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
     }
 }
 
+        // Function to format currency without .00 when decimals are zero
+        function formatCurrency(value) {
+            const num = parseFloat(value);
+            if (isNaN(num)) return currencySymbol + '0';
+            
+            // Check if the number has non-zero decimal part
+            if (Math.floor(num) === num) {
+                // No decimal part or .00
+                return currencySymbol + Math.floor(num);
+            } else {
+                // Has decimal part, format with 2 decimal places
+                return currencySymbol + num.toFixed(2);
+            }
+        }
+        
+        // Function to dynamically create and add an entry row to the dashboard
+        function addEntryRowToDOM(entryType, formData) {
+            const formattedDate = new Date(formData.date).toISOString().split('T')[0];
+            const categoryId = String(formData.category);
+            
+            // Only add the entry if it belongs to a date currently displayed on the dashboard
+            const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+            const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+            if (!weekDates.includes(formattedDate)) {
+                return false; // Date is not in the current view
+            }
+            
+            // First, check if a row for this category and date already exists
+            const existingRow = document.querySelector(`.dashboard-d-row[data-category-id="${categoryId}"][data-date="${formattedDate}"]`);
+            
+            // If row exists, just update the amount
+            if (existingRow) {
+                const cell = existingRow.querySelector('.dashboard-d-amount-cell');
+                if (cell) {
+                    const input = cell.querySelector('input');
+                    if (input) {
+                        // Get current value and add new amount
+                        let currentValue = input.value.replace(currencySymbol, '').trim();
+                        currentValue = parseFloat(currentValue) || 0;
+                        const newValue = currentValue + parseFloat(formData.amount);
+                        input.value = formatCurrency(newValue);
+                        return true; // Successfully updated existing row
+                    }
+                }
+            }
+            
+            // If we reach here, we need to create a new row
+            // Find the container for this date
+            const container = document.querySelector(`.dashboard-d-container .dashboard-d-day-header[data-date="${formattedDate}"]`);
+            if (!container) {
+                return false;
+            }
+            
+            const parentContainer = container.parentElement;
+            
+            // Find or create the entries div based on entry type
+            let entriesDiv;
+            let rowClass, inputClass, categoryArray;
+            
+            if (entryType === 'income') {
+                entriesDiv = parentContainer.querySelector(`.dashboard-d-income-entries[data-date="${formattedDate}"]`);
+                if (!entriesDiv) {
+                    entriesDiv = document.createElement('div');
+                    entriesDiv.classList.add('dashboard-d-income-entries');
+                    entriesDiv.setAttribute('data-date', formattedDate);
+                    
+                    // Find where to insert it (after last remainder or at the beginning)
+                    const lastRemainder = parentContainer.querySelector('.dashboard-d-lastremainder');
+                    if (lastRemainder) {
+                        lastRemainder.after(entriesDiv);
+                    } else {
+                        parentContainer.appendChild(entriesDiv);
+                    }
+                }
+                rowClass = 'dashboard-d-row';
+                inputClass = 'income-cell-input';
+                categoryArray = incomeCategories;
+            } else if (entryType === 'expense') {
+                entriesDiv = parentContainer.querySelector(`.dashboard-d-expense-entries[data-date="${formattedDate}"]`);
+                if (!entriesDiv) {
+                    entriesDiv = document.createElement('div');
+                    entriesDiv.classList.add('dashboard-d-expense-entries');
+                    entriesDiv.setAttribute('data-date', formattedDate);
+                    
+                    // Find where to insert it (after income total or at the end)
+                    const incomeTotal = parentContainer.querySelector('.dashboard-d-income-total');
+                    if (incomeTotal) {
+                        incomeTotal.after(entriesDiv);
+                    } else {
+                        parentContainer.appendChild(entriesDiv);
+                    }
+                }
+                rowClass = 'dashboard-d-row';
+                inputClass = 'expense-cell-input';
+                categoryArray = expenseCategories;
+            } else if (entryType === 'ca' || entryType.startsWith('ca')) {
+                // Handle credit account entries
+                // Find credit account section or return false if not found
+                const accountId = formData.account_id;
+                entriesDiv = parentContainer.querySelector(`.dashboard-d-credit-account[data-account-id="${accountId}"][data-date="${formattedDate}"]`);
+                if (!entriesDiv) {
+                    return false; // Credit account section not found
+                }
+                rowClass = 'dashboard-d-credit-row';
+                inputClass = 'ca-cell-input';
+                categoryArray = [];
+                // Get categories for this credit account
+                credit_accounts.forEach(account => {
+                    if (String(account.id) === String(accountId)) {
+                        categoryArray = account.categories || [];
+                    }
+                });
+            } else {
+                return false; // Unknown entry type
+            }
+            
+            // Find the category object
+            const catObj = categoryArray.find(cat => String(cat.id) === categoryId);
+            
+            if (!catObj) {
+                return false; // Category not found
+            }
+            
+            // Create the row
+            const row = document.createElement('div');
+            row.classList.add(rowClass);
+            row.setAttribute('data-entry-id', 'new'); // Will be updated after AJAX
+            row.setAttribute('data-category-id', categoryId);
+            row.setAttribute('data-date', formattedDate);
+            
+            // Determine icon
+            let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
+            const isBud = catObj.is_bud || false;
+            
+            if (catObj) {
+                if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
+                else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
+                else if (entryType === 'expense' && catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
+            }
+            
+            // Build the HTML
+            row.innerHTML = `
+                ${!isBud ? `<span class="dashboard-d-drag-handle"><i class="fa-solid fa-bars"></i></span>` : ''}
+                ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
+                    <span class="calendar-icon">
+                    <i class="fa-regular fa-calendar"></i>
+                    </span>
+                </span>` : ''}
+                <div class="dashboard-d-label-cell">
+                    ${iconHtml}
+                    ${catObj.name}
+                </div>
+                <div class="dashboard-d-amount-cell">
+                    <input type="text"
+                        class="${inputClass}"
+                        data-processed="0"
+                        value="${formatCurrency(formData.amount)}"
+                        data-entry-id="new"
+                        data-category-id="${categoryId}"
+                        data-date="${formattedDate}"
+                        ${isBud ? 'readonly tabindex="-1"' : ''}
+                    />
+                </div>
+            `;
+            
+            entriesDiv.appendChild(row);
+            return true; // Successfully added row to DOM
+        }
+
         function addEntryAJAX(formData, callback) {
             dashboardDCloseModal();
             resetDashboardDAddEntryForm();
@@ -1415,6 +1585,20 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                 formData.account_id = accountId; // So updateLocalEntryAfterAdd can use it
             }
 
+            // Update local entry data BEFORE the AJAX call
+            updateLocalEntryAfterAdd(entryType, formData, true);
+            
+            // Try to add the entry to the DOM immediately
+            const rowAdded = addEntryRowToDOM(entryType, formData);
+            
+            // If we couldn't add the row (maybe date not in view), refresh containers
+            if (!rowAdded) {
+                const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+                const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+                createDashboardContainers(weekDates);
+                setupDashboardDInputFocus();
+            }
+            
             $.ajax({
                 url: '/dashboard-d/add_entry',
                 type: 'POST',
@@ -1422,7 +1606,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                 contentType: 'application/json',
                 success: function(response) {
                     if (response.status === 'success') {
-                        updateLocalEntryAfterAdd(entryType, formData, true);
+                        // Local entry already updated, just save totals and remainders
                         saveDailyTotalsAndRemainders(formData.date);
                         if (typeof callback === "function") callback(response);
                     } else {
@@ -1970,7 +2154,8 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                                 : 'ca';
                             updateEntry(input, type);
                         } else if (input.value.trim() !== '') {
-                            input.value = currencySymbol + (parseInt(input.value, 10) || 0);
+                            // Use our new formatCurrency function
+                            input.value = formatCurrency(parseFloat(input.value) || 0);
                         }
                     });
                 });
