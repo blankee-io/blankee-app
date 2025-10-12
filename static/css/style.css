@@ -1703,9 +1703,12 @@ input#setup-profile-starting-balance {
     align-items: center;
     justify-content: space-between;
     min-height: 20px;
-    padding: 0px 10px;
     box-sizing: border-box;
     color: #575757;
+}
+
+.dashboard-d-credit-balance {
+    padding: 0px 10px;
 }
 
 /* Specific background colors for totals and remainder rows */
