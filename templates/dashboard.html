@@ -571,7 +571,7 @@
         expensesTable = document.getElementById('expenses-table');
 
         // Define the maximum viewable year and month as December of the current year + 3 years
-        const maxYear = today.getUTCFullYear() + 5;
+        const maxYear = today.getUTCFullYear() + 3;  // Limit to 3 years from current year
         const maxMonthIndex = 11; // December (0-based, so 11 is December)
 
         const nextMonthBtn = document.getElementById('next-month-btn'); // Reference to the "Next Month" button

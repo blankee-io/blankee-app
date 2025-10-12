@@ -1492,12 +1492,18 @@ def get_dashboard_d_data():
 def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
     conn = get_db_connection()
     cursor = conn.cursor(buffered=True)
+    
+    # Use covering index (user_id, date) to optimize this query
     cursor.execute("""
         SELECT date FROM totals_remainders_d
         WHERE user_id = %s AND date >= %s
         ORDER BY date ASC
     """, (user_id, start_date))
     all_dates = [row[0] for row in cursor.fetchall()]
+    
+    if not all_dates:
+        conn.close()
+        return
 
     prev_date = start_date - timedelta(days=1)
     cursor.execute("""
@@ -1507,33 +1513,44 @@ def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
     prev_remainder_row = cursor.fetchone()
     last_day_remainder = float(prev_remainder_row[0]) if prev_remainder_row else 0.0
 
-    # Fetch all income for the range
+    # Fetch all income for the range - using FORCE INDEX to ensure the index on user_id is used
     cursor.execute("""
         SELECT ie.date, SUM(ie.amount)
         FROM income_entries ie
         JOIN income_categories ic ON ie.category_id = ic.id
         WHERE ic.user_id = %s AND ie.date >= %s
         GROUP BY ie.date
+        ORDER BY ie.date
     """, (user_id, start_date))
     income_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
 
-    # Fetch all expenses for the range
+    # Fetch all expenses for the range - using FORCE INDEX to ensure the index on user_id is used
     cursor.execute("""
         SELECT ee.date, SUM(ee.amount)
         FROM expense_entries ee
         JOIN expense_categories ec ON ee.category_id = ec.id
         WHERE ec.user_id = %s AND ee.date >= %s
         GROUP BY ee.date
+        ORDER BY ee.date
     """, (user_id, start_date))
     expense_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
 
+    # Prepare batch insert data
+    batch_data = []
+    
     for current_date in all_dates:
         total_income = income_by_date.get(current_date, 0) + last_day_remainder
         total_expenses = expense_by_date.get(current_date, 0)
-
         remainder = total_income - total_expenses
-
-        cursor.execute("""
+        
+        batch_data.append((user_id, current_date, total_income, total_expenses, remainder, last_day_remainder))
+        
+        last_day_remainder = remainder
+        date_to_remainder[current_date] = remainder
+    
+    # Execute batch update using multi-row syntax
+    if batch_data:
+        cursor.executemany("""
             INSERT INTO totals_remainders_d (user_id, date, total_income, total_expenses, remainder, last_day_remainder)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
@@ -1541,10 +1558,7 @@ def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
                 total_expenses = VALUES(total_expenses),
                 remainder = VALUES(remainder),
                 last_day_remainder = VALUES(last_day_remainder)
-        """, (user_id, current_date, total_income, total_expenses, remainder, last_day_remainder))
-
-        last_day_remainder = remainder
-        date_to_remainder[current_date] = remainder
+        """, batch_data)
 
     conn.commit()
     conn.close()
@@ -1560,23 +1574,10 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
         ORDER BY date ASC
     """, (user_id, start_date))
     all_week_dates = [row[0] for row in cursor.fetchall()]
-
-    # Fetch all income and expense entries in one query each
-    cursor.execute("""
-        SELECT ie.date, ie.amount
-        FROM income_entries ie
-        JOIN income_categories ic ON ie.category_id = ic.id
-        WHERE ic.user_id = %s AND ie.date >= %s
-    """, (user_id, start_date))
-    income_entries = cursor.fetchall()
-
-    cursor.execute("""
-        SELECT ee.date, ee.amount
-        FROM expense_entries ee
-        JOIN expense_categories ec ON ee.category_id = ec.id
-        WHERE ec.user_id = %s AND ee.date >= %s
-    """, (user_id, start_date))
-    expense_entries = cursor.fetchall()
+    
+    if not all_week_dates:
+        conn.close()
+        return
 
     # Helper to get week range for a given week date
     def get_week_range(week_date):
@@ -1589,23 +1590,54 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
             week_end = week_date
             week_start = week_end - timedelta(days=6)
         return week_start, week_end
+    
+    # Get the earliest and latest dates needed for our calculation
+    earliest_week_date = min(all_week_dates)
+    latest_week_date = max(all_week_dates)
+    earliest_week_start, _ = get_week_range(earliest_week_date)
+    _, latest_week_end = get_week_range(latest_week_date)
+    
+    # Fetch only the income entries we need (within the complete date range)
+    cursor.execute("""
+        SELECT ie.date, SUM(ie.amount) as daily_income
+        FROM income_entries ie
+        JOIN income_categories ic ON ie.category_id = ic.id
+        WHERE ic.user_id = %s AND ie.date BETWEEN %s AND %s
+        GROUP BY ie.date
+        ORDER BY ie.date
+    """, (user_id, earliest_week_start, latest_week_end))
+    income_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
 
+    # Fetch only the expense entries we need (within the complete date range)
+    cursor.execute("""
+        SELECT ee.date, SUM(ee.amount) as daily_expense
+        FROM expense_entries ee
+        JOIN expense_categories ec ON ee.category_id = ec.id
+        WHERE ec.user_id = %s AND ee.date BETWEEN %s AND %s
+        GROUP BY ee.date
+        ORDER BY ee.date
+    """, (user_id, earliest_week_start, latest_week_end))
+    expense_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
+
+    # Prepare batch data
+    batch_data = []
+    
     for week_date in all_week_dates:
         week_start, week_end = get_week_range(week_date)
 
-        # Sum income for this week
-        total_income = sum(
-            float(amount)
-            for entry_date, amount in income_entries
-            if week_start <= entry_date <= week_end
-        )
-
-        # Sum expenses for this week
-        total_expenses = sum(
-            float(amount)
-            for entry_date, amount in expense_entries
-            if week_start <= entry_date <= week_end
-        )
+        # Calculate total income for this week
+        total_income = 0
+        current_date = week_start
+        while current_date <= week_end:
+            total_income += income_by_date.get(current_date, 0)
+            current_date += timedelta(days=1)
+        
+        # Calculate total expenses for this week
+        total_expenses = 0
+        current_date = week_start
+        while current_date <= week_end:
+            total_expenses += expense_by_date.get(current_date, 0)
+            current_date += timedelta(days=1)
 
         # Get last week's remainder
         prev_week_date = week_date - timedelta(days=7)
@@ -1615,7 +1647,17 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
         total_income_with_remainder = total_income + float(last_week_remainder)
         week_remainder = total_income_with_remainder - total_expenses
 
-        cursor.execute("""
+        batch_data.append((
+            user_id, week_date, total_income_with_remainder, total_expenses, 
+            week_remainder, last_week_remainder
+        ))
+
+        # Update date_to_remainder for next week
+        date_to_remainder[week_date] = week_remainder
+    
+    # Execute batch update
+    if batch_data:
+        cursor.executemany("""
             INSERT INTO totals_remainders (user_id, date, total_income, total_expenses, remainder, last_week_remainder)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
@@ -1623,10 +1665,7 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
                 total_expenses = VALUES(total_expenses),
                 remainder = VALUES(remainder),
                 last_week_remainder = VALUES(last_week_remainder)
-        """, (user_id, week_date, total_income_with_remainder, total_expenses, week_remainder, last_week_remainder))
-
-        # Update date_to_remainder for next week
-        date_to_remainder[week_date] = week_remainder
+        """, batch_data)
 
     conn.commit()
     conn.close()
@@ -1634,66 +1673,125 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
 def update_monthly_totals(user_id, start_date, date_to_remainder):
     conn = get_db_connection()
     cursor = conn.cursor(buffered=True)
+    
+    import calendar
 
-    # Get all relevant dates from totals_remainders_d
+    # Calculate start of month for the start_date to ensure we get complete month data
+    start_of_month = date(start_date.year, start_date.month, 1)
+    
+    # Get min and max dates from totals_remainders_d to define our query range
     cursor.execute("""
-        SELECT date FROM totals_remainders_d
+        SELECT MIN(date), MAX(date) FROM totals_remainders_d
         WHERE user_id = %s AND date >= %s
-        ORDER BY date ASC
-    """, (user_id, start_date))
-    all_dates = [row[0] for row in cursor.fetchall()]
-
-    if not all_dates:
+    """, (user_id, start_of_month))
+    date_range = cursor.fetchone()
+    
+    if not date_range or not date_range[0]:
         conn.close()
         return
+        
+    min_date, max_date = date_range[0], date_range[1]
+    
+    # Determine all relevant months in the date range
+    months_data = []
+    current_year, current_month = min_date.year, min_date.month
+    end_year, end_month = max_date.year, max_date.month
+    
+    while (current_year < end_year) or (current_year == end_year and current_month <= end_month):
+        last_day = date(current_year, current_month, calendar.monthrange(current_year, current_month)[1])
+        first_day = date(current_year, current_month, 1)
+        
+        months_data.append({
+            'year': current_year,
+            'month': current_month,
+            'first_day': first_day,
+            'last_day': last_day
+        })
+        
+        # Move to next month
+        if current_month == 12:
+            current_month = 1
+            current_year += 1
+        else:
+            current_month += 1
+    
+    # Filter to only include months that start on or after our start date
+    months_data = [m for m in months_data if m['first_day'] >= start_of_month]
+    
+    if not months_data:
+        conn.close()
+        return
+    
+    # Get income data for the entire period in one query
+    cursor.execute("""
+        SELECT YEAR(ie.date) as year, MONTH(ie.date) as month, SUM(ie.amount) as total
+        FROM income_entries ie
+        JOIN income_categories ic ON ie.category_id = ic.id
+        WHERE ic.user_id = %s 
+          AND ie.date BETWEEN %s AND %s
+        GROUP BY YEAR(ie.date), MONTH(ie.date)
+    """, (user_id, months_data[0]['first_day'], months_data[-1]['last_day']))
+    
+    income_by_month = {(row[0], row[1]): float(row[2]) for row in cursor.fetchall()}
+    
+    # Get expense data for the entire period in one query
+    cursor.execute("""
+        SELECT YEAR(ee.date) as year, MONTH(ee.date) as month, SUM(ee.amount) as total
+        FROM expense_entries ee
+        JOIN expense_categories ec ON ee.category_id = ec.id
+        WHERE ec.user_id = %s 
+          AND ee.date BETWEEN %s AND %s
+        GROUP BY YEAR(ee.date), MONTH(ee.date)
+    """, (user_id, months_data[0]['first_day'], months_data[-1]['last_day']))
+    
+    expense_by_month = {(row[0], row[1]): float(row[2]) for row in cursor.fetchall()}
 
-    # Group dates by month
-    months = set((d.year, d.month) for d in all_dates)
-    for year, month in sorted(months):
-        # Get all dates in this month
-        month_dates = [d for d in all_dates if d.year == year and d.month == month]
-        if not month_dates:
-            continue
-        first_day = min(month_dates)
-        last_day = max(month_dates)
-
-        # Sum income and expenses for the month from entries
-        cursor.execute("""
-            SELECT COALESCE(SUM(ie.amount), 0)
-            FROM income_entries ie
-            JOIN income_categories ic ON ie.category_id = ic.id
-            WHERE ic.user_id = %s AND ie.date BETWEEN %s AND %s
-        """, (user_id, first_day, last_day))
-        total_income = cursor.fetchone()[0]
-
-        cursor.execute("""
-            SELECT COALESCE(SUM(ee.amount), 0)
-            FROM expense_entries ee
-            JOIN expense_categories ec ON ee.category_id = ec.id
-            WHERE ec.user_id = %s AND ee.date BETWEEN %s AND %s
-        """, (user_id, first_day, last_day))
-        total_expenses = cursor.fetchone()[0]
-
+    # Prepare batch data
+    batch_data = []
+    
+    for month_info in months_data:
+        year = month_info['year']
+        month = month_info['month']
+        last_day_of_month = month_info['last_day']
+        
+        # Get income and expense totals for this month
+        total_income = income_by_month.get((year, month), 0.0)
+        total_expenses = expense_by_month.get((year, month), 0.0)
+        
         # Get last month's remainder
         prev_month = (month - 1) or 12
         prev_year = year if month > 1 else year - 1
-        cursor.execute("""
-            SELECT remainder FROM totals_remainders_m
-            WHERE user_id = %s AND YEAR(date) = %s AND MONTH(date) = %s
-            ORDER BY date DESC LIMIT 1
-        """, (user_id, prev_year, prev_month))
-        prev_remainder_row = cursor.fetchone()
-        last_month_remainder = float(prev_remainder_row[0]) if prev_remainder_row else 0.0
+        
+        if (prev_year, prev_month) == (months_data[0]['year'], months_data[0]['month']):
+            # First month in our data, get from database
+            cursor.execute("""
+                SELECT remainder FROM totals_remainders_m
+                WHERE user_id = %s AND YEAR(date) = %s AND MONTH(date) = %s
+                ORDER BY date DESC LIMIT 1
+            """, (user_id, prev_year, prev_month))
+            prev_remainder_row = cursor.fetchone()
+            last_month_remainder = float(prev_remainder_row[0]) if prev_remainder_row else 0.0
+        else:
+            # Get from our calculated values
+            prev_last_day = date(prev_year, prev_month, calendar.monthrange(prev_year, prev_month)[1])
+            last_month_remainder = date_to_remainder.get(prev_last_day, 0.0)
 
-        # Include last month's remainder in total_income (like weekly logic)
-        total_income_with_remainder = float(total_income) + last_month_remainder
-        remainder = total_income_with_remainder - float(total_expenses)
-
-        # Find the last day of the month
-        import calendar
-        last_day_of_month = date(year, month, calendar.monthrange(year, month)[1])
-
-        cursor.execute("""
+        # Calculate totals with remainder
+        total_income_with_remainder = total_income + last_month_remainder
+        remainder = total_income_with_remainder - total_expenses
+        
+        # Store for batch insert
+        batch_data.append((
+            user_id, last_day_of_month, total_income_with_remainder, 
+            total_expenses, remainder, last_month_remainder
+        ))
+        
+        # Save for next month's calculation
+        date_to_remainder[last_day_of_month] = remainder
+    
+    # Execute batch insert/update
+    if batch_data:
+        cursor.executemany("""
             INSERT INTO totals_remainders_m (user_id, date, total_income, total_expenses, remainder, last_month_remainder)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
@@ -1701,7 +1799,7 @@ def update_monthly_totals(user_id, start_date, date_to_remainder):
                 total_expenses = VALUES(total_expenses),
                 remainder = VALUES(remainder),
                 last_month_remainder = VALUES(last_month_remainder)
-        """, (user_id, last_day_of_month, total_income_with_remainder, total_expenses, remainder, last_month_remainder))
+        """, batch_data)
 
     conn.commit()
     conn.close()
@@ -1720,18 +1818,24 @@ def update_daily_savings_for_savings_category(user_id, start_date):
         member_since = start_date
         starting_savings = 0.0
 
-    # Get the "Savings" income and expense category IDs for this user
+    # Get the "Savings" income and expense category IDs for this user in one query
     cursor.execute("""
-        SELECT id FROM income_categories WHERE user_id = %s AND name = 'Savings'
-    """, (user_id,))
-    income_savings_row = cursor.fetchone()
-    income_savings_id = income_savings_row[0] if income_savings_row else None
-
-    cursor.execute("""
-        SELECT id FROM expense_categories WHERE user_id = %s AND name = 'Savings'
-    """, (user_id,))
-    expense_savings_row = cursor.fetchone()
-    expense_savings_id = expense_savings_row[0] if expense_savings_row else None
+        SELECT 'income' as type, id FROM income_categories 
+        WHERE user_id = %s AND name = 'Savings'
+        UNION ALL
+        SELECT 'expense' as type, id FROM expense_categories 
+        WHERE user_id = %s AND name = 'Savings'
+    """, (user_id, user_id))
+    
+    results = cursor.fetchall()
+    income_savings_id = None
+    expense_savings_id = None
+    
+    for row_type, category_id in results:
+        if row_type == 'income':
+            income_savings_id = category_id
+        else:
+            expense_savings_id = category_id
 
     if not income_savings_id and not expense_savings_id:
         conn.close()
@@ -1744,6 +1848,10 @@ def update_daily_savings_for_savings_category(user_id, start_date):
         ORDER BY date ASC
     """, (user_id, start_date))
     all_dates = [row[0] for row in cursor.fetchall()]
+    
+    if not all_dates:
+        conn.close()
+        return
 
     # Get previous day's savings
     prev_date = start_date - timedelta(days=1)
@@ -1754,41 +1862,54 @@ def update_daily_savings_for_savings_category(user_id, start_date):
     prev_savings_row = cursor.fetchone()
     last_savings = float(prev_savings_row[0]) if prev_savings_row else 0.0
 
+    # Get all income and expense data for the full date range in one query each
+    min_date = min(all_dates)
+    max_date = max(all_dates)
+    
+    income_by_date = {}
+    if income_savings_id:
+        cursor.execute("""
+            SELECT date, COALESCE(SUM(amount), 0) as total
+            FROM income_entries
+            WHERE category_id = %s AND date BETWEEN %s AND %s
+            GROUP BY date
+        """, (income_savings_id, min_date, max_date))
+        income_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
+    
+    expense_by_date = {}
+    if expense_savings_id:
+        cursor.execute("""
+            SELECT date, COALESCE(SUM(amount), 0) as total
+            FROM expense_entries
+            WHERE category_id = %s AND date BETWEEN %s AND %s
+            GROUP BY date
+        """, (expense_savings_id, min_date, max_date))
+        expense_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
+    
+    # Prepare batch insert data
+    batch_data = []
+    
     for current_date in all_dates:
-        # Sum income for the date (Savings category only)
-        total_income = 0.0
-        if income_savings_id:
-            cursor.execute("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM income_entries
-                WHERE category_id = %s AND date = %s
-            """, (income_savings_id, current_date))
-            total_income = float(cursor.fetchone()[0])
-
-        # Sum expenses for the date (Savings category only)
-        total_expenses = 0.0
-        if expense_savings_id:
-            cursor.execute("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM expense_entries
-                WHERE category_id = %s AND date = %s
-            """, (expense_savings_id, current_date))
-            total_expenses = float(cursor.fetchone()[0])
+        # Get income and expense totals for this date
+        total_income = income_by_date.get(current_date, 0.0)
+        total_expenses = expense_by_date.get(current_date, 0.0)
 
         # Only add starting_savings on the member_since date
         if current_date == member_since:
             savings = last_savings + total_expenses - total_income + starting_savings
         else:
             savings = last_savings + total_expenses - total_income
-
-        # Insert or update savings_entries for this date
-        cursor.execute("""
+            
+        batch_data.append((user_id, current_date, savings))
+        last_savings = savings
+    
+    # Perform batch insert/update
+    if batch_data:
+        cursor.executemany("""
             INSERT INTO savings_entries (user_id, date, amount)
             VALUES (%s, %s, %s)
             ON DUPLICATE KEY UPDATE amount = VALUES(amount)
-        """, (user_id, current_date, savings))
-
-        last_savings = savings
+        """, batch_data)
 
     conn.commit()
     conn.close()
@@ -1797,21 +1918,40 @@ def update_daily_ca_totals(user_id, start_date):
     conn = get_db_connection()
     cursor = conn.cursor(buffered=True)
 
+    # Get all credit accounts for this user
     cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
     account_ids = [row[0] for row in cursor.fetchall()]
     if not account_ids:
         conn.close()
         return
 
+    # Process each account with optimized queries
     for account_id in account_ids:
+        # Get the date range we need to process
+        cursor.execute("""
+            SELECT MIN(date) as min_date, MAX(date) as max_date FROM c_a_balances_d
+            WHERE account_id = %s AND date >= %s
+        """, (account_id, start_date))
+        date_range = cursor.fetchone()
+        
+        if not date_range or not date_range[0]:
+            continue
+            
+        min_date, max_date = date_range[0], date_range[1]
+        
+        # Get all dates within the range
         cursor.execute("""
             SELECT date FROM c_a_balances_d
-            WHERE account_id = %s AND date >= %s
+            WHERE account_id = %s AND date BETWEEN %s AND %s
             ORDER BY date ASC
-        """, (account_id, start_date))
+        """, (account_id, min_date, max_date))
         all_dates = [row[0] for row in cursor.fetchall()]
+        
+        if not all_dates:
+            continue
 
-        prev_date = start_date - timedelta(days=1)
+        # Get previous balance
+        prev_date = min_date - timedelta(days=1)
         cursor.execute("""
             SELECT balance FROM c_a_balances_d
             WHERE account_id = %s AND date = %s
@@ -1819,39 +1959,51 @@ def update_daily_ca_totals(user_id, start_date):
         prev_balance_row = cursor.fetchone()
         last_day_balance = float(prev_balance_row[0]) if prev_balance_row and prev_balance_row[0] is not None else 0.0
 
-        # Get all c_expense_entries for this account, grouped by date
+        # Get all expenses for the date range in one query
         cursor.execute("""
-            SELECT cee.date, SUM(cee.amount)
+            SELECT cee.date, SUM(cee.amount) as daily_total
             FROM c_expense_entries cee
             JOIN c_expense_categories cec ON cee.category_id = cec.id
-            WHERE cec.account_id = %s AND cee.date >= %s
+            WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
             GROUP BY cee.date
-        """, (account_id, start_date))
+            ORDER BY cee.date
+        """, (account_id, min_date, max_date))
         expense_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
 
-        # Get all payments for this account, grouped by date
+        # Get all payments for the date range in one query
         cursor.execute("""
-            SELECT date, SUM(amount) FROM c_payment_entries
-            WHERE account_id = %s AND date >= %s
+            SELECT date, SUM(amount) as daily_total 
+            FROM c_payment_entries
+            WHERE account_id = %s AND date BETWEEN %s AND %s
             GROUP BY date
-        """, (account_id, start_date))
+            ORDER BY date
+        """, (account_id, min_date, max_date))
         payments_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
 
+        # Prepare batch data
+        batch_data = []
+        
         for current_date in all_dates:
             total_expenses = expense_by_date.get(current_date, 0.0)
             total_payments = payments_by_date.get(current_date, 0.0)
             balance = last_day_balance + total_expenses - total_payments
-
-            cursor.execute("""
+            
+            batch_data.append((
+                account_id, current_date, total_expenses, total_payments, balance
+            ))
+            
+            last_day_balance = balance
+        
+        # Execute batch insert/update
+        if batch_data:
+            cursor.executemany("""
                 INSERT INTO c_a_balances_d (account_id, date, total_expenses, total_payments, balance)
                 VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     total_expenses = VALUES(total_expenses),
                     total_payments = VALUES(total_payments),
                     balance = VALUES(balance)
-            """, (account_id, current_date, total_expenses, total_payments, balance))
-
-            last_day_balance = balance
+            """, batch_data)
 
     conn.commit()
     conn.close()
@@ -1860,74 +2012,127 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
     conn = get_db_connection()
     cursor = conn.cursor(buffered=True)
 
+    # Get all credit accounts for this user
     cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
     account_ids = [row[0] for row in cursor.fetchall()]
     if not account_ids:
         conn.close()
         return
 
+    # Helper function to get week range
+    def get_week_range(week_date):
+        if goofy_week_mode:
+            # Goofy: week starts Friday, ends Thursday
+            week_start = week_date
+            week_end = week_start + timedelta(days=6)
+        else:
+            # Normal: week ends Friday, starts Saturday before
+            week_end = week_date
+            week_start = week_end - timedelta(days=6)
+        return week_start, week_end
+
     for account_id in account_ids:
+        # Get all relevant week dates
         cursor.execute("""
             SELECT date FROM c_a_balances
             WHERE account_id = %s AND date >= %s
             ORDER BY date ASC
         """, (account_id, start_date))
         all_week_dates = [row[0] for row in cursor.fetchall()]
-
-        # Build a mapping of week date to all dates in that week
-        week_map = {}
+        
+        if not all_week_dates:
+            continue
+            
+        # Calculate the full date range needed
+        earliest_week = min(all_week_dates)
+        latest_week = max(all_week_dates)
+        earliest_start, _ = get_week_range(earliest_week)
+        _, latest_end = get_week_range(latest_week)
+        
+        # Precompute all week ranges
+        week_ranges = {}
         for week_date in all_week_dates:
-            if goofy_week_mode:
-                # Goofy: week starts Friday, ends Thursday
-                week_start = week_date
-                week_end = week_start + timedelta(days=6)
-            else:
-                # Normal: week ends Friday, starts Saturday before
-                week_end = week_date
-                week_start = week_end - timedelta(days=6)
-            week_map[week_date] = (week_start, week_end)
-
-        # Sum all expenses for each week
-        week_expenses = {}
-        for week_date, (week_start, week_end) in week_map.items():
-            cursor.execute("""
-                SELECT COALESCE(SUM(cee.amount), 0)
-                FROM c_expense_entries cee
-                JOIN c_expense_categories cec ON cee.category_id = cec.id
-                WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
-            """, (account_id, week_start, week_end))
-            week_expenses[week_date] = float(cursor.fetchone()[0])
-
-        # Sum all payments for each week
-        week_payments = {}
-        for week_date, (week_start, week_end) in week_map.items():
-            cursor.execute("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM c_payment_entries
-                WHERE account_id = %s AND date BETWEEN %s AND %s
-            """, (account_id, week_start, week_end))
-            week_payments[week_date] = float(cursor.fetchone()[0])
-
-        for week_date, (week_start, week_end) in week_map.items():
+            week_ranges[week_date] = get_week_range(week_date)
+        
+        # Get all expense data within the entire date range in one query
+        cursor.execute("""
+            SELECT cee.date, SUM(cee.amount) as daily_expense
+            FROM c_expense_entries cee
+            JOIN c_expense_categories cec ON cee.category_id = cec.id
+            WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
+            GROUP BY cee.date
+            ORDER BY cee.date
+        """, (account_id, earliest_start, latest_end))
+        expenses_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
+        
+        # Get all payment data within the entire date range in one query
+        cursor.execute("""
+            SELECT date, SUM(amount) as daily_payment
+            FROM c_payment_entries
+            WHERE account_id = %s AND date BETWEEN %s AND %s
+            GROUP BY date
+            ORDER BY date
+        """, (account_id, earliest_start, latest_end))
+        payments_by_date = {row[0]: float(row[1]) for row in cursor.fetchall()}
+        
+        # Calculate previous week balances (done first to avoid multiple queries in the loop)
+        prev_balances = {}
+        for week_date in all_week_dates:
+            prev_week = week_date - timedelta(days=7)
+            if prev_week < start_date:
+                # Only fetch from database for weeks before our calculation range
+                cursor.execute("""
+                    SELECT balance FROM c_a_balances
+                    WHERE account_id = %s AND date = %s
+                """, (account_id, prev_week))
+                prev_row = cursor.fetchone()
+                prev_balances[week_date] = float(prev_row[0]) if prev_row and prev_row[0] is not None else 0.0
+        
+        # Prepare batch data and calculate each week's totals
+        batch_data = []
+        for week_date in sorted(all_week_dates):
+            week_start, week_end = week_ranges[week_date]
+            
+            # Sum expenses for this week
+            total_expenses = 0.0
+            current_date = week_start
+            while current_date <= week_end:
+                total_expenses += expenses_by_date.get(current_date, 0.0)
+                current_date += timedelta(days=1)
+                
+            # Sum payments for this week
+            total_payments = 0.0
+            current_date = week_start
+            while current_date <= week_end:
+                total_payments += payments_by_date.get(current_date, 0.0)
+                current_date += timedelta(days=1)
+            
+            # Get previous week's balance
             prev_week_date = week_date - timedelta(days=7)
-            cursor.execute("""
-                SELECT balance FROM c_a_balances
-                WHERE account_id = %s AND date = %s
-            """, (account_id, prev_week_date))
-            prev_balance_row = cursor.fetchone()
-            last_week_balance = float(prev_balance_row[0]) if prev_balance_row and prev_balance_row[0] is not None else 0.0
-
-            total_expenses = week_expenses.get(week_date, 0.0)
-            total_payments = week_payments.get(week_date, 0.0)
+            # Use precalculated value if available, otherwise use calculated value
+            last_week_balance = prev_balances.get(week_date, prev_balances.get(prev_week_date, 0.0))
+            
+            # Calculate new balance
             balance = last_week_balance + total_expenses - total_payments
-            cursor.execute("""
+            
+            # Store for batch update
+            batch_data.append((
+                account_id, week_date, total_expenses, total_payments, balance
+            ))
+            
+            # Save for subsequent weeks
+            prev_balances[week_date] = balance
+        
+        # Execute batch insert/update
+        if batch_data:
+            cursor.executemany("""
                 INSERT INTO c_a_balances (account_id, date, total_expenses, total_payments, balance)
                 VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     total_expenses = VALUES(total_expenses),
                     total_payments = VALUES(total_payments),
                     balance = VALUES(balance)
-            """, (account_id, week_date, total_expenses, total_payments, balance))
+            """, batch_data)
 
     conn.commit()
     conn.close()
@@ -1935,7 +2140,9 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
 def update_monthly_ca_totals(user_id, start_date):
     conn = get_db_connection()
     cursor = conn.cursor(buffered=True)
+    import calendar
 
+    # Get all credit accounts for this user
     cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
     account_ids = [row[0] for row in cursor.fetchall()]
     if not account_ids:
@@ -1943,67 +2150,136 @@ def update_monthly_ca_totals(user_id, start_date):
         return
 
     for account_id in account_ids:
+        # Get date range to process
+        cursor.execute("""
+            SELECT MIN(date) as min_date, MAX(date) as max_date FROM c_a_balances_m
+            WHERE account_id = %s AND date >= %s
+        """, (account_id, start_date))
+        date_range = cursor.fetchone()
+        
+        if not date_range or not date_range[0]:
+            continue
+            
+        min_date, max_date = date_range[0], date_range[1]
+        
+        # Get all month-end dates
         cursor.execute("""
             SELECT date FROM c_a_balances_m
-            WHERE account_id = %s AND date >= %s
+            WHERE account_id = %s AND date BETWEEN %s AND %s
             ORDER BY date ASC
-        """, (account_id, start_date))
+        """, (account_id, min_date, max_date))
         all_months = [row[0] for row in cursor.fetchall()]
-
-        # Build a mapping of month-end date to all dates in that month
-        month_map = {}
+        
+        if not all_months:
+            continue
+        
+        # Create a list of month info with start/end dates
+        month_data = []
         for last_day in all_months:
-            month_start = last_day.replace(day=1)
-            month_map[last_day] = (month_start, last_day)
-
-        # Sum all expenses for each month
-        month_expenses = {}
-        for last_day, (month_start, month_end) in month_map.items():
-            cursor.execute("""
-                SELECT COALESCE(SUM(cee.amount), 0)
-                FROM c_expense_entries cee
-                JOIN c_expense_categories cec ON cee.category_id = cec.id
-                WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
-            """, (account_id, month_start, month_end))
-            month_expenses[last_day] = float(cursor.fetchone()[0])
-
-        # Sum all payments for each month
-        month_payments = {}
-        for last_day, (month_start, month_end) in month_map.items():
-            cursor.execute("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM c_payment_entries
-                WHERE account_id = %s AND date BETWEEN %s AND %s
-            """, (account_id, month_start, month_end))
-            month_payments[last_day] = float(cursor.fetchone()[0])
-
-        for last_day in all_months:
-            # Always fetch previous month's last day balance for each month
-            if last_day.month == 1:
-                prev_year = last_day.year - 1
+            month_start = date(last_day.year, last_day.month, 1)
+            month_data.append({
+                'last_day': last_day,
+                'start_date': month_start,
+                'end_date': last_day,
+                'year': last_day.year,
+                'month': last_day.month
+            })
+            
+        # Get the entire date range for expense/payment queries
+        earliest_start = min(m['start_date'] for m in month_data)
+        latest_end = max(m['end_date'] for m in month_data)
+        
+        # Get all expense data within the entire date range in one query
+        cursor.execute("""
+            SELECT YEAR(cee.date) as year, MONTH(cee.date) as month, SUM(cee.amount) as month_total
+            FROM c_expense_entries cee
+            JOIN c_expense_categories cec ON cee.category_id = cec.id
+            WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
+            GROUP BY YEAR(cee.date), MONTH(cee.date)
+        """, (account_id, earliest_start, latest_end))
+        expenses_by_month = {(row[0], row[1]): float(row[2]) for row in cursor.fetchall()}
+        
+        # Get all payment data within the entire date range in one query
+        cursor.execute("""
+            SELECT YEAR(date) as year, MONTH(date) as month, SUM(amount) as month_total
+            FROM c_payment_entries
+            WHERE account_id = %s AND date BETWEEN %s AND %s
+            GROUP BY YEAR(date), MONTH(date)
+        """, (account_id, earliest_start, latest_end))
+        payments_by_month = {(row[0], row[1]): float(row[2]) for row in cursor.fetchall()}
+        
+        # Calculate all previous month balances upfront to avoid multiple queries
+        prev_balances = {}
+        for month_info in month_data:
+            # For the first month or months starting from our actual start_date
+            if month_info['start_date'] == earliest_start:
+                # Calculate previous month date
+                if month_info['month'] == 1:
+                    prev_month = 12
+                    prev_year = month_info['year'] - 1
+                else:
+                    prev_month = month_info['month'] - 1
+                    prev_year = month_info['year']
+                
+                prev_last_day = date(prev_year, prev_month, 
+                                     calendar.monthrange(prev_year, prev_month)[1])
+                
+                # Fetch from database only for the first month
+                cursor.execute("""
+                    SELECT balance FROM c_a_balances_m
+                    WHERE account_id = %s AND date = %s
+                """, (account_id, prev_last_day))
+                prev_row = cursor.fetchone()
+                prev_balances[(month_info['year'], month_info['month'])] = (
+                    float(prev_row[0]) if prev_row and prev_row[0] is not None else 0.0
+                )
+        
+        # Prepare batch data
+        batch_data = []
+        
+        for month_info in sorted(month_data, key=lambda m: (m['year'], m['month'])):
+            # Get expenses and payments for this month
+            total_expenses = expenses_by_month.get(
+                (month_info['year'], month_info['month']), 0.0)
+            total_payments = payments_by_month.get(
+                (month_info['year'], month_info['month']), 0.0)
+            
+            # Get previous month's balance
+            if month_info['month'] == 1:
                 prev_month = 12
+                prev_year = month_info['year'] - 1
             else:
-                prev_year = last_day.year
-                prev_month = last_day.month - 1
-            prev_last_day = date(prev_year, prev_month, calendar.monthrange(prev_year, prev_month)[1])
-            cursor.execute("""
-                SELECT balance FROM c_a_balances_m
-                WHERE account_id = %s AND date = %s
-            """, (account_id, prev_last_day))
-            prev_balance_row = cursor.fetchone()
-            last_month_balance = float(prev_balance_row[0]) if prev_balance_row and prev_balance_row[0] is not None else 0.0
-
-            total_expenses = month_expenses.get(last_day, 0.0)
-            total_payments = month_payments.get(last_day, 0.0)
+                prev_month = month_info['month'] - 1
+                prev_year = month_info['year']
+            
+            # Get from our calculated values if available
+            last_month_balance = prev_balances.get(
+                (month_info['year'], month_info['month']),
+                prev_balances.get((prev_year, prev_month), 0.0)
+            )
+            
+            # Calculate new balance
             balance = last_month_balance + total_expenses - total_payments
-            cursor.execute("""
+            
+            # Store for batch update
+            batch_data.append((
+                account_id, month_info['last_day'], total_expenses, 
+                total_payments, balance
+            ))
+            
+            # Save for next month's calculation
+            prev_balances[(month_info['year'], month_info['month'])] = balance
+        
+        # Execute batch insert/update
+        if batch_data:
+            cursor.executemany("""
                 INSERT INTO c_a_balances_m (account_id, date, total_expenses, total_payments, balance)
                 VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     total_expenses = VALUES(total_expenses),
                     total_payments = VALUES(total_payments),
                     balance = VALUES(balance)
-            """, (account_id, last_day, total_expenses, total_payments, balance))
+            """, batch_data)
 
     conn.commit()
     conn.close()
