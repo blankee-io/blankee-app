@@ -2551,8 +2551,11 @@
         function handleInputEdit(input, type) {
             let originalValue = '';
             let ignoreBlur = false;
+            let entryProcessed = false;  // New flag to track if the entry has been processed
 
             input.addEventListener('focus', function () {
+                // Reset the processed flag when focusing on the input
+                entryProcessed = false;
                 // Remove $ only if present
                 if (input.value.trim().startsWith('$')) {
                     input.value = input.value.trim().substring(1).trim();
@@ -2570,6 +2573,7 @@
                 if (event.key === 'Enter') {
                     event.preventDefault();
                     ignoreBlur = true;
+                    entryProcessed = true;  // Mark as processed
                     const newValue = input.value.trim();
                     if (originalValue === '' && newValue === '') {
                         input.value = originalValue;
@@ -2580,10 +2584,12 @@
                         return;
                     }
                     if (originalValue === '') {
+                        // Creating a new entry
                         updateEntryInput(input, type);
                         return;
                     }
                     if (newValue !== originalValue) {
+                        // Editing an existing entry
                         showEntryUpdateModal(
                             function() { updateEntryInput(input, type); },
                             function() { input.value = originalValue; }
@@ -2601,6 +2607,12 @@
                     ignoreBlur = false;
                     return;
                 }
+                
+                // If already processed via Enter key, don't process again
+                if (entryProcessed) {
+                    return;
+                }
+                
                 const newValue = input.value.trim();
                 if (newValue !== originalValue) {
                     // If value changed, submit (with confirmation if needed)
@@ -2613,9 +2625,11 @@
                         return;
                     }
                     if (originalValue === '') {
+                        // Creating a new entry
                         updateEntryInput(input, type);
                         return;
                     }
+                    // Only show the modal when editing an existing value
                     showEntryUpdateModal(
                         function() { updateEntryInput(input, type); },
                         function() { input.value = originalValue; }
