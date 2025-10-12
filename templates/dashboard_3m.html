@@ -2640,11 +2640,6 @@
                 }
                 entryProcessed = true; // Mark as processed after handling the blur event
             });
-
-            input.addEventListener('input', function () {
-                // Allow only numbers, no decimals
-                input.value = input.value.replace(/[^0-9]/g, '');
-            });
         }
 
         function isCellFocused() {
