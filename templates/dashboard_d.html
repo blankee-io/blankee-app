@@ -495,7 +495,7 @@
                 lastRemainder.classList.add('dashboard-d-lastremainder');
                 lastRemainder.innerHTML = `
                     <div class="dashboard-d-label-cell">Last remainder:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${lastRemainderValue}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(lastRemainderValue)}</div>`;
                 container.appendChild(lastRemainder);
 
                 // Income entries
@@ -539,7 +539,7 @@
                             <input type="text"
                                 class="income-cell-input"
                                 data-processed="${dataProcessed}"
-                                value="${currencySymbol}${parseFloat(entry.amount)}"
+                                value="${formatCurrency(entry.amount)}"
                                 data-entry-id="${entry.id}"
                                 data-category-id="${entry.category_id}"
                                 data-date="${date}"
@@ -556,7 +556,7 @@
                 incomeTotal.classList.add('dashboard-d-income-total');
                 incomeTotal.innerHTML = `
                     <div class="dashboard-d-label-cell">Total Income:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${totalIncomeValue}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(totalIncomeValue)}</div>`;
                 container.appendChild(incomeTotal);
 
                 // Expense entries
@@ -601,7 +601,7 @@
                             <input type="text"
                                 class="expense-cell-input"
                                 data-processed="${dataProcessed}"
-                                value="${currencySymbol}${parseFloat(entry.amount)}"
+                                value="${formatCurrency(entry.amount)}"
                                 data-entry-id="${entry.id}"
                                 data-category-id="${entry.category_id}"
                                 data-date="${date}"
@@ -618,7 +618,7 @@
                 expenseTotal.classList.add('dashboard-d-expense-total');
                 expenseTotal.innerHTML = `
                     <div class="dashboard-d-label-cell">Total Expenses:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${totalExpensesValue}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(totalExpensesValue)}</div>`;
                 container.appendChild(expenseTotal);
 
                 // Remainder
@@ -626,7 +626,7 @@
                 remainder.classList.add('dashboard-d-remainder');
                 remainder.innerHTML = `
                     <div class="dashboard-d-label-cell">Remainder:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${remainderValue}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(remainderValue)}</div>`;
                 const remainderValueCell = remainder.querySelector('.dashboard-d-amount-cell');
                 let applyThresholdClasses = true;
                 let normalizedMemberSince = memberSince;
@@ -719,7 +719,7 @@
                                 <input type="text"
                                     class="ca-cell-input"
                                     data-processed="${dataProcessed}"
-                                    value="${currencySymbol}${parseFloat(entry.amount)}"
+                                    value="${formatCurrency(entry.amount)}"
                                     data-entry-id="${entry.id}"
                                     data-category-id="${entry.category_id}"
                                     data-date="${date}"
@@ -741,10 +741,10 @@
                         return balDateStr === date && bal.account_id == account.id;
                     });
                     const balanceRow = document.createElement('div');
-                    balanceRow.classList.add('dashboard-d-credit-row');
+                    balanceRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-balance');
                     balanceRow.innerHTML = `
                         <div class="dashboard-d-label-cell">Balance:</div>
-                        <div class="dashboard-d-amount-cell">${currencySymbol}${balanceObj ? parseInt(balanceObj.balance, 10) : 0}</div>
+                        <div class="dashboard-d-amount-cell">${formatCurrency(balanceObj ? balanceObj.balance : 0)}</div>
                     `;
                     caDiv.appendChild(balanceRow);
 
@@ -856,7 +856,7 @@
 
                     showDashboardSpinner(true);
 
-                    // --- Update local entry's date immediately ---
+                    // --- Check if an entry already exists at the target date for the same category ---
                     let entriesArray;
                     if (type === 'income') {
                         entriesArray = incomeEntries;
@@ -865,15 +865,31 @@
                     } else if (type === 'ca') {
                         entriesArray = c_expense_entries;
                     }
+                    
+                    // Look for existing entry at target date with same category
+                    let existingEntry = null;
+                    let draggedEntry = null;
+                    let existingAmount = 0;
+                    let draggedAmount = parseFloat($draggedRow.find('input').val().replace(currencySymbol, '').trim()) || amount;
+                    
+                    // Find the entry we're moving and any existing entry at the target
                     entriesArray.forEach(entry => {
                         let entryDateString = new Date(entry.date).toISOString().split('T')[0];
-                        if (String(entry.category_id) === String(categoryId) && entryDateString === oldDate) {
-                            entry.date = newDate;
+                        if (String(entry.category_id) === String(categoryId)) {
+                            if (entryDateString === oldDate) {
+                                draggedEntry = entry;
+                            } else if (entryDateString === newDate) {
+                                existingEntry = entry;
+                                existingAmount = parseFloat(entry.amount || entry.total_amount || 0);
+                            }
                         }
                     });
-
+                    
+                    // Check if target already has a row for this category
+                    let $existingRow = null;
+                    let $targetEntries = null;
+                    
                     setTimeout(function() {
-                        let $targetEntries;
                         if (type === 'income') {
                             $targetEntries = $targetContainer.find('.dashboard-d-income-entries[data-date="' + newDate + '"]');
                             if ($targetEntries.length === 0) {
@@ -881,15 +897,16 @@
                                     .addClass('dashboard-d-income-entries')
                                     .attr('data-date', newDate)
                                     .appendTo($targetContainer);
+                                
+                                // Insert before the income total
+                                var $incomeTotal = $targetContainer.find('.dashboard-d-income-total');
+                                if ($incomeTotal.length > 0) {
+                                    $targetEntries.insertBefore($incomeTotal);
+                                }
                             }
-                            // Insert before the income total
-                            var $incomeTotal = $targetContainer.find('.dashboard-d-income-total');
-                            if ($incomeTotal.length > 0) {
-                                $targetEntries.append($draggedRow);
-                                $targetEntries.insertBefore($incomeTotal);
-                            } else {
-                                $targetEntries.append($draggedRow);
-                            }
+                            
+                            $existingRow = $targetEntries.find('.dashboard-d-row[data-category-id="' + categoryId + '"]');
+                            
                         } else if (type === 'expense') {
                             $targetEntries = $targetContainer.find('.dashboard-d-expense-entries[data-date="' + newDate + '"]');
                             if ($targetEntries.length === 0) {
@@ -897,15 +914,16 @@
                                     .addClass('dashboard-d-expense-entries')
                                     .attr('data-date', newDate)
                                     .appendTo($targetContainer);
+                                
+                                // Insert before the expense total
+                                var $expenseTotal = $targetContainer.find('.dashboard-d-expense-total');
+                                if ($expenseTotal.length > 0) {
+                                    $targetEntries.insertBefore($expenseTotal);
+                                }
                             }
-                            // Insert before the expense total
-                            var $expenseTotal = $targetContainer.find('.dashboard-d-expense-total');
-                            if ($expenseTotal.length > 0) {
-                                $targetEntries.append($draggedRow);
-                                $targetEntries.insertBefore($expenseTotal);
-                            } else {
-                                $targetEntries.append($draggedRow);
-                            }
+                            
+                            $existingRow = $targetEntries.find('.dashboard-d-row[data-category-id="' + categoryId + '"]');
+                            
                         } else if (type === 'ca') {
                             var accountId = $draggedRow.attr('data-account-id');
                             $targetEntries = $targetContainer.find('.dashboard-d-credit-account[data-account-id="' + accountId + '"]');
@@ -915,18 +933,59 @@
                                     .attr('data-account-id', accountId)
                                     .appendTo($targetContainer);
                             }
-                            // Insert before the balance row
-                            var $balanceRow = $targetEntries.find('.dashboard-d-credit-row').filter(function() {
-                                return $(this).find('.dashboard-d-label-cell').text().trim() === 'Balance:';
-                            });
-                            if ($balanceRow.length > 0) {
-                                $draggedRow.insertBefore($balanceRow);
-                            } else {
-                                $targetEntries.append($draggedRow);
-                            }
+                            
+                            $existingRow = $targetEntries.find('.dashboard-d-credit-row[data-category-id="' + categoryId + '"]');
                         }
-
-                        $draggedRow.attr('data-date', newDate);
+                        
+                        if ($existingRow && $existingRow.length > 0) {
+                            // Combine entries - update existing row with combined amount
+                            const combinedAmount = existingAmount + draggedAmount;
+                            
+                            // Update input value in existing row
+                            const $input = $existingRow.find('input');
+                            $input.val(formatCurrency(combinedAmount));
+                            
+                            // Update data structure
+                            if (existingEntry) {
+                                existingEntry.amount = combinedAmount;
+                                if ('total_amount' in existingEntry) {
+                                    existingEntry.total_amount = combinedAmount;
+                                }
+                            }
+                            
+                            // Remove the original row from the source
+                            $draggedRow.remove();
+                            
+                            // Remove the entry from its original date
+                            if (draggedEntry) {
+                                const index = entriesArray.indexOf(draggedEntry);
+                                if (index !== -1) {
+                                    entriesArray.splice(index, 1);
+                                }
+                            }
+                        } else {
+                            // No existing entry with same category - move the row as usual
+                            if (draggedEntry) {
+                                draggedEntry.date = newDate;
+                            }
+                            
+                            // Move the row to target container
+                            if (type === 'income' || type === 'expense') {
+                                $targetEntries.append($draggedRow);
+                            } else if (type === 'ca') {
+                                // Insert before the balance row
+                                var $balanceRow = $targetEntries.find('.dashboard-d-credit-balance, .dashboard-d-credit-row').filter(function() {
+                                    return $(this).find('.dashboard-d-label-cell').text().trim() === 'Balance:';
+                                });
+                                if ($balanceRow.length > 0) {
+                                    $draggedRow.insertBefore($balanceRow);
+                                } else {
+                                    $targetEntries.append($draggedRow);
+                                }
+                            }
+                            
+                            $draggedRow.attr('data-date', newDate);
+                        }
 
                         $.ajax({
                             url: '/move_entry_d',
@@ -1039,6 +1098,27 @@
                     }
                 }
 
+                // Remove the row from the UI immediately
+                const row = input.closest('.dashboard-d-row');
+                if (row) {
+                    // Check if this is the last entry in its section
+                    const entriesDiv = row.parentElement;
+                    row.remove();
+                    
+                    // If this was the last row, remove the entire entries section
+                    if (entriesDiv && entriesDiv.children.length === 0) {
+                        if (entriesDiv.classList.contains('dashboard-d-income-entries') || 
+                            entriesDiv.classList.contains('dashboard-d-expense-entries')) {
+                            entriesDiv.remove();
+                        } 
+                        // For credit accounts, check if we only have the account name and balance rows left
+                        else if (entriesDiv.classList.contains('dashboard-d-credit-account')) {
+                            // Don't remove credit account div itself, as it should always show balance
+                            // even if there are no transactions
+                        }
+                    }
+                }
+
                 const data = {
                     category_id: categoryId,
                     start_date: startDate,
@@ -1053,14 +1133,17 @@
                     data: JSON.stringify(data),
                     success: function(response) {
                         if (response.status === 'success') {
-                            input.value = '';
                             saveDailyTotalsAndRemainders(endDate);
                         } else {
                             console.error('Failed to delete the entry.');
+                            // If delete failed on server, restore the UI by refreshing
+                            updateDashboardDView();
                         }
                     },
                     error: function() {
                         console.error('An error occurred while deleting the entry.');
+                        // If delete failed due to an error, restore the UI by refreshing
+                        updateDashboardDView();
                     }
                 });
             } else {
@@ -1392,6 +1475,297 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
     }
 }
 
+        // Function to get the appropriate category array based on entry type
+        function getCategoryArray(entryType) {
+            if (entryType === 'income') {
+                return incomeCategories;
+            } else if (entryType === 'expense') {
+                return expenseCategories;
+            } else if (entryType === 'ca' || entryType.startsWith('ca')) {
+                return c_expense_categories;
+            }
+            return [];
+        }
+        
+        // Function to format currency without .00 when decimals are zero
+        function formatCurrency(value) {
+            const num = parseFloat(value);
+            if (isNaN(num)) return currencySymbol + '0';
+            
+            // Check if the number has non-zero decimal part
+            if (Math.floor(num) === num) {
+                // No decimal part or .00
+                return currencySymbol + Math.floor(num);
+            } else {
+                // Has decimal part, format with 2 decimal places
+                return currencySymbol + num.toFixed(2);
+            }
+        }
+        
+        // Function to dynamically create and add an entry row to the dashboard
+        function addEntryRowToDOM(entryType, formData) {
+            const formattedDate = new Date(formData.date).toISOString().split('T')[0];
+            const categoryId = String(formData.category);
+            
+            // Only add the entry if it belongs to a date currently displayed on the dashboard
+            const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+            const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+            if (!weekDates.includes(formattedDate)) {
+                return false; // Date is not in the current view
+            }
+            
+            // First, check if a row for this category and date already exists
+            let existingRowSelector;
+            if (entryType === 'ca' || entryType.startsWith('ca')) {
+                // For credit accounts, we need to check credit rows
+                existingRowSelector = `.dashboard-d-credit-row[data-category-id="${categoryId}"][data-date="${formattedDate}"]`;
+                if (formData.account_id) {
+                    existingRowSelector += `[data-account-id="${formData.account_id}"]`;
+                }
+            } else {
+                // For regular income/expense
+                existingRowSelector = `.dashboard-d-row[data-category-id="${categoryId}"][data-date="${formattedDate}"]`;
+            }
+            const existingRow = document.querySelector(existingRowSelector);
+            
+            // If row exists, just update the amount
+            if (existingRow) {
+                const cell = existingRow.querySelector('.dashboard-d-amount-cell');
+                if (cell) {
+                    const input = cell.querySelector('input');
+                    if (input) {
+                        // Get current value and add new amount
+                        let currentValue = input.value.replace(currencySymbol, '').trim();
+                        currentValue = parseFloat(currentValue) || 0;
+                        const newValue = currentValue + parseFloat(formData.amount);
+                        input.value = formatCurrency(newValue);
+                        
+                        // Also update the balance row if this is a credit account
+                        if (entryType === 'ca' || entryType.startsWith('ca')) {
+                            // We added an amount, so we should update the balance
+                            const entriesDiv = existingRow.closest('.dashboard-d-credit-account');
+                            if (entriesDiv) {
+                                // Try to find balance row
+                                const balanceRow = entriesDiv.querySelector('.dashboard-d-credit-balance, .dashboard-d-credit-row:last-child');
+                                if (balanceRow && balanceRow.querySelector('.dashboard-d-label-cell').textContent.trim() === 'Balance:') {
+                                    const balanceCell = balanceRow.querySelector('.dashboard-d-amount-cell');
+                                    if (balanceCell) {
+                                        // We'll let saveDailyTotalsAndRemainders update the actual balance
+                                        // as it has all the correct data
+                                    }
+                                }
+                            }
+                        }
+                        
+                        return true; // Successfully updated existing row
+                    }
+                }
+            }
+            
+            // If we reach here, we need to create a new row
+            // Find the container for this date
+            const container = document.querySelector(`.dashboard-d-container .dashboard-d-day-header[data-date="${formattedDate}"]`);
+            if (!container) {
+                return false;
+            }
+            
+            const parentContainer = container.parentElement;
+            
+            // Find or create the entries div based on entry type
+            let entriesDiv;
+            let rowClass, inputClass, categoryArray;
+            
+            if (entryType === 'income') {
+                entriesDiv = parentContainer.querySelector(`.dashboard-d-income-entries[data-date="${formattedDate}"]`);
+                if (!entriesDiv) {
+                    entriesDiv = document.createElement('div');
+                    entriesDiv.classList.add('dashboard-d-income-entries');
+                    entriesDiv.setAttribute('data-date', formattedDate);
+                    
+                    // Find where to insert it (after last remainder or at the beginning)
+                    const lastRemainder = parentContainer.querySelector('.dashboard-d-lastremainder');
+                    if (lastRemainder) {
+                        lastRemainder.after(entriesDiv);
+                    } else {
+                        parentContainer.appendChild(entriesDiv);
+                    }
+                }
+                rowClass = 'dashboard-d-row';
+                inputClass = 'income-cell-input';
+                categoryArray = incomeCategories;
+            } else if (entryType === 'expense') {
+                entriesDiv = parentContainer.querySelector(`.dashboard-d-expense-entries[data-date="${formattedDate}"]`);
+                if (!entriesDiv) {
+                    entriesDiv = document.createElement('div');
+                    entriesDiv.classList.add('dashboard-d-expense-entries');
+                    entriesDiv.setAttribute('data-date', formattedDate);
+                    
+                    // Find where to insert it (after income total or at the end)
+                    const incomeTotal = parentContainer.querySelector('.dashboard-d-income-total');
+                    if (incomeTotal) {
+                        incomeTotal.after(entriesDiv);
+                    } else {
+                        parentContainer.appendChild(entriesDiv);
+                    }
+                }
+                rowClass = 'dashboard-d-row';
+                inputClass = 'expense-cell-input';
+                categoryArray = expenseCategories;
+            } else if (entryType === 'ca' || entryType.startsWith('ca')) {
+                // Handle credit account entries
+                // Find credit account section in this date container
+                const accountId = formData.account_id;
+                entriesDiv = parentContainer.querySelector(`.dashboard-d-credit-account[data-account-id="${accountId}"]`);
+                
+                if (!entriesDiv) {
+                    console.log('Credit account section not found for account:', accountId, 'in date:', formattedDate);
+                    // The account div might not exist yet if this is the first entry
+                    // Let's check if we have any credit account divider
+                    const creditDivider = parentContainer.querySelector('.dashboard-d-credit-divider');
+                    if (creditDivider) {
+                        // Create a new credit account section
+                        entriesDiv = document.createElement('div');
+                        entriesDiv.classList.add('dashboard-d-credit-account');
+                        entriesDiv.setAttribute('data-account-id', accountId);
+                        
+                        // Find the account info to get the name
+                        const accountInfo = credit_accounts.find(a => String(a.id) === String(accountId));
+                        if (!accountInfo) {
+                            console.error('Could not find account info for account ID:', accountId);
+                            return false;
+                        }
+                        
+                        // Create account name row
+                        const accountNameRow = document.createElement('div');
+                        accountNameRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-name-row');
+                        accountNameRow.innerHTML = `
+                            <div class="dashboard-d-label-cell">${accountInfo.name}</div>
+                            <div class="dashboard-d-amount-cell"></div>
+                        `;
+                        entriesDiv.appendChild(accountNameRow);
+                        
+                        // Add balance row (will be updated when totals are calculated)
+                        const balanceRow = document.createElement('div');
+                        balanceRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-balance');
+                        balanceRow.innerHTML = `
+                            <div class="dashboard-d-label-cell">Balance:</div>
+                            <div class="dashboard-d-amount-cell">${formatCurrency(0)}</div>
+                        `;
+                        
+                        // Insert after credit divider
+                        creditDivider.after(entriesDiv);
+                        
+                        // Balance row will be added after the entry is inserted
+                    } else {
+                        console.error('No credit divider found');
+                        return false; // No credit divider found
+                    }
+                }
+                
+                rowClass = 'dashboard-d-credit-row';
+                inputClass = 'ca-cell-input';
+                categoryArray = [];
+                
+                // Get categories for this credit account
+                c_expense_categories.forEach(cat => {
+                    if (String(cat.account_id) === String(accountId)) {
+                        categoryArray.push(cat);
+                    }
+                });
+            } else {
+                return false; // Unknown entry type
+            }
+            
+            // Find the category object
+            let catObj;
+            
+            if (entryType === 'ca' || entryType.startsWith('ca')) {
+                // For credit accounts, we need to find the category with matching account_id
+                catObj = c_expense_categories.find(cat => {
+                    return String(cat.id) === categoryId && 
+                           String(cat.account_id) === String(formData.account_id);
+                });
+            } else {
+                catObj = categoryArray.find(cat => String(cat.id) === categoryId);
+            }
+            
+            if (!catObj) {
+                return false; // Category not found
+            }
+            
+            // Create the row
+            const row = document.createElement('div');
+            row.classList.add(rowClass);
+            row.setAttribute('data-entry-id', 'new'); // Will be updated after AJAX
+            row.setAttribute('data-category-id', categoryId);
+            row.setAttribute('data-date', formattedDate);
+            
+            // Add account ID attribute for credit account rows
+            if ((entryType === 'ca' || entryType.startsWith('ca')) && formData.account_id) {
+                row.setAttribute('data-account-id', formData.account_id);
+            }
+            
+            // Determine icon
+            let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
+            const isBud = catObj.is_bud || false;
+            
+            if (catObj) {
+                if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
+                else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
+                else if (entryType === 'expense' && catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
+            }
+            
+            // Build the HTML
+            row.innerHTML = `
+                ${!isBud ? `<span class="dashboard-d-drag-handle"><i class="fa-solid fa-bars"></i></span>` : ''}
+                ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
+                    <span class="calendar-icon">
+                    <i class="fa-regular fa-calendar"></i>
+                    </span>
+                </span>` : ''}
+                <div class="dashboard-d-label-cell">
+                    ${iconHtml}
+                    ${catObj.name}
+                </div>
+                <div class="dashboard-d-amount-cell">
+                    <input type="text"
+                        class="${inputClass}"
+                        data-processed="0"
+                        value="${formatCurrency(formData.amount)}"
+                        data-entry-id="new"
+                        data-category-id="${categoryId}"
+                        data-date="${formattedDate}"
+                        ${isBud ? 'readonly tabindex="-1"' : ''}
+                    />
+                </div>
+            `;
+            
+            // For credit accounts, insert before balance row if it exists
+            if (entryType === 'ca' || entryType.startsWith('ca')) {
+                const balanceRow = entriesDiv.querySelector('.dashboard-d-credit-balance, .dashboard-d-credit-row:last-child');
+                if (balanceRow && balanceRow.querySelector('.dashboard-d-label-cell').textContent.trim() === 'Balance:') {
+                    balanceRow.before(row);
+                } else {
+                    // Create balance row if it doesn't exist
+                    const balanceRow = document.createElement('div');
+                    balanceRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-balance');
+                    balanceRow.innerHTML = `
+                        <div class="dashboard-d-label-cell">Balance:</div>
+                        <div class="dashboard-d-amount-cell">${formatCurrency(0)}</div>
+                    `;
+                    
+                    // Add the entry and then the balance row
+                    entriesDiv.appendChild(row);
+                    entriesDiv.appendChild(balanceRow);
+                }
+            } else {
+                // Regular income/expense entry
+                entriesDiv.appendChild(row);
+            }
+            return true; // Successfully added row to DOM
+        }
+
         function addEntryAJAX(formData, callback) {
             dashboardDCloseModal();
             resetDashboardDAddEntryForm();
@@ -1415,6 +1789,20 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                 formData.account_id = accountId; // So updateLocalEntryAfterAdd can use it
             }
 
+            // Update local entry data BEFORE the AJAX call
+            updateLocalEntryAfterAdd(entryType, formData, true);
+            
+            // Try to add the entry to the DOM immediately
+            const rowAdded = addEntryRowToDOM(entryType, formData);
+            
+            // If we couldn't add the row (maybe date not in view), refresh containers
+            if (!rowAdded) {
+                const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+                const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+                createDashboardContainers(weekDates);
+                setupDashboardDInputFocus();
+            }
+            
             $.ajax({
                 url: '/dashboard-d/add_entry',
                 type: 'POST',
@@ -1422,7 +1810,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                 contentType: 'application/json',
                 success: function(response) {
                     if (response.status === 'success') {
-                        updateLocalEntryAfterAdd(entryType, formData, true);
+                        // Local entry already updated, just save totals and remainders
                         saveDailyTotalsAndRemainders(formData.date);
                         if (typeof callback === "function") callback(response);
                     } else {
@@ -1712,9 +2100,10 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
             if (!cell) return;
 
             // Exclude credit account balance rows
-            const isBalanceRow = cell.parentElement.classList.contains('dashboard-d-credit-row') &&
+            const isBalanceRow = (cell.parentElement.classList.contains('dashboard-d-credit-balance') || 
+                (cell.parentElement.classList.contains('dashboard-d-credit-row') &&
                 cell.previousElementSibling &&
-                cell.previousElementSibling.textContent.trim() === 'Balance:';
+                cell.previousElementSibling.textContent.trim() === 'Balance:'));
             if (isBalanceRow) return;
 
             // Position the menu so its top right corner is at the mouse click
@@ -1970,7 +2359,8 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                                 : 'ca';
                             updateEntry(input, type);
                         } else if (input.value.trim() !== '') {
-                            input.value = currencySymbol + (parseInt(input.value, 10) || 0);
+                            // Use our new formatCurrency function
+                            input.value = formatCurrency(parseFloat(input.value) || 0);
                         }
                     });
                 });
