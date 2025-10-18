@@ -3693,7 +3693,7 @@ input#setup-profile-starting-balance {
 
 .dashboard-d-today-container {
     height: 15px;
-    font-size: 8px;
+    font-size: 14px;
     font-weight: bold;
     color: #E45F1C;
     display: flex;
