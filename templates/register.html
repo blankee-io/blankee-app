@@ -217,6 +217,7 @@
             // Event listener for changes in the password input field
             passwordInput.on('input', function() {
                 const password = passwordInput.val();  // Get the input value
+                const confirmPassword = confirmPasswordInput.val();  // Get confirmation password
 
                 isPasswordValid = true;  // Assume the password is valid initially
 
@@ -252,6 +253,18 @@
                 } else {
                     numberRequirement.text('✗').removeClass('valid');  // Indicate missing number
                     isPasswordValid = false;
+                }
+
+                // Re-check password match when password changes
+                if (password === confirmPassword && confirmPassword !== "") {
+                    passwordMatchRequirement.text('✓').addClass('valid');  // Show valid if passwords match
+                    isPasswordMatchValid = true;
+                } else if (confirmPassword !== "") {
+                    passwordMatchRequirement.text('✗').removeClass('valid');  // Show invalid if passwords don't match
+                    isPasswordMatchValid = false;
+                } else {
+                    passwordMatchRequirement.text('✗').removeClass('valid');  // Show invalid if confirm is empty
+                    isPasswordMatchValid = false;
                 }
 
                 adjustValidationWindowPosition(passwordInput, passwordRequirements);
