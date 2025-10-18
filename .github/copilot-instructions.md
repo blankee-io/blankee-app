@@ -73,6 +73,7 @@ This project uses a normalized MySQL schema for budgeting, with strong user isol
 **Reminder:**  
 - Never use inline CSS. Provide all style changes as separate CSS code blocks for inclusion in a CSS file.
 - Reference this section for table/column names and relationships when generating backend or template code.
+- Do not use git commands at all.
 
 ---
 
