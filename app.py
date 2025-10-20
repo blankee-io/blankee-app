@@ -5351,141 +5351,141 @@ def generate_income_entries(recurring_id, category_id, amount, cadence_interval,
         current_date = start_date
         end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
 
-    while current_date <= end_date:
-        delta = None
+        while current_date <= end_date:
+            delta = None
 
-        if cadence_unit == 'days':
-            # Insert entry for the current date
-            cursor.execute("""
-                INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                VALUES (%s, %s, %s, %s)
-            """, (recurring_id, category_id, current_date, amount))
-            delta = timedelta(days=int(cadence_interval))
+            if cadence_unit == 'days':
+                # Insert entry for the current date
+                cursor.execute("""
+                    INSERT INTO income_entries (recurring_id, category_id, date, amount)
+                    VALUES (%s, %s, %s, %s)
+                """, (recurring_id, category_id, current_date, amount))
+                delta = timedelta(days=int(cadence_interval))
 
-        elif cadence_unit == 'weeks':
-            for weekday in weekdays:
-                weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
-                weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
-                if start_date <= weekday_date <= end_date:
-                    cursor.execute("""
-                        INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, weekday_date, amount))
-            delta = timedelta(weeks=int(cadence_interval))
+            elif cadence_unit == 'weeks':
+                for weekday in weekdays:
+                    weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
+                    weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
+                    if start_date <= weekday_date <= end_date:
+                        cursor.execute("""
+                            INSERT INTO income_entries (recurring_id, category_id, date, amount)
+                            VALUES (%s, %s, %s, %s)
+                        """, (recurring_id, category_id, weekday_date, amount))
+                delta = timedelta(weeks=int(cadence_interval))
 
-        elif cadence_unit == 'months':
-            if monthly_days:
-                # Convert all days to int, except 'Last Day'
-                monthly_days_cleaned = []
-                for day in monthly_days:
-                    if str(day).lower() == 'last day':
-                        monthly_days_cleaned.append('Last Day')
-                    else:
-                        try:
-                            monthly_days_cleaned.append(int(day))
-                        except Exception:
-                            continue
+            elif cadence_unit == 'months':
+                if monthly_days:
+                    # Convert all days to int, except 'Last Day'
+                    monthly_days_cleaned = []
+                    for day in monthly_days:
+                        if str(day).lower() == 'last day':
+                            monthly_days_cleaned.append('Last Day')
+                        else:
+                            try:
+                                monthly_days_cleaned.append(int(day))
+                            except Exception:
+                                continue
 
-                # Loop through each month from start_date to end_date
-                year = current_date.year
-                month = current_date.month
-                while True:
-                    for day in monthly_days_cleaned:
-                        try:
-                            if str(day).lower() == 'last day':
-                                day_num = calendar.monthrange(year, month)[1]
-                            else:
-                                day_num = int(day)
-                                last_day_of_month = calendar.monthrange(year, month)[1]
-                                if day_num > last_day_of_month:
-                                    continue  # Skip invalid days
-                            entry_date = date(year=year, month=month, day=day_num)
-                        except Exception:
-                            continue
+                    # Loop through each month from start_date to end_date
+                    year = current_date.year
+                    month = current_date.month
+                    while True:
+                        for day in monthly_days_cleaned:
+                            try:
+                                if str(day).lower() == 'last day':
+                                    day_num = calendar.monthrange(year, month)[1]
+                                else:
+                                    day_num = int(day)
+                                    last_day_of_month = calendar.monthrange(year, month)[1]
+                                    if day_num > last_day_of_month:
+                                        continue  # Skip invalid days
+                                entry_date = date(year=year, month=month, day=day_num)
+                            except Exception:
+                                continue
+                            if entry_date < start_date:
+                                continue
+                            if entry_date > end_date:
+                                continue
+                            cursor.execute("""
+                                INSERT INTO income_entries (recurring_id, category_id, date, amount)
+                                VALUES (%s, %s, %s, %s)
+                            """, (recurring_id, category_id, entry_date, amount))
+                        # Move to next month by cadence_interval
+                        month += int(cadence_interval)
+                        while month > 12:
+                            month -= 12
+                            year += 1
+                        # Stop if we've passed the end date's year and month
+                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                            break
+                else:
+                    # Default to the first day of each month
+                    year = current_date.year
+                    month = current_date.month
+                    while True:
+                        entry_date = date(year=year, month=month, day=1)
                         if entry_date < start_date:
+                            pass
+                        elif entry_date > end_date:
+                            break
+                        else:
+                            cursor.execute("""
+                                INSERT INTO income_entries (recurring_id, category_id, date, amount)
+                                VALUES (%s, %s, %s, %s)
+                            """, (recurring_id, category_id, entry_date, amount))
+                        # Move to next month by cadence_interval
+                        month += int(cadence_interval)
+                        while month > 12:
+                            month -= 12
+                            year += 1
+                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                            break
+                break  # Exit the outer while loop after handling months
+
+            elif cadence_unit == 'years':
+                if yearly_day and yearly_month:
+                    interval = int(cadence_interval)
+                    year = start_date.year
+                    while True:
+                        try:
+                            yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
+                        except ValueError:
+                            year += interval
                             continue
-                        if entry_date > end_date:
+                        if yearly_entry_date < start_date:
+                            year += interval
                             continue
+                        if yearly_entry_date > end_date:
+                            break
                         cursor.execute("""
                             INSERT INTO income_entries (recurring_id, category_id, date, amount)
                             VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, entry_date, amount))
-                    # Move to next month by cadence_interval
-                    month += int(cadence_interval)
-                    while month > 12:
-                        month -= 12
-                        year += 1
-                    # Stop if we've passed the end date's year and month
-                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                        break
-            else:
-                # Default to the first day of each month
-                year = current_date.year
-                month = current_date.month
-                while True:
-                    entry_date = date(year=year, month=month, day=1)
-                    if entry_date < start_date:
-                        pass
-                    elif entry_date > end_date:
-                        break
-                    else:
+                        """, (recurring_id, category_id, yearly_entry_date, amount))
+                        year += interval
+                else:
+                    interval = int(cadence_interval)
+                    year = start_date.year
+                    while True:
+                        yearly_entry_date = date(year=year, month=1, day=1)
+                        if yearly_entry_date < start_date:
+                            year += interval
+                            continue
+                        if yearly_entry_date > end_date:
+                            break
                         cursor.execute("""
                             INSERT INTO income_entries (recurring_id, category_id, date, amount)
                             VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, entry_date, amount))
-                    # Move to next month by cadence_interval
-                    month += int(cadence_interval)
-                    while month > 12:
-                        month -= 12
-                        year += 1
-                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                        break
-            break  # Exit the outer while loop after handling months
+                        """, (recurring_id, category_id, yearly_entry_date, amount))
+                        year += interval
 
-        elif cadence_unit == 'years':
-            if yearly_day and yearly_month:
-                interval = int(cadence_interval)
-                year = start_date.year
-                while True:
-                    try:
-                        yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
-                    except ValueError:
-                        year += interval
-                        continue
-                    if yearly_entry_date < start_date:
-                        year += interval
-                        continue
-                    if yearly_entry_date > end_date:
-                        break
-                    cursor.execute("""
-                        INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, yearly_entry_date, amount))
-                    year += interval
+            # Increment current_date
+            if delta:
+                current_date += delta
             else:
-                interval = int(cadence_interval)
-                year = start_date.year
-                while True:
-                    yearly_entry_date = date(year=year, month=1, day=1)
-                    if yearly_entry_date < start_date:
-                        year += interval
-                        continue
-                    if yearly_entry_date > end_date:
-                        break
-                    cursor.execute("""
-                        INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, yearly_entry_date, amount))
-                    year += interval
+                break
 
-        # Increment current_date
-        if delta:
-            current_date += delta
-        else:
-            break
-
-    conn.commit()
-    cursor.close()
+        conn.commit()
+        cursor.close()
 
 @app.route('/delete-recurring-income', methods=['POST'])
 @login_required
@@ -5858,141 +5858,141 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
         current_date = start_date
         end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
 
-    while current_date <= end_date:
-        delta = None
+        while current_date <= end_date:
+            delta = None
 
-        if cadence_unit == 'days':
-            # Insert entry for the current date
-            cursor.execute("""
-                INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                VALUES (%s, %s, %s, %s)
-            """, (recurring_id, category_id, current_date, amount))
-            delta = timedelta(days=int(cadence_interval))
+            if cadence_unit == 'days':
+                # Insert entry for the current date
+                cursor.execute("""
+                    INSERT INTO expense_entries (recurring_id, category_id, date, amount)
+                    VALUES (%s, %s, %s, %s)
+                """, (recurring_id, category_id, current_date, amount))
+                delta = timedelta(days=int(cadence_interval))
 
-        elif cadence_unit == 'weeks':
-            for weekday in weekdays:
-                weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
-                weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
-                if start_date <= weekday_date <= end_date:
-                    cursor.execute("""
-                        INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, weekday_date, amount))
-            delta = timedelta(weeks=int(cadence_interval))
+            elif cadence_unit == 'weeks':
+                for weekday in weekdays:
+                    weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
+                    weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
+                    if start_date <= weekday_date <= end_date:
+                        cursor.execute("""
+                            INSERT INTO expense_entries (recurring_id, category_id, date, amount)
+                            VALUES (%s, %s, %s, %s)
+                        """, (recurring_id, category_id, weekday_date, amount))
+                delta = timedelta(weeks=int(cadence_interval))
 
-        elif cadence_unit == 'months':
-            if monthly_days:
-                # Convert all days to int, except 'Last Day'
-                monthly_days_cleaned = []
-                for day in monthly_days:
-                    if str(day).lower() == 'last day':
-                        monthly_days_cleaned.append('Last Day')
-                    else:
-                        try:
-                            monthly_days_cleaned.append(int(day))
-                        except Exception:
-                            continue
+            elif cadence_unit == 'months':
+                if monthly_days:
+                    # Convert all days to int, except 'Last Day'
+                    monthly_days_cleaned = []
+                    for day in monthly_days:
+                        if str(day).lower() == 'last day':
+                            monthly_days_cleaned.append('Last Day')
+                        else:
+                            try:
+                                monthly_days_cleaned.append(int(day))
+                            except Exception:
+                                continue
 
-                # Loop through each month from start_date to end_date
-                year = current_date.year
-                month = current_date.month
-                while True:
-                    for day in monthly_days_cleaned:
-                        try:
-                            if str(day).lower() == 'last day':
-                                day_num = calendar.monthrange(year, month)[1]
-                            else:
-                                day_num = int(day)
-                                last_day_of_month = calendar.monthrange(year, month)[1]
-                                if day_num > last_day_of_month:
-                                    continue  # Skip invalid days
-                            entry_date = date(year=year, month=month, day=day_num)
-                        except Exception:
-                            continue
+                    # Loop through each month from start_date to end_date
+                    year = current_date.year
+                    month = current_date.month
+                    while True:
+                        for day in monthly_days_cleaned:
+                            try:
+                                if str(day).lower() == 'last day':
+                                    day_num = calendar.monthrange(year, month)[1]
+                                else:
+                                    day_num = int(day)
+                                    last_day_of_month = calendar.monthrange(year, month)[1]
+                                    if day_num > last_day_of_month:
+                                        continue  # Skip invalid days
+                                entry_date = date(year=year, month=month, day=day_num)
+                            except Exception:
+                                continue
+                            if entry_date < start_date:
+                                continue
+                            if entry_date > end_date:
+                                continue
+                            cursor.execute("""
+                                INSERT INTO expense_entries (recurring_id, category_id, date, amount)
+                                VALUES (%s, %s, %s, %s)
+                            """, (recurring_id, category_id, entry_date, amount))
+                        # Move to next month by cadence_interval
+                        month += int(cadence_interval)
+                        while month > 12:
+                            month -= 12
+                            year += 1
+                        # Stop if we've passed the end date's year and month
+                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                            break
+                else:
+                    # Default to the first day of each month
+                    year = current_date.year
+                    month = current_date.month
+                    while True:
+                        entry_date = date(year=year, month=month, day=1)
                         if entry_date < start_date:
+                            pass
+                        elif entry_date > end_date:
+                            break
+                        else:
+                            cursor.execute("""
+                                INSERT INTO expense_entries (recurring_id, category_id, date, amount)
+                                VALUES (%s, %s, %s, %s)
+                            """, (recurring_id, category_id, entry_date, amount))
+                        # Move to next month by cadence_interval
+                        month += int(cadence_interval)
+                        while month > 12:
+                            month -= 12
+                            year += 1
+                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                            break
+                break  # Exit the outer while loop after handling months
+
+            elif cadence_unit == 'years':
+                if yearly_day and yearly_month:
+                    interval = int(cadence_interval)
+                    year = start_date.year
+                    while True:
+                        try:
+                            yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
+                        except ValueError:
+                            year += interval
                             continue
-                        if entry_date > end_date:
+                        if yearly_entry_date < start_date:
+                            year += interval
                             continue
+                        if yearly_entry_date > end_date:
+                            break
                         cursor.execute("""
                             INSERT INTO expense_entries (recurring_id, category_id, date, amount)
                             VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, entry_date, amount))
-                    # Move to next month by cadence_interval
-                    month += int(cadence_interval)
-                    while month > 12:
-                        month -= 12
-                        year += 1
-                    # Stop if we've passed the end date's year and month
-                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                        break
-            else:
-                # Default to the first day of each month
-                year = current_date.year
-                month = current_date.month
-                while True:
-                    entry_date = date(year=year, month=month, day=1)
-                    if entry_date < start_date:
-                        pass
-                    elif entry_date > end_date:
-                        break
-                    else:
+                        """, (recurring_id, category_id, yearly_entry_date, amount))
+                        year += interval
+                else:
+                    interval = int(cadence_interval)
+                    year = start_date.year
+                    while True:
+                        yearly_entry_date = date(year=year, month=1, day=1)
+                        if yearly_entry_date < start_date:
+                            year += interval
+                            continue
+                        if yearly_entry_date > end_date:
+                            break
                         cursor.execute("""
                             INSERT INTO expense_entries (recurring_id, category_id, date, amount)
                             VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, entry_date, amount))
-                    # Move to next month by cadence_interval
-                    month += int(cadence_interval)
-                    while month > 12:
-                        month -= 12
-                        year += 1
-                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                        break
-            break  # Exit the outer while loop after handling months
+                        """, (recurring_id, category_id, yearly_entry_date, amount))
+                        year += interval
 
-        elif cadence_unit == 'years':
-            if yearly_day and yearly_month:
-                interval = int(cadence_interval)
-                year = current_date.year
-                while True:
-                    try:
-                        yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
-                    except ValueError:
-                        year += interval
-                        continue
-                    if yearly_entry_date < start_date:
-                        year += interval
-                        continue
-                    if yearly_entry_date > end_date:
-                        break
-                    cursor.execute("""
-                        INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, yearly_entry_date, amount))
-                    year += interval
+            # Increment current_date
+            if delta:
+                current_date += delta
             else:
-                interval = int(cadence_interval)
-                year = current_date.year
-                while True:
-                    yearly_entry_date = date(year=year, month=1, day=1)
-                    if yearly_entry_date < start_date:
-                        year += interval
-                        continue
-                    if yearly_entry_date > end_date:
-                        break
-                    cursor.execute("""
-                        INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, yearly_entry_date, amount))
-                    year += interval
+                break
 
-        # Increment current_date
-        if delta:
-            current_date += delta
-        else:
-            break
-
-    conn.commit()
-    cursor.close()
+        conn.commit()
+        cursor.close()
 
 @app.route('/delete-recurring-expense', methods=['POST'])
 @login_required
@@ -6363,132 +6363,132 @@ def generate_ca_expense_entries(recurring_id, category_id, amount, cadence_inter
         current_date = start_date
         end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
 
-    while current_date <= end_date:
-        delta = None
+        while current_date <= end_date:
+            delta = None
 
-        if cadence_unit == 'days':
-            cursor.execute("""
-                INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                VALUES (%s, %s, %s, %s)
-            """, (recurring_id, category_id, current_date, amount))
-            delta = timedelta(days=int(cadence_interval))
+            if cadence_unit == 'days':
+                cursor.execute("""
+                    INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                    VALUES (%s, %s, %s, %s)
+                """, (recurring_id, category_id, current_date, amount))
+                delta = timedelta(days=int(cadence_interval))
 
-        elif cadence_unit == 'weeks':
-            for weekday in weekdays:
-                weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
-                weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
-                if start_date <= weekday_date <= end_date:
-                    cursor.execute("""
-                        INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, weekday_date, amount))
-            delta = timedelta(weeks=int(cadence_interval))
+            elif cadence_unit == 'weeks':
+                for weekday in weekdays:
+                    weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
+                    weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
+                    if start_date <= weekday_date <= end_date:
+                        cursor.execute("""
+                            INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                            VALUES (%s, %s, %s, %s)
+                        """, (recurring_id, category_id, weekday_date, amount))
+                delta = timedelta(weeks=int(cadence_interval))
 
-        elif cadence_unit == 'months':
-            if monthly_days:
-                monthly_days_cleaned = []
-                for day in monthly_days:
-                    if str(day).lower() == 'last day':
-                        monthly_days_cleaned.append('Last Day')
-                    else:
-                        try:
-                            monthly_days_cleaned.append(int(day))
-                        except Exception:
-                            continue
-                year = current_date.year
-                month = current_date.month
-                while True:
-                    for day in monthly_days_cleaned:
-                        try:
-                            if str(day).lower() == 'last day':
-                                day_num = calendar.monthrange(year, month)[1]
-                            else:
-                                day_num = int(day)
-                                last_day_of_month = calendar.monthrange(year, month)[1]
-                                if day_num > last_day_of_month:
-                                    continue
-                            entry_date = date(year=year, month=month, day=day_num)
-                        except Exception:
-                            continue
+            elif cadence_unit == 'months':
+                if monthly_days:
+                    monthly_days_cleaned = []
+                    for day in monthly_days:
+                        if str(day).lower() == 'last day':
+                            monthly_days_cleaned.append('Last Day')
+                        else:
+                            try:
+                                monthly_days_cleaned.append(int(day))
+                            except Exception:
+                                continue
+                    year = current_date.year
+                    month = current_date.month
+                    while True:
+                        for day in monthly_days_cleaned:
+                            try:
+                                if str(day).lower() == 'last day':
+                                    day_num = calendar.monthrange(year, month)[1]
+                                else:
+                                    day_num = int(day)
+                                    last_day_of_month = calendar.monthrange(year, month)[1]
+                                    if day_num > last_day_of_month:
+                                        continue
+                                entry_date = date(year=year, month=month, day=day_num)
+                            except Exception:
+                                continue
+                            if entry_date < start_date:
+                                continue
+                            if entry_date > end_date:
+                                continue
+                            cursor.execute("""
+                                INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                                VALUES (%s, %s, %s, %s)
+                            """, (recurring_id, category_id, entry_date, amount))
+                        month += int(cadence_interval)
+                        while month > 12:
+                            month -= 12
+                            year += 1
+                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                            break
+                else:
+                    year = current_date.year
+                    month = current_date.month
+                    while True:
+                        entry_date = date(year=year, month=month, day=1)
                         if entry_date < start_date:
+                            pass
+                        elif entry_date > end_date:
+                            break
+                        else:
+                            cursor.execute("""
+                                INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
+                                VALUES (%s, %s, %s, %s)
+                            """, (recurring_id, category_id, entry_date, amount))
+                        month += int(cadence_interval)
+                        while month > 12:
+                            month -= 12
+                            year += 1
+                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                            break
+                break
+
+            elif cadence_unit == 'years':
+                if yearly_day and yearly_month:
+                    interval = int(cadence_interval)
+                    year = start_date.year
+                    while True:
+                        try:
+                            yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
+                        except ValueError:
+                            year += interval
                             continue
-                        if entry_date > end_date:
+                        if yearly_entry_date < start_date:
+                            year += interval
                             continue
+                        if yearly_entry_date > end_date:
+                            break
                         cursor.execute("""
                             INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
                             VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, entry_date, amount))
-                    month += int(cadence_interval)
-                    while month > 12:
-                        month -= 12
-                        year += 1
-                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                        break
-            else:
-                year = current_date.year
-                month = current_date.month
-                while True:
-                    entry_date = date(year=year, month=month, day=1)
-                    if entry_date < start_date:
-                        pass
-                    elif entry_date > end_date:
-                        break
-                    else:
+                        """, (recurring_id, category_id, yearly_entry_date, amount))
+                        year += interval
+                else:
+                    interval = int(cadence_interval)
+                    year = start_date.year
+                    while True:
+                        yearly_entry_date = date(year=year, month=1, day=1)
+                        if yearly_entry_date < start_date:
+                            year += interval
+                            continue
+                        if yearly_entry_date > end_date:
+                            break
                         cursor.execute("""
                             INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
                             VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, entry_date, amount))
-                    month += int(cadence_interval)
-                    while month > 12:
-                        month -= 12
-                        year += 1
-                    if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                        break
-            break
+                        """, (recurring_id, category_id, yearly_entry_date, amount))
+                        year += interval
 
-        elif cadence_unit == 'years':
-            if yearly_day and yearly_month:
-                interval = int(cadence_interval)
-                year = current_date.year
-                while True:
-                    try:
-                        yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
-                    except ValueError:
-                        year += interval
-                        continue
-                    if yearly_entry_date < start_date:
-                        year += interval
-                        continue
-                    if yearly_entry_date > end_date:
-                        break
-                    cursor.execute("""
-                        INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, yearly_entry_date, amount))
-                    year += interval
+            if delta:
+                current_date += delta
             else:
-                interval = int(cadence_interval)
-                year = current_date.year
-                while True:
-                    yearly_entry_date = date(year=year, month=1, day=1)
-                    if yearly_entry_date < start_date:
-                        year += interval
-                        continue
-                    if yearly_entry_date > end_date:
-                        break
-                    cursor.execute("""
-                        INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                        VALUES (%s, %s, %s, %s)
-                    """, (recurring_id, category_id, yearly_entry_date, amount))
-                    year += interval
+                break
 
-        if delta:
-            current_date += delta
-        else:
-            break
-
-    conn.commit()
-    cursor.close()
+        conn.commit()
+        cursor.close()
 
 @app.route('/delete-recurring-ca-expense', methods=['POST'])
 @login_required
