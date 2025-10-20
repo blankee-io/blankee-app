@@ -3098,145 +3098,145 @@ def dashboard():
         cursor.execute("""
             SELECT category_id, date, amount, processed
             FROM income_entries
-        WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
-    """, (current_user.id,))
-    raw_income_entries = cursor.fetchall()
+            WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
+        """, (current_user.id,))
+        raw_income_entries = cursor.fetchall()
 
-    income_map = {}
-    processed_map = {}
-    for entry in raw_income_entries:
-        week_key = get_week_key(entry['date'], goofy_week_mode)
-        key = (entry['category_id'], week_key)
-        income_map[key] = income_map.get(key, 0.0) + float(entry['amount'])
-        if key not in processed_map:
-            processed_map[key] = []
-        processed_map[key].append(entry['processed'])
+        income_map = {}
+        processed_map = {}
+        for entry in raw_income_entries:
+            week_key = get_week_key(entry['date'], goofy_week_mode)
+            key = (entry['category_id'], week_key)
+            income_map[key] = income_map.get(key, 0.0) + float(entry['amount'])
+            if key not in processed_map:
+                processed_map[key] = []
+            processed_map[key].append(entry['processed'])
 
-    income_entries = []
-    for key, total_amount in income_map.items():
-        processed_list = processed_map[key]
-        processed = 1 if all(p == 1 for p in processed_list) else 0
-        category_id, week_key = key
-        income_entries.append({
-            'category_id': category_id,
-            'date': week_key,
-            'total_amount': total_amount,
-            'processed': processed
-        })
+        income_entries = []
+        for key, total_amount in income_map.items():
+            processed_list = processed_map[key]
+            processed = 1 if all(p == 1 for p in processed_list) else 0
+            category_id, week_key = key
+            income_entries.append({
+                'category_id': category_id,
+                'date': week_key,
+                'total_amount': total_amount,
+                'processed': processed
+            })
 
-    # --- AGGREGATE EXPENSE ENTRIES ---
-    cursor.execute("""
-        SELECT category_id, date, amount, processed
-        FROM expense_entries
-        WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
-    """, (current_user.id,))
-    raw_expense_entries = cursor.fetchall()
+        # --- AGGREGATE EXPENSE ENTRIES ---
+        cursor.execute("""
+            SELECT category_id, date, amount, processed
+            FROM expense_entries
+            WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
+        """, (current_user.id,))
+        raw_expense_entries = cursor.fetchall()
 
-    expense_map = {}
-    expense_processed_map = {}
-    for entry in raw_expense_entries:
-        week_key = get_week_key(entry['date'], goofy_week_mode)
-        key = (entry['category_id'], week_key)
-        expense_map[key] = expense_map.get(key, 0.0) + float(entry['amount'])
-        if key not in expense_processed_map:
-            expense_processed_map[key] = []
-        expense_processed_map[key].append(entry['processed'])
+        expense_map = {}
+        expense_processed_map = {}
+        for entry in raw_expense_entries:
+            week_key = get_week_key(entry['date'], goofy_week_mode)
+            key = (entry['category_id'], week_key)
+            expense_map[key] = expense_map.get(key, 0.0) + float(entry['amount'])
+            if key not in expense_processed_map:
+                expense_processed_map[key] = []
+            expense_processed_map[key].append(entry['processed'])
 
-    expense_entries = []
-    for key, total_amount in expense_map.items():
-        processed_list = expense_processed_map[key]
-        processed = 1 if all(p == 1 for p in processed_list) else 0
-        category_id, week_key = key
-        expense_entries.append({
-            'category_id': category_id,
-            'date': week_key,
-            'total_amount': total_amount,
-            'processed': processed
-        })
+        expense_entries = []
+        for key, total_amount in expense_map.items():
+            processed_list = expense_processed_map[key]
+            processed = 1 if all(p == 1 for p in processed_list) else 0
+            category_id, week_key = key
+            expense_entries.append({
+                'category_id': category_id,
+                'date': week_key,
+                'total_amount': total_amount,
+                'processed': processed
+            })
 
-    # --- AGGREGATE CA ENTRIES ---
-    cursor.execute("""
-        SELECT cee.category_id, cee.date, cee.amount, cee.processed
-        FROM c_expense_entries cee
-        JOIN c_expense_categories cec ON cee.category_id = cec.id
-        JOIN credit_accounts ca ON cec.account_id = ca.id
-        WHERE ca.user_id = %s
-    """, (current_user.id,))
-    raw_c_expense_entries = cursor.fetchall()
+        # --- AGGREGATE CA ENTRIES ---
+        cursor.execute("""
+            SELECT cee.category_id, cee.date, cee.amount, cee.processed
+            FROM c_expense_entries cee
+            JOIN c_expense_categories cec ON cee.category_id = cec.id
+            JOIN credit_accounts ca ON cec.account_id = ca.id
+            WHERE ca.user_id = %s
+        """, (current_user.id,))
+        raw_c_expense_entries = cursor.fetchall()
 
-    c_expense_map = {}
-    c_expense_processed_map = {}
-    for entry in raw_c_expense_entries:
-        week_key = get_week_key(entry['date'], goofy_week_mode)
-        key = (entry['category_id'], week_key)
-        c_expense_map[key] = c_expense_map.get(key, 0.0) + float(entry['amount'])
-        if key not in c_expense_processed_map:
-            c_expense_processed_map[key] = []
-        c_expense_processed_map[key].append(entry['processed'])
+        c_expense_map = {}
+        c_expense_processed_map = {}
+        for entry in raw_c_expense_entries:
+            week_key = get_week_key(entry['date'], goofy_week_mode)
+            key = (entry['category_id'], week_key)
+            c_expense_map[key] = c_expense_map.get(key, 0.0) + float(entry['amount'])
+            if key not in c_expense_processed_map:
+                c_expense_processed_map[key] = []
+            c_expense_processed_map[key].append(entry['processed'])
 
-    c_expense_entries = []
-    for key, total_amount in c_expense_map.items():
-        processed_list = c_expense_processed_map[key]
-        processed = 1 if all(p == 1 for p in processed_list) else 0
-        category_id, week_key = key
-        c_expense_entries.append({
-            'category_id': category_id,
-            'date': week_key,
-            'total_amount': total_amount,
-            'processed': processed
-        })
+        c_expense_entries = []
+        for key, total_amount in c_expense_map.items():
+            processed_list = c_expense_processed_map[key]
+            processed = 1 if all(p == 1 for p in processed_list) else 0
+            category_id, week_key = key
+            c_expense_entries.append({
+                'category_id': category_id,
+                'date': week_key,
+                'total_amount': total_amount,
+                'processed': processed
+            })
 
-    # Fetch all totals and remainders
-    cursor.execute("""
-        SELECT date, total_income, total_expenses, remainder, last_week_remainder
-        FROM totals_remainders
-        WHERE user_id = %s
-    """, (current_user.id,))
-    totals_remainders = cursor.fetchall()
+        # Fetch all totals and remainders
+        cursor.execute("""
+            SELECT date, total_income, total_expenses, remainder, last_week_remainder
+            FROM totals_remainders
+            WHERE user_id = %s
+        """, (current_user.id,))
+        totals_remainders = cursor.fetchall()
 
-    # Fetch all savings entries for the user
-    cursor.execute("""
-        SELECT date, amount FROM savings_entries
-        WHERE user_id = %s
-        ORDER BY date ASC
-    """, (current_user.id,))
-    savings_entries = cursor.fetchall()
+        # Fetch all savings entries for the user
+        cursor.execute("""
+            SELECT date, amount FROM savings_entries
+            WHERE user_id = %s
+            ORDER BY date ASC
+        """, (current_user.id,))
+        savings_entries = cursor.fetchall()
 
-    # Fetch buds
-    cursor.execute("""
-        SELECT b.id, b.expense_category_id
-        FROM buds b
-        WHERE b.user_id = %s
-    """, (current_user.id,))
-    buds = cursor.fetchall()
+        # Fetch buds
+        cursor.execute("""
+            SELECT b.id, b.expense_category_id
+            FROM buds b
+            WHERE b.user_id = %s
+        """, (current_user.id,))
+        buds = cursor.fetchall()
 
-    # --- Credit Accounts Section ---
-    cursor.execute("""
-        SELECT * FROM credit_accounts
-        WHERE user_id = %s
-        ORDER BY id ASC
-    """, (current_user.id,))
-    credit_accounts = cursor.fetchall()
+        # --- Credit Accounts Section ---
+        cursor.execute("""
+            SELECT * FROM credit_accounts
+            WHERE user_id = %s
+            ORDER BY id ASC
+        """, (current_user.id,))
+        credit_accounts = cursor.fetchall()
 
-    cursor.execute("""
-        SELECT cec.*, ca.name AS account_name
-        FROM c_expense_categories cec
-        JOIN credit_accounts ca ON cec.account_id = ca.id
-        WHERE ca.user_id = %s
-        ORDER BY cec.display_order DESC, cec.id DESC
-    """, (current_user.id,))
-    c_expense_categories = cursor.fetchall()
+        cursor.execute("""
+            SELECT cec.*, ca.name AS account_name
+            FROM c_expense_categories cec
+            JOIN credit_accounts ca ON cec.account_id = ca.id
+            WHERE ca.user_id = %s
+            ORDER BY cec.display_order DESC, cec.id DESC
+        """, (current_user.id,))
+        c_expense_categories = cursor.fetchall()
 
-    cursor.execute("""
-        SELECT * FROM c_a_balances
-        WHERE account_id IN (
-            SELECT id FROM credit_accounts WHERE user_id = %s
-        )
-        ORDER BY date DESC
-    """, (current_user.id,))
-    c_a_balances = cursor.fetchall()
+        cursor.execute("""
+            SELECT * FROM c_a_balances
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            )
+            ORDER BY date DESC
+        """, (current_user.id,))
+        c_a_balances = cursor.fetchall()
 
-    cursor.close()
+        cursor.close()
 
     profile_picture = user_data['profile_picture'] if user_data else None
     first_name = user_data['first_name'] if user_data else ''
@@ -3281,7 +3281,7 @@ def get_total_income():
 
     try:
         with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
 
             # Fetch total_income from totals_remainders table
             cursor.execute("""
@@ -3291,7 +3291,7 @@ def get_total_income():
             """, (current_user.id, date))
             
             result = cursor.fetchone()
-            total_income = result[0] if result else 0  # Safely handle the case where no result is found
+            total_income = result['total_income'] if result else 0
             cursor.close()
         
         return jsonify({'status': 'success', 'total_income': total_income})
@@ -3309,7 +3309,7 @@ def get_total_expenses():
 
     try:
         with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
 
             # Fetch total_expenses from totals_remainders table
             cursor.execute("""
@@ -3319,7 +3319,7 @@ def get_total_expenses():
             """, (current_user.id, date))
             
             result = cursor.fetchone()
-            total_expenses = result[0] if result else 0  # Safely handle the case where no result is found
+            total_expenses = result['total_expenses'] if result else 0
             cursor.close()
         
         return jsonify({'status': 'success', 'total_expenses': total_expenses})
@@ -4221,7 +4221,7 @@ def get_total_income_3m():
 
     try:
         with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
 
             # Fetch total_income from totals_remainders_m table
             cursor.execute("""
@@ -4231,7 +4231,7 @@ def get_total_income_3m():
             """, (current_user.id, date))
             
             result = cursor.fetchone()
-            total_income = result[0] if result else 0
+            total_income = result['total_income'] if result else 0
             cursor.close()
         
         return jsonify({'status': 'success', 'total_income': total_income})
@@ -4248,7 +4248,7 @@ def get_total_expenses_3m():
 
     try:
         with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
 
             # Fetch total_expenses from totals_remainders_m table
             cursor.execute("""
@@ -4258,7 +4258,7 @@ def get_total_expenses_3m():
             """, (current_user.id, date))
             
             result = cursor.fetchone()
-            total_expenses = result[0] if result else 0
+            total_expenses = result['total_expenses'] if result else 0
             cursor.close()
         
         return jsonify({'status': 'success', 'total_expenses': total_expenses})

@@ -876,5 +876,230 @@ The application is now production-ready for growth, with headroom for 3-5x curre
 
 ---
 
+## Post-Migration Troubleshooting & Bug Fixes
+
+### Critical Bug Pattern Discovered (October 19, 2025)
+
+After successful migration, several runtime errors revealed a systematic bug pattern where database operations were executing **outside** the context manager scope due to incorrect indentation.
+
+#### Bug Pattern: Operations Outside Context Manager
+
+**Error Symptoms:**
+```
+AttributeError: 'NoneType' object has no attribute 'commit'
+```
+
+**Root Cause:**
+Database operations (cursor.execute, conn.commit) were executing after the `with` block closed, causing the connection to be returned to the pool before operations completed.
+
+**Example Bug:**
+```python
+def generate_income_entries():
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT * FROM recurring_income WHERE user_id = %s", (user_id,))
+        entries = cursor.fetchall()
+    # ⚠️ WRONG - these are OUTSIDE the with block:
+    while current_date <= end_date:
+        cursor.execute("INSERT INTO income_entries ...")  # ❌ Connection already closed!
+        current_date += timedelta(days=1)
+    conn.commit()  # ❌ NoneType error!
+```
+
+**Correct Pattern:**
+```python
+def generate_income_entries():
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT * FROM recurring_income WHERE user_id = %s", (user_id,))
+        entries = cursor.fetchall()
+        
+        # ✅ CORRECT - all operations inside the with block:
+        while current_date <= end_date:
+            cursor.execute("INSERT INTO income_entries ...")
+            current_date += timedelta(days=1)
+        
+        cursor.close()
+        conn.commit()  # ✅ Connection still valid
+```
+
+#### Functions Fixed
+
+**1. `generate_income_entries()` (Line ~5346)**
+- **Bug:** Entire while loop and conn.commit() were outside with block
+- **Impact:** Recurring income entries failed to be created
+- **Fix:** Moved lines 5348-5413 inside with block, properly indented
+
+**2. `generate_expense_entries()` (Line ~5853)**
+- **Bug:** Same pattern - while loop and commit outside context
+- **Impact:** Recurring expense entries failed to be created
+- **Fix:** Moved lines 5855-5920 inside with block
+
+**3. `generate_ca_expense_entries()` (Line ~6358)**
+- **Bug:** Same pattern for credit account recurring expenses
+- **Impact:** Recurring credit account expenses failed to be created
+- **Fix:** Moved lines 6360-6425 inside with block
+
+**4. `dashboard()` (Line ~3034) - CRITICAL BUG**
+- **Bug:** ~150 lines of database operations outside with block
+- **Impact:** Dashboard page would intermittently fail with NoneType errors
+- **Scope:** Lines 3098-3245 (multiple cursor.execute() calls, data processing)
+- **Fix:** Moved all database operations inside with block that starts at line 3034
+- **Severity:** HIGH - affected main dashboard functionality
+
+#### Code Consistency Improvements
+
+After fixing the critical bugs, additional improvements were made for code consistency and maintainability:
+
+**DictCursor Standardization:**
+Updated 4 functions to use `pymysql.cursors.DictCursor` for consistent dictionary-based row access:
+
+1. **`get_total_income()` (Line ~3275)**
+   - Changed: `cursor = conn.cursor()` → `cursor = conn.cursor(pymysql.cursors.DictCursor)`
+   - Changed: `result[0]` → `result['total_income']`
+
+2. **`get_total_expenses()` (Line ~3303)**
+   - Changed: `cursor = conn.cursor()` → `cursor = conn.cursor(pymysql.cursors.DictCursor)`
+   - Changed: `result[0]` → `result['total_expenses']`
+
+3. **`get_total_income_3m()` (Line ~4215)**
+   - Changed: `cursor = conn.cursor()` → `cursor = conn.cursor(pymysql.cursors.DictCursor)`
+   - Changed: `result[0]` → `result['total_income']`
+
+4. **`get_total_expenses_3m()` (Line ~4242)**
+   - Changed: `cursor = conn.cursor()` → `cursor = conn.cursor(pymysql.cursors.DictCursor)`
+   - Changed: `result[0]` → `result['total_expenses']`
+
+**Benefits:**
+- Eliminates tuple index magic numbers
+- Improves code readability
+- Makes column renames safer (no positional dependencies)
+- Consistent with rest of codebase (95%+ functions use DictCursor)
+
+#### Automated Verification
+
+Created Python verification script to detect remaining issues:
+
+```python
+# Script scans app.py for cursor/conn usage outside with blocks
+# by analyzing indentation patterns
+python3 verify_context_managers.py
+```
+
+**Results:**
+```
+✅ SUCCESS! No issues found - all cursor/conn usage is properly contained!
+All database operations are correctly inside their context managers.
+```
+
+#### Lessons Learned
+
+1. **Python Indentation is Critical:** In context managers, even one level of incorrect indentation breaks the entire pattern
+2. **Large Functions are Risky:** The dashboard() bug persisted because the function spans 200+ lines
+3. **Automated Testing Needed:** Manual code review missed the subtle indentation bugs
+4. **Pattern Consistency Matters:** Using DictCursor everywhere reduces cognitive load
+
+#### Total Functions Fixed: 8
+- 4 critical context manager bugs (recurring entry generation + dashboard)
+- 4 code consistency improvements (DictCursor standardization)
+
+---
+
+## Pool Monitoring Solution
+
+### Internal Pool Monitor (October 19, 2025)
+
+Created production-ready internal monitoring system for database connection pool health.
+
+#### Components
+
+**1. `monitor_pool_internal.py`**
+- Standalone Python script for direct pool monitoring
+- Zero HTTP overhead (accesses pool directly)
+- Configurable alert thresholds
+- Structured logging for CloudWatch integration
+- Graceful shutdown with signal handlers
+- Location: `optimization/db-connection-pooling/pool-monitoring/`
+
+**Features:**
+```python
+# Configurable thresholds
+CHECK_INTERVAL = 5.0  # seconds between checks
+ALERT_HIGH_USAGE = 0.8  # Alert at 80% usage
+ALERT_LOW_AVAILABLE = 2  # Alert when ≤2 connections available
+ALERT_CRITICAL_AVAILABLE = 0  # Critical when exhausted
+
+# Logging
+LOG_FILE = '/var/log/blankee/pool_monitor.log'
+LOG_TO_CONSOLE = True  # Dev mode
+```
+
+**2. `blankee-pool-monitor.service`**
+- Systemd service configuration
+- Auto-restart on failure
+- Resource limits (100M memory, 10% CPU)
+- Security hardening (NoNewPrivileges, PrivateTmp, ProtectSystem)
+- Journal logging integration
+
+**3. `POOL_MONITOR_DEPLOYMENT.md`**
+- Step-by-step deployment guide for dev and production
+- Service management commands
+- Troubleshooting section
+- Configuration tuning recommendations
+
+**4. `CLOUDWATCH_INTEGRATION.md`**
+- AWS CloudWatch integration guide
+- Cost analysis (~$0.20/month)
+- Two setup methods: CloudWatch Agent (recommended) vs boto3 manual
+- Pre-configured alarms for critical/warning/down states
+- SNS notification setup
+- Custom dashboard JSON
+- CloudWatch Insights queries
+- IAM permissions reference
+
+#### Deployment Options
+
+**Development:**
+```bash
+cd /var/www/html/budget/
+python3 optimization/db-connection-pooling/pool-monitoring/monitor_pool_internal.py
+```
+
+**Production (EC2/RDS with Systemd):**
+```bash
+sudo cp blankee-pool-monitor.service /etc/systemd/system/
+sudo systemctl enable blankee-pool-monitor
+sudo systemctl start blankee-pool-monitor
+```
+
+**Production (with CloudWatch):**
+- Install CloudWatch Agent
+- Configure log group `/blankee/pool-monitor`
+- Create metric filters and alarms
+- Set up SNS notifications
+- Optional: Custom dashboard
+
+#### Monitoring Capabilities
+
+- Real-time pool status (total, in-use, available, usage %)
+- Configurable alert thresholds
+- Log rotation and retention
+- Performance metrics for CloudWatch
+- Email/SMS alerts via SNS
+- Visual dashboards via CloudWatch
+
+#### Cost Considerations
+
+**CloudWatch Integration (Optional):**
+- CloudWatch Logs: $0.02-$0.20/month
+- Alarms: $0 (within 10 free alarm tier)
+- SNS Email: Free
+- SNS SMS: $0.00645 per message (only when alerts fire)
+- **Total: ~$0.20/month + SMS costs**
+
+---
+
 **Migration Completed:** October 2025  
-**Status:** ✅ Stable and Monitoring
+**Bug Fixes Applied:** October 19, 2025  
+**Monitoring Deployed:** October 19, 2025  
+**Status:** ✅ Stable and Actively Monitored
