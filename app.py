@@ -22,6 +22,8 @@ from decimal import Decimal
 import threading
 from collections import defaultdict
 from db_connections import init_db_pool, get_db_pool, dispose_db_pool
+from redis_manager import init_redis_manager, shutdown_redis_manager
+from middleware import init_redis_middleware, init_redis_routes
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
@@ -89,6 +91,18 @@ try:
 except Exception as e:
     app.logger.error(f"Failed to initialize database pool: {e}")
     raise
+
+# Initialize Redis manager with hydration/dehydration workers
+if _redis_client:
+    init_redis_manager(_redis_client)
+    app.logger.info("Redis manager initialized with hydration/dehydration workers")
+    
+    # Initialize Redis middleware and routes
+    init_redis_middleware(app)
+    init_redis_routes(app)
+    app.logger.info("Redis middleware and routes initialized")
+else:
+    app.logger.warning("Redis manager not initialized - Redis unavailable")
 
 @app.route('/health/redis', methods=['GET'])
 def health_redis():
@@ -7792,3 +7806,35 @@ def update_credit_account():
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
+
+
+#################################################################################
+########################## APPLICATION LIFECYCLE ################################
+#################################################################################
+
+@app.teardown_appcontext
+def shutdown_redis_on_teardown(exception=None):
+    """Clean up Redis connections on app context teardown"""
+    pass  # Redis client handles its own cleanup
+
+
+def cleanup_on_exit():
+    """Cleanup function to run on application exit"""
+    try:
+        app.logger.info("Application shutting down...")
+        shutdown_redis_manager()
+        dispose_db_pool()
+        app.logger.info("Cleanup complete")
+    except Exception as e:
+        app.logger.error(f"Error during cleanup: {e}")
+
+
+# Register cleanup handler
+import atexit
+atexit.register(cleanup_on_exit)
+
+
+if __name__ == '__main__':
+    # Run development server
+    # For production, use WSGI server (gunicorn, uWSGI, etc.)
+    app.run(host='0.0.0.0', port=5000, debug=True)

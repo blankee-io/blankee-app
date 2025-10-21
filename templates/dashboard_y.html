@@ -21,6 +21,7 @@
     <meta name="apple-mobile-web-app-title" content="Blankee">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+    {% include 'redis_auto_refresh.html' %}
 </head>
 <body id="dashboard-y-body">
     <!-- Include the navigation bar -->
