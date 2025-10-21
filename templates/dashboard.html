@@ -2554,13 +2554,16 @@
             let entryProcessed = false;  // New flag to track if the entry has been processed
 
             input.addEventListener('focus', function () {
+                console.log('[FOCUS] Starting focus handler', { entryProcessed, ignoreBlur });
                 // Reset the processed flag when focusing on the input
                 entryProcessed = false;
+                console.log('[FOCUS] Reset entryProcessed to false');
                 // Remove $ only if present
                 if (input.value.trim().startsWith('$')) {
                     input.value = input.value.trim().substring(1).trim();
                 }
                 originalValue = input.value;
+                console.log('[FOCUS] Original value set to:', originalValue);
                 input.select();
             });
 
@@ -2571,28 +2574,44 @@
 
             input.addEventListener('keypress', function (event) {
                 if (event.key === 'Enter') {
+                    console.log('[ENTER] Enter key pressed', { originalValue, currentValue: input.value.trim(), entryProcessed, ignoreBlur });
                     event.preventDefault();
                     ignoreBlur = true;
                     entryProcessed = true;  // Mark as processed
+                    console.log('[ENTER] Flags set:', { entryProcessed, ignoreBlur });
                     const newValue = input.value.trim();
                     if (originalValue === '' && newValue === '') {
+                        console.log('[ENTER] Both values empty, resetting flags');
                         input.value = originalValue;
+                        ignoreBlur = false;
+                        entryProcessed = false;
                         return;
                     }
                     if (newValue === '') {
+                        console.log('[ENTER] Deleting entry (newValue empty)');
                         updateEntryInput(input, type);
                         return;
                     }
                     if (originalValue === '') {
+                        console.log('[ENTER] Creating new entry');
                         // Creating a new entry
                         updateEntryInput(input, type);
                         return;
                     }
                     if (newValue !== originalValue) {
+                        console.log('[ENTER] Editing existing entry, showing modal');
                         // Editing an existing entry
                         showEntryUpdateModal(
-                            function() { updateEntryInput(input, type); },
-                            function() { input.value = originalValue; }
+                            function() { 
+                                console.log('[ENTER-MODAL] Confirmed, updating entry');
+                                updateEntryInput(input, type);
+                            },
+                            function() { 
+                                console.log('[ENTER-MODAL] Cancelled, restoring value and resetting flags');
+                                input.value = originalValue;
+                                ignoreBlur = false;
+                                entryProcessed = false;
+                            }
                         );
                     }
                 }
@@ -2603,36 +2622,59 @@
             });
 
             input.addEventListener('blur', function () {
+                console.log('[BLUR] Blur event fired', { originalValue, currentValue: input.value.trim(), entryProcessed, ignoreBlur });
+                
                 if (ignoreBlur) {
+                    console.log('[BLUR] ignoreBlur is true, resetting flags and returning');
                     ignoreBlur = false;
+                    entryProcessed = false;
                     return;
                 }
                 
                 // If already processed via Enter key, don't process again
                 if (entryProcessed) {
+                    console.log('[BLUR] entryProcessed is true, resetting and returning');
+                    entryProcessed = false;
                     return;
                 }
                 
-                const newValue = input.value.trim();
+                const newValue = input.value.trim().replace(currencySymbol, '').trim();
                 if (newValue !== originalValue) {
+                    console.log('[BLUR] Value changed, processing', { originalValue, newValue });
+                    // Mark as processed to prevent duplicate submissions
+                    entryProcessed = true;
+                    console.log('[BLUR] Set entryProcessed to true');
+                    
                     // If value changed, submit (with confirmation if needed)
                     if (originalValue === '' && newValue === '') {
+                        console.log('[BLUR] Both empty, resetting');
                         input.value = originalValue;
+                        entryProcessed = false;
                         return;
                     }
                     if (newValue === '') {
+                        console.log('[BLUR] Deleting entry (newValue empty)');
                         updateEntryInput(input, type);
                         return;
                     }
                     if (originalValue === '') {
+                        console.log('[BLUR] Creating new entry');
                         // Creating a new entry
                         updateEntryInput(input, type);
                         return;
                     }
+                    console.log('[BLUR] Editing existing entry, showing modal');
                     // Only show the modal when editing an existing value
                     showEntryUpdateModal(
-                        function() { updateEntryInput(input, type); },
-                        function() { input.value = originalValue; }
+                        function() { 
+                            console.log('[BLUR-MODAL] Confirmed, updating entry');
+                            updateEntryInput(input, type);
+                        },
+                        function() { 
+                            console.log('[BLUR-MODAL] Cancelled, restoring value and resetting flag');
+                            input.value = originalValue;
+                            entryProcessed = false;
+                        }
                     );
                 } else {
                     // Restore original value or format properly if it's a number
