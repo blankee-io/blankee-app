@@ -2101,7 +2101,9 @@
                                 weekEntriesMap[weekKey] = { processed: true, cells: [] };
                             }
 
-                            weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && entry.processed;
+                            // Convert processed to boolean and check if all entries are processed
+                            const isEntryProcessed = Number(entry.processed) === 1;
+                            weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && isEntryProcessed;
                             weekEntriesMap[weekKey].cells.push(matchedCell);
                         }
                     });
@@ -2172,7 +2174,9 @@
                                 weekEntriesMap[weekKey] = { processed: true, cells: [] };
                             }
 
-                            weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && entry.processed;
+                            // Convert processed to boolean and check if all entries are processed
+                            const isEntryProcessed = Number(entry.processed) === 1;
+                            weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && isEntryProcessed;
                             weekEntriesMap[weekKey].cells.push(matchedCell);
                         }
                     });
@@ -2250,7 +2254,9 @@
                             weekEntriesMap[weekKey] = { processed: true, cells: [], hasEntry: false };
                         }
                         if (entry && entry.processed !== undefined) {
-                            weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && entry.processed;
+                            // Convert processed to boolean and check if all entries are processed
+                            const isEntryProcessed = Number(entry.processed) === 1;
+                            weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && isEntryProcessed;
                             weekEntriesMap[weekKey].hasEntry = true;
                         }
                         weekEntriesMap[weekKey].cells.push(td);
@@ -4077,19 +4083,16 @@
                             // Update local data
                             if (tableType === 'income') {
                                 updateLocalProcessedStatus(categoryId, fridayDate, Number(newProcessed), 'income');
+                                // Recalculate aggregated processed status for all weeks
+                                populateIncomeData();
                             } else if (tableType === 'expense') {
                                 updateLocalProcessedStatus(categoryId, fridayDate, Number(newProcessed), 'expense');
+                                // Recalculate aggregated processed status for all weeks
+                                populateExpenseData();
                             } else if (tableType === 'ca') {
-                                // --- Update CA processed status ---
                                 updateLocalProcessedStatus(categoryId, fridayDate, Number(newProcessed), 'ca');
+                                // Recalculate aggregated processed status for all weeks
                                 populateCaData();
-                            }
-
-                            // Update the UI by adding/removing the 'paid' class based on newProcessed
-                            if (newProcessed === '1') {
-                                currentCell.classList.add('paid');
-                            } else {
-                                currentCell.classList.remove('paid');
                             }
                         } else {
                         }
