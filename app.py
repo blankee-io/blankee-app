@@ -1629,6 +1629,9 @@ def update_totals_for_day():
 @app.route('/update-processed-status-d-entry', methods=['POST'])
 @login_required
 def update_processed_status_d_entry():
+    from redis_crud import get_entries, bulk_update_entries
+    from datetime import datetime
+    
     data = request.json
     category_id = data.get('category_id')
     category_type = data.get('category_type')  # 'income', 'expense', or 'ca'
@@ -1639,40 +1642,53 @@ def update_processed_status_d_entry():
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
     try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
+        # Determine the table name
+        if category_type == 'income':
+            table_name = 'income_entries'
+        elif category_type == 'expense':
+            table_name = 'expense_entries'
+        elif category_type == 'ca':
+            table_name = 'c_expense_entries'
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
 
-            if category_type == 'income':
-                # Update income entries
-                cursor.execute("""
-                    UPDATE income_entries
-                    SET processed = %s
-                    WHERE category_id = %s AND date = %s
-                """, (processed, category_id, entry_date))
-            elif category_type == 'expense':
-                # Update expense entries
-                cursor.execute("""
-                    UPDATE expense_entries
-                    SET processed = %s
-                    WHERE category_id = %s AND date = %s
-                """, (processed, category_id, entry_date))
-            elif category_type == 'ca':
-                # Update credit account expense entries
-                cursor.execute("""
-                    UPDATE c_expense_entries
-                    SET processed = %s
-                    WHERE category_id = %s AND date = %s
-                """, (processed, category_id, entry_date))
-            else:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
-
-            conn.commit()
-            cursor.close()
-
-        return jsonify({'status': 'success'})
+        # Get all entries for this category (Redis-first)
+        all_entries = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
+        
+        app.logger.info(f"[UPDATE PROCESSED D] User {current_user.id}, category {category_id}, date {entry_date}, found {len(all_entries)} total entries")
+        
+        # Normalize the target date
+        target_date = datetime.strptime(entry_date, '%Y-%m-%d').date() if isinstance(entry_date, str) else entry_date
+        
+        # Filter entries by date (handle both string and date object formats)
+        entries = []
+        for entry in all_entries:
+            entry_date_obj = entry.get('date')
+            if isinstance(entry_date_obj, str):
+                entry_date_obj = datetime.strptime(entry_date_obj, '%Y-%m-%d').date()
+            
+            if entry_date_obj == target_date:
+                entries.append(entry)
+        
+        app.logger.info(f"[UPDATE PROCESSED D] Found {len(entries)} entries matching date {target_date}")
+        
+        if not entries:
+            return jsonify({'status': 'success', 'message': 'No entries found for this date'})
+        
+        # Prepare bulk update
+        updates = [{'id': entry['id'], 'processed': processed} for entry in entries]
+        
+        # Update using Redis-first approach
+        success = bulk_update_entries(table_name, updates, user_id=current_user.id)
+        
+        if success:
+            app.logger.info(f"[UPDATE PROCESSED D] Successfully updated {len(updates)} entries")
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to update processed status'}), 500
 
     except Exception as e:
+        app.logger.error(f"Error in update_processed_status_d_entry: {str(e)}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to update processed status'}), 500
 
 @app.route('/get_dashboard_d_data')
@@ -5809,6 +5825,9 @@ def check_and_initialize_totals():
 @app.route('/update-processed-status-week-range', methods=['POST'])
 @login_required
 def update_processed_status_week_range():
+    from redis_crud import get_entries, bulk_update_entries
+    from datetime import datetime
+    
     data = request.get_json()
     category_id = data.get('category_id')
     category_type = data.get('category_type')  # 'income', 'expense', or 'ca'
@@ -5820,54 +5839,74 @@ def update_processed_status_week_range():
         return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
 
     try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
+        # Determine the table name
+        if category_type == 'income':
+            table_name = 'income_entries'
+        elif category_type == 'expense':
+            table_name = 'expense_entries'
+        elif category_type == 'ca':
+            table_name = 'c_expense_entries'
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
 
-            # Determine the appropriate table and category table based on category_type
-            if category_type == 'income':
-                table_name = 'income_entries'
-                category_table = 'income_categories'
-                user_field = 'user_id'
-                user_value = current_user.id
-            elif category_type == 'expense':
-                table_name = 'expense_entries'
-                category_table = 'expense_categories'
-                user_field = 'user_id'
-                user_value = current_user.id
-            elif category_type == 'ca':
-                table_name = 'c_expense_entries'
-                category_table = 'c_expense_categories'
-                user_field = 'ca.user_id'
-                user_value = current_user.id
-            else:
-                return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
-
-            # SQL Query to update all entries within the date range
-            if category_type == 'ca':
-                # For CA, join through credit_accounts to get user_id
-                query = f"""
-                    UPDATE {table_name} AS entries
-                    JOIN {category_table} AS categories ON entries.category_id = categories.id
-                    JOIN credit_accounts ca ON categories.account_id = ca.id
-                    SET entries.processed = %s
-                    WHERE ca.user_id = %s AND entries.category_id = %s AND entries.date BETWEEN %s AND %s
-                """
-                cursor.execute(query, (processed, user_value, category_id, start_date, end_date))
-            else:
-                query = f"""
-                    UPDATE {table_name} AS entries
-                    JOIN {category_table} AS categories ON entries.category_id = categories.id
-                    SET entries.processed = %s
-                    WHERE categories.user_id = %s AND entries.category_id = %s AND entries.date BETWEEN %s AND %s
-                """
-                cursor.execute(query, (processed, user_value, category_id, start_date, end_date))
-
-            conn.commit()
-            cursor.close()
-
-        return jsonify({'status': 'success'})
+        # Parse dates
+        start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
+        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
+        
+        # Get all entries for this category (Redis-first)
+        all_entries = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
+        
+        app.logger.info(f"[UPDATE PROCESSED WEEK] User {current_user.id}, category {category_id}, date range {start_date} to {end_date}, found {len(all_entries)} total entries")
+        
+        # Filter entries within date range
+        entries_to_update = []
+        for entry in all_entries:
+            entry_date = entry.get('date')
+            # Handle both date objects and string dates
+            if isinstance(entry_date, str):
+                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+            
+            if start_date_obj <= entry_date <= end_date_obj:
+                entries_to_update.append(entry)
+        
+        app.logger.info(f"[UPDATE PROCESSED WEEK] Found {len(entries_to_update)} entries in date range")
+        
+        if not entries_to_update:
+            return jsonify({'status': 'success', 'message': 'No entries found in date range'})
+        
+        # Prepare bulk update - convert processed to int
+        processed_int = int(processed)
+        updates = [{'id': entry['id'], 'processed': processed_int} for entry in entries_to_update]
+        
+        # Update using Redis-first approach
+        success = bulk_update_entries(table_name, updates, user_id=current_user.id)
+        
+        if success:
+            app.logger.info(f"[UPDATE PROCESSED WEEK] Successfully updated {len(updates)} entries")
+            
+            # Calculate if all entries in this date range for this category are now processed
+            all_entries_in_range = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
+            entries_in_date_range = []
+            for entry in all_entries_in_range:
+                entry_date = entry.get('date')
+                if isinstance(entry_date, str):
+                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                if start_date_obj <= entry_date <= end_date_obj:
+                    entries_in_date_range.append(entry)
+            
+            # Check if all entries are processed - convert to int for comparison
+            all_processed = all(int(entry.get('processed', 0)) == 1 for entry in entries_in_date_range) if entries_in_date_range else False
+            
+            return jsonify({
+                'status': 'success',
+                'all_processed': all_processed,
+                'entries_updated': len(updates)
+            })
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to update entries'}), 500
 
     except Exception as e:
+        app.logger.error(f"Error in update_processed_status_week_range: {str(e)}", exc_info=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
 @app.route('/hide_income_category', methods=['POST'])
@@ -6555,6 +6594,9 @@ def get_remainder_3m():
 @app.route('/update-processed-status-month-range', methods=['POST'])
 @login_required
 def update_processed_status_month_range():
+    from redis_crud import get_entries, bulk_update_entries
+    from datetime import datetime
+    
     data = request.get_json()
     category_id = data.get('category_id')
     category_type = data.get('category_type')  # 'income' or 'expense'
@@ -6566,38 +6608,72 @@ def update_processed_status_month_range():
         return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
 
     try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
+        # Determine the table name
+        if category_type == 'income':
+            table_name = 'income_entries'
+        elif category_type == 'expense':
+            table_name = 'expense_entries'
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
 
-            # Determine the appropriate table and category table based on category_type
-            if category_type == 'income':
-                table_name = 'income_entries'
-                category_table = 'income_categories'
-            elif category_type == 'expense':
-                table_name = 'expense_entries'
-                category_table = 'expense_categories'
-            else:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
-
-            # SQL Query to update all entries within the date range
-            query = f"""
-                UPDATE {table_name} AS entries
-                JOIN {category_table} AS categories ON entries.category_id = categories.id
-                SET entries.processed = %s
-                WHERE categories.user_id = %s AND entries.category_id = %s AND entries.date BETWEEN %s AND %s
-            """
-
-            # Execute the query
-            cursor.execute(query, (processed, current_user.id, category_id, start_date, end_date))
-
-            # Commit the transaction
-            cursor.close()
-            conn.commit()
-
-        return jsonify({'status': 'success'})
+        # Parse dates
+        start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
+        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
+        
+        # Get all entries for this category (Redis-first)
+        all_entries = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
+        
+        app.logger.info(f"[UPDATE PROCESSED MONTH] User {current_user.id}, category {category_id}, date range {start_date} to {end_date}, found {len(all_entries)} total entries")
+        
+        # Filter entries within date range
+        entries_to_update = []
+        for entry in all_entries:
+            entry_date = entry.get('date')
+            # Handle both date objects and string dates
+            if isinstance(entry_date, str):
+                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+            
+            if start_date_obj <= entry_date <= end_date_obj:
+                entries_to_update.append(entry)
+        
+        app.logger.info(f"[UPDATE PROCESSED MONTH] Found {len(entries_to_update)} entries in date range")
+        
+        if not entries_to_update:
+            return jsonify({'status': 'success', 'message': 'No entries found in date range'})
+        
+        # Prepare bulk update - convert processed to int
+        processed_int = int(processed)
+        updates = [{'id': entry['id'], 'processed': processed_int} for entry in entries_to_update]
+        
+        # Update using Redis-first approach
+        success = bulk_update_entries(table_name, updates, user_id=current_user.id)
+        
+        if success:
+            app.logger.info(f"[UPDATE PROCESSED MONTH] Successfully updated {len(updates)} entries")
+            
+            # Calculate if all entries in this date range for this category are now processed
+            all_entries_in_range = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
+            entries_in_date_range = []
+            for entry in all_entries_in_range:
+                entry_date = entry.get('date')
+                if isinstance(entry_date, str):
+                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                if start_date_obj <= entry_date <= end_date_obj:
+                    entries_in_date_range.append(entry)
+            
+            # Check if all entries are processed - convert to int for comparison
+            all_processed = all(int(entry.get('processed', 0)) == 1 for entry in entries_in_date_range) if entries_in_date_range else False
+            
+            return jsonify({
+                'status': 'success',
+                'all_processed': all_processed,
+                'entries_updated': len(updates)
+            })
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to update entries'}), 500
 
     except Exception as e:
+        app.logger.error(f"Error in update_processed_status_month_range: {str(e)}", exc_info=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 ########################################################################################

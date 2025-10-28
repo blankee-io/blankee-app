@@ -2125,7 +2125,9 @@
                     monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [] };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
-                monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && entry.processed;
+                // Convert processed to boolean and check if all entries are processed
+                const isEntryProcessed = Number(entry.processed) === 1;
+                monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
             });
 
             // For each row in the income month table
@@ -2175,7 +2177,9 @@
                     monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [] };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
-                monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && entry.processed;
+                // Convert processed to boolean and check if all entries are processed
+                const isEntryProcessed = Number(entry.processed) === 1;
+                monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
             });
 
             // For each row in the expense month table
@@ -2229,7 +2233,9 @@
                         monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [] };
                     }
                     monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
-                    monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && entry.processed;
+                    // Convert processed to boolean and check if all entries are processed
+                    const isEntryProcessed = Number(entry.processed) === 1;
+                    monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
                 });
 
                 // For each row in the CA month table
@@ -4053,18 +4059,16 @@
                             // Update local data
                             if (tableType === 'income') {
                                 updateLocalProcessedStatus(categoryId, endOfMonth, Number(newProcessed), 'income');
+                                // Recalculate aggregated processed status for all months
+                                populateIncomeData();
                             } else if (tableType === 'expense') {
                                 updateLocalProcessedStatus(categoryId, endOfMonth, Number(newProcessed), 'expense');
+                                // Recalculate aggregated processed status for all months
+                                populateExpenseData();
                             } else if (tableType === 'ca') {
                                 updateLocalProcessedStatus(categoryId, endOfMonth, Number(newProcessed), 'ca');
+                                // Recalculate aggregated processed status for all months
                                 populateCaData();
-                            }
-
-                            // Update the UI by adding/removing the 'paid' class based on newProcessed
-                            if (newProcessed === '1') {
-                                currentCell.classList.add('paid');
-                            } else {
-                                currentCell.classList.remove('paid');
                             }
                         } else {
                         }

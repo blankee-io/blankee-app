@@ -316,15 +316,17 @@ def bulk_update_entries(table: str, updates: List[Dict[str, Any]], user_id: Opti
     try:
         # Update MySQL
         with get_db_pool().get_cursor(commit=True) as cursor:
-            for update in updates:
+            for update_data in updates:
+                # Make a copy to avoid modifying the original
+                update = dict(update_data)
                 entry_id = update.pop('id')
+                
                 if not update:
                     continue
                     
                 set_clause = ', '.join([f"{col} = %s" for col in update.keys()])
                 query = f"UPDATE {table} SET {set_clause} WHERE id = %s"
                 cursor.execute(query, (*update.values(), entry_id))
-                update['id'] = entry_id  # Restore for Redis update
             
             logger.debug(f"Bulk updated {len(updates)} entries in {table}")
         
@@ -337,7 +339,9 @@ def bulk_update_entries(table: str, updates: List[Dict[str, Any]], user_id: Opti
                 for i, entry in enumerate(cached_data):
                     entry_id = entry.get('id')
                     if entry_id in update_map:
-                        cached_data[i].update(update_map[entry_id])
+                        # Update only the fields that are in the update dict (excluding 'id')
+                        update_fields = {k: v for k, v in update_map[entry_id].items() if k != 'id'}
+                        cached_data[i].update(update_fields)
                 _set_to_redis(table, user_id, cached_data)
                 logger.debug(f"Updated Redis cache for {table}")
         
@@ -386,15 +390,43 @@ def get_entries(table: str, filters: Optional[Dict[str, Any]] = None, user_id: O
                 return result
             return cached_data
     
-    # Fallback to MySQL
+    # Fallback to MySQL - need to filter by user_id through category tables
     try:
         with get_db_pool().get_cursor(dictionary=True) as cursor:
-            query = f"SELECT * FROM {table} WHERE 1=1"
-            params = []
+            # Determine category table based on entry table
+            if table == 'income_entries':
+                category_table = 'income_categories'
+                query = f"""
+                    SELECT e.* FROM {table} e
+                    JOIN {category_table} c ON e.category_id = c.id
+                    WHERE c.user_id = %s
+                """
+                params = [user_id]
+            elif table == 'expense_entries':
+                category_table = 'expense_categories'
+                query = f"""
+                    SELECT e.* FROM {table} e
+                    JOIN {category_table} c ON e.category_id = c.id
+                    WHERE c.user_id = %s
+                """
+                params = [user_id]
+            elif table == 'c_expense_entries':
+                query = f"""
+                    SELECT e.* FROM {table} e
+                    JOIN c_expense_categories c ON e.category_id = c.id
+                    JOIN credit_accounts a ON c.account_id = a.id
+                    WHERE a.user_id = %s
+                """
+                params = [user_id]
+            else:
+                # For other tables, just query directly (no user filtering)
+                query = f"SELECT * FROM {table} WHERE 1=1"
+                params = []
             
+            # Add filters
             if filters:
                 for col, val in filters.items():
-                    query += f" AND {col} = %s"
+                    query += f" AND e.{col} = %s"
                     params.append(val)
             
             cursor.execute(query, tuple(params))
