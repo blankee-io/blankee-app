@@ -180,11 +180,9 @@
                         // Update the local totals and remainders here or refresh the view
                         // Optionally: update the totals and remainders in the UI without reloading the page
                     } else {
-                        console.error('Failed to save totals and remainders:', response.message);
                     }
                 },
                 error: function(error) {
-                    console.error('An error occurred while saving totals and remainders:', error);
                 }
             });
         }        
@@ -241,7 +239,6 @@
                     });
                 });
             } else {
-                console.error('Goofy Week Mode checkbox not found.');
             }
 
             let originalStartingBalance = $('#starting_balance').val();
@@ -306,11 +303,9 @@
                 success: function(response) {
                     if (response.status === "success") {
                     } else {
-                        console.error("Failed to save totals and remainders:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error during AJAX request:", error);
                 },
                 complete: function() {
                     // Hide the loading screen after the AJAX request completes
@@ -334,11 +329,9 @@
                 success: function(response) {
                     if (response.status === "success") {
                     } else {
-                        console.error("Failed to save CA balances:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error during AJAX request:", error);
                 },
                 complete: function() {
                     document.getElementById('loading-screen').style.display = 'none';

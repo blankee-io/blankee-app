@@ -34,13 +34,37 @@ def init_redis_middleware(app):
     def track_activity():
         """
         Track user activity before each request.
-        This automatically triggers hydration if needed.
+        This automatically triggers hydration if needed and waits for it to complete.
         """
         # Only track authenticated users
         if current_user.is_authenticated:
             try:
                 user_id = current_user.id
+                
+                # Track activity (triggers hydration if needed)
                 track_user_activity(user_id)
+                
+                # If not hydrated, wait for hydration to complete before processing request
+                # This ensures data is available for immediate operations after dehydration
+                if not is_user_hydrated(user_id):
+                    logger.info(f"[MIDDLEWARE] User {user_id} not hydrated, waiting for hydration...")
+                    
+                    # Wait up to 5 seconds for hydration to complete
+                    import time
+                    max_wait = 5.0
+                    wait_interval = 0.1
+                    elapsed = 0.0
+                    
+                    while elapsed < max_wait:
+                        time.sleep(wait_interval)
+                        elapsed += wait_interval
+                        
+                        if is_user_hydrated(user_id):
+                            logger.info(f"[MIDDLEWARE] User {user_id} hydration complete after {elapsed:.2f}s")
+                            break
+                    
+                    if not is_user_hydrated(user_id):
+                        logger.warning(f"[MIDDLEWARE] User {user_id} hydration timeout after {elapsed:.2f}s, proceeding with MySQL fallback")
                 
                 # Store hydration status in g for use in templates
                 g.redis_hydrated = is_user_hydrated(user_id)

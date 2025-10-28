@@ -597,11 +597,9 @@
                     if (response.status === "success") {
                         location.reload();
                     } else {
-                        console.error("Failed to save totals and remainders:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error during AJAX request:", error);
                 },
                 complete: function() {
                 }

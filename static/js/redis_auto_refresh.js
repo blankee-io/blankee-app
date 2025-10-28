@@ -31,7 +31,6 @@
             isHydrated = hydratedMeta.content === 'true';
             if (!isHydrated) {
                 pageLoadedWhileHydrating = true;
-                console.log('[Redis Auto-Refresh] Page loaded before hydration completed');
             }
         }
     }
@@ -47,7 +46,6 @@
         
         // Stop polling after max attempts
         if (pollCount >= MAX_POLLS) {
-            console.log('[Redis Auto-Refresh] Max poll attempts reached, stopping');
             stopPolling();
             return;
         }
@@ -68,10 +66,8 @@
             return response.json();
         })
         .then(data => {
-            console.log(`[Redis Auto-Refresh] Poll ${pollCount}: hydrated=${data.hydrated}, refresh=${data.refresh_needed}`);
             
             if (data.refresh_needed && pageLoadedWhileHydrating) {
-                console.log('[Redis Auto-Refresh] Hydration completed, refreshing page...');
                 
                 // Refresh immediately without notification
                 window.location.reload();
@@ -81,7 +77,6 @@
                 // Hydration completed but no explicit refresh flag
                 // This means hydration happened but page might still need refresh
                 isHydrated = true;
-                console.log('[Redis Auto-Refresh] Hydration detected');
                 
                 // Continue polling for a few more cycles to catch refresh flag
             }
@@ -224,7 +219,6 @@
         // Then poll at intervals
         pollTimer = setInterval(checkForRefresh, POLL_INTERVAL);
         
-        console.log(`[Redis Auto-Refresh] Started polling (interval: ${POLL_INTERVAL}ms)`);
     }
     
     /**
@@ -236,11 +230,10 @@
         
         // Only start polling if page loaded before hydration
         if (pageLoadedWhileHydrating) {
-            console.log('[Redis Auto-Refresh] Starting auto-refresh monitoring');
+
             // Don't show loading indicator - silent refresh
             startPolling();
         } else {
-            console.log('[Redis Auto-Refresh] Page loaded after hydration, no polling needed');
         }
         
         // Clean up on page unload

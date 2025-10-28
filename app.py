@@ -22,7 +22,7 @@ from decimal import Decimal
 import threading
 from collections import defaultdict
 from db_connections import init_db_pool, get_db_pool, dispose_db_pool
-from redis_manager import init_redis_manager, shutdown_redis_manager
+from redis_manager import init_redis_manager, shutdown_redis_manager, DecimalEncoder
 from middleware import init_redis_middleware, init_redis_routes
 
 app = Flask(__name__)
@@ -129,6 +129,10 @@ def health_db_pool():
 
 # --- Dashboard cache helpers ---
 DASHBOARD_CACHE_TTL = int(os.getenv("DASHBOARD_CACHE_TTL", "60"))
+# TTL for data that needs to be persisted to MySQL
+# MUST be longer than INACTIVITY_TIMEOUT (300s) + flush interval (30s) to prevent premature expiration
+# Set to 10 minutes to ensure data survives until dehydration explicitly removes it
+PERSISTENT_CACHE_TTL = int(os.getenv("PERSISTENT_CACHE_TTL", "600"))  # 10 minutes (was 5)
 
 #################################################################################
 ############################### DB INTEGRATION ##################################
@@ -197,10 +201,12 @@ def find_nearest_friday(some_date, round_up=False):
 @login_required
 def update_landing_page():
     landing_page = request.form.get('landing_page', 'dashboard_3m')
-    with get_db_pool().get_cursor(commit=True) as cursor:
-        cursor.execute("UPDATE users SET landing_page = %s WHERE id = %s", (landing_page, current_user.id))
+    
+    # Update in Redis only - flush worker will persist to MySQL
+    _update_user_setting_in_redis(current_user.id, 'landing_page', landing_page)
+    
     flash('Landing page updated.')
-    return redirect(url_for('profile'))
+    return redirect(url_for('settings'))
 
 def create_totals_remainders_for_new_user(user_id):
     with get_db_pool().get_connection() as conn:
@@ -1041,12 +1047,27 @@ def dashboard_d():
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         # Fetch user data including the desired fields (profile_picture, first_name, last_name, balance_threshold, goofy_week_mode)
-        cursor.execute("""
-            SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
-            FROM users
-            WHERE id = %s
-        """, (current_user.id,))
-        user_data = cursor.fetchone()
+        # Try Redis first
+        user_data = None
+        redis_key = f"users:v1:{current_user.id}"
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(redis_key)
+                if cached:
+                    user_data = json.loads(cached)
+                    app.logger.debug(f"[REDIS HIT] dashboard_d user settings for user {current_user.id}")
+            except Exception as e:
+                app.logger.error(f"[REDIS ERROR] dashboard_d user settings: {str(e)}")
+        
+        # Fallback to MySQL
+        if not user_data:
+            cursor.execute("""
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
+                FROM users
+                WHERE id = %s
+            """, (current_user.id,))
+            user_data = cursor.fetchone()
+            app.logger.debug(f"[MYSQL] dashboard_d user settings for user {current_user.id}")
 
         # Extract goofy_week_mode value (defaults to False if not set)
         profile_picture = user_data['profile_picture'] if user_data else None
@@ -1092,41 +1113,85 @@ def dashboard_d():
             start_of_week = selected_date_obj - timedelta(days=6)  # Week starts on the Saturday before
             end_of_week = selected_date_obj  # Selected Friday is the end of the week
 
-        # Fetch all income entries within the user's account, along with associated category information and processed status, ordered by category display_order DESC, then date
-        cursor.execute("""
-            SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
-            FROM income_entries ie
-            JOIN income_categories ic ON ie.category_id = ic.id
-            WHERE ic.user_id = %s
-            ORDER BY ic.display_order DESC, ie.date ASC
-        """, (current_user.id,))
-        income_entries = cursor.fetchall()
+        # Try Redis first for income entries
+        income_entries = _get_entries_from_redis('income_entries', current_user.id)
+        if income_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_d income_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
+                FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+                ORDER BY ic.display_order DESC, ie.date ASC
+            """, (current_user.id,))
+            income_entries = list(cursor.fetchall())
+            income_entries = _filter_pending_deletions('income_entries', current_user.id, income_entries)
+            # Update Redis cache
+            _set_entries_to_redis('income_entries', current_user.id, income_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_d income_entries for user {current_user.id}")
+            # Enrich with category names from income_categories
+            income_cat_map = {cat['id']: cat['name'] for cat in income_categories}
+            for entry in income_entries:
+                if 'category_name' not in entry:
+                    entry['category_name'] = income_cat_map.get(entry.get('category_id'), 'Unknown')
 
-        # Fetch all expense entries with associated category information and processed status for the user, ordered by category display_order DESC, then date
-        cursor.execute("""
-            SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
-            FROM expense_entries ee
-            JOIN expense_categories ec ON ee.category_id = ec.id
-            WHERE ec.user_id = %s
-            ORDER BY ec.display_order DESC, ee.date ASC
-        """, (current_user.id,))
-        expense_entries = cursor.fetchall()
+        # Try Redis first for expense entries
+        expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+        if expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_d expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
+                FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+                ORDER BY ec.display_order DESC, ee.date ASC
+            """, (current_user.id,))
+            expense_entries = list(cursor.fetchall())
+            expense_entries = _filter_pending_deletions('expense_entries', current_user.id, expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('expense_entries', current_user.id, expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_d expense_entries for user {current_user.id}")
+            # Enrich with category names from expense_categories
+            expense_cat_map = {cat['id']: cat['name'] for cat in expense_categories}
+            for entry in expense_entries:
+                if 'category_name' not in entry:
+                    entry['category_name'] = expense_cat_map.get(entry.get('category_id'), 'Unknown')
 
-        # Fetch the updated totals and remainders after processing
-        cursor.execute("""
-            SELECT * FROM totals_remainders_d
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (current_user.id,))
-        totals_remainders_d = cursor.fetchall()
+        # Try Redis first for totals/remainders
+        totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', current_user.id)
+        if totals_remainders_d is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_d totals_remainders_d for user {current_user.id}")
+            cursor.execute("""
+                SELECT * FROM totals_remainders_d
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (current_user.id,))
+            totals_remainders_d = cursor.fetchall()
+            # Update Redis cache
+            _set_totals_remainders_to_redis('totals_remainders_d', current_user.id, totals_remainders_d)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_d totals_remainders_d for user {current_user.id}")
 
-        # Fetch all savings entries for the user
-        cursor.execute("""
-            SELECT date, amount FROM savings_entries
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (current_user.id,))
-        savings_entries = cursor.fetchall()
+        # Try Redis first for savings entries
+        savings_entries = _get_savings_entries_from_redis(current_user.id)
+        if savings_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_d savings_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT date, amount FROM savings_entries
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (current_user.id,))
+            savings_entries = cursor.fetchall()
+            # Update Redis cache
+            _set_savings_entries_to_redis(current_user.id, savings_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_d savings_entries for user {current_user.id}")
 
         # Fetch credit accounts for the user
         cursor.execute("""
@@ -1146,26 +1211,48 @@ def dashboard_d():
         """, (current_user.id,))
         c_expense_categories = cursor.fetchall()
 
-        # Fetch c_expense_entries for the user's categories
-        cursor.execute("""
-            SELECT cee.*, cec.name AS category_name
-            FROM c_expense_entries cee
-            JOIN c_expense_categories cec ON cee.category_id = cec.id
-            JOIN credit_accounts ca ON cec.account_id = ca.id
-            WHERE ca.user_id = %s
-            ORDER BY cee.date DESC, cee.id ASC
-        """, (current_user.id,))
-        c_expense_entries = cursor.fetchall()
+        # Try Redis first for c_expense_entries
+        c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+        if c_expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_d c_expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT cee.*, cec.name AS category_name
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+                ORDER BY cee.date DESC, cee.id ASC
+            """, (current_user.id,))
+            c_expense_entries = list(cursor.fetchall())
+            c_expense_entries = _filter_pending_deletions('c_expense_entries', current_user.id, c_expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('c_expense_entries', current_user.id, c_expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_d c_expense_entries for user {current_user.id}")
+            # Enrich with category names from c_expense_categories
+            c_expense_cat_map = {cat['id']: cat['name'] for cat in c_expense_categories}
+            for entry in c_expense_entries:
+                if 'category_name' not in entry:
+                    entry['category_name'] = c_expense_cat_map.get(entry.get('category_id'), 'Unknown')
 
-        # Fetch all c_a_balances_d for the user's credit accounts
-        cursor.execute("""
-            SELECT * FROM c_a_balances_d
-            WHERE account_id IN (
-                SELECT id FROM credit_accounts WHERE user_id = %s
-            )
-            ORDER BY date DESC
-        """, (current_user.id,))
-        c_a_balances_d = cursor.fetchall()
+        # Try Redis first for c_a_balances_d
+        c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', current_user.id)
+        if c_a_balances_d is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_d c_a_balances_d for user {current_user.id}")
+            cursor.execute("""
+                SELECT * FROM c_a_balances_d
+                WHERE account_id IN (
+                    SELECT id FROM credit_accounts WHERE user_id = %s
+                )
+                ORDER BY date DESC
+            """, (current_user.id,))
+            c_a_balances_d = cursor.fetchall()
+            # Update Redis cache
+            _set_ca_balances_to_redis('c_a_balances_d', current_user.id, c_a_balances_d)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_d c_a_balances_d for user {current_user.id}")
         cursor.close()
 
     # Render the template, passing necessary data including selected date, goofy_week_mode, entries, and totals/remainders
@@ -1199,6 +1286,8 @@ def dashboard_d_add_entry():
     category_id = data.get('category')
     amount = data.get('amount')
     entry_date = data.get('date')
+    
+    app.logger.info(f"[ADD ENTRY] User {current_user.id}: type={entry_type}, category={category_id}, amount={amount}, date={entry_date}")
 
     if not all([entry_type, category_id, amount, entry_date]):
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
@@ -1242,47 +1331,172 @@ def dashboard_d_add_entry():
             if not cat_row:
                 cursor.close()
                 return jsonify({'status': 'error', 'message': 'Invalid category_id for this entry type'}), 400
-
-        # Check if an entry already exists for the given category and date
-        cursor.execute(f"SELECT id, amount FROM {table_name} WHERE category_id = %s AND date = %s", (category_id, entry_date))
-        existing_entry = cursor.fetchone()
-
-        if existing_entry:
-            new_amount = existing_entry['amount'] + Decimal(amount)
-            cursor.execute(f"UPDATE {table_name} SET amount = %s WHERE id = %s", (new_amount, existing_entry['id']))
-        else:
-            cursor.execute(f"INSERT INTO {table_name} (category_id, date, amount) VALUES (%s, %s, %s)", (category_id, entry_date, amount))
-
-        # If this is an expense category and is_credit_account=1, add payment record to c_payment_entries and run save_ca_daily_balance()
-        if entry_type == 'expense' and cat_row.get('is_credit_account', 0) == 1:
-            payment_category_name = cat_row['name']
-            cursor.execute("""
-                SELECT ca.id AS account_id
-                FROM credit_accounts ca
-                WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-                LIMIT 1
-            """, (current_user.id, payment_category_name))
-            account_row = cursor.fetchone()
-            if account_row:
-                account_id = account_row['account_id']
-                cursor.execute("""
-                    DELETE FROM c_payment_entries
-                    WHERE account_id = %s AND date = %s
-                """, (account_id, entry_date))
-                cursor.execute("""
-                    INSERT INTO c_payment_entries (account_id, date, amount, processed)
-                    VALUES (%s, %s, %s, 1)
-                """, (account_id, entry_date, amount))
-                ca_triggered = True
-
-        conn.commit()
+        
+        # Make a copy of cat_row data before closing cursor
+        cat_data = dict(cat_row) if cat_row else {}
+        app.logger.info(f"[ADD ENTRY] Category data for category {category_id}: name='{cat_data.get('name')}', is_credit_account={cat_data.get('is_credit_account', 'MISSING')}")
         cursor.close()
+
+    # Add to Redis only - flush worker will persist to MySQL
+    # Get existing entries to check if we need to add or update
+    existing_data = _get_entries_from_redis(table_name, current_user.id)
+    
+    # If not in Redis, load from MySQL first
+    if existing_data is None:
+        existing_data = []
+        with get_db_pool().get_connection() as conn:
+            cursor2 = conn.cursor(pymysql.cursors.DictCursor)
+            if entry_type == 'income':
+                cursor2.execute("""
+                    SELECT ie.* FROM income_entries ie
+                    JOIN income_categories ic ON ie.category_id = ic.id
+                    WHERE ic.user_id = %s
+                """, (current_user.id,))
+            elif entry_type == 'expense':
+                cursor2.execute("""
+                    SELECT ee.* FROM expense_entries ee
+                    JOIN expense_categories ec ON ee.category_id = ec.id
+                    WHERE ec.user_id = %s
+                """, (current_user.id,))
+            elif entry_type == 'ca':
+                cursor2.execute("""
+                    SELECT cee.* FROM c_expense_entries cee
+                    JOIN c_expense_categories cec ON cee.category_id = cec.id
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (current_user.id,))
+            existing_data = list(cursor2.fetchall())
+            cursor2.close()
+        # Filter out entries marked for deletion
+        existing_data = _filter_pending_deletions(table_name, current_user.id, existing_data)
+        app.logger.info(f"[REDIS][{table_name}] Loaded {len(existing_data)} entries from MySQL (after filtering pending deletions)")
+    
+    existing_entry = None
+    
+    if existing_data:
+        for entry in existing_data:
+            if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(entry_date):
+                existing_entry = entry
+                break
+    
+    if existing_entry:
+        new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(amount)
+        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(new_amount))
+    else:
+        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(amount))
+
+    # Check if this is a savings category - update savings if so
+    is_savings_category = False
+    if entry_type in ['income', 'expense'] and cat_data.get('name') == 'Savings':
+        is_savings_category = True
+
+    # If this is an expense category and is_credit_account=1, add payment entry and trigger CA balance update
+    app.logger.info(f"[CA PAYMENT DEBUG] entry_type={entry_type}, cat_data={cat_data}")
+    if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
+        ca_triggered = True
+        app.logger.info(f"[CA PAYMENT] Detected payment category for user {current_user.id}, category {category_id}")
+        # Find the credit account by matching category name
+        category_name = cat_data.get('name', '')
+        app.logger.info(f"[CA PAYMENT] Category name: '{category_name}'")
+        if category_name.endswith(' payment'):
+            account_name = category_name[:-8]  # Remove ' payment' suffix
+            app.logger.info(f"[CA PAYMENT] Looking for credit account with name: '{account_name}'")
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
+                """, (current_user.id, account_name))
+                account_row = cursor.fetchone()
+                app.logger.info(f"[CA PAYMENT] Credit account query result: {account_row}")
+                if account_row:
+                    account_id = account_row['id']
+                    app.logger.info(f"[CA PAYMENT] Found credit account_id={account_id}, adding payment entry for date={entry_date}, amount={amount}")
+                    # Add or update payment entry in Redis
+                    payment_entries = _get_entries_from_redis('c_payment_entries', current_user.id)
+                    app.logger.info(f"[CA PAYMENT] Current payment_entries from Redis: {len(payment_entries) if payment_entries else 'None'}")
+                    if payment_entries is None:
+                        # Load from MySQL first
+                        cursor.execute("""
+                            SELECT cpe.* FROM c_payment_entries cpe
+                            JOIN credit_accounts ca ON cpe.account_id = ca.id
+                            WHERE ca.user_id = %s
+                        """, (current_user.id,))
+                        payment_entries = list(cursor.fetchall())
+                        payment_entries = _filter_pending_deletions('c_payment_entries', current_user.id, payment_entries)
+                        app.logger.info(f"[CA PAYMENT] Loaded {len(payment_entries)} payment_entries from MySQL")
+                    
+                    # Check if payment entry already exists for this date/account
+                    existing_payment = None
+                    for pe in payment_entries:
+                        if str(pe.get('account_id')) == str(account_id) and str(pe.get('date')) == str(entry_date):
+                            existing_payment = pe
+                            break
+                    
+                    if existing_payment:
+                        new_payment_amount = Decimal(existing_payment.get('amount', 0)) + Decimal(amount)
+                        app.logger.info(f"[CA PAYMENT] Updating existing payment: {existing_payment.get('amount')} + {amount} = {new_payment_amount}")
+                        _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(new_payment_amount))
+                    else:
+                        app.logger.info(f"[CA PAYMENT] Creating new payment entry: account_id={account_id}, date={entry_date}, amount={amount}")
+                        _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
+                    app.logger.info(f"[CA PAYMENT] Payment entry operation completed")
+                else:
+                    app.logger.warning(f"[CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
+                cursor.close()
+        else:
+            app.logger.warning(f"[CA PAYMENT] Category name '{category_name}' does not end with ' payment'")
+    else:
+        app.logger.info(f"[CA PAYMENT] Not a payment category: entry_type={entry_type}, is_credit_account={cat_data.get('is_credit_account', 0)}")
 
     if entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()
+    
+    # Update totals and savings if this is a savings category
+    if is_savings_category:
+        save_totals_remainders_d()
 
     return jsonify({"status": "success"})
 
+
+@app.route('/dashboard-d/get_categories', methods=['GET'])
+@login_required
+def get_categories():
+    """
+    Get income or expense categories for the current user.
+    Used by autobalance to find the Auto Adjustments category.
+    """
+    entry_type = request.args.get('type')
+    
+    if not entry_type or entry_type not in ['income', 'expense']:
+        return jsonify({'status': 'error', 'message': 'Invalid or missing type parameter'}), 400
+    
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            if entry_type == 'income':
+                cursor.execute("""
+                    SELECT id, name, is_auto_adjustment, hidden, is_recurring
+                    FROM income_categories
+                    WHERE user_id = %s
+                    ORDER BY display_order DESC
+                """, (current_user.id,))
+            else:  # expense
+                cursor.execute("""
+                    SELECT id, name, is_auto_adjustment, hidden, is_bud, is_recurring, is_credit_account
+                    FROM expense_categories
+                    WHERE user_id = %s
+                    ORDER BY display_order DESC
+                """, (current_user.id,))
+            
+            categories = cursor.fetchall()
+            cursor.close()
+        
+        return jsonify({'status': 'success', 'categories': categories})
+        
+    except Exception as e:
+        app.logger.error(f"[GET CATEGORIES ERROR] User {current_user.id}: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/dashboard-d/get_totals_for_day', methods=['GET'])
@@ -1293,6 +1507,26 @@ def get_totals_for_day():
         return jsonify({'status': 'error', 'message': 'No date provided.'}), 400
 
     try:
+        # Try Redis first
+        cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', current_user.id)
+        
+        if cached_daily:
+            # Search for the specific date in cached data
+            selected_date_obj = datetime.strptime(selected_date, '%Y-%m-%d').date()
+            for row in cached_daily:
+                row_date = datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']
+                if row_date == selected_date_obj:
+                    app.logger.debug(f"[REDIS HIT] get_totals_for_day for user {current_user.id}, date {selected_date}")
+                    return jsonify({
+                        'status': 'success',
+                        'total_income': float(row.get('total_income', 0)),
+                        'total_expenses': float(row.get('total_expenses', 0)),
+                        'remainder': float(row.get('remainder', 0))
+                    })
+        
+        # Redis miss - fallback to MySQL
+        app.logger.debug(f"[REDIS MISS] get_totals_for_day for user {current_user.id}, date {selected_date}")
+        
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
@@ -1376,6 +1610,16 @@ def update_totals_for_day():
 
             conn.commit()
             cursor.close()
+        
+        # Update Redis cache
+        selected_date_obj = datetime.strptime(selected_date, '%Y-%m-%d').date()
+        _update_totals_remainders_in_redis('totals_remainders_d', current_user.id, [{
+            'date': selected_date_obj,
+            'total_income': float(total_income),
+            'total_expenses': float(total_expenses),
+            'remainder': float(remainder)
+        }])
+        app.logger.debug(f"[REDIS UPDATE] update_totals_for_day for user {current_user.id}, date {selected_date}")
 
         return jsonify({'status': 'success', 'remainder': remainder})
 
@@ -1437,69 +1681,191 @@ def get_dashboard_d_data():
     user_id = current_user.id
     date = request.args.get('date')
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
+    # Try Redis first for aggregated data
+    cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
+    cached_ca_balances = _get_ca_balances_from_redis('c_a_balances_d', user_id)
+    cached_savings = _get_savings_entries_from_redis(user_id)
+    
+    # For entries, check if user is hydrated
+    from redis_manager import is_user_hydrated, get_cached_data
+    
+    entries_cached = False
+    income_entries = []
+    expense_entries = []
+    c_expense_entries = []
+    
+    if is_user_hydrated(user_id):
+        # Try to get entries from Redis
+        income_entries_raw = get_cached_data('income_entries', user_id)
+        expense_entries_raw = get_cached_data('expense_entries', user_id)
+        c_expense_entries_raw = get_cached_data('c_expense_entries', user_id)
+        
+        if income_entries_raw is not None and expense_entries_raw is not None and c_expense_entries_raw is not None:
+            entries_cached = True
+            # Need to enrich with category names - fetch categories from cache too
+            income_categories = get_cached_data('income_categories', user_id) or []
+            expense_categories = get_cached_data('expense_categories', user_id) or []
+            c_expense_categories = get_cached_data('c_expense_categories', user_id) or []
+            
+            # Create lookup maps
+            income_cat_map = {cat['id']: cat for cat in income_categories}
+            expense_cat_map = {cat['id']: cat for cat in expense_categories}
+            c_expense_cat_map = {cat['id']: cat for cat in c_expense_categories}
+            
+            # Enrich income entries
+            for entry in income_entries_raw:
+                cat = income_cat_map.get(entry.get('category_id'), {})
+                income_entries.append({
+                    'id': entry.get('id'),
+                    'date': entry.get('date'),
+                    'amount': entry.get('amount'),
+                    'processed': entry.get('processed'),
+                    'category_id': entry.get('category_id'),
+                    'category_name': cat.get('name', ''),
+                    'display_order': cat.get('display_order', 0)
+                })
+            
+            # Enrich expense entries
+            for entry in expense_entries_raw:
+                cat = expense_cat_map.get(entry.get('category_id'), {})
+                expense_entries.append({
+                    'id': entry.get('id'),
+                    'date': entry.get('date'),
+                    'amount': entry.get('amount'),
+                    'processed': entry.get('processed'),
+                    'category_id': entry.get('category_id'),
+                    'category_name': cat.get('name', ''),
+                    'display_order': cat.get('display_order', 0)
+                })
+            
+            # Enrich c_expense entries
+            for entry in c_expense_entries_raw:
+                cat = c_expense_cat_map.get(entry.get('category_id'), {})
+                c_expense_entries.append({
+                    **entry,
+                    'category_name': cat.get('name', '')
+                })
+    
+    # Use Redis data when available, fetch missing pieces from MySQL
+    totals_remainders_d = cached_daily
+    c_a_balances_d = cached_ca_balances
+    savings_entries = cached_savings
+    
+    # Track what we need to fetch from MySQL
+    need_mysql = False
+    redis_hits = []
+    redis_misses = []
+    
+    if cached_daily:
+        redis_hits.append('totals_remainders_d')
+    else:
+        redis_misses.append('totals_remainders_d')
+        need_mysql = True
+    
+    if cached_ca_balances:
+        redis_hits.append('c_a_balances_d')
+    else:
+        redis_misses.append('c_a_balances_d')
+        need_mysql = True
+    
+    if cached_savings:
+        redis_hits.append('savings_entries')
+    else:
+        redis_misses.append('savings_entries')
+        need_mysql = True
+    
+    if entries_cached:
+        redis_hits.append('entries')
+    else:
+        redis_misses.append('entries')
+        need_mysql = True
+    
+    # Fetch missing data from MySQL
+    if need_mysql:
+        app.logger.info(f"[REDIS PARTIAL] get_dashboard_d_data for user {user_id}, hits={redis_hits}, misses={redis_misses}")
+        
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # Fetch daily totals/remainders for user (all dates)
-        cursor.execute("""
-            SELECT *
-            FROM totals_remainders_d
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (user_id,))
-        totals_remainders_d = cursor.fetchall()
+            # Fetch daily totals/remainders if not cached
+            if not cached_daily:
+                cursor.execute("""
+                    SELECT *
+                    FROM totals_remainders_d
+                    WHERE user_id = %s
+                    ORDER BY date ASC
+                """, (user_id,))
+                totals_remainders_d = cursor.fetchall()
+                # Update Redis cache
+                _set_totals_remainders_to_redis('totals_remainders_d', user_id, totals_remainders_d)
 
-        # Fetch daily CA balances for user's credit accounts
-        cursor.execute("""
-            SELECT *
-            FROM c_a_balances_d
-            WHERE account_id IN (
-                SELECT id FROM credit_accounts WHERE user_id = %s
-            )
-            ORDER BY account_id ASC, date ASC
-        """, (user_id,))
-        c_a_balances_d = cursor.fetchall()
+            # Fetch daily CA balances if not cached
+            if not cached_ca_balances:
+                cursor.execute("""
+                    SELECT *
+                    FROM c_a_balances_d
+                    WHERE account_id IN (
+                        SELECT id FROM credit_accounts WHERE user_id = %s
+                    )
+                    ORDER BY account_id ASC, date ASC
+                """, (user_id,))
+                c_a_balances_d = cursor.fetchall()
+                # Update Redis cache
+                _set_ca_balances_to_redis('c_a_balances_d', user_id, c_a_balances_d)
 
-        # Fetch all savings entries for the user
-        cursor.execute("""
-            SELECT date, amount FROM savings_entries
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (user_id,))
-        savings_entries = cursor.fetchall()
+            # Fetch savings entries if not cached
+            if not cached_savings:
+                cursor.execute("""
+                    SELECT date, amount FROM savings_entries
+                    WHERE user_id = %s
+                    ORDER BY date ASC
+                """, (user_id,))
+                savings_entries = cursor.fetchall()
+                # Update Redis cache
+                _set_savings_entries_to_redis(user_id, savings_entries)
 
-        # Fetch all income entries for the user
-        cursor.execute("""
-            SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
-            FROM income_entries ie
-            JOIN income_categories ic ON ie.category_id = ic.id
-            WHERE ic.user_id = %s
-            ORDER BY ic.display_order DESC, ie.date ASC
-        """, (user_id,))
-        income_entries = cursor.fetchall()
+            # Fetch entries if not cached
+            if not entries_cached:
+                # Fetch all income entries for the user
+                cursor.execute("""
+                    SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
+                    FROM income_entries ie
+                    JOIN income_categories ic ON ie.category_id = ic.id
+                    WHERE ic.user_id = %s
+                    ORDER BY ic.display_order DESC, ie.date ASC
+                """, (user_id,))
+                income_entries = list(cursor.fetchall())
+                # Filter out entries marked for deletion
+                income_entries = _filter_pending_deletions('income_entries', user_id, income_entries)
 
-        # Fetch all expense entries for the user
-        cursor.execute("""
-            SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
-            FROM expense_entries ee
-            JOIN expense_categories ec ON ee.category_id = ec.id
-            WHERE ec.user_id = %s
-            ORDER BY ec.display_order DESC, ee.date ASC
-        """, (user_id,))
-        expense_entries = cursor.fetchall()
+                # Fetch all expense entries for the user
+                cursor.execute("""
+                    SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
+                    FROM expense_entries ee
+                    JOIN expense_categories ec ON ee.category_id = ec.id
+                    WHERE ec.user_id = %s
+                    ORDER BY ec.display_order DESC, ee.date ASC
+                """, (user_id,))
+                expense_entries = list(cursor.fetchall())
+                # Filter out entries marked for deletion
+                expense_entries = _filter_pending_deletions('expense_entries', user_id, expense_entries)
 
-        # Fetch all c_expense_entries for the user's credit accounts
-        cursor.execute("""
-            SELECT cee.*, cec.name AS category_name
-            FROM c_expense_entries cee
-            JOIN c_expense_categories cec ON cee.category_id = cec.id
-            JOIN credit_accounts ca ON cec.account_id = ca.id
-            WHERE ca.user_id = %s
-            ORDER BY cee.date DESC, cee.id ASC
-        """, (user_id,))
-        c_expense_entries = cursor.fetchall()
+                # Fetch all c_expense_entries for the user's credit accounts
+                cursor.execute("""
+                    SELECT cee.*, cec.name AS category_name
+                    FROM c_expense_entries cee
+                    JOIN c_expense_categories cec ON cee.category_id = cec.id
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                    ORDER BY cee.date DESC, cee.id ASC
+                """, (user_id,))
+                c_expense_entries = list(cursor.fetchall())
+                # Filter out entries marked for deletion
+                c_expense_entries = _filter_pending_deletions('c_expense_entries', user_id, c_expense_entries)
 
-        cursor.close()
+            cursor.close()
+    else:
+        app.logger.info(f"[REDIS HIT] get_dashboard_d_data for user {user_id} - all data from Redis")
 
     return jsonify({
         "status": "success",
@@ -1514,6 +1880,1119 @@ def get_dashboard_d_data():
 ############################################################################################
 ############################### TOTALS, REMAINDERS, BALANCES ###############################
 ############################################################################################
+
+# Redis helper functions for totals/remainders/balances
+
+def _get_totals_remainders_from_redis(table_name, user_id, start_date=None):
+    """
+    Get totals/remainders data from Redis.
+    
+    Args:
+        table_name: 'totals_remainders', 'totals_remainders_d', or 'totals_remainders_m'
+        user_id: User ID
+        start_date: Optional filter for dates >= start_date
+        
+    Returns:
+        List of dicts or None if not in cache
+    """
+    if not app.config.get('REDIS_OK'):
+        return None
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        
+        if cached:
+            data = json.loads(cached)
+            # Filter by start_date if provided
+            if start_date:
+                data = [row for row in data if datetime.strptime(row['date'], '%Y-%m-%d').date() >= start_date]
+            return data
+        return None
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] GET error user={user_id}: {e}")
+        return None
+
+def _set_totals_remainders_to_redis(table_name, user_id, data):
+    """
+    Set totals/remainders data to Redis.
+    
+    Args:
+        table_name: 'totals_remainders', 'totals_remainders_d', or 'totals_remainders_m'
+        user_id: User ID
+        data: List of dicts with date, total_income, total_expenses, remainder, etc.
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        # Convert dates to strings for JSON serialization
+        serializable_data = []
+        for row in data:
+            row_copy = row.copy()
+            if 'date' in row_copy and isinstance(row_copy['date'], date):
+                row_copy['date'] = row_copy['date'].isoformat()
+            # Convert Decimals to floats
+            for k, v in row_copy.items():
+                if isinstance(v, Decimal):
+                    row_copy[k] = float(v)
+            serializable_data.append(row_copy)
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(serializable_data))
+        app.logger.debug(f"[REDIS][{table_name}] SET user={user_id}, rows={len(data)}")
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] SET error user={user_id}: {e}")
+
+def _update_totals_remainders_in_redis(table_name, user_id, updates):
+    """
+    Update specific rows in Redis cache.
+    
+    Args:
+        table_name: Table name
+        user_id: User ID
+        updates: List of dicts with updated values (must include 'date' key)
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        
+        if cached:
+            # Cache exists - update specific rows
+            data = json.loads(cached)
+            # Create a map of date -> update data
+            update_map = {}
+            for update in updates:
+                date_str = update['date'].isoformat() if isinstance(update['date'], date) else update['date']
+                update_map[date_str] = update
+            
+            # Update matching rows
+            for i, row in enumerate(data):
+                if row['date'] in update_map:
+                    data[i].update(update_map[row['date']])
+                    # Convert date back to string if needed
+                    if isinstance(data[i]['date'], date):
+                        data[i]['date'] = data[i]['date'].isoformat()
+            
+            # Add new rows that don't exist yet
+            existing_dates = {row['date'] for row in data}
+            for update in updates:
+                date_str = update['date'].isoformat() if isinstance(update['date'], date) else update['date']
+                if date_str not in existing_dates:
+                    new_row = update.copy()
+                    if isinstance(new_row['date'], date):
+                        new_row['date'] = new_row['date'].isoformat()
+                    data.append(new_row)
+            
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(data))
+            # Mark table as dirty for flush (with TTL matching cache TTL)
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, table_name)
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            app.logger.info(f"[REDIS][{table_name}] UPDATE user={user_id}, rows={len(updates)}")
+        else:
+            # Cache doesn't exist - create it with the updates
+            serializable_updates = []
+            for update in updates:
+                update_copy = update.copy()
+                if isinstance(update_copy['date'], date):
+                    update_copy['date'] = update_copy['date'].isoformat()
+                # Convert Decimals to floats
+                for k, v in update_copy.items():
+                    if isinstance(v, Decimal):
+                        update_copy[k] = float(v)
+                serializable_updates.append(update_copy)
+            
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(serializable_updates))
+            # Mark table as dirty for flush (with TTL matching cache TTL)
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, table_name)
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            app.logger.info(f"[REDIS][{table_name}] CREATE user={user_id}, rows={len(updates)}")
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] UPDATE error user={user_id}: {e}")
+
+def _get_ca_balances_from_redis(table_name, user_id, account_id=None, start_date=None):
+    """
+    Get credit account balances from Redis.
+    
+    Args:
+        table_name: 'c_a_balances', 'c_a_balances_d', or 'c_a_balances_m'
+        user_id: User ID
+        account_id: Optional account ID filter
+        start_date: Optional date filter
+        
+    Returns:
+        List of dicts or None if not in cache
+    """
+    if not app.config.get('REDIS_OK'):
+        return None
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        
+        if cached:
+            data = json.loads(cached)
+            # Apply filters
+            if account_id:
+                data = [row for row in data if row.get('account_id') == account_id]
+            if start_date:
+                data = [row for row in data if datetime.strptime(row['date'], '%Y-%m-%d').date() >= start_date]
+            return data
+        return None
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] GET error user={user_id}: {e}")
+        return None
+
+def _set_ca_balances_to_redis(table_name, user_id, data):
+    """
+    Set credit account balances to Redis, merging with existing data.
+    
+    Args:
+        table_name: 'c_a_balances', 'c_a_balances_d', or 'c_a_balances_m'
+        user_id: User ID
+        data: List of balance records to add/update
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        
+        # Get existing data from Redis
+        existing_data = []
+        cached = _redis_client.get(redis_key)
+        if cached:
+            existing_data = json.loads(cached)
+        
+        # Create a map of existing records by (account_id, date)
+        existing_map = {}
+        for row in existing_data:
+            account_id = row.get('account_id')
+            row_date = row.get('date')
+            if isinstance(row_date, str):
+                row_date = datetime.strptime(row_date, '%Y-%m-%d').date().isoformat()
+            key = (account_id, row_date)
+            existing_map[key] = row
+        
+        # Serialize and merge new data
+        for row in data:
+            row_copy = row.copy()
+            if 'date' in row_copy and isinstance(row_copy['date'], date):
+                row_copy['date'] = row_copy['date'].isoformat()
+            for k, v in row_copy.items():
+                if isinstance(v, Decimal):
+                    row_copy[k] = float(v)
+            
+            # Update or add the record
+            key = (row_copy.get('account_id'), row_copy.get('date'))
+            existing_map[key] = row_copy
+        
+        # Convert back to list
+        merged_data = list(existing_map.values())
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(merged_data))
+        # Mark table as dirty for flush (with TTL matching cache TTL)
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        app.logger.debug(f"[REDIS][{table_name}] MERGED user={user_id}, new_rows={len(data)}, total_rows={len(merged_data)}")
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] SET error user={user_id}: {e}")
+
+def _get_savings_entries_from_redis(user_id, start_date=None):
+    """
+    Get savings entries from Redis.
+    
+    Args:
+        user_id: User ID
+        start_date: Optional filter for dates >= start_date
+        
+    Returns:
+        List of dicts or None if not in cache
+    """
+    if not app.config.get('REDIS_OK'):
+        return None
+    
+    try:
+        redis_key = f"savings_entries:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        
+        if cached:
+            data = json.loads(cached)
+            if start_date:
+                data = [row for row in data if datetime.strptime(row['date'], '%Y-%m-%d').date() >= start_date]
+            return data
+        return None
+    except Exception as e:
+        app.logger.warning(f"[REDIS][savings_entries] GET error user={user_id}: {e}")
+        return None
+
+def _set_savings_entries_to_redis(user_id, data):
+    """
+    Set savings entries to Redis.
+    
+    Args:
+        user_id: User ID
+        data: List of savings records
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        redis_key = f"savings_entries:v1:{user_id}"
+        serializable_data = []
+        for row in data:
+            row_copy = row.copy()
+            if 'date' in row_copy and isinstance(row_copy['date'], date):
+                row_copy['date'] = row_copy['date'].isoformat()
+            for k, v in row_copy.items():
+                if isinstance(v, Decimal):
+                    row_copy[k] = float(v)
+            serializable_data.append(row_copy)
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(serializable_data))
+        # Mark table as dirty for flush (with TTL matching cache TTL)
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, "savings_entries")
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        app.logger.debug(f"[REDIS][savings_entries] SET user={user_id}, rows={len(data)}")
+    except Exception as e:
+        app.logger.warning(f"[REDIS][savings_entries] SET error user={user_id}: {e}")
+
+# Redis helper functions for user settings
+
+def _update_user_setting_in_redis(user_id, field, value):
+    """
+    Update a single user setting field in Redis and mark dirty for flush.
+    
+    Args:
+        user_id: User ID
+        field: Field name (e.g., 'balance_threshold', 'starting_savings')
+        value: New value for the field
+    """
+    app.logger.info(f"[REDIS][user_settings] CALLED: user_id={user_id}, field={field}, value={value}")
+    
+    if not app.config.get('REDIS_OK'):
+        app.logger.warning(f"[REDIS][user_settings] REDIS_OK is False, skipping Redis update")
+        return
+    
+    try:
+        # Get current user data from Redis or MySQL
+        redis_key = f"users:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        
+        app.logger.info(f"[REDIS][user_settings] Redis key: {redis_key}, cached exists: {cached is not None}")
+        
+        if cached:
+            user_data = json.loads(cached)
+            app.logger.info(f"[REDIS][user_settings] Loaded from Redis, keys: {list(user_data.keys())}")
+        else:
+            # Load from MySQL
+            app.logger.info(f"[REDIS][user_settings] Not in Redis, loading from MySQL")
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+                user_data = cursor.fetchone()
+                cursor.close()
+            
+            if not user_data:
+                app.logger.warning(f"[REDIS][user_settings] User {user_id} not found in MySQL")
+                return
+            
+            # Convert to dict if needed
+            user_data = dict(user_data)
+            app.logger.info(f"[REDIS][user_settings] Loaded from MySQL, keys: {list(user_data.keys())}")
+        
+        # Update the field
+        old_value = user_data.get(field, 'NOT_SET')
+        user_data[field] = value
+        app.logger.info(f"[REDIS][user_settings] Updated field '{field}': {old_value} -> {value}")
+        
+        # Serialize data
+        serializable_data = user_data.copy()
+        for k, v in serializable_data.items():
+            if isinstance(v, (date, datetime)):
+                serializable_data[k] = v.isoformat()
+            elif isinstance(v, Decimal):
+                serializable_data[k] = float(v)
+        
+        # Save to Redis
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(serializable_data))
+        app.logger.info(f"[REDIS][user_settings] Saved to Redis key: {redis_key}")
+        
+        # Mark as dirty for flush
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, "users")
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        app.logger.info(f"[REDIS][user_settings] Marked 'users' as dirty for user {user_id}")
+        
+        app.logger.info(f"[REDIS][user_settings] SUCCESS: Updated {field}={value} for user={user_id}")
+    except Exception as e:
+        app.logger.error(f"[REDIS][user_settings] UPDATE ERROR user={user_id}, field={field}: {e}", exc_info=True)
+
+# Redis helper functions for entry management (income/expense/c_expense)
+
+def _get_entries_from_redis(table_name, user_id):
+    """
+    Get entries from Redis.
+    
+    Args:
+        table_name: 'income_entries', 'expense_entries', or 'c_expense_entries'
+        user_id: User ID
+        
+    Returns:
+        List of dicts or None if not in cache
+    """
+    if not app.config.get('REDIS_OK'):
+        return None
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        
+        if cached:
+            return json.loads(cached)
+        return None
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] GET error user={user_id}: {e}")
+        return None
+
+def _filter_pending_deletions(table_name, user_id, entries):
+    """
+    Filter out entries that are pending deletion (deleted from Redis but not yet flushed to MySQL).
+    This prevents MySQL fallback from resurrecting deleted entries.
+    
+    Args:
+        table_name: Table name
+        user_id: User ID
+        entries: List of entries from MySQL
+        
+    Returns:
+        Filtered list of entries
+    """
+    if not app.config.get('REDIS_OK') or not entries:
+        return entries
+    
+    try:
+        pending_key = f"pending_deletes:{table_name}:{user_id}"
+        pending_deletes = _redis_client.smembers(pending_key)
+        
+        if not pending_deletes:
+            return entries
+        
+        # Convert to set of integers for fast lookup
+        pending_delete_ids = {int(id_str) for id_str in pending_deletes}
+        
+        # Filter out entries with IDs in the pending deletion set
+        filtered = [entry for entry in entries if entry.get('id') not in pending_delete_ids]
+        
+        if len(filtered) < len(entries):
+            app.logger.debug(f"[REDIS][{table_name}] Filtered {len(entries) - len(filtered)} pending deletions for user {user_id}")
+        
+        return filtered
+        
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] Error filtering pending deletions: {e}")
+        return entries
+
+def _set_entries_to_redis(table_name, user_id, data):
+    """
+    Set entries to Redis and mark dirty for flush.
+    
+    Args:
+        table_name: 'income_entries', 'expense_entries', or 'c_expense_entries'
+        user_id: User ID
+        data: List of entry records
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        # Serialize data
+        serializable_data = []
+        for row in data:
+            row_copy = row.copy()
+            if 'date' in row_copy and isinstance(row_copy['date'], date):
+                row_copy['date'] = row_copy['date'].isoformat()
+            for k, v in row_copy.items():
+                if isinstance(v, Decimal):
+                    row_copy[k] = float(v)
+            serializable_data.append(row_copy)
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(serializable_data))
+        # Mark table as dirty for flush
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        app.logger.debug(f"[REDIS][{table_name}] SET user={user_id}, rows={len(data)}")
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] SET error user={user_id}: {e}")
+
+def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount, processed=0, entry_id=None, bud_item_id=None):
+    """
+    Update or insert a single entry in Redis cache.
+    
+    Args:
+        table_name: 'income_entries', 'expense_entries', or 'c_expense_entries'
+        user_id: User ID
+        category_id: Category ID
+        entry_date: Entry date (date object or string)
+        amount: Entry amount
+        processed: Processed flag (0 or 1)
+        entry_id: Existing entry ID (if updating) or None (will generate)
+        bud_item_id: Optional bud_item_id for expense entries
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        # Get current entries from Redis
+        entries = _get_entries_from_redis(table_name, user_id)
+        
+        # If not in Redis, load from MySQL first
+        if entries is None:
+            entries = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                if table_name == 'income_entries':
+                    cursor.execute("""
+                        SELECT ie.* FROM income_entries ie
+                        JOIN income_categories ic ON ie.category_id = ic.id
+                        WHERE ic.user_id = %s
+                    """, (user_id,))
+                elif table_name == 'expense_entries':
+                    cursor.execute("""
+                        SELECT ee.* FROM expense_entries ee
+                        JOIN expense_categories ec ON ee.category_id = ec.id
+                        WHERE ec.user_id = %s
+                    """, (user_id,))
+                elif table_name == 'c_expense_entries':
+                    cursor.execute("""
+                        SELECT cee.* FROM c_expense_entries cee
+                        JOIN c_expense_categories cec ON cee.category_id = cec.id
+                        JOIN credit_accounts ca ON cec.account_id = ca.id
+                        WHERE ca.user_id = %s
+                    """, (user_id,))
+                entries = list(cursor.fetchall())
+                cursor.close()
+            
+            # Filter out any entries pending deletion
+            entries = _filter_pending_deletions(table_name, user_id, entries)
+            app.logger.info(f"[REDIS][{table_name}] Loaded {len(entries)} entries from MySQL for user {user_id}")
+        
+        # Convert entry_date to string for comparison
+        if isinstance(entry_date, date):
+            entry_date_str = entry_date.isoformat()
+        else:
+            entry_date_str = entry_date
+        
+        # Find existing entry
+        found = False
+        for entry in entries:
+            if (int(entry.get('category_id', 0)) == int(category_id) and 
+                entry.get('date') == entry_date_str):
+                # Update existing entry
+                entry['amount'] = float(amount)
+                entry['processed'] = int(processed)
+                if bud_item_id is not None:
+                    entry['bud_item_id'] = int(bud_item_id)
+                found = True
+                break
+        
+        if not found:
+            # Create new entry
+            new_entry = {
+                'id': entry_id or (max([e.get('id', 0) for e in entries], default=0) + 1),
+                'category_id': int(category_id),
+                'date': entry_date_str,
+                'amount': float(amount),
+                'recurring_id': None,
+                'processed': int(processed)
+            }
+            if table_name in ['expense_entries', 'c_expense_entries']:
+                new_entry['bud_item_id'] = int(bud_item_id) if bud_item_id is not None else None
+            entries.append(new_entry)
+        
+        # Write back to Redis
+        _set_entries_to_redis(table_name, user_id, entries)
+        
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] UPDATE error user={user_id}: {e}")
+
+def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_date):
+    """
+    Delete entries in Redis cache for a date range.
+    
+    Args:
+        table_name: 'income_entries', 'expense_entries', or 'c_expense_entries'
+        user_id: User ID
+        category_id: Category ID
+        start_date: Start date (inclusive)
+        end_date: End date (inclusive)
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        # Get current entries from Redis
+        entries = _get_entries_from_redis(table_name, user_id)
+        
+        # If not in Redis, load from MySQL first
+        if entries is None:
+            entries = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                if table_name == 'income_entries':
+                    cursor.execute("""
+                        SELECT ie.* FROM income_entries ie
+                        JOIN income_categories ic ON ie.category_id = ic.id
+                        WHERE ic.user_id = %s
+                    """, (user_id,))
+                elif table_name == 'expense_entries':
+                    cursor.execute("""
+                        SELECT ee.* FROM expense_entries ee
+                        JOIN expense_categories ec ON ee.category_id = ec.id
+                        WHERE ec.user_id = %s
+                    """, (user_id,))
+                elif table_name == 'c_expense_entries':
+                    cursor.execute("""
+                        SELECT cee.* FROM c_expense_entries cee
+                        JOIN c_expense_categories cec ON cee.category_id = cec.id
+                        JOIN credit_accounts ca ON cec.account_id = ca.id
+                        WHERE ca.user_id = %s
+                    """, (user_id,))
+                entries = list(cursor.fetchall())
+                cursor.close()
+            
+            # Filter out any entries pending deletion (in case cache was cleared)
+            entries = _filter_pending_deletions(table_name, user_id, entries)
+            app.logger.info(f"[REDIS][{table_name}] Loaded {len(entries)} entries from MySQL for user {user_id}")
+        
+        # Convert dates to strings for comparison
+        if isinstance(start_date, date):
+            start_date_str = start_date.isoformat()
+        else:
+            start_date_str = start_date
+        if isinstance(end_date, date):
+            end_date_str = end_date.isoformat()
+        else:
+            end_date_str = end_date
+        
+        # Filter out entries in the date range for this category
+        # Also track which entry IDs are being deleted
+        deleted_ids = []
+        filtered_entries = []
+        for entry in entries:
+            if int(entry.get('category_id', 0)) == int(category_id) and start_date_str <= entry.get('date', '') <= end_date_str:
+                # This entry is being deleted
+                if 'id' in entry:
+                    deleted_ids.append(entry['id'])
+            else:
+                # Keep this entry
+                filtered_entries.append(entry)
+        
+        # Write filtered entries back to Redis
+        _set_entries_to_redis(table_name, user_id, filtered_entries)
+        
+        # Track pending deletions to prevent MySQL fallback from resurrecting them
+        if deleted_ids:
+            pending_key = f"pending_deletes:{table_name}:{user_id}"
+            _redis_client.sadd(pending_key, *deleted_ids)
+            _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)  # Expire after flush would complete
+            app.logger.debug(f"[REDIS][{table_name}] Marked {len(deleted_ids)} entries as pending deletion for user {user_id}")
+        
+    except Exception as e:
+        app.logger.warning(f"[REDIS][{table_name}] DELETE error user={user_id}: {e}")
+
+def _update_payment_entry_in_redis(user_id, account_id, entry_date, amount):
+    """
+    Update or insert a payment entry in Redis cache.
+    
+    Args:
+        user_id: User ID
+        account_id: Credit account ID
+        entry_date: Payment date (date object or string)
+        amount: Payment amount
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        table_name = 'c_payment_entries'
+        # Get current entries from Redis
+        entries = _get_entries_from_redis(table_name, user_id)
+        
+        # If not in Redis, load from MySQL first
+        if entries is None:
+            entries = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT cpe.* FROM c_payment_entries cpe
+                    JOIN credit_accounts ca ON cpe.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                entries = list(cursor.fetchall())
+                cursor.close()
+            
+            # Filter out any entries pending deletion
+            entries = _filter_pending_deletions(table_name, user_id, entries)
+            app.logger.info(f"[REDIS][{table_name}] Loaded {len(entries)} entries from MySQL for user {user_id}")
+        
+        # Convert entry_date to string for comparison
+        if isinstance(entry_date, date):
+            entry_date_str = entry_date.isoformat()
+        else:
+            entry_date_str = entry_date
+        
+        # Find existing entry
+        found = False
+        for entry in entries:
+            if (int(entry.get('account_id', 0)) == int(account_id) and 
+                entry.get('date') == entry_date_str):
+                # Update existing entry
+                entry['amount'] = float(amount)
+                found = True
+                break
+        
+        if not found:
+            # Generate a new ID (use negative to avoid conflicts with MySQL IDs)
+            max_id = max([abs(int(e.get('id', 0))) for e in entries], default=0)
+            new_id = -(max_id + 1)
+            
+            # Add new entry
+            entries.append({
+                'id': new_id,
+                'account_id': int(account_id),
+                'date': entry_date_str,
+                'amount': float(amount),
+                'recurring_id': None,
+                'processed': 0
+            })
+        
+        # Save back to Redis
+        _set_entries_to_redis(table_name, user_id, entries)
+        app.logger.debug(f"[REDIS][{table_name}] Updated payment entry for account={account_id}, date={entry_date_str}, amount={amount}")
+        
+    except Exception as e:
+        app.logger.warning(f"[REDIS][c_payment_entries] UPDATE error user={user_id}: {e}")
+
+def _delete_payment_entry_in_redis(user_id, account_id, start_date, end_date):
+    """
+    Delete payment entries from Redis cache by account and date range.
+    
+    Args:
+        user_id: User ID
+        account_id: Credit account ID
+        start_date: Start date (inclusive)
+        end_date: End date (inclusive)
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        table_name = 'c_payment_entries'
+        # Get current entries from Redis
+        entries = _get_entries_from_redis(table_name, user_id)
+        
+        # If not in Redis, load from MySQL first
+        if entries is None:
+            entries = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT cpe.* FROM c_payment_entries cpe
+                    JOIN credit_accounts ca ON cpe.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                entries = list(cursor.fetchall())
+                cursor.close()
+            app.logger.info(f"[REDIS][{table_name}] Loaded {len(entries)} entries from MySQL for user {user_id}")
+        
+        # Convert dates to strings for comparison
+        if isinstance(start_date, date):
+            start_date_str = start_date.isoformat()
+        else:
+            start_date_str = start_date
+            
+        if isinstance(end_date, date):
+            end_date_str = end_date.isoformat()
+        else:
+            end_date_str = end_date
+        
+        # Filter out entries to delete
+        deleted_ids = []
+        filtered_entries = []
+        for entry in entries:
+            entry_date_str = entry.get('date')
+            if (int(entry.get('account_id', 0)) == int(account_id) and
+                start_date_str <= entry_date_str <= end_date_str):
+                # Mark for deletion
+                entry_id = entry.get('id')
+                if entry_id and int(entry_id) > 0:  # Only track positive IDs (from MySQL)
+                    deleted_ids.append(str(entry_id))
+            else:
+                filtered_entries.append(entry)
+        
+        # Save filtered entries back to Redis
+        _set_entries_to_redis(table_name, user_id, filtered_entries)
+        app.logger.debug(f"[REDIS][{table_name}] Deleted {len(entries) - len(filtered_entries)} payment entries for account={account_id}, dates={start_date_str} to {end_date_str}")
+        
+        # Track pending deletions to prevent MySQL fallback from resurrecting them
+        if deleted_ids:
+            pending_key = f"pending_deletes:{table_name}:{user_id}"
+            _redis_client.sadd(pending_key, *deleted_ids)
+            _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+            app.logger.debug(f"[REDIS][{table_name}] Marked {len(deleted_ids)} payment entries as pending deletion for user {user_id}")
+        
+    except Exception as e:
+        app.logger.warning(f"[REDIS][c_payment_entries] DELETE error user={user_id}: {e}")
+
+def _get_payment_entries_from_redis(user_id):
+    """
+    Get payment entries from Redis.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        List of dicts or None if not in cache
+    """
+    if not app.config.get('REDIS_OK'):
+        return None
+    
+    try:
+        redis_key = f"c_payment_entries:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        if cached:
+            return json.loads(cached)
+        return None
+    except Exception as e:
+        app.logger.error(f"Error getting payment entries from Redis: {e}")
+        return None
+
+# Redis helper functions for recurring tables
+
+def _get_recurring_from_redis(table_name, user_id):
+    """
+    Get recurring records from Redis.
+    
+    Args:
+        table_name: 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+        user_id: User ID
+        
+    Returns:
+        List of dicts or None if not in cache
+    """
+    if not app.config.get('REDIS_OK'):
+        return None
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        if cached:
+            return json.loads(cached)
+        return None
+    except Exception as e:
+        app.logger.error(f"Error getting {table_name} from Redis: {e}")
+        return None
+
+def _set_recurring_to_redis(table_name, user_id, data):
+    """
+    Set recurring records to Redis and mark dirty for flush.
+    
+    Args:
+        table_name: 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+        user_id: User ID
+        data: List of recurring records
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        _redis_client.setex(
+            redis_key,
+            PERSISTENT_CACHE_TTL,
+            json.dumps(data, cls=DecimalEncoder)
+        )
+        
+        # Mark table as dirty for flush worker
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+    except Exception as e:
+        app.logger.error(f"Error setting {table_name} to Redis: {e}")
+
+def _update_recurring_in_redis(table_name, user_id, recurring_data):
+    """
+    Update or insert a single recurring record in Redis cache.
+    
+    Args:
+        table_name: 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+        user_id: User ID
+        recurring_data: Dict with recurring record data (must include 'id' for update or None for insert)
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        
+        # Get existing data
+        cached = _redis_client.get(redis_key)
+        if cached:
+            rows = json.loads(cached)
+        else:
+            rows = []
+        
+        recurring_id = recurring_data.get('id')
+        
+        if recurring_id:
+            # Update existing record
+            found = False
+            for i, row in enumerate(rows):
+                if int(row.get('id')) == int(recurring_id):
+                    # Preserve category_name if not provided in update
+                    if 'category_name' not in recurring_data and 'category_name' in row:
+                        recurring_data['category_name'] = row['category_name']
+                    rows[i] = recurring_data
+                    found = True
+                    break
+            
+            if not found:
+                # Record not in cache, add it
+                rows.append(recurring_data)
+        else:
+            # New record - generate a temporary negative ID (will be replaced by MySQL on flush)
+            temp_id = -int(time.time() * 1000000)  # Use negative timestamp to avoid collisions
+            recurring_data['id'] = temp_id
+            rows.append(recurring_data)
+        
+        # Save back to Redis
+        _redis_client.setex(
+            redis_key,
+            PERSISTENT_CACHE_TTL,
+            json.dumps(rows, cls=DecimalEncoder)
+        )
+        
+        # Mark as dirty
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+    except Exception as e:
+        app.logger.error(f"Error updating {table_name} in Redis: {e}")
+
+def _delete_recurring_in_redis(table_name, user_id, recurring_id):
+    """
+    Delete a recurring record from Redis cache.
+    
+    Args:
+        table_name: 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+        user_id: User ID
+        recurring_id: ID of the recurring record to delete
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        
+        # Get existing data
+        cached = _redis_client.get(redis_key)
+        if cached:
+            rows = json.loads(cached)
+            # Filter out the deleted record (compare as int to handle both int and str IDs)
+            recurring_id_int = int(recurring_id)
+            rows = [row for row in rows if int(row.get('id')) != recurring_id_int]
+            
+            # Save back to Redis
+            _redis_client.setex(
+                redis_key,
+                PERSISTENT_CACHE_TTL,
+                json.dumps(rows, cls=DecimalEncoder)
+            )
+        
+        # Track pending deletion for flush worker
+        pending_key = f"pending_deletes:{table_name}:{user_id}"
+        _redis_client.sadd(pending_key, str(recurring_id))
+        _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+        
+        # Mark as dirty
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+    except Exception as e:
+        app.logger.error(f"Error deleting {table_name} in Redis: {e}")
+
+# Redis helper functions for buds and bud_items
+
+def _get_buds_from_redis(user_id):
+    """Get buds from Redis."""
+    if not app.config.get('REDIS_OK'):
+        return None
+    try:
+        redis_key = f"buds:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        return json.loads(cached) if cached else None
+    except Exception as e:
+        app.logger.error(f"Error getting buds from Redis: {e}")
+        return None
+
+def _set_buds_to_redis(user_id, data):
+    """Set buds to Redis and mark dirty for flush."""
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        redis_key = f"buds:v1:{user_id}"
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(data, cls=DecimalEncoder))
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, 'buds')
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        app.logger.error(f"Error setting buds to Redis: {e}")
+
+def _update_bud_in_redis(user_id, bud_data):
+    """Update or insert a single bud record in Redis cache."""
+    if not app.config.get('REDIS_OK'):
+        return None
+    try:
+        redis_key = f"buds:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        rows = json.loads(cached) if cached else []
+        
+        bud_id = bud_data.get('id')
+        if bud_id:
+            found = False
+            for i, row in enumerate(rows):
+                if int(row.get('id')) == int(bud_id):
+                    rows[i] = bud_data
+                    found = True
+                    break
+            if not found:
+                rows.append(bud_data)
+        else:
+            temp_id = -int(time.time() * 1000000)
+            bud_data['id'] = temp_id
+            rows.append(bud_data)
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, 'buds')
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        return bud_data['id']
+    except Exception as e:
+        app.logger.error(f"Error updating bud in Redis: {e}")
+        return None
+
+def _delete_bud_in_redis(user_id, bud_id):
+    """Delete a bud record from Redis cache."""
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        redis_key = f"buds:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        if cached:
+            rows = json.loads(cached)
+            rows = [row for row in rows if int(row.get('id')) != int(bud_id)]
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
+        
+        pending_key = f"pending_deletes:buds:{user_id}"
+        _redis_client.sadd(pending_key, str(bud_id))
+        _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, 'buds')
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        app.logger.error(f"Error deleting bud from Redis: {e}")
+
+def _get_bud_items_from_redis(user_id):
+    """Get bud_items from Redis."""
+    if not app.config.get('REDIS_OK'):
+        return None
+    try:
+        redis_key = f"bud_items:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        return json.loads(cached) if cached else None
+    except Exception as e:
+        app.logger.error(f"Error getting bud_items from Redis: {e}")
+        return None
+
+def _set_bud_items_to_redis(user_id, data):
+    """Set bud_items to Redis and mark dirty for flush."""
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        redis_key = f"bud_items:v1:{user_id}"
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(data, cls=DecimalEncoder))
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, 'bud_items')
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        app.logger.error(f"Error setting bud_items to Redis: {e}")
+
+def _update_bud_item_in_redis(user_id, bud_item_data):
+    """Update or insert a single bud_item record in Redis cache."""
+    if not app.config.get('REDIS_OK'):
+        return None
+    try:
+        redis_key = f"bud_items:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        rows = json.loads(cached) if cached else []
+        
+        item_id = bud_item_data.get('id')
+        if item_id:
+            found = False
+            for i, row in enumerate(rows):
+                if int(row.get('id')) == int(item_id):
+                    rows[i] = bud_item_data
+                    found = True
+                    break
+            if not found:
+                rows.append(bud_item_data)
+        else:
+            temp_id = -int(time.time() * 1000000)
+            bud_item_data['id'] = temp_id
+            rows.append(bud_item_data)
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, 'bud_items')
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        return bud_item_data['id']
+    except Exception as e:
+        app.logger.error(f"Error updating bud_item in Redis: {e}")
+        return None
+
+def _delete_bud_item_in_redis(user_id, item_id):
+    """Delete a bud_item record from Redis cache."""
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        redis_key = f"bud_items:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        if cached:
+            rows = json.loads(cached)
+            rows = [row for row in rows if int(row.get('id')) != int(item_id)]
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
+        
+        pending_key = f"pending_deletes:bud_items:{user_id}"
+        _redis_client.sadd(pending_key, str(item_id))
+        _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, 'bud_items')
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        app.logger.error(f"Error deleting bud_item from Redis: {e}")
 
 def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
     with get_db_pool().get_connection() as conn:
@@ -1539,55 +3018,72 @@ def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
         prev_remainder_row = cursor.fetchone()
         last_day_remainder = float(prev_remainder_row['remainder']) if prev_remainder_row else 0.0
 
-        # Fetch all income for the range - using FORCE INDEX to ensure the index on user_id is used
-        cursor.execute("""
-            SELECT ie.date, SUM(ie.amount) as total
-            FROM income_entries ie
-            JOIN income_categories ic ON ie.category_id = ic.id
-            WHERE ic.user_id = %s AND ie.date >= %s
-            GROUP BY ie.date
-            ORDER BY ie.date
-        """, (user_id, start_date))
-        income_by_date = {row['date']: float(row['total']) for row in cursor.fetchall()}
+        # Try to get entries from Redis first
+        income_entries = _get_entries_from_redis('income_entries', user_id)
+        expense_entries = _get_entries_from_redis('expense_entries', user_id)
+        
+        # If not in Redis, fall back to MySQL
+        if income_entries is None:
+            cursor.execute("""
+                SELECT ie.* FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+            """, (user_id,))
+            income_entries = list(cursor.fetchall())
+            app.logger.debug(f"[REDIS MISS] Loaded {len(income_entries)} income entries from MySQL")
+        
+        if expense_entries is None:
+            cursor.execute("""
+                SELECT ee.* FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+            """, (user_id,))
+            expense_entries = list(cursor.fetchall())
+            app.logger.debug(f"[REDIS MISS] Loaded {len(expense_entries)} expense entries from MySQL")
+        
+        # Aggregate income by date (filter >= start_date)
+        income_by_date = {}
+        for entry in income_entries:
+            entry_date = entry.get('date')
+            if isinstance(entry_date, str):
+                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+            if entry_date >= start_date:
+                income_by_date[entry_date] = income_by_date.get(entry_date, 0) + float(entry.get('amount', 0))
+        
+        # Aggregate expenses by date (filter >= start_date)
+        expense_by_date = {}
+        for entry in expense_entries:
+            entry_date = entry.get('date')
+            if isinstance(entry_date, str):
+                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+            if entry_date >= start_date:
+                expense_by_date[entry_date] = expense_by_date.get(entry_date, 0) + float(entry.get('amount', 0))
 
-        # Fetch all expenses for the range - using FORCE INDEX to ensure the index on user_id is used
-        cursor.execute("""
-            SELECT ee.date, SUM(ee.amount) as total
-            FROM expense_entries ee
-            JOIN expense_categories ec ON ee.category_id = ec.id
-            WHERE ec.user_id = %s AND ee.date >= %s
-            GROUP BY ee.date
-            ORDER BY ee.date
-        """, (user_id, start_date))
-        expense_by_date = {row['date']: float(row['total']) for row in cursor.fetchall()}
-
-        # Prepare batch insert data
-        batch_data = []
+        # Prepare data for Redis
+        redis_updates = []
         
         for current_date in all_dates:
             total_income = income_by_date.get(current_date, 0) + last_day_remainder
             total_expenses = expense_by_date.get(current_date, 0)
             remainder = total_income - total_expenses
             
-            batch_data.append((user_id, current_date, total_income, total_expenses, remainder, last_day_remainder))
+            redis_updates.append({
+                'date': current_date,
+                'total_income': float(total_income),
+                'total_expenses': float(total_expenses),
+                'remainder': float(remainder),
+                'last_day_remainder': float(last_day_remainder)
+            })
             
             last_day_remainder = remainder
             date_to_remainder[current_date] = remainder
         
-        # Execute batch update using multi-row syntax
-        if batch_data:
-            cursor.executemany("""
-                INSERT INTO totals_remainders_d (user_id, date, total_income, total_expenses, remainder, last_day_remainder)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    total_income = VALUES(total_income),
-                    total_expenses = VALUES(total_expenses),
-                    remainder = VALUES(remainder),
-                    last_day_remainder = VALUES(last_day_remainder)
-            """, batch_data)
-        
         cursor.close()
-        conn.commit()
+        
+        # Update Redis cache only - flush workers will persist to MySQL
+        if redis_updates:
+            _update_totals_remainders_in_redis('totals_remainders_d', user_id, redis_updates)
+            app.logger.info(f"[REDIS ONLY] Daily totals for user {user_id}: {len(redis_updates)} rows updated in Redis")
 
 def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
     with get_db_pool().get_connection() as conn:
@@ -1623,30 +3119,49 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
         earliest_week_start, _ = get_week_range(earliest_week_date)
         _, latest_week_end = get_week_range(latest_week_date)
         
-        # Fetch only the income entries we need (within the complete date range)
-        cursor.execute("""
-            SELECT ie.date, SUM(ie.amount) as daily_income
-            FROM income_entries ie
-            JOIN income_categories ic ON ie.category_id = ic.id
-            WHERE ic.user_id = %s AND ie.date BETWEEN %s AND %s
-            GROUP BY ie.date
-            ORDER BY ie.date
-        """, (user_id, earliest_week_start, latest_week_end))
-        income_by_date = {row['date']: float(row['daily_income']) for row in cursor.fetchall()}
+        # Try to get entries from Redis first
+        income_entries = _get_entries_from_redis('income_entries', user_id)
+        expense_entries = _get_entries_from_redis('expense_entries', user_id)
+        
+        # If not in Redis, fall back to MySQL
+        if income_entries is None:
+            cursor.execute("""
+                SELECT ie.* FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+            """, (user_id,))
+            income_entries = list(cursor.fetchall())
+            app.logger.debug(f"[REDIS MISS] Loaded {len(income_entries)} income entries from MySQL")
+        
+        if expense_entries is None:
+            cursor.execute("""
+                SELECT ee.* FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+            """, (user_id,))
+            expense_entries = list(cursor.fetchall())
+            app.logger.debug(f"[REDIS MISS] Loaded {len(expense_entries)} expense entries from MySQL")
+        
+        # Aggregate income by date (filter by date range)
+        income_by_date = {}
+        for entry in income_entries:
+            entry_date = entry.get('date')
+            if isinstance(entry_date, str):
+                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+            if earliest_week_start <= entry_date <= latest_week_end:
+                income_by_date[entry_date] = income_by_date.get(entry_date, 0) + float(entry.get('amount', 0))
+        
+        # Aggregate expenses by date (filter by date range)
+        expense_by_date = {}
+        for entry in expense_entries:
+            entry_date = entry.get('date')
+            if isinstance(entry_date, str):
+                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+            if earliest_week_start <= entry_date <= latest_week_end:
+                expense_by_date[entry_date] = expense_by_date.get(entry_date, 0) + float(entry.get('amount', 0))
 
-        # Fetch only the expense entries we need (within the complete date range)
-        cursor.execute("""
-            SELECT ee.date, SUM(ee.amount) as daily_expense
-            FROM expense_entries ee
-            JOIN expense_categories ec ON ee.category_id = ec.id
-            WHERE ec.user_id = %s AND ee.date BETWEEN %s AND %s
-            GROUP BY ee.date
-            ORDER BY ee.date
-        """, (user_id, earliest_week_start, latest_week_end))
-        expense_by_date = {row['date']: float(row['daily_expense']) for row in cursor.fetchall()}
-
-        # Prepare batch data
-        batch_data = []
+        # Prepare data for Redis
+        redis_updates = []
         
         for week_date in all_week_dates:
             week_start, week_end = get_week_range(week_date)
@@ -1673,28 +3188,23 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
             total_income_with_remainder = total_income + float(last_week_remainder)
             week_remainder = total_income_with_remainder - total_expenses
 
-            batch_data.append((
-                user_id, week_date, total_income_with_remainder, total_expenses, 
-                week_remainder, last_week_remainder
-            ))
+            redis_updates.append({
+                'date': week_date,
+                'total_income': float(total_income_with_remainder),
+                'total_expenses': float(total_expenses),
+                'remainder': float(week_remainder),
+                'last_week_remainder': float(last_week_remainder)
+            })
 
             # Update date_to_remainder for next week
             date_to_remainder[week_date] = week_remainder
         
-        # Execute batch update
-        if batch_data:
-            cursor.executemany("""
-                INSERT INTO totals_remainders (user_id, date, total_income, total_expenses, remainder, last_week_remainder)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    total_income = VALUES(total_income),
-                    total_expenses = VALUES(total_expenses),
-                    remainder = VALUES(remainder),
-                    last_week_remainder = VALUES(last_week_remainder)
-            """, batch_data)
-
         cursor.close()
-        conn.commit()
+        
+        # Update Redis cache only - flush workers will persist to MySQL
+        if redis_updates:
+            _update_totals_remainders_in_redis('totals_remainders', user_id, redis_updates)
+            app.logger.info(f"[REDIS ONLY] Weekly totals for user {user_id}: {len(redis_updates)} rows updated in Redis")
 
 def update_monthly_totals(user_id, start_date, date_to_remainder):
     with get_db_pool().get_connection() as conn:
@@ -1748,32 +3258,54 @@ def update_monthly_totals(user_id, start_date, date_to_remainder):
             cursor.close()
             return
         
-        # Get income data for the entire period in one query
-        cursor.execute("""
-            SELECT YEAR(ie.date) as year, MONTH(ie.date) as month, SUM(ie.amount) as total
-            FROM income_entries ie
-            JOIN income_categories ic ON ie.category_id = ic.id
-            WHERE ic.user_id = %s 
-              AND ie.date BETWEEN %s AND %s
-            GROUP BY YEAR(ie.date), MONTH(ie.date)
-        """, (user_id, months_data[0]['first_day'], months_data[-1]['last_day']))
+        # Try to get entries from Redis first
+        income_entries = _get_entries_from_redis('income_entries', user_id)
+        expense_entries = _get_entries_from_redis('expense_entries', user_id)
         
-        income_by_month = {(row['year'], row['month']): float(row['total']) for row in cursor.fetchall()}
+        # If not in Redis, fall back to MySQL
+        if income_entries is None:
+            cursor.execute("""
+                SELECT ie.* FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+            """, (user_id,))
+            income_entries = list(cursor.fetchall())
+            app.logger.debug(f"[REDIS MISS] Loaded {len(income_entries)} income entries from MySQL")
         
-        # Get expense data for the entire period in one query
-        cursor.execute("""
-            SELECT YEAR(ee.date) as year, MONTH(ee.date) as month, SUM(ee.amount) as total
-            FROM expense_entries ee
-            JOIN expense_categories ec ON ee.category_id = ec.id
-            WHERE ec.user_id = %s 
-              AND ee.date BETWEEN %s AND %s
-            GROUP BY YEAR(ee.date), MONTH(ee.date)
-        """, (user_id, months_data[0]['first_day'], months_data[-1]['last_day']))
+        if expense_entries is None:
+            cursor.execute("""
+                SELECT ee.* FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+            """, (user_id,))
+            expense_entries = list(cursor.fetchall())
+            app.logger.debug(f"[REDIS MISS] Loaded {len(expense_entries)} expense entries from MySQL")
         
-        expense_by_month = {(row['year'], row['month']): float(row['total']) for row in cursor.fetchall()}
+        # Aggregate income by month (filter by date range)
+        income_by_month = {}
+        first_day = months_data[0]['first_day']
+        last_day = months_data[-1]['last_day']
+        
+        for entry in income_entries:
+            entry_date = entry.get('date')
+            if isinstance(entry_date, str):
+                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+            if first_day <= entry_date <= last_day:
+                key = (entry_date.year, entry_date.month)
+                income_by_month[key] = income_by_month.get(key, 0) + float(entry.get('amount', 0))
+        
+        # Aggregate expenses by month (filter by date range)
+        expense_by_month = {}
+        for entry in expense_entries:
+            entry_date = entry.get('date')
+            if isinstance(entry_date, str):
+                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+            if first_day <= entry_date <= last_day:
+                key = (entry_date.year, entry_date.month)
+                expense_by_month[key] = expense_by_month.get(key, 0) + float(entry.get('amount', 0))
 
-        # Prepare batch data
-        batch_data = []
+        # Prepare data for Redis
+        redis_updates = []
         
         for month_info in months_data:
             year = month_info['year']
@@ -1806,29 +3338,24 @@ def update_monthly_totals(user_id, start_date, date_to_remainder):
             total_income_with_remainder = total_income + last_month_remainder
             remainder = total_income_with_remainder - total_expenses
             
-            # Store for batch insert
-            batch_data.append((
-                user_id, last_day_of_month, total_income_with_remainder, 
-                total_expenses, remainder, last_month_remainder
-            ))
+            # Store for Redis
+            redis_updates.append({
+                'date': last_day_of_month,
+                'total_income': float(total_income_with_remainder),
+                'total_expenses': float(total_expenses),
+                'remainder': float(remainder),
+                'last_month_remainder': float(last_month_remainder)
+            })
             
             # Save for next month's calculation
             date_to_remainder[last_day_of_month] = remainder
         
-        # Execute batch insert/update
-        if batch_data:
-            cursor.executemany("""
-                INSERT INTO totals_remainders_m (user_id, date, total_income, total_expenses, remainder, last_month_remainder)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    total_income = VALUES(total_income),
-                    total_expenses = VALUES(total_expenses),
-                    remainder = VALUES(remainder),
-                    last_month_remainder = VALUES(last_month_remainder)
-            """, batch_data)
-
         cursor.close()
-        conn.commit()
+        
+        # Update Redis cache only - flush workers will persist to MySQL
+        if redis_updates:
+            _update_totals_remainders_in_redis('totals_remainders_m', user_id, redis_updates)
+            app.logger.info(f"[REDIS ONLY] Monthly totals for user {user_id}: {len(redis_updates)} rows updated in Redis")
 
 def update_daily_savings_for_savings_category(user_id, start_date):
     with get_db_pool().get_connection() as conn:
@@ -1892,28 +3419,53 @@ def update_daily_savings_for_savings_category(user_id, start_date):
         min_date = min(all_dates)
         max_date = max(all_dates)
         
+        # Try to get entries from Redis first
+        income_entries = _get_entries_from_redis('income_entries', user_id)
+        expense_entries = _get_entries_from_redis('expense_entries', user_id)
+        
+        # If not in Redis, fall back to MySQL
+        if income_entries is None:
+            cursor.execute("""
+                SELECT * FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+            """, (user_id,))
+            income_entries = list(cursor.fetchall())
+            app.logger.debug(f"[REDIS MISS] Loaded {len(income_entries)} income entries from MySQL for savings")
+        
+        if expense_entries is None:
+            cursor.execute("""
+                SELECT * FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+            """, (user_id,))
+            expense_entries = list(cursor.fetchall())
+            app.logger.debug(f"[REDIS MISS] Loaded {len(expense_entries)} expense entries from MySQL for savings")
+        
+        # Filter and aggregate income by date
         income_by_date = {}
         if income_savings_id:
-            cursor.execute("""
-                SELECT date, COALESCE(SUM(amount), 0) as total
-                FROM income_entries
-                WHERE category_id = %s AND date BETWEEN %s AND %s
-                GROUP BY date
-            """, (income_savings_id, min_date, max_date))
-            income_by_date = {row['date']: float(row['total']) for row in cursor.fetchall()}
+            for entry in income_entries:
+                if int(entry.get('category_id', 0)) == int(income_savings_id):
+                    entry_date = entry.get('date')
+                    if isinstance(entry_date, str):
+                        entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                    if min_date <= entry_date <= max_date:
+                        income_by_date[entry_date] = income_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
         
+        # Filter and aggregate expenses by date
         expense_by_date = {}
         if expense_savings_id:
-            cursor.execute("""
-                SELECT date, COALESCE(SUM(amount), 0) as total
-                FROM expense_entries
-                WHERE category_id = %s AND date BETWEEN %s AND %s
-                GROUP BY date
-            """, (expense_savings_id, min_date, max_date))
-            expense_by_date = {row['date']: float(row['total']) for row in cursor.fetchall()}
+            for entry in expense_entries:
+                if int(entry.get('category_id', 0)) == int(expense_savings_id):
+                    entry_date = entry.get('date')
+                    if isinstance(entry_date, str):
+                        entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                    if min_date <= entry_date <= max_date:
+                        expense_by_date[entry_date] = expense_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
         
-        # Prepare batch insert data
-        batch_data = []
+        # Prepare data for Redis
+        redis_updates = []
         
         for current_date in all_dates:
             # Get income and expense totals for this date
@@ -1926,19 +3478,19 @@ def update_daily_savings_for_savings_category(user_id, start_date):
             else:
                 savings = last_savings + total_expenses - total_income
                 
-            batch_data.append((user_id, current_date, savings))
+            redis_updates.append({
+                'date': current_date,
+                'amount': float(savings)
+            })
             last_savings = savings
         
-        # Perform batch insert/update
-        if batch_data:
-            cursor.executemany("""
-                INSERT INTO savings_entries (user_id, date, amount)
-                VALUES (%s, %s, %s)
-                ON DUPLICATE KEY UPDATE amount = VALUES(amount)
-            """, batch_data)
-
         cursor.close()
-        conn.commit()
+        
+        # Update Redis cache only - flush workers will persist to MySQL
+        if redis_updates:
+            # For savings, we need to update the full cache
+            _set_savings_entries_to_redis(user_id, redis_updates)
+            app.logger.info(f"[REDIS ONLY] Savings entries for user {user_id}: {len(redis_updates)} rows updated in Redis")
 
 def update_daily_ca_totals(user_id, start_date):
     with get_db_pool().get_connection() as conn:
@@ -1950,6 +3502,9 @@ def update_daily_ca_totals(user_id, start_date):
         if not account_ids:
             cursor.close()
             return
+
+        # Collect all updates for aggregation
+        all_redis_updates = []
 
         # Process each account with optimized queries
         for account_id in account_ids:
@@ -1976,63 +3531,127 @@ def update_daily_ca_totals(user_id, start_date):
             if not all_dates:
                 continue
 
-            # Get previous balance
+            # Get previous balance - try Redis first, then MySQL
             prev_date = min_date - timedelta(days=1)
-            cursor.execute("""
-                SELECT balance FROM c_a_balances_d
-                WHERE account_id = %s AND date = %s
-            """, (account_id, prev_date))
-            prev_balance_row = cursor.fetchone()
-            last_day_balance = float(prev_balance_row['balance']) if prev_balance_row and prev_balance_row['balance'] is not None else 0.0
+            last_day_balance = 0.0
+            
+            # Try to get from Redis cache first
+            cached_balances = _get_ca_balances_from_redis('c_a_balances_d', user_id, account_id=account_id)
+            if cached_balances:
+                # Find the previous date's balance
+                for bal in cached_balances:
+                    bal_date = bal.get('date')
+                    if isinstance(bal_date, str):
+                        bal_date = datetime.strptime(bal_date, '%Y-%m-%d').date()
+                    if bal_date == prev_date:
+                        last_day_balance = float(bal.get('balance', 0))
+                        app.logger.debug(f"[REDIS HIT] Previous balance for {prev_date}: {last_day_balance}")
+                        break
+                else:
+                    # Not found in Redis, try MySQL
+                    cursor.execute("""
+                        SELECT balance FROM c_a_balances_d
+                        WHERE account_id = %s AND date = %s
+                    """, (account_id, prev_date))
+                    prev_balance_row = cursor.fetchone()
+                    last_day_balance = float(prev_balance_row['balance']) if prev_balance_row and prev_balance_row['balance'] is not None else 0.0
+                    app.logger.debug(f"[MYSQL] Previous balance for {prev_date}: {last_day_balance}")
+            else:
+                # Redis miss, query MySQL
+                cursor.execute("""
+                    SELECT balance FROM c_a_balances_d
+                    WHERE account_id = %s AND date = %s
+                """, (account_id, prev_date))
+                prev_balance_row = cursor.fetchone()
+                last_day_balance = float(prev_balance_row['balance']) if prev_balance_row and prev_balance_row['balance'] is not None else 0.0
+                app.logger.debug(f"[MYSQL FALLBACK] Previous balance for {prev_date}: {last_day_balance}")
 
-            # Get all expenses for the date range in one query
-            cursor.execute("""
-                SELECT cee.date, SUM(cee.amount) as daily_total
-                FROM c_expense_entries cee
-                JOIN c_expense_categories cec ON cee.category_id = cec.id
-                WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
-                GROUP BY cee.date
-                ORDER BY cee.date
-            """, (account_id, min_date, max_date))
-            expense_by_date = {row['date']: float(row['daily_total']) for row in cursor.fetchall()}
+            # Try to get expenses from Redis first
+            c_expense_entries = _get_entries_from_redis('c_expense_entries', user_id)
+            
+            if c_expense_entries is None:
+                # Redis miss - fallback to MySQL
+                app.logger.debug(f"[REDIS MISS] update_daily_ca_totals c_expense_entries for user {user_id}")
+                cursor.execute("""
+                    SELECT cee.* FROM c_expense_entries cee
+                    JOIN c_expense_categories cec ON cee.category_id = cec.id
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                c_expense_entries = list(cursor.fetchall())
+            else:
+                app.logger.debug(f"[REDIS HIT] update_daily_ca_totals c_expense_entries for user {user_id}")
+            
+            # Filter and aggregate expenses by date for this account
+            expense_by_date = {}
+            for entry in c_expense_entries:
+                entry_date = entry.get('date')
+                if isinstance(entry_date, str):
+                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                
+                # Get category to check account_id
+                entry_category_id = entry.get('category_id')
+                cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (entry_category_id,))
+                cat_row = cursor.fetchone()
+                
+                if cat_row and cat_row['account_id'] == account_id and min_date <= entry_date <= max_date:
+                    expense_by_date[entry_date] = expense_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
 
-            # Get all payments for the date range in one query
-            cursor.execute("""
-                SELECT date, SUM(amount) as daily_total 
-                FROM c_payment_entries
-                WHERE account_id = %s AND date BETWEEN %s AND %s
-                GROUP BY date
-                ORDER BY date
-            """, (account_id, min_date, max_date))
-            payments_by_date = {row['date']: float(row['daily_total']) for row in cursor.fetchall()}
+            # Try to get payment entries from Redis first
+            c_payment_entries = _get_payment_entries_from_redis(user_id)
+            
+            if c_payment_entries is None:
+                # Redis miss - fallback to MySQL
+                app.logger.debug(f"[REDIS MISS] update_daily_ca_totals c_payment_entries for user {user_id}")
+                cursor.execute("""
+                    SELECT date, SUM(amount) as daily_total 
+                    FROM c_payment_entries
+                    WHERE account_id = %s AND date BETWEEN %s AND %s
+                    GROUP BY date
+                    ORDER BY date
+                """, (account_id, min_date, max_date))
+                payments_by_date = {row['date']: float(row['daily_total']) for row in cursor.fetchall()}
+            else:
+                app.logger.debug(f"[REDIS HIT] update_daily_ca_totals c_payment_entries for user {user_id}")
+                # Filter and aggregate payments by date for this account
+                payments_by_date = {}
+                for entry in c_payment_entries:
+                    entry_account_id = entry.get('account_id')
+                    entry_date = entry.get('date')
+                    if isinstance(entry_date, str):
+                        entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                    
+                    if entry_account_id == account_id and min_date <= entry_date <= max_date:
+                        payments_by_date[entry_date] = payments_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
 
-            # Prepare batch data
-            batch_data = []
+            # Prepare data for Redis
+            redis_updates = []
             
             for current_date in all_dates:
                 total_expenses = expense_by_date.get(current_date, 0.0)
                 total_payments = payments_by_date.get(current_date, 0.0)
                 balance = last_day_balance + total_expenses - total_payments
                 
-                batch_data.append((
-                    account_id, current_date, total_expenses, total_payments, balance
-                ))
+                redis_updates.append({
+                    'account_id': account_id,
+                    'date': current_date,
+                    'total_expenses': float(total_expenses),
+                    'total_payments': float(total_payments),
+                    'balance': float(balance)
+                })
                 
                 last_day_balance = balance
             
-            # Execute batch insert/update
-            if batch_data:
-                cursor.executemany("""
-                    INSERT INTO c_a_balances_d (account_id, date, total_expenses, total_payments, balance)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        total_expenses = VALUES(total_expenses),
-                        total_payments = VALUES(total_payments),
-                        balance = VALUES(balance)
-                """, batch_data)
+            # Store for later aggregation
+            if redis_updates:
+                all_redis_updates.extend(redis_updates)
 
         cursor.close()
-        conn.commit()
+        
+        # Update Redis cache only - flush workers will persist to MySQL
+        if all_redis_updates:
+            _set_ca_balances_to_redis('c_a_balances_d', user_id, all_redis_updates)
+            app.logger.info(f"[REDIS ONLY] CA daily balances for user {user_id}: {len(all_redis_updates)} rows updated in Redis")
 
 def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
     with get_db_pool().get_connection() as conn:
@@ -2044,6 +3663,9 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
         if not account_ids:
             cursor.close()
             return
+
+        # Collect all updates for aggregation
+        all_redis_updates = []
 
         # Helper function to get week range
         def get_week_range(week_date):
@@ -2080,42 +3702,96 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
             for week_date in all_week_dates:
                 week_ranges[week_date] = get_week_range(week_date)
             
-            # Get all expense data within the entire date range in one query
-            cursor.execute("""
-                SELECT cee.date, SUM(cee.amount) as daily_expense
-                FROM c_expense_entries cee
-                JOIN c_expense_categories cec ON cee.category_id = cec.id
-                WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
-                GROUP BY cee.date
-                ORDER BY cee.date
-            """, (account_id, earliest_start, latest_end))
-            expenses_by_date = {row['date']: float(row['daily_expense']) for row in cursor.fetchall()}
+            # Try to get expenses from Redis first
+            c_expense_entries = _get_entries_from_redis('c_expense_entries', user_id)
             
-            # Get all payment data within the entire date range in one query
-            cursor.execute("""
-                SELECT date, SUM(amount) as daily_payment
-                FROM c_payment_entries
-                WHERE account_id = %s AND date BETWEEN %s AND %s
-                GROUP BY date
-                ORDER BY date
-            """, (account_id, earliest_start, latest_end))
-            payments_by_date = {row['date']: float(row['daily_payment']) for row in cursor.fetchall()}
+            if c_expense_entries is None:
+                # Redis miss - fallback to MySQL
+                app.logger.debug(f"[REDIS MISS] update_weekly_ca_totals c_expense_entries for user {user_id}")
+                cursor.execute("""
+                    SELECT cee.* FROM c_expense_entries cee
+                    JOIN c_expense_categories cec ON cee.category_id = cec.id
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                c_expense_entries = list(cursor.fetchall())
+            else:
+                app.logger.debug(f"[REDIS HIT] update_weekly_ca_totals c_expense_entries for user {user_id}")
+            
+            # Filter and aggregate expenses by date for this account
+            expenses_by_date = {}
+            for entry in c_expense_entries:
+                entry_date = entry.get('date')
+                if isinstance(entry_date, str):
+                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                
+                # Get category to check account_id
+                entry_category_id = entry.get('category_id')
+                cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (entry_category_id,))
+                cat_row = cursor.fetchone()
+                
+                if cat_row and cat_row['account_id'] == account_id and earliest_start <= entry_date <= latest_end:
+                    expenses_by_date[entry_date] = expenses_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
+            
+            # Try to get payment entries from Redis first
+            c_payment_entries = _get_payment_entries_from_redis(user_id)
+            
+            if c_payment_entries is None:
+                # Redis miss - fallback to MySQL
+                app.logger.debug(f"[REDIS MISS] update_weekly_ca_totals c_payment_entries for user {user_id}")
+                cursor.execute("""
+                    SELECT date, SUM(amount) as daily_payment
+                    FROM c_payment_entries
+                    WHERE account_id = %s AND date BETWEEN %s AND %s
+                    GROUP BY date
+                    ORDER BY date
+                """, (account_id, earliest_start, latest_end))
+                payments_by_date = {row['date']: float(row['daily_payment']) for row in cursor.fetchall()}
+            else:
+                app.logger.debug(f"[REDIS HIT] update_weekly_ca_totals c_payment_entries for user {user_id}")
+                # Filter and aggregate payments by date for this account
+                payments_by_date = {}
+                for entry in c_payment_entries:
+                    entry_account_id = entry.get('account_id')
+                    entry_date = entry.get('date')
+                    if isinstance(entry_date, str):
+                        entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                    
+                    if entry_account_id == account_id and earliest_start <= entry_date <= latest_end:
+                        payments_by_date[entry_date] = payments_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
             
             # Calculate previous week balances (done first to avoid multiple queries in the loop)
+            # Try Redis first for all balances
+            cached_balances = _get_ca_balances_from_redis('c_a_balances', user_id, account_id=account_id)
+            
             prev_balances = {}
             for week_date in all_week_dates:
                 prev_week = week_date - timedelta(days=7)
                 if prev_week < start_date:
-                    # Only fetch from database for weeks before our calculation range
-                    cursor.execute("""
-                        SELECT balance FROM c_a_balances
-                        WHERE account_id = %s AND date = %s
-                    """, (account_id, prev_week))
-                    prev_row = cursor.fetchone()
-                    prev_balances[week_date] = float(prev_row['balance']) if prev_row and prev_row['balance'] is not None else 0.0
+                    balance_found = False
+                    
+                    # Check Redis cache first
+                    if cached_balances:
+                        for bal in cached_balances:
+                            bal_date = bal.get('date')
+                            if isinstance(bal_date, str):
+                                bal_date = datetime.strptime(bal_date, '%Y-%m-%d').date()
+                            if bal_date == prev_week:
+                                prev_balances[week_date] = float(bal.get('balance', 0))
+                                balance_found = True
+                                break
+                    
+                    # Fallback to MySQL if not in Redis
+                    if not balance_found:
+                        cursor.execute("""
+                            SELECT balance FROM c_a_balances
+                            WHERE account_id = %s AND date = %s
+                        """, (account_id, prev_week))
+                        prev_row = cursor.fetchone()
+                        prev_balances[week_date] = float(prev_row['balance']) if prev_row and prev_row['balance'] is not None else 0.0
             
-            # Prepare batch data and calculate each week's totals
-            batch_data = []
+            # Prepare data for Redis
+            redis_updates = []
             for week_date in sorted(all_week_dates):
                 week_start, week_end = week_ranges[week_date]
                 
@@ -2141,27 +3817,28 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
                 # Calculate new balance
                 balance = last_week_balance + total_expenses - total_payments
                 
-                # Store for batch update
-                batch_data.append((
-                    account_id, week_date, total_expenses, total_payments, balance
-                ))
+                # Store for Redis
+                redis_updates.append({
+                    'account_id': account_id,
+                    'date': week_date,
+                    'total_expenses': float(total_expenses),
+                    'total_payments': float(total_payments),
+                    'balance': float(balance)
+                })
                 
                 # Save for subsequent weeks
                 prev_balances[week_date] = balance
             
-            # Execute batch insert/update
-            if batch_data:
-                cursor.executemany("""
-                    INSERT INTO c_a_balances (account_id, date, total_expenses, total_payments, balance)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        total_expenses = VALUES(total_expenses),
-                        total_payments = VALUES(total_payments),
-                        balance = VALUES(balance)
-                """, batch_data)
+            # Add to aggregated updates
+            if redis_updates:
+                all_redis_updates.extend(redis_updates)
 
         cursor.close()
-        conn.commit()
+        
+        # Update Redis cache only - flush workers will persist to MySQL
+        if all_redis_updates:
+            _set_ca_balances_to_redis('c_a_balances', user_id, all_redis_updates)
+            app.logger.info(f"[REDIS ONLY] CA weekly balances for user {user_id}: {len(all_redis_updates)} rows updated in Redis")
 
 def update_monthly_ca_totals(user_id, start_date):
     with get_db_pool().get_connection() as conn:
@@ -2174,6 +3851,9 @@ def update_monthly_ca_totals(user_id, start_date):
         if not account_ids:
             cursor.close()
             return
+
+        # Collect all updates for aggregation
+        all_redis_updates = []
 
         for account_id in account_ids:
             # Get date range to process
@@ -2215,26 +3895,69 @@ def update_monthly_ca_totals(user_id, start_date):
             earliest_start = min(m['start_date'] for m in month_data)
             latest_end = max(m['end_date'] for m in month_data)
             
-            # Get all expense data within the entire date range in one query
-            cursor.execute("""
-                SELECT YEAR(cee.date) as year, MONTH(cee.date) as month, SUM(cee.amount) as month_total
-                FROM c_expense_entries cee
-                JOIN c_expense_categories cec ON cee.category_id = cec.id
-                WHERE cec.account_id = %s AND cee.date BETWEEN %s AND %s
-                GROUP BY YEAR(cee.date), MONTH(cee.date)
-            """, (account_id, earliest_start, latest_end))
-            expenses_by_month = {(row['year'], row['month']): float(row['month_total']) for row in cursor.fetchall()}
+            # Try to get expenses from Redis first
+            c_expense_entries = _get_entries_from_redis('c_expense_entries', user_id)
             
-            # Get all payment data within the entire date range in one query
-            cursor.execute("""
-                SELECT YEAR(date) as year, MONTH(date) as month, SUM(amount) as month_total
-                FROM c_payment_entries
-                WHERE account_id = %s AND date BETWEEN %s AND %s
-                GROUP BY YEAR(date), MONTH(date)
-            """, (account_id, earliest_start, latest_end))
-            payments_by_month = {(row['year'], row['month']): float(row['month_total']) for row in cursor.fetchall()}
+            if c_expense_entries is None:
+                # Redis miss - fallback to MySQL
+                app.logger.debug(f"[REDIS MISS] update_monthly_ca_totals c_expense_entries for user {user_id}")
+                cursor.execute("""
+                    SELECT cee.* FROM c_expense_entries cee
+                    JOIN c_expense_categories cec ON cee.category_id = cec.id
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                c_expense_entries = list(cursor.fetchall())
+            else:
+                app.logger.debug(f"[REDIS HIT] update_monthly_ca_totals c_expense_entries for user {user_id}")
+            
+            # Filter and aggregate expenses by month for this account
+            expenses_by_month = {}
+            for entry in c_expense_entries:
+                entry_date = entry.get('date')
+                if isinstance(entry_date, str):
+                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                
+                # Get category to check account_id
+                entry_category_id = entry.get('category_id')
+                cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (entry_category_id,))
+                cat_row = cursor.fetchone()
+                
+                if cat_row and cat_row['account_id'] == account_id and earliest_start <= entry_date <= latest_end:
+                    year_month = (entry_date.year, entry_date.month)
+                    expenses_by_month[year_month] = expenses_by_month.get(year_month, 0.0) + float(entry.get('amount', 0))
+            
+            # Try to get payment entries from Redis first
+            c_payment_entries = _get_payment_entries_from_redis(user_id)
+            
+            if c_payment_entries is None:
+                # Redis miss - fallback to MySQL
+                app.logger.debug(f"[REDIS MISS] update_monthly_ca_totals c_payment_entries for user {user_id}")
+                cursor.execute("""
+                    SELECT YEAR(date) as year, MONTH(date) as month, SUM(amount) as month_total
+                    FROM c_payment_entries
+                    WHERE account_id = %s AND date BETWEEN %s AND %s
+                    GROUP BY YEAR(date), MONTH(date)
+                """, (account_id, earliest_start, latest_end))
+                payments_by_month = {(row['year'], row['month']): float(row['month_total']) for row in cursor.fetchall()}
+            else:
+                app.logger.debug(f"[REDIS HIT] update_monthly_ca_totals c_payment_entries for user {user_id}")
+                # Filter and aggregate payments by month for this account
+                payments_by_month = {}
+                for entry in c_payment_entries:
+                    entry_account_id = entry.get('account_id')
+                    entry_date = entry.get('date')
+                    if isinstance(entry_date, str):
+                        entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                    
+                    if entry_account_id == account_id and earliest_start <= entry_date <= latest_end:
+                        year_month = (entry_date.year, entry_date.month)
+                        payments_by_month[year_month] = payments_by_month.get(year_month, 0.0) + float(entry.get('amount', 0))
             
             # Calculate all previous month balances upfront to avoid multiple queries
+            # Try Redis first for all balances
+            cached_balances = _get_ca_balances_from_redis('c_a_balances_m', user_id, account_id=account_id)
+            
             prev_balances = {}
             for month_info in month_data:
                 # For the first month or months starting from our actual start_date
@@ -2250,18 +3973,32 @@ def update_monthly_ca_totals(user_id, start_date):
                     prev_last_day = date(prev_year, prev_month, 
                                          calendar.monthrange(prev_year, prev_month)[1])
                     
-                    # Fetch from database only for the first month
-                    cursor.execute("""
-                        SELECT balance FROM c_a_balances_m
-                        WHERE account_id = %s AND date = %s
-                    """, (account_id, prev_last_day))
-                    prev_row = cursor.fetchone()
-                    prev_balances[(month_info['year'], month_info['month'])] = (
-                        float(prev_row['balance']) if prev_row and prev_row['balance'] is not None else 0.0
+                    balance_found = False
+                    
+                    # Check Redis cache first
+                    if cached_balances:
+                        for bal in cached_balances:
+                            bal_date = bal.get('date')
+                            if isinstance(bal_date, str):
+                                bal_date = datetime.strptime(bal_date, '%Y-%m-%d').date()
+                            if bal_date == prev_last_day:
+                                prev_balances[(month_info['year'], month_info['month'])] = float(bal.get('balance', 0))
+                                balance_found = True
+                                break
+                    
+                    # Fallback to MySQL if not in Redis
+                    if not balance_found:
+                        cursor.execute("""
+                            SELECT balance FROM c_a_balances_m
+                            WHERE account_id = %s AND date = %s
+                        """, (account_id, prev_last_day))
+                        prev_row = cursor.fetchone()
+                        prev_balances[(month_info['year'], month_info['month'])] = (
+                            float(prev_row['balance']) if prev_row and prev_row['balance'] is not None else 0.0
                     )
             
-            # Prepare batch data
-            batch_data = []
+            # Prepare data for Redis
+            redis_updates = []
             
             for month_info in sorted(month_data, key=lambda m: (m['year'], m['month'])):
                 # Get expenses and payments for this month
@@ -2287,28 +4024,28 @@ def update_monthly_ca_totals(user_id, start_date):
                 # Calculate new balance
                 balance = last_month_balance + total_expenses - total_payments
                 
-                # Store for batch update
-                batch_data.append((
-                    account_id, month_info['last_day'], total_expenses, 
-                    total_payments, balance
-                ))
+                # Store for Redis
+                redis_updates.append({
+                    'account_id': account_id,
+                    'date': month_info['last_day'],
+                    'total_expenses': float(total_expenses),
+                    'total_payments': float(total_payments),
+                    'balance': float(balance)
+                })
                 
                 # Save for next month's calculation
                 prev_balances[(month_info['year'], month_info['month'])] = balance
             
-            # Execute batch insert/update
-            if batch_data:
-                cursor.executemany("""
-                    INSERT INTO c_a_balances_m (account_id, date, total_expenses, total_payments, balance)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        total_expenses = VALUES(total_expenses),
-                        total_payments = VALUES(total_payments),
-                        balance = VALUES(balance)
-                """, batch_data)
+            # Add to aggregated updates
+            if redis_updates:
+                all_redis_updates.extend(redis_updates)
 
         cursor.close()
-        conn.commit()
+        
+        # Update Redis cache only - flush workers will persist to MySQL
+        if all_redis_updates:
+            _set_ca_balances_to_redis('c_a_balances_m', user_id, all_redis_updates)
+            app.logger.info(f"[REDIS ONLY] CA monthly balances for user {user_id}: {len(all_redis_updates)} rows updated in Redis")
 
 @app.route('/save_totals_remainders_d', methods=['POST'])
 @login_required
@@ -2341,12 +4078,79 @@ def save_totals_remainders_d():
 
         date_to_remainder = {}
 
-        # Run daily, weekly, and monthly updates
+        # Run daily, weekly, and monthly updates (these now update Redis automatically)
         update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
         update_daily_savings_for_savings_category(user_id, start_date)
         update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
         update_monthly_totals(user_id, start_date, date_to_remainder)
 
+        # Try to fetch from Redis first, fallback to MySQL
+        cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id, start_date)
+        cached_weekly = _get_totals_remainders_from_redis('totals_remainders', user_id, start_date)
+        cached_monthly = _get_totals_remainders_from_redis('totals_remainders_m', user_id, start_date)
+        cached_savings = _get_savings_entries_from_redis(user_id, start_date)
+        
+        if cached_daily and cached_weekly and cached_monthly and cached_savings:
+            # Redis hit - use cached data
+            app.logger.info(f"[REDIS HIT] save_totals_remainders_d for user {user_id}")
+            
+            # Enrich daily totals with last_week_remainder
+            results = []
+            weekly_by_date = {row['date']: row for row in cached_weekly}
+            
+            for daily_row in cached_daily:
+                current_date = datetime.strptime(daily_row['date'], '%Y-%m-%d').date() if isinstance(daily_row['date'], str) else daily_row['date']
+                
+                # Find the most recent previous Friday
+                if goofy_week_mode:
+                    prev_friday = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+                else:
+                    prev_friday = current_date - timedelta(days=7)
+                
+                prev_friday_str = prev_friday.isoformat()
+                last_week_remainder = float(weekly_by_date.get(prev_friday_str, {}).get('remainder', 0.0))
+                
+                result = {
+                    'date': current_date if isinstance(current_date, date) else datetime.strptime(current_date, '%Y-%m-%d').date(),
+                    'total_income': float(daily_row.get('total_income', 0)),
+                    'total_expenses': float(daily_row.get('total_expenses', 0)),
+                    'remainder': float(daily_row.get('remainder', 0)),
+                    'last_day_remainder': float(daily_row.get('last_day_remainder', 0)),
+                    'last_week_remainder': last_week_remainder
+                }
+                results.append(result)
+            
+            # Format monthly results
+            monthly_results = [
+                {
+                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                    'total_income': float(row.get('total_income', 0)),
+                    'total_expenses': float(row.get('total_expenses', 0)),
+                    'remainder': float(row.get('remainder', 0)),
+                    'last_month_remainder': float(row.get('last_month_remainder', 0))
+                }
+                for row in cached_monthly
+            ]
+            
+            # Format savings entries
+            savings_entries = [
+                {
+                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                    'amount': float(row.get('amount', 0))
+                }
+                for row in cached_savings
+            ]
+            
+            return jsonify({
+                "status": "success",
+                "updated_totals_remainders": results,
+                "updated_monthly_totals_remainders": monthly_results,
+                "updated_savings_entries": savings_entries
+            })
+        
+        # Redis miss - fallback to MySQL
+        app.logger.info(f"[REDIS MISS] save_totals_remainders_d for user {user_id}, falling back to MySQL")
+        
         # Prepare the response: for each date, fetch last_week_remainder from totals_remainders table
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
@@ -2465,11 +4269,66 @@ def save_ca_daily_balance():
                 start_date = min_date_row[0] if min_date_row and min_date_row[0] else date.today()
                 cursor.close()
 
-        # Update CA balances (daily, weekly, monthly)
+        # Update CA balances (daily, weekly, monthly) - these now update Redis automatically
         update_daily_ca_totals(user_id, start_date)
-        update_weekly_ca_totals(user_id, start_date, goofy_week_mode)  # <-- Pass goofy_week_mode here
+        update_weekly_ca_totals(user_id, start_date, goofy_week_mode)
         update_monthly_ca_totals(user_id, start_date)
 
+        # Try to fetch from Redis first, fallback to MySQL
+        cached_daily = _get_ca_balances_from_redis('c_a_balances_d', user_id, start_date=start_date)
+        cached_weekly = _get_ca_balances_from_redis('c_a_balances', user_id, start_date=start_date)
+        cached_monthly = _get_ca_balances_from_redis('c_a_balances_m', user_id, start_date=start_date)
+        
+        if cached_daily and cached_weekly and cached_monthly:
+            # Redis hit - use cached data
+            app.logger.info(f"[REDIS HIT] save_ca_daily_balance for user {user_id}")
+            
+            # Format daily balances
+            ca_balances_d = [
+                {
+                    'id': row.get('id'),
+                    'account_id': row.get('account_id'),
+                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                    'total_expenses': float(row.get('total_expenses', 0)),
+                    'balance': float(row.get('balance', 0))
+                }
+                for row in cached_daily
+            ]
+            
+            # Format weekly balances
+            ca_balances = [
+                {
+                    'id': row.get('id'),
+                    'account_id': row.get('account_id'),
+                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                    'total_expenses': float(row.get('total_expenses', 0)),
+                    'balance': float(row.get('balance', 0))
+                }
+                for row in cached_weekly
+            ]
+            
+            # Format monthly balances
+            ca_balances_m = [
+                {
+                    'id': row.get('id'),
+                    'account_id': row.get('account_id'),
+                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                    'total_expenses': float(row.get('total_expenses', 0)),
+                    'balance': float(row.get('balance', 0))
+                }
+                for row in cached_monthly
+            ]
+            
+            return jsonify({
+                "status": "success",
+                "updated_ca_balances_d": ca_balances_d,
+                "updated_ca_balances": ca_balances,
+                "updated_ca_balances_m": ca_balances_m
+            })
+        
+        # Redis miss - fallback to MySQL
+        app.logger.info(f"[REDIS MISS] save_ca_daily_balance for user {user_id}, falling back to MySQL")
+        
         # Fetch updated daily CA balances
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
@@ -2553,6 +4412,9 @@ def move_entry_d():
     if not entry_id or not new_date or not entry_type:
         return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
 
+    ca_triggered = False
+    category_id = None
+
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         try:
@@ -2568,23 +4430,53 @@ def move_entry_d():
                     cursor.close()
                     return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
                 category_id = row['category_id']
-
-                cursor.execute("SELECT amount FROM income_entries WHERE id = %s", (entry_id,))
-                amount_row = cursor.fetchone()
-                amount = amount_row['amount'] if amount_row else 0
-
-                cursor.execute("""
-                    SELECT id, amount FROM income_entries
-                    WHERE category_id = %s AND date = %s
-                """, (category_id, new_date))
-                existing = cursor.fetchone()
-
-                if existing:
-                    new_amount = existing['amount'] + amount
-                    cursor.execute("UPDATE income_entries SET amount = %s WHERE id = %s", (new_amount, existing['id']))
-                    cursor.execute("DELETE FROM income_entries WHERE id = %s", (entry_id,))
+                
+                # Get entries from Redis
+                entries = _get_entries_from_redis('income_entries', current_user.id)
+                
+                # If not in Redis, load from MySQL first
+                if entries is None:
+                    entries = []
+                    cursor.execute("""
+                        SELECT ie.* FROM income_entries ie
+                        JOIN income_categories ic ON ie.category_id = ic.id
+                        WHERE ic.user_id = %s
+                    """, (current_user.id,))
+                    entries = list(cursor.fetchall())
+                    app.logger.info(f"[REDIS][income_entries] Loaded {len(entries)} entries from MySQL")
+                
+                # Find the entry to move
+                entry_to_move = None
+                for entry in entries:
+                    if str(entry.get('id')) == str(entry_id):
+                        entry_to_move = entry
+                        break
+                
+                if not entry_to_move:
+                    cursor.close()
+                    return jsonify({'status': 'error', 'message': 'Entry not found in cache'}), 404
+                
+                amount = Decimal(entry_to_move.get('amount', 0))
+                old_date = entry_to_move.get('date')
+                
+                # Check if entry exists at new date
+                existing_at_new_date = None
+                for entry in entries:
+                    if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(new_date):
+                        existing_at_new_date = entry
+                        break
+                
+                if existing_at_new_date:
+                    # Add to existing entry at new date
+                    new_amount = Decimal(existing_at_new_date.get('amount', 0)) + amount
+                    _update_entry_in_redis('income_entries', current_user.id, category_id, new_date, float(new_amount))
+                    # Delete old entry
+                    _delete_entry_in_redis('income_entries', current_user.id, category_id, old_date, old_date)
                 else:
-                    cursor.execute("UPDATE income_entries SET date = %s WHERE id = %s", (new_date, entry_id))
+                    # Update date on existing entry
+                    _update_entry_in_redis('income_entries', current_user.id, category_id, new_date, float(amount), entry_id=int(entry_id))
+                    # Delete old date entry
+                    _delete_entry_in_redis('income_entries', current_user.id, category_id, old_date, old_date)
 
             elif entry_type == 'expense':
                 cursor.execute("""
@@ -2599,54 +4491,57 @@ def move_entry_d():
                     return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
                 category_id = row['category_id']
                 is_credit = row['is_credit_account']
-                payment_category_name = row['name']
-
-                cursor.execute("SELECT amount, date FROM expense_entries WHERE id = %s", (entry_id,))
-                amount_row = cursor.fetchone()
-                amount = amount_row['amount'] if amount_row else 0
-                old_date = amount_row['date'] if amount_row else None
-
-                cursor.execute("""
-                    SELECT id, amount FROM expense_entries
-                    WHERE category_id = %s AND date = %s
-                """, (category_id, new_date))
-                existing = cursor.fetchone()
-
-                if existing:
-                    new_amount = existing['amount'] + amount
-                    cursor.execute("UPDATE expense_entries SET amount = %s WHERE id = %s", (new_amount, existing['id']))
-                    cursor.execute("DELETE FROM expense_entries WHERE id = %s", (entry_id,))
-                else:
-                    cursor.execute("UPDATE expense_entries SET date = %s WHERE id = %s", (new_date, entry_id))
-
-                # If is_credit_account, update c_payment_entries and CA balances
-                if is_credit == 1:
+                
+                # Get entries from Redis
+                entries = _get_entries_from_redis('expense_entries', current_user.id)
+                
+                # If not in Redis, load from MySQL first
+                if entries is None:
+                    entries = []
                     cursor.execute("""
-                        SELECT ca.id AS account_id
-                        FROM credit_accounts ca
-                        WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-                        LIMIT 1
-                    """, (current_user.id, payment_category_name))
-                    account_row = cursor.fetchone()
-                    if account_row:
-                        account_id = account_row['account_id']
-                        # Find the payment entry for the old date
-                        cursor.execute("""
-                            SELECT id FROM c_payment_entries
-                            WHERE account_id = %s AND date = %s
-                        """, (account_id, old_date))
-                        payment_entry = cursor.fetchone()
-                        if payment_entry:
-                            # Just update the date to the new date
-                            cursor.execute("""
-                                UPDATE c_payment_entries SET date = %s WHERE id = %s
-                            """, (new_date, payment_entry['id']))
-                        else:
-                            # If not found, insert a new payment entry at the new date
-                            cursor.execute("""
-                                INSERT INTO c_payment_entries (account_id, date, amount, processed)
-                                VALUES (%s, %s, %s, 1)
-                            """, (account_id, new_date, amount))
+                        SELECT ee.* FROM expense_entries ee
+                        JOIN expense_categories ec ON ee.category_id = ec.id
+                        WHERE ec.user_id = %s
+                    """, (current_user.id,))
+                    entries = list(cursor.fetchall())
+                    app.logger.info(f"[REDIS][expense_entries] Loaded {len(entries)} entries from MySQL")
+                
+                # Find the entry to move
+                entry_to_move = None
+                for entry in entries:
+                    if str(entry.get('id')) == str(entry_id):
+                        entry_to_move = entry
+                        break
+                
+                if not entry_to_move:
+                    cursor.close()
+                    return jsonify({'status': 'error', 'message': 'Entry not found in cache'}), 404
+                
+                amount = Decimal(entry_to_move.get('amount', 0))
+                old_date = entry_to_move.get('date')
+                
+                # Check if entry exists at new date
+                existing_at_new_date = None
+                for entry in entries:
+                    if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(new_date):
+                        existing_at_new_date = entry
+                        break
+                
+                if existing_at_new_date:
+                    # Add to existing entry at new date
+                    new_amount = Decimal(existing_at_new_date.get('amount', 0)) + amount
+                    _update_entry_in_redis('expense_entries', current_user.id, category_id, new_date, float(new_amount))
+                    # Delete old entry
+                    _delete_entry_in_redis('expense_entries', current_user.id, category_id, old_date, old_date)
+                else:
+                    # Update date on existing entry
+                    _update_entry_in_redis('expense_entries', current_user.id, category_id, new_date, float(amount), entry_id=int(entry_id))
+                    # Delete old date entry
+                    _delete_entry_in_redis('expense_entries', current_user.id, category_id, old_date, old_date)
+
+                # If is_credit_account, trigger CA balance update
+                if is_credit == 1:
+                    ca_triggered = True
 
             elif entry_type == 'ca':
                 cursor.execute("""
@@ -2661,34 +4556,91 @@ def move_entry_d():
                     cursor.close()
                     return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
                 category_id = row['category_id']
-
-                cursor.execute("SELECT amount FROM c_expense_entries WHERE id = %s", (entry_id,))
-                amount_row = cursor.fetchone()
-                amount = amount_row['amount'] if amount_row else 0
-
-                cursor.execute("""
-                    SELECT id, amount FROM c_expense_entries
-                    WHERE category_id = %s AND date = %s
-                """, (category_id, new_date))
-                existing = cursor.fetchone()
-
-                if existing:
-                    new_amount = existing['amount'] + amount
-                    cursor.execute("UPDATE c_expense_entries SET amount = %s WHERE id = %s", (new_amount, existing['id']))
-                    cursor.execute("DELETE FROM c_expense_entries WHERE id = %s", (entry_id,))
+                
+                # Get entries from Redis
+                entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+                
+                # If not in Redis, load from MySQL first
+                if entries is None:
+                    entries = []
+                    cursor.execute("""
+                        SELECT cee.* FROM c_expense_entries cee
+                        JOIN c_expense_categories cec ON cee.category_id = cec.id
+                        JOIN credit_accounts ca ON cec.account_id = ca.id
+                        WHERE ca.user_id = %s
+                    """, (current_user.id,))
+                    entries = list(cursor.fetchall())
+                    app.logger.info(f"[REDIS][c_expense_entries] Loaded {len(entries)} entries from MySQL")
+                
+                # Find the entry to move
+                entry_to_move = None
+                for entry in entries:
+                    if str(entry.get('id')) == str(entry_id):
+                        entry_to_move = entry
+                        break
+                
+                if not entry_to_move:
+                    cursor.close()
+                    return jsonify({'status': 'error', 'message': 'Entry not found in cache'}), 404
+                
+                amount = Decimal(entry_to_move.get('amount', 0))
+                old_date = entry_to_move.get('date')
+                
+                # Check if entry exists at new date
+                existing_at_new_date = None
+                for entry in entries:
+                    if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(new_date):
+                        existing_at_new_date = entry
+                        break
+                
+                if existing_at_new_date:
+                    # Add to existing entry at new date
+                    new_amount = Decimal(existing_at_new_date.get('amount', 0)) + amount
+                    _update_entry_in_redis('c_expense_entries', current_user.id, category_id, new_date, float(new_amount))
+                    # Delete old entry
+                    _delete_entry_in_redis('c_expense_entries', current_user.id, category_id, old_date, old_date)
                 else:
-                    cursor.execute("UPDATE c_expense_entries SET date = %s WHERE id = %s", (new_date, entry_id))
+                    # Update date on existing entry
+                    _update_entry_in_redis('c_expense_entries', current_user.id, category_id, new_date, float(amount), entry_id=int(entry_id))
+                    # Delete old date entry
+                    _delete_entry_in_redis('c_expense_entries', current_user.id, category_id, old_date, old_date)
+                
+                ca_triggered = True
 
             else:
                 cursor.close()
                 return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
 
             cursor.close()
-            conn.commit()
-            save_ca_daily_balance()
+            
+            # Check if this is a savings category
+            is_savings_category = False
+            if entry_type in ['income', 'expense']:
+                # Get category name to check if savings
+                if entry_type == 'income':
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT name FROM income_categories WHERE id = %s", (category_id,))
+                    cat = cursor.fetchone()
+                    if cat and cat.get('name') == 'Savings':
+                        is_savings_category = True
+                    cursor.close()
+                elif entry_type == 'expense':
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT name FROM expense_categories WHERE id = %s", (category_id,))
+                    cat = cursor.fetchone()
+                    if cat and cat.get('name') == 'Savings':
+                        is_savings_category = True
+                    cursor.close()
+            
+            if entry_type == 'ca' or ca_triggered:
+                save_ca_daily_balance()
+            
+            # Update totals and savings for income/expense moves
+            if is_savings_category or entry_type in ['income', 'expense']:
+                save_totals_remainders_d()
+                
             return jsonify({'status': 'success'})
         except Exception as e:
-            conn.rollback()
             cursor.close()
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -3048,12 +5000,27 @@ def dashboard():
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        cursor.execute("""
-            SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
-            FROM users
-            WHERE id = %s
-        """, (current_user.id,))
-        user_data = cursor.fetchone()
+        # Try Redis first
+        user_data = None
+        redis_key = f"users:v1:{current_user.id}"
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(redis_key)
+                if cached:
+                    user_data = json.loads(cached)
+                    app.logger.debug(f"[REDIS HIT] dashboard user settings for user {current_user.id}")
+            except Exception as e:
+                app.logger.error(f"[REDIS ERROR] dashboard user settings: {str(e)}")
+        
+        # Fallback to MySQL
+        if not user_data:
+            cursor.execute("""
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
+                FROM users
+                WHERE id = %s
+            """, (current_user.id,))
+            user_data = cursor.fetchone()
+            app.logger.debug(f"[MYSQL] dashboard user settings for user {current_user.id}")
 
         goofy_week_mode = bool(user_data.get('goofy_week_mode', False)) if user_data else False
 
@@ -3109,12 +5076,22 @@ def dashboard():
                 return week_end.strftime('%Y-%m-%d')
 
         # --- AGGREGATE INCOME ENTRIES ---
-        cursor.execute("""
-            SELECT category_id, date, amount, processed
-            FROM income_entries
-            WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
-        """, (current_user.id,))
-        raw_income_entries = cursor.fetchall()
+        # Try Redis first
+        raw_income_entries = _get_entries_from_redis('income_entries', current_user.id)
+        if raw_income_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard income_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT id, category_id, date, amount, processed
+                FROM income_entries
+                WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
+            """, (current_user.id,))
+            raw_income_entries = list(cursor.fetchall())
+            raw_income_entries = _filter_pending_deletions('income_entries', current_user.id, raw_income_entries)
+            # Update Redis cache
+            _set_entries_to_redis('income_entries', current_user.id, raw_income_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard income_entries for user {current_user.id}")
 
         income_map = {}
         processed_map = {}
@@ -3139,12 +5116,22 @@ def dashboard():
             })
 
         # --- AGGREGATE EXPENSE ENTRIES ---
-        cursor.execute("""
-            SELECT category_id, date, amount, processed
-            FROM expense_entries
-            WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
-        """, (current_user.id,))
-        raw_expense_entries = cursor.fetchall()
+        # Try Redis first
+        raw_expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+        if raw_expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT id, category_id, date, amount, processed
+                FROM expense_entries
+                WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
+            """, (current_user.id,))
+            raw_expense_entries = list(cursor.fetchall())
+            raw_expense_entries = _filter_pending_deletions('expense_entries', current_user.id, raw_expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('expense_entries', current_user.id, raw_expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard expense_entries for user {current_user.id}")
 
         expense_map = {}
         expense_processed_map = {}
@@ -3169,14 +5156,24 @@ def dashboard():
             })
 
         # --- AGGREGATE CA ENTRIES ---
-        cursor.execute("""
-            SELECT cee.category_id, cee.date, cee.amount, cee.processed
-            FROM c_expense_entries cee
-            JOIN c_expense_categories cec ON cee.category_id = cec.id
-            JOIN credit_accounts ca ON cec.account_id = ca.id
-            WHERE ca.user_id = %s
-        """, (current_user.id,))
-        raw_c_expense_entries = cursor.fetchall()
+        # Try Redis first
+        raw_c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+        if raw_c_expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard c_expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+            """, (current_user.id,))
+            raw_c_expense_entries = list(cursor.fetchall())
+            raw_c_expense_entries = _filter_pending_deletions('c_expense_entries', current_user.id, raw_c_expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('c_expense_entries', current_user.id, raw_c_expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard c_expense_entries for user {current_user.id}")
 
         c_expense_map = {}
         c_expense_processed_map = {}
@@ -3201,20 +5198,38 @@ def dashboard():
             })
 
         # Fetch all totals and remainders
-        cursor.execute("""
-            SELECT date, total_income, total_expenses, remainder, last_week_remainder
-            FROM totals_remainders
-            WHERE user_id = %s
-        """, (current_user.id,))
-        totals_remainders = cursor.fetchall()
+        # Try Redis first
+        totals_remainders = _get_totals_remainders_from_redis('totals_remainders', current_user.id)
+        if totals_remainders is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard totals_remainders for user {current_user.id}")
+            cursor.execute("""
+                SELECT date, total_income, total_expenses, remainder, last_week_remainder
+                FROM totals_remainders
+                WHERE user_id = %s
+            """, (current_user.id,))
+            totals_remainders = cursor.fetchall()
+            # Update Redis cache
+            _set_totals_remainders_to_redis('totals_remainders', current_user.id, totals_remainders)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard totals_remainders for user {current_user.id}")
 
         # Fetch all savings entries for the user
-        cursor.execute("""
-            SELECT date, amount FROM savings_entries
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (current_user.id,))
-        savings_entries = cursor.fetchall()
+        # Try Redis first
+        savings_entries = _get_savings_entries_from_redis(current_user.id)
+        if savings_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard savings_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT date, amount FROM savings_entries
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (current_user.id,))
+            savings_entries = cursor.fetchall()
+            # Update Redis cache
+            _set_savings_entries_to_redis(current_user.id, savings_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard savings_entries for user {current_user.id}")
 
         # Fetch buds
         cursor.execute("""
@@ -3241,14 +5256,23 @@ def dashboard():
         """, (current_user.id,))
         c_expense_categories = cursor.fetchall()
 
-        cursor.execute("""
-            SELECT * FROM c_a_balances
-            WHERE account_id IN (
-                SELECT id FROM credit_accounts WHERE user_id = %s
-            )
-            ORDER BY date DESC
-        """, (current_user.id,))
-        c_a_balances = cursor.fetchall()
+        # Try Redis first for CA balances
+        c_a_balances = _get_ca_balances_from_redis('c_a_balances', current_user.id)
+        if c_a_balances is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard c_a_balances for user {current_user.id}")
+            cursor.execute("""
+                SELECT * FROM c_a_balances
+                WHERE account_id IN (
+                    SELECT id FROM credit_accounts WHERE user_id = %s
+                )
+                ORDER BY date DESC
+            """, (current_user.id,))
+            c_a_balances = cursor.fetchall()
+            # Update Redis cache
+            _set_ca_balances_to_redis('c_a_balances', current_user.id, c_a_balances)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard c_a_balances for user {current_user.id}")
 
         cursor.close()
 
@@ -3294,6 +5318,16 @@ def get_total_income():
         return jsonify({'status': 'error', 'message': 'Missing date parameter'}), 400
 
     try:
+        # Try Redis first
+        cached_data = _get_totals_remainders_from_redis('totals_remainders', current_user.id)
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    total_income = row.get('total_income', 0)
+                    return jsonify({'status': 'success', 'total_income': total_income})
+        
+        # Fallback to MySQL if not in Redis
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
@@ -3322,6 +5356,16 @@ def get_total_expenses():
         return jsonify({'status': 'error', 'message': 'Missing date parameter'}), 400
 
     try:
+        # Try Redis first
+        cached_data = _get_totals_remainders_from_redis('totals_remainders', current_user.id)
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    total_expenses = row.get('total_expenses', 0)
+                    return jsonify({'status': 'success', 'total_expenses': total_expenses})
+        
+        # Fallback to MySQL if not in Redis
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
@@ -3349,19 +5393,33 @@ def get_ca_balance():
     if not account_id or not date:
         return jsonify({'status': 'error', 'message': 'Missing account_id or date'}), 400
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-        cursor.execute("""
-            SELECT balance
-            FROM c_a_balances
-            WHERE account_id = %s AND date = %s
-            LIMIT 1
-        """, (account_id, date))
-        result = cursor.fetchone()
-        cursor.close()
+    try:
+        # Try Redis first
+        cached_data = _get_ca_balances_from_redis('c_a_balances', current_user.id, account_id=int(account_id))
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    balance = row.get('balance', 0)
+                    return jsonify({'status': 'success', 'balance': balance})
         
-    balance = result['balance'] if result and result['balance'] is not None else 0
-    return jsonify({'status': 'success', 'balance': balance})
+        # Fallback to MySQL if not in Redis
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT balance
+                FROM c_a_balances
+                WHERE account_id = %s AND date = %s
+                LIMIT 1
+            """, (account_id, date))
+            result = cursor.fetchone()
+            cursor.close()
+            
+        balance = result['balance'] if result and result['balance'] is not None else 0
+        return jsonify({'status': 'success', 'balance': balance})
+    except Exception as e:
+        app.logger.error(f"[get_ca_balance] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
 
 @app.route('/get_last_remainder', methods=['GET'])
 @login_required
@@ -3372,6 +5430,16 @@ def get_last_remainder():
         return jsonify({"status": "error", "message": "Date parameter is missing"}), 400
 
     try:
+        # Try Redis first
+        cached_data = _get_totals_remainders_from_redis('totals_remainders', current_user.id)
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    last_remainder = row.get('last_week_remainder', 0)
+                    return jsonify({"status": "success", "last_remainder": last_remainder})
+        
+        # Fallback to MySQL if not in Redis
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
@@ -3403,6 +5471,16 @@ def get_remainder():
         return jsonify({"status": "error", "message": "Date parameter is missing"}), 400
 
     try:
+        # Try Redis first
+        cached_data = _get_totals_remainders_from_redis('totals_remainders', current_user.id)
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    remainder = row.get('remainder', 0)
+                    return jsonify({"status": "success", "remainder": remainder})
+        
+        # Fallback to MySQL if not in Redis
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
@@ -3506,6 +5584,8 @@ def update_entry():
     date = data.get('date')
     amount = data.get('amount')
     entry_type = data.get('type')
+    
+    app.logger.info(f"[UPDATE ENTRY] User {current_user.id}: type={entry_type}, category={category_id}, amount={amount}, date={date}")
 
     if not category_id or not date or amount is None:
         return jsonify({"status": "error", "message": "Missing required parameters"}), 400
@@ -3520,15 +5600,12 @@ def update_entry():
         if entry_type == 'income':
             table_name = 'income_entries'
             category_table = 'income_categories'
-            user_field = 'user_id'
         elif entry_type == 'expense':
             table_name = 'expense_entries'
             category_table = 'expense_categories'
-            user_field = 'user_id'
         elif entry_type == 'ca':
             table_name = 'c_expense_entries'
             category_table = 'c_expense_categories'
-            user_field = 'ca.user_id'
         else:
             cursor.close()
             return jsonify({"status": "error", "message": "Invalid entry type"}), 400
@@ -3551,42 +5628,46 @@ def update_entry():
             if not cat_row:
                 cursor.close()
                 return jsonify({"status": "error", "message": "Invalid category_id for this entry type"}), 400
-
-        # Check if an entry already exists for the given category and date
-        cursor.execute(f"SELECT id FROM {table_name} WHERE category_id = %s AND date = %s", (category_id, date))
-        existing_entry = cursor.fetchone()
-
-        if existing_entry:
-            cursor.execute(f"UPDATE {table_name} SET amount = %s WHERE id = %s", (amount, existing_entry['id']))
-        else:
-            cursor.execute(f"INSERT INTO {table_name} (category_id, date, amount) VALUES (%s, %s, %s)", (category_id, date, amount))
-
-        # If this is an expense category and is_credit_account=1, add payment record to c_payment_entries and run save_ca_daily_balance()
-        if entry_type == 'expense' and cat_row.get('is_credit_account', 0) == 1:
-            payment_category_name = cat_row['name']
-            cursor.execute("""
-                SELECT ca.id AS account_id
-                FROM credit_accounts ca
-                WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-                LIMIT 1
-            """, (current_user.id, payment_category_name))
-            account_row = cursor.fetchone()
-            if account_row:
-                account_id = account_row['account_id']
-                # Remove any previous payment entries for this account and date
-                cursor.execute("""
-                    DELETE FROM c_payment_entries
-                    WHERE account_id = %s AND date = %s
-                """, (account_id, date))
-                # Add payment record to c_payment_entries with the new value only
-                cursor.execute("""
-                    INSERT INTO c_payment_entries (account_id, date, amount, processed)
-                    VALUES (%s, %s, %s, 1)
-                """, (account_id, date, amount))
-                ca_triggered = True
-
-        conn.commit()
+        
+        # Make a copy of cat_row data before closing cursor
+        cat_data = dict(cat_row) if cat_row else {}
+        app.logger.info(f"[UPDATE ENTRY] Category data for category {category_id}: name='{cat_data.get('name')}', is_credit_account={cat_data.get('is_credit_account', 'MISSING')}")
         cursor.close()
+    
+    # Write to Redis only - flush worker will persist to MySQL
+    _update_entry_in_redis(table_name, current_user.id, category_id, date, amount)
+    
+    # If this is an expense category and is_credit_account=1, update payment entry and trigger CA balance update
+    app.logger.info(f"[UPDATE CA PAYMENT DEBUG] entry_type={entry_type}, cat_data={cat_data}")
+    if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
+        ca_triggered = True
+        app.logger.info(f"[UPDATE CA PAYMENT] Detected payment category for user {current_user.id}, category {category_id}")
+        # Find the credit account by matching category name
+        category_name = cat_data.get('name', '')
+        app.logger.info(f"[UPDATE CA PAYMENT] Category name: '{category_name}'")
+        if category_name.endswith(' payment'):
+            account_name = category_name[:-8]  # Remove ' payment' suffix
+            app.logger.info(f"[UPDATE CA PAYMENT] Looking for credit account with name: '{account_name}'")
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
+                """, (current_user.id, account_name))
+                account_row = cursor.fetchone()
+                app.logger.info(f"[UPDATE CA PAYMENT] Credit account query result: {account_row}")
+                if account_row:
+                    account_id = account_row['id']
+                    app.logger.info(f"[UPDATE CA PAYMENT] Found credit account_id={account_id}, updating payment entry for date={date}, amount={amount}")
+                    # Update payment entry in Redis
+                    _update_payment_entry_in_redis(current_user.id, account_id, date, float(amount))
+                    app.logger.info(f"[UPDATE CA PAYMENT] Payment entry update completed")
+                else:
+                    app.logger.warning(f"[UPDATE CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
+                cursor.close()
+        else:
+            app.logger.warning(f"[UPDATE CA PAYMENT] Category name '{category_name}' does not end with ' payment'")
+    else:
+        app.logger.info(f"[UPDATE CA PAYMENT] Not a payment category: entry_type={entry_type}, is_credit_account={cat_data.get('is_credit_account', 0)}")
 
     if entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()
@@ -3637,45 +5718,50 @@ def delete_entry():
             if not cat_row:
                 cursor.close()
                 return jsonify({'status': 'error', 'message': 'Invalid category_id for this entry type'}), 400
-            cursor.execute(
-                f"DELETE FROM {table_name} WHERE category_id = %s AND date BETWEEN %s AND %s",
-                (category_id, start_date, end_date)
-            )
         else:
             cursor.execute(f"SELECT * FROM {category_table} WHERE id = %s AND user_id = %s", (category_id, current_user.id))
             cat_row = cursor.fetchone()
             if not cat_row:
                 cursor.close()
                 return jsonify({'status': 'error', 'message': 'Invalid category_id for this entry type'}), 400
-            cursor.execute(
-                f"DELETE FROM {table_name} WHERE category_id = %s AND date BETWEEN %s AND %s",
-                (category_id, start_date, end_date)
-            )
-
-        # If this is an expense category and is_credit_account=1, delete payment in c_payment_entries
-        if entry_type == 'expense' and cat_row.get('is_credit_account', 0) == 1:
-            payment_category_name = cat_row['name']
-            cursor.execute("""
-                SELECT ca.id AS account_id
-                FROM credit_accounts ca
-                WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-                LIMIT 1
-            """, (current_user.id, payment_category_name))
-            account_row = cursor.fetchone()
-            if account_row:
-                account_id = account_row['account_id']
-                # Delete payment entry from c_payment_entries for this account and date range
-                cursor.execute("""
-                    DELETE FROM c_payment_entries
-                    WHERE account_id = %s AND date BETWEEN %s AND %s
-                """, (account_id, start_date, end_date))
-                ca_triggered = True
-
-        conn.commit()
+        
+        # Make a copy of cat_row data before closing cursor
+        cat_data = dict(cat_row) if cat_row else {}
         cursor.close()
+    
+    # Delete from Redis only - flush worker will persist to MySQL
+    _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
+    
+    # Check if this is a savings category - update savings if so
+    is_savings_category = False
+    if entry_type in ['income', 'expense'] and cat_data.get('name') == 'Savings':
+        is_savings_category = True
+    
+    # If this is an expense category and is_credit_account=1, delete payment entry and trigger CA balance update
+    if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
+        ca_triggered = True
+        # Find the credit account by matching category name
+        category_name = cat_data.get('name', '')
+        if category_name.endswith(' payment'):
+            account_name = category_name[:-8]  # Remove ' payment' suffix
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
+                """, (current_user.id, account_name))
+                account_row = cursor.fetchone()
+                if account_row:
+                    account_id = account_row['id']
+                    # Delete payment entries for this account and date range
+                    _delete_payment_entry_in_redis(current_user.id, account_id, start_date, end_date)
+                cursor.close()
 
     if entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()
+    
+    # Update totals and savings if this is a savings category or regular income/expense
+    if is_savings_category or entry_type in ['income', 'expense']:
+        save_totals_remainders_d()
 
     return jsonify({'status': 'success'})
 
@@ -3849,37 +5935,35 @@ def delete_week_entry():
         cursor.execute(f"SELECT * FROM {category_table} WHERE id = %s", (category_id,))
         cat_row = cursor.fetchone()
 
-        # Delete all entries for this category between start_date and end_date
-        cursor.execute(
-            f"DELETE FROM {table_name} WHERE category_id = %s AND date BETWEEN %s AND %s",
-            (category_id, start_date, end_date)
-        )
-
-        ca_triggered = False
-        # If this is an expense category and is_credit_account=1, delete payment in c_payment_entries for the full range
-        if entry_type == 'expense' and cat_row and cat_row.get('is_credit_account', 0) == 1:
-            payment_category_name = cat_row['name']
-            cursor.execute("""
-                SELECT ca.id AS account_id
-                FROM credit_accounts ca
-                WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-                LIMIT 1
-            """, (current_user.id, payment_category_name))
-            account_row = cursor.fetchone()
-            if account_row:
-                account_id = account_row['account_id']
-                # Delete payment entries from c_payment_entries for this account and date range
-                cursor.execute("""
-                    DELETE FROM c_payment_entries
-                    WHERE account_id = %s AND date BETWEEN %s AND %s
-                """, (account_id, start_date, end_date))
-                ca_triggered = True
-
-        conn.commit()
+        # Make a copy of cat_row data before closing cursor
+        cat_data = dict(cat_row) if cat_row else {}
         cursor.close()
+    
+    # Delete from Redis only - flush worker will persist to MySQL
+    _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
+    
+    ca_triggered = False
+    # If this is an expense category and is_credit_account=1, delete payment entry and trigger CA balance update
+    if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
+        ca_triggered = True
+        # Find the credit account by matching category name
+        category_name = cat_data.get('name', '')
+        if category_name.endswith(' payment'):
+            account_name = category_name[:-8]  # Remove ' payment' suffix
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
+                """, (current_user.id, account_name))
+                account_row = cursor.fetchone()
+                if account_row:
+                    account_id = account_row['id']
+                    # Delete payment entries for this account and date range
+                    _delete_payment_entry_in_redis(current_user.id, account_id, start_date, end_date)
+                cursor.close()
 
     # If a CA payment was updated, trigger CA balance recalculation
-    if ca_triggered:
+    if ca_triggered or entry_type == 'ca':
         save_ca_daily_balance()
 
     return jsonify({'status': 'success'})
@@ -3921,48 +6005,46 @@ def update_week_entry():
             cursor.close()
             return jsonify({"status": "error", "message": "Invalid category_id for this entry type"}), 400
 
-        # Delete all entries for this category between start_date and end_date
-        cursor.execute(
-            f"DELETE FROM {table_name} WHERE category_id = %s AND date BETWEEN %s AND %s",
-            (category_id, start_date, end_date)
-        )
-
-        # Insert the new entry for the friday_date
-        cursor.execute(
-            f"INSERT INTO {table_name} (category_id, date, amount) VALUES (%s, %s, %s)",
-            (category_id, friday_date, amount)
-        )
-
-        # If this is an expense category and is_credit_account=1, add payment record to c_payment_entries and run save_ca_daily_balance_inner
-        ca_triggered = False
-        if entry_type == 'expense' and cat_row.get('is_credit_account', 0) == 1:
-            payment_category_name = cat_row['name']
-            cursor.execute("""
-                SELECT ca.id AS account_id
-                FROM credit_accounts ca
-                WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-                LIMIT 1
-            """, (current_user.id, payment_category_name))
-            account_row = cursor.fetchone()
-            if account_row:
-                account_id = account_row['account_id']
-                # --- Remove any previous payment entries for this account and date range ---
-                cursor.execute("""
-                    DELETE FROM c_payment_entries
-                    WHERE account_id = %s AND date BETWEEN %s AND %s
-                """, (account_id, start_date, end_date))
-                # --- Add payment record to c_payment_entries with the new value only ---
-                cursor.execute("""
-                    INSERT INTO c_payment_entries (account_id, date, amount, processed)
-                    VALUES (%s, %s, %s, 1)
-                """, (account_id, friday_date, amount))
-                ca_triggered = True
-
-        conn.commit()
+        # Make a copy of cat_row data before closing cursor
+        cat_data = dict(cat_row) if cat_row else {}
         cursor.close()
 
+    # Delete old entries and add new entry to Redis only - flush worker will persist
+    _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
+    _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, float(amount))
+
+    # If this is an expense category and is_credit_account=1, create/update payment entry and trigger CA balance update
+    ca_triggered = False
+    if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
+        ca_triggered = True
+        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Detected payment category for user {current_user.id}, category {category_id}")
+        # Find the credit account by matching category name
+        category_name = cat_data.get('name', '')
+        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Category name: '{category_name}'")
+        if category_name.endswith(' payment'):
+            account_name = category_name[:-8]  # Remove ' payment' suffix
+            app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Looking for credit account with name: '{account_name}'")
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
+                """, (current_user.id, account_name))
+                account_row = cursor.fetchone()
+                app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Credit account query result: {account_row}")
+                if account_row:
+                    account_id = account_row['id']
+                    app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Found credit account_id={account_id}, updating payment entry for date={friday_date}, amount={amount}")
+                    # Update payment entry in Redis
+                    _update_payment_entry_in_redis(current_user.id, account_id, friday_date, float(amount))
+                    app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Payment entry update completed")
+                else:
+                    app.logger.warning(f"[UPDATE WEEK ENTRY - CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
+                cursor.close()
+        else:
+            app.logger.warning(f"[UPDATE WEEK ENTRY - CA PAYMENT] Category name '{category_name}' does not end with ' payment'")
+
     # If a CA payment was updated, trigger CA balance recalculation
-    if ca_triggered:
+    if ca_triggered or entry_type == 'ca':
         save_ca_daily_balance()
 
     return jsonify({"status": "success"})
@@ -3981,12 +6063,29 @@ def dashboard_3m():
     # Fetch user data using connection pool
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-        cursor.execute("""
-            SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
-            FROM users
-            WHERE id = %s
-        """, (current_user.id,))
-        user_data = cursor.fetchone()
+        
+        # Try Redis first
+        user_data = None
+        redis_key = f"users:v1:{current_user.id}"
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(redis_key)
+                if cached:
+                    user_data = json.loads(cached)
+                    app.logger.debug(f"[REDIS HIT] dashboard_3m user settings for user {current_user.id}")
+            except Exception as e:
+                app.logger.error(f"[REDIS ERROR] dashboard_3m user settings: {str(e)}")
+        
+        # Fallback to MySQL
+        if not user_data:
+            cursor.execute("""
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
+                FROM users
+                WHERE id = %s
+            """, (current_user.id,))
+            user_data = cursor.fetchone()
+            app.logger.debug(f"[MYSQL] dashboard_3m user settings for user {current_user.id}")
+        
         goofy_week_mode = bool(user_data.get('goofy_week_mode', False)) if user_data else False
 
         # Build fridays_by_month for navigation (unchanged)
@@ -4034,12 +6133,22 @@ def dashboard_3m():
             return month_end.strftime('%Y-%m-%d')
 
         # --- AGGREGATE INCOME ENTRIES BY MONTH ---
-        cursor.execute("""
-            SELECT category_id, date, amount, processed
-            FROM income_entries
-            WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
-        """, (current_user.id,))
-        raw_income_entries = cursor.fetchall()
+        # Try Redis first
+        raw_income_entries = _get_entries_from_redis('income_entries', current_user.id)
+        if raw_income_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_3m income_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT id, category_id, date, amount, processed
+                FROM income_entries
+                WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
+            """, (current_user.id,))
+            raw_income_entries = list(cursor.fetchall())
+            raw_income_entries = _filter_pending_deletions('income_entries', current_user.id, raw_income_entries)
+            # Update Redis cache
+            _set_entries_to_redis('income_entries', current_user.id, raw_income_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_3m income_entries for user {current_user.id}")
         income_map = {}
         processed_map = {}
         for entry in raw_income_entries:
@@ -4062,12 +6171,22 @@ def dashboard_3m():
             })
 
         # --- AGGREGATE EXPENSE ENTRIES BY MONTH ---
-        cursor.execute("""
-            SELECT category_id, date, amount, processed
-            FROM expense_entries
-            WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
-        """, (current_user.id,))
-        raw_expense_entries = cursor.fetchall()
+        # Try Redis first
+        raw_expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+        if raw_expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_3m expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT id, category_id, date, amount, processed
+                FROM expense_entries
+                WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
+            """, (current_user.id,))
+            raw_expense_entries = list(cursor.fetchall())
+            raw_expense_entries = _filter_pending_deletions('expense_entries', current_user.id, raw_expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('expense_entries', current_user.id, raw_expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_3m expense_entries for user {current_user.id}")
         expense_map = {}
         expense_processed_map = {}
         for entry in raw_expense_entries:
@@ -4090,14 +6209,24 @@ def dashboard_3m():
             })
 
         # --- AGGREGATE CA ENTRIES BY MONTH ---
-        cursor.execute("""
-            SELECT cee.category_id, cee.date, cee.amount, cee.processed
-            FROM c_expense_entries cee
-            JOIN c_expense_categories cec ON cee.category_id = cec.id
-            JOIN credit_accounts ca ON cec.account_id = ca.id
-            WHERE ca.user_id = %s
-        """, (current_user.id,))
-        raw_c_expense_entries = cursor.fetchall()
+        # Try Redis first
+        raw_c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+        if raw_c_expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_3m c_expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+            """, (current_user.id,))
+            raw_c_expense_entries = list(cursor.fetchall())
+            raw_c_expense_entries = _filter_pending_deletions('c_expense_entries', current_user.id, raw_c_expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('c_expense_entries', current_user.id, raw_c_expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_3m c_expense_entries for user {current_user.id}")
         c_expense_map = {}
         c_expense_processed_map = {}
         for entry in raw_c_expense_entries:
@@ -4120,20 +6249,38 @@ def dashboard_3m():
             })
 
         # Fetch all monthly totals and remainders
-        cursor.execute("""
-            SELECT date, total_income, total_expenses, remainder, last_month_remainder
-            FROM totals_remainders_m
-            WHERE user_id = %s
-        """, (current_user.id,))
-        totals_remainders = cursor.fetchall()
+        # Try Redis first
+        totals_remainders = _get_totals_remainders_from_redis('totals_remainders_m', current_user.id)
+        if totals_remainders is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_3m totals_remainders_m for user {current_user.id}")
+            cursor.execute("""
+                SELECT date, total_income, total_expenses, remainder, last_month_remainder
+                FROM totals_remainders_m
+                WHERE user_id = %s
+            """, (current_user.id,))
+            totals_remainders = cursor.fetchall()
+            # Update Redis cache
+            _set_totals_remainders_to_redis('totals_remainders_m', current_user.id, totals_remainders)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_3m totals_remainders_m for user {current_user.id}")
 
         # Fetch all savings entries for the user
-        cursor.execute("""
-            SELECT date, amount FROM savings_entries
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (current_user.id,))
-        savings_entries = cursor.fetchall()
+        # Try Redis first
+        savings_entries = _get_savings_entries_from_redis(current_user.id)
+        if savings_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_3m savings_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT date, amount FROM savings_entries
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (current_user.id,))
+            savings_entries = cursor.fetchall()
+            # Update Redis cache
+            _set_savings_entries_to_redis(current_user.id, savings_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_3m savings_entries for user {current_user.id}")
 
         # Fetch Buds
         cursor.execute("""
@@ -4160,14 +6307,23 @@ def dashboard_3m():
         """, (current_user.id,))
         c_expense_categories = cursor.fetchall()
 
-        cursor.execute("""
-            SELECT * FROM c_a_balances_m
-            WHERE account_id IN (
-                SELECT id FROM credit_accounts WHERE user_id = %s
-            )
-            ORDER BY date DESC
-        """, (current_user.id,))
-        c_a_balances_m = cursor.fetchall()
+        # Try Redis first for CA balances
+        c_a_balances_m = _get_ca_balances_from_redis('c_a_balances_m', current_user.id)
+        if c_a_balances_m is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_3m c_a_balances_m for user {current_user.id}")
+            cursor.execute("""
+                SELECT * FROM c_a_balances_m
+                WHERE account_id IN (
+                    SELECT id FROM credit_accounts WHERE user_id = %s
+                )
+                ORDER BY date DESC
+            """, (current_user.id,))
+            c_a_balances_m = cursor.fetchall()
+            # Update Redis cache
+            _set_ca_balances_to_redis('c_a_balances_m', current_user.id, c_a_balances_m)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_3m c_a_balances_m for user {current_user.id}")
         cursor.close()
 
     profile_picture = user_data['profile_picture'] if user_data else None
@@ -4212,19 +6368,33 @@ def get_ca_balance_3m():
     if not account_id or not date:
         return jsonify({'status': 'error', 'message': 'Missing account_id or date'}), 400
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-        cursor.execute("""
-            SELECT balance
-            FROM c_a_balances_m
-            WHERE account_id = %s AND date = %s
-            LIMIT 1
-        """, (account_id, date))
-        result = cursor.fetchone()
-        cursor.close()
+    try:
+        # Try Redis first
+        cached_data = _get_ca_balances_from_redis('c_a_balances_m', current_user.id, account_id=int(account_id))
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    balance = row.get('balance', 0)
+                    return jsonify({'status': 'success', 'balance': balance})
         
-    balance = result['balance'] if result and result['balance'] is not None else 0
-    return jsonify({'status': 'success', 'balance': balance})
+        # Fallback to MySQL if not in Redis
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT balance
+                FROM c_a_balances_m
+                WHERE account_id = %s AND date = %s
+                LIMIT 1
+            """, (account_id, date))
+            result = cursor.fetchone()
+            cursor.close()
+            
+        balance = result['balance'] if result and result['balance'] is not None else 0
+        return jsonify({'status': 'success', 'balance': balance})
+    except Exception as e:
+        app.logger.error(f"[get_ca_balance_3m] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
 
 @app.route('/get_total_income_3m', methods=['GET'])
 @login_required
@@ -4234,6 +6404,16 @@ def get_total_income_3m():
         return jsonify({'status': 'error', 'message': 'Missing date parameter'}), 400
 
     try:
+        # Try Redis first
+        cached_data = _get_totals_remainders_from_redis('totals_remainders_m', current_user.id)
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    total_income = row.get('total_income', 0)
+                    return jsonify({'status': 'success', 'total_income': total_income})
+        
+        # Fallback to MySQL if not in Redis
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
@@ -4261,6 +6441,16 @@ def get_total_expenses_3m():
         return jsonify({'status': 'error', 'message': 'Missing date parameter'}), 400
 
     try:
+        # Try Redis first
+        cached_data = _get_totals_remainders_from_redis('totals_remainders_m', current_user.id)
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    total_expenses = row.get('total_expenses', 0)
+                    return jsonify({'status': 'success', 'total_expenses': total_expenses})
+        
+        # Fallback to MySQL if not in Redis
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
@@ -4289,6 +6479,16 @@ def get_last_remainder_3m():
         return jsonify({"status": "error", "message": "Date parameter is missing"}), 400
 
     try:
+        # Try Redis first
+        cached_data = _get_totals_remainders_from_redis('totals_remainders_m', current_user.id)
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    last_remainder = row.get('last_month_remainder', 0)
+                    return jsonify({"status": "success", "last_remainder": last_remainder})
+        
+        # Fallback to MySQL if not in Redis
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
@@ -4320,6 +6520,16 @@ def get_remainder_3m():
         return jsonify({"status": "error", "message": "Date parameter is missing"}), 400
 
     try:
+        # Try Redis first
+        cached_data = _get_totals_remainders_from_redis('totals_remainders_m', current_user.id)
+        if cached_data:
+            # Find the matching date in cached data
+            for row in cached_data:
+                if row.get('date') == date:
+                    remainder = row.get('remainder', 0)
+                    return jsonify({"status": "success", "remainder": remainder})
+        
+        # Fallback to MySQL if not in Redis
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
@@ -4403,12 +6613,28 @@ def dashboard_m():
 
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-        cursor.execute("""
-            SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
-            FROM users
-            WHERE id = %s
-        """, (current_user.id,))
-        user_data = cursor.fetchone()
+        
+        # Try Redis first
+        user_data = None
+        redis_key = f"users:v1:{current_user.id}"
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(redis_key)
+                if cached:
+                    user_data = json.loads(cached)
+                    app.logger.debug(f"[REDIS HIT] dashboard_m user settings for user {current_user.id}")
+            except Exception as e:
+                app.logger.error(f"[REDIS ERROR] dashboard_m user settings: {str(e)}")
+        
+        # Fallback to MySQL
+        if not user_data:
+            cursor.execute("""
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
+                FROM users
+                WHERE id = %s
+            """, (current_user.id,))
+            user_data = cursor.fetchone()
+            app.logger.debug(f"[MYSQL] dashboard_m user settings for user {current_user.id}")
 
         profile_picture = user_data['profile_picture'] if user_data else None
         first_name = user_data['first_name'] if user_data else ''
@@ -4437,39 +6663,87 @@ def dashboard_m():
         expense_categories = cursor.fetchall()
 
         # Entries
-        cursor.execute("""
-            SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
-            FROM income_entries ie
-            JOIN income_categories ic ON ie.category_id = ic.id
-            WHERE ic.user_id = %s
-            ORDER BY ic.display_order DESC, ie.date ASC
-        """, (current_user.id,))
-        income_entries = cursor.fetchall()
+        # Try Redis first for income entries
+        income_entries = _get_entries_from_redis('income_entries', current_user.id)
+        if income_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_m income_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
+                FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+                ORDER BY ic.display_order DESC, ie.date ASC
+            """, (current_user.id,))
+            income_entries = list(cursor.fetchall())
+            income_entries = _filter_pending_deletions('income_entries', current_user.id, income_entries)
+            # Update Redis cache
+            _set_entries_to_redis('income_entries', current_user.id, income_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_m income_entries for user {current_user.id}")
+            # Enrich with category names from income_categories
+            income_cat_map = {cat['id']: cat['name'] for cat in income_categories}
+            for entry in income_entries:
+                if 'category_name' not in entry:
+                    entry['category_name'] = income_cat_map.get(entry.get('category_id'), 'Unknown')
 
-        cursor.execute("""
-            SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
-            FROM expense_entries ee
-            JOIN expense_categories ec ON ee.category_id = ec.id
-            WHERE ec.user_id = %s
-            ORDER BY ec.display_order DESC, ee.date ASC
-        """, (current_user.id,))
-        expense_entries = cursor.fetchall()
+        # Try Redis first for expense entries
+        expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+        if expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_m expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
+                FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+                ORDER BY ec.display_order DESC, ee.date ASC
+            """, (current_user.id,))
+            expense_entries = list(cursor.fetchall())
+            expense_entries = _filter_pending_deletions('expense_entries', current_user.id, expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('expense_entries', current_user.id, expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_m expense_entries for user {current_user.id}")
+            # Enrich with category names from expense_categories
+            expense_cat_map = {cat['id']: cat['name'] for cat in expense_categories}
+            for entry in expense_entries:
+                if 'category_name' not in entry:
+                    entry['category_name'] = expense_cat_map.get(entry.get('category_id'), 'Unknown')
 
         # Totals/remainders
-        cursor.execute("""
-            SELECT * FROM totals_remainders_d
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (current_user.id,))
-        totals_remainders_d = cursor.fetchall()
+        # Try Redis first
+        totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', current_user.id)
+        if totals_remainders_d is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_m totals_remainders_d for user {current_user.id}")
+            cursor.execute("""
+                SELECT * FROM totals_remainders_d
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (current_user.id,))
+            totals_remainders_d = cursor.fetchall()
+            # Update Redis cache
+            _set_totals_remainders_to_redis('totals_remainders_d', current_user.id, totals_remainders_d)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_m totals_remainders_d for user {current_user.id}")
 
         # Savings
-        cursor.execute("""
-            SELECT date, amount FROM savings_entries
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (current_user.id,))
-        savings_entries = cursor.fetchall()
+        # Try Redis first
+        savings_entries = _get_savings_entries_from_redis(current_user.id)
+        if savings_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_m savings_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT date, amount FROM savings_entries
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (current_user.id,))
+            savings_entries = cursor.fetchall()
+            # Update Redis cache
+            _set_savings_entries_to_redis(current_user.id, savings_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_m savings_entries for user {current_user.id}")
 
         # Credit accounts
         cursor.execute("""
@@ -4490,25 +6764,49 @@ def dashboard_m():
         c_expense_categories = cursor.fetchall()
 
         # CA entries
-        cursor.execute("""
-            SELECT cee.*, cec.name AS category_name
-            FROM c_expense_entries cee
-            JOIN c_expense_categories cec ON cee.category_id = cec.id
-            JOIN credit_accounts ca ON cec.account_id = ca.id
-            WHERE ca.user_id = %s
-            ORDER BY cee.date DESC, cee.id ASC
-        """, (current_user.id,))
-        c_expense_entries = cursor.fetchall()
+        # Try Redis first
+        c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+        if c_expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_m c_expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT cee.*, cec.name AS category_name
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+                ORDER BY cee.date DESC, cee.id ASC
+            """, (current_user.id,))
+            c_expense_entries = list(cursor.fetchall())
+            c_expense_entries = _filter_pending_deletions('c_expense_entries', current_user.id, c_expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('c_expense_entries', current_user.id, c_expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_m c_expense_entries for user {current_user.id}")
+            # Enrich with category names from c_expense_categories
+            c_expense_cat_map = {cat['id']: cat['name'] for cat in c_expense_categories}
+            for entry in c_expense_entries:
+                if 'category_name' not in entry:
+                    entry['category_name'] = c_expense_cat_map.get(entry.get('category_id'), 'Unknown')
 
         # CA balances (daily)
-        cursor.execute("""
-            SELECT * FROM c_a_balances_d
-            WHERE account_id IN (
-                SELECT id FROM credit_accounts WHERE user_id = %s
-            )
-            ORDER BY account_id ASC, date ASC
-        """, (current_user.id,))
-        c_a_balances_d = cursor.fetchall()
+        # Try Redis first
+        c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', current_user.id)
+        if c_a_balances_d is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_m c_a_balances_d for user {current_user.id}")
+            cursor.execute("""
+                SELECT * FROM c_a_balances_d
+                WHERE account_id IN (
+                    SELECT id FROM credit_accounts WHERE user_id = %s
+                )
+                ORDER BY account_id ASC, date ASC
+            """, (current_user.id,))
+            c_a_balances_d = cursor.fetchall()
+            # Update Redis cache
+            _set_ca_balances_to_redis('c_a_balances_d', current_user.id, c_a_balances_d)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_m c_a_balances_d for user {current_user.id}")
         cursor.close()
 
     return render_template(
@@ -4552,38 +6850,85 @@ def get_dashboard_m_data():
             return {"status": "error", "message": "No date range provided"}
         from calendar import monthrange
         year, month_num = map(int, month.split('-'))
-        from_date = datetime.date(year, month_num, 1)
-        to_date = datetime.date(year, month_num, monthrange(year, month_num)[1])
+        from_date = date(year, month_num, 1)
+        to_date = date(year, month_num, monthrange(year, month_num)[1])
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
+    # Try Redis first for daily totals/remainders
+    totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
+    if totals_remainders_d is None:
+        # Redis miss - fallback to MySQL
+        app.logger.info(f"[REDIS MISS] get_dashboard_m_data totals_remainders_d for user {user_id}")
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM totals_remainders_d
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (user_id,))
+            totals_remainders_d = cursor.fetchall()
+            cursor.close()
+        # Update Redis cache
+        _set_totals_remainders_to_redis('totals_remainders_d', user_id, totals_remainders_d)
+    else:
+        app.logger.debug(f"[REDIS HIT] get_dashboard_m_data totals_remainders_d for user {user_id}")
+    
+    # Filter by date range
+    from_date_obj = datetime.strptime(str(from_date), '%Y-%m-%d').date() if isinstance(from_date, str) else from_date
+    to_date_obj = datetime.strptime(str(to_date), '%Y-%m-%d').date() if isinstance(to_date, str) else to_date
+    totals_remainders_d = [
+        row for row in totals_remainders_d 
+        if from_date_obj <= (datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']) <= to_date_obj
+    ]
 
-        # Daily totals/remainders for the range
-        cursor.execute("""
-            SELECT * FROM totals_remainders_d
-            WHERE user_id = %s AND date BETWEEN %s AND %s
-            ORDER BY date ASC
-        """, (user_id, from_date, to_date))
-        totals_remainders_d = cursor.fetchall()
+    # Try Redis first for CA balances
+    c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', user_id)
+    if c_a_balances_d is None:
+        # Redis miss - fallback to MySQL
+        app.logger.info(f"[REDIS MISS] get_dashboard_m_data c_a_balances_d for user {user_id}")
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM c_a_balances_d
+                WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+                ORDER BY account_id ASC, date ASC
+            """, (user_id,))
+            c_a_balances_d = cursor.fetchall()
+            cursor.close()
+        # Update Redis cache
+        _set_ca_balances_to_redis('c_a_balances_d', user_id, c_a_balances_d)
+    else:
+        app.logger.debug(f"[REDIS HIT] get_dashboard_m_data c_a_balances_d for user {user_id}")
+    
+    # Filter by date range
+    c_a_balances_d = [
+        row for row in c_a_balances_d 
+        if from_date_obj <= (datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']) <= to_date_obj
+    ]
 
-        # Credit account daily balances for the range
-        cursor.execute("""
-            SELECT * FROM c_a_balances_d
-            WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
-            AND date BETWEEN %s AND %s
-            ORDER BY account_id ASC, date ASC
-        """, (user_id, from_date, to_date))
-        c_a_balances_d = cursor.fetchall()
-
-        # Savings entries for the range
-        cursor.execute("""
-            SELECT * FROM savings_entries
-            WHERE user_id = %s AND date BETWEEN %s AND %s
-            ORDER BY date ASC
-        """, (user_id, from_date, to_date))
-        savings_entries = cursor.fetchall()
-
-        cursor.close()
+    # Try Redis first for savings entries
+    savings_entries = _get_savings_entries_from_redis(user_id)
+    if savings_entries is None:
+        # Redis miss - fallback to MySQL
+        app.logger.info(f"[REDIS MISS] get_dashboard_m_data savings_entries for user {user_id}")
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM savings_entries
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (user_id,))
+            savings_entries = cursor.fetchall()
+            cursor.close()
+        # Update Redis cache
+        _set_savings_entries_to_redis(user_id, savings_entries)
+    else:
+        app.logger.debug(f"[REDIS HIT] get_dashboard_m_data savings_entries for user {user_id}")
+    
+    # Filter by date range
+    savings_entries = [
+        row for row in savings_entries 
+        if from_date_obj <= (datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']) <= to_date_obj
+    ]
 
     return {
         "status": "success",
@@ -4605,12 +6950,28 @@ def dashboard_y():
 
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-        cursor.execute("""
-            SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
-            FROM users
-            WHERE id = %s
-        """, (current_user.id,))
-        user_data = cursor.fetchone()
+        
+        # Try Redis first
+        user_data = None
+        redis_key = f"users:v1:{current_user.id}"
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(redis_key)
+                if cached:
+                    user_data = json.loads(cached)
+                    app.logger.debug(f"[REDIS HIT] dashboard_y user settings for user {current_user.id}")
+            except Exception as e:
+                app.logger.error(f"[REDIS ERROR] dashboard_y user settings: {str(e)}")
+        
+        # Fallback to MySQL
+        if not user_data:
+            cursor.execute("""
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, member_since, currency_type, landing_page
+                FROM users
+                WHERE id = %s
+            """, (current_user.id,))
+            user_data = cursor.fetchone()
+            app.logger.debug(f"[MYSQL] dashboard_y user settings for user {current_user.id}")
 
         profile_picture = user_data['profile_picture'] if user_data else None
         first_name = user_data['first_name'] if user_data else ''
@@ -4639,39 +7000,87 @@ def dashboard_y():
         expense_categories = cursor.fetchall()
 
         # Entries
-        cursor.execute("""
-            SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
-            FROM income_entries ie
-            JOIN income_categories ic ON ie.category_id = ic.id
-            WHERE ic.user_id = %s
-            ORDER BY ic.display_order DESC, ie.date ASC
-        """, (current_user.id,))
-        income_entries = cursor.fetchall()
+        # Try Redis first for income entries
+        income_entries = _get_entries_from_redis('income_entries', current_user.id)
+        if income_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_y income_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
+                FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+                ORDER BY ic.display_order DESC, ie.date ASC
+            """, (current_user.id,))
+            income_entries = list(cursor.fetchall())
+            income_entries = _filter_pending_deletions('income_entries', current_user.id, income_entries)
+            # Update Redis cache
+            _set_entries_to_redis('income_entries', current_user.id, income_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_y income_entries for user {current_user.id}")
+            # Enrich with category names from income_categories
+            income_cat_map = {cat['id']: cat['name'] for cat in income_categories}
+            for entry in income_entries:
+                if 'category_name' not in entry:
+                    entry['category_name'] = income_cat_map.get(entry.get('category_id'), 'Unknown')
 
-        cursor.execute("""
-            SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
-            FROM expense_entries ee
-            JOIN expense_categories ec ON ee.category_id = ec.id
-            WHERE ec.user_id = %s
-            ORDER BY ec.display_order DESC, ee.date ASC
-        """, (current_user.id,))
-        expense_entries = cursor.fetchall()
+        # Try Redis first for expense entries
+        expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+        if expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_y expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
+                FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+                ORDER BY ec.display_order DESC, ee.date ASC
+            """, (current_user.id,))
+            expense_entries = list(cursor.fetchall())
+            expense_entries = _filter_pending_deletions('expense_entries', current_user.id, expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('expense_entries', current_user.id, expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_y expense_entries for user {current_user.id}")
+            # Enrich with category names from expense_categories
+            expense_cat_map = {cat['id']: cat['name'] for cat in expense_categories}
+            for entry in expense_entries:
+                if 'category_name' not in entry:
+                    entry['category_name'] = expense_cat_map.get(entry.get('category_id'), 'Unknown')
 
         # Totals/remainders
-        cursor.execute("""
-            SELECT * FROM totals_remainders_d
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (current_user.id,))
-        totals_remainders_d = cursor.fetchall()
+        # Try Redis first
+        totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', current_user.id)
+        if totals_remainders_d is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_y totals_remainders_d for user {current_user.id}")
+            cursor.execute("""
+                SELECT * FROM totals_remainders_d
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (current_user.id,))
+            totals_remainders_d = cursor.fetchall()
+            # Update Redis cache
+            _set_totals_remainders_to_redis('totals_remainders_d', current_user.id, totals_remainders_d)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_y totals_remainders_d for user {current_user.id}")
 
         # Savings
-        cursor.execute("""
-            SELECT date, amount FROM savings_entries
-            WHERE user_id = %s
-            ORDER BY date ASC
-        """, (current_user.id,))
-        savings_entries = cursor.fetchall()
+        # Try Redis first
+        savings_entries = _get_savings_entries_from_redis(current_user.id)
+        if savings_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_y savings_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT date, amount FROM savings_entries
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (current_user.id,))
+            savings_entries = cursor.fetchall()
+            # Update Redis cache
+            _set_savings_entries_to_redis(current_user.id, savings_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_y savings_entries for user {current_user.id}")
 
         # Credit accounts
         cursor.execute("""
@@ -4692,25 +7101,49 @@ def dashboard_y():
         c_expense_categories = cursor.fetchall()
 
         # CA entries
-        cursor.execute("""
-            SELECT cee.*, cec.name AS category_name
-            FROM c_expense_entries cee
-            JOIN c_expense_categories cec ON cee.category_id = cec.id
-            JOIN credit_accounts ca ON cec.account_id = ca.id
-            WHERE ca.user_id = %s
-            ORDER BY cee.date DESC, cee.id ASC
-        """, (current_user.id,))
-        c_expense_entries = cursor.fetchall()
+        # Try Redis first
+        c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+        if c_expense_entries is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_y c_expense_entries for user {current_user.id}")
+            cursor.execute("""
+                SELECT cee.*, cec.name AS category_name
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+                ORDER BY cee.date DESC, cee.id ASC
+            """, (current_user.id,))
+            c_expense_entries = list(cursor.fetchall())
+            c_expense_entries = _filter_pending_deletions('c_expense_entries', current_user.id, c_expense_entries)
+            # Update Redis cache
+            _set_entries_to_redis('c_expense_entries', current_user.id, c_expense_entries)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_y c_expense_entries for user {current_user.id}")
+            # Enrich with category names from c_expense_categories
+            c_expense_cat_map = {cat['id']: cat['name'] for cat in c_expense_categories}
+            for entry in c_expense_entries:
+                if 'category_name' not in entry:
+                    entry['category_name'] = c_expense_cat_map.get(entry.get('category_id'), 'Unknown')
 
         # CA balances (daily)
-        cursor.execute("""
-            SELECT * FROM c_a_balances_d
-            WHERE account_id IN (
-                SELECT id FROM credit_accounts WHERE user_id = %s
-            )
-            ORDER BY account_id ASC, date ASC
-        """, (current_user.id,))
-        c_a_balances_d = cursor.fetchall()
+        # Try Redis first
+        c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', current_user.id)
+        if c_a_balances_d is None:
+            # Redis miss - fallback to MySQL
+            app.logger.info(f"[REDIS MISS] dashboard_y c_a_balances_d for user {current_user.id}")
+            cursor.execute("""
+                SELECT * FROM c_a_balances_d
+                WHERE account_id IN (
+                    SELECT id FROM credit_accounts WHERE user_id = %s
+                )
+                ORDER BY account_id ASC, date ASC
+            """, (current_user.id,))
+            c_a_balances_d = cursor.fetchall()
+            # Update Redis cache
+            _set_ca_balances_to_redis('c_a_balances_d', current_user.id, c_a_balances_d)
+        else:
+            app.logger.debug(f"[REDIS HIT] dashboard_y c_a_balances_d for user {current_user.id}")
         cursor.close()
 
     return render_template(
@@ -4741,35 +7174,83 @@ def dashboard_y():
 def get_dashboard_y_data():
     year = int(request.args.get('year', datetime.utcnow().year))
     user_id = current_user.id
-    first_day = f"{year}-01-01"
-    last_day = f"{year}-12-31"
+    first_day = date(year, 1, 1)
+    last_day = date(year, 12, 31)
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
+    # Try Redis first for totals/remainders
+    totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
+    if totals_remainders_d is None:
+        # Redis miss - fallback to MySQL
+        app.logger.info(f"[REDIS MISS] get_dashboard_y_data totals_remainders_d for user {user_id}")
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM totals_remainders_d
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (user_id,))
+            totals_remainders_d = cursor.fetchall()
+            cursor.close()
+        # Update Redis cache
+        _set_totals_remainders_to_redis('totals_remainders_d', user_id, totals_remainders_d)
+    else:
+        app.logger.debug(f"[REDIS HIT] get_dashboard_y_data totals_remainders_d for user {user_id}")
+    
+    # Filter by year
+    totals_remainders_d = [
+        row for row in totals_remainders_d 
+        if first_day <= (datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']) <= last_day
+    ]
 
-        cursor.execute("""
-            SELECT * FROM totals_remainders_d
-            WHERE user_id = %s AND date BETWEEN %s AND %s
-            ORDER BY date ASC
-        """, (user_id, first_day, last_day))
-        totals_remainders_d = cursor.fetchall()
+    # Try Redis first for CA balances
+    c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', user_id)
+    if c_a_balances_d is None:
+        # Redis miss - fallback to MySQL
+        app.logger.info(f"[REDIS MISS] get_dashboard_y_data c_a_balances_d for user {user_id}")
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM c_a_balances_d
+                WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+                ORDER BY account_id ASC, date ASC
+            """, (user_id,))
+            c_a_balances_d = cursor.fetchall()
+            cursor.close()
+        # Update Redis cache
+        _set_ca_balances_to_redis('c_a_balances_d', user_id, c_a_balances_d)
+    else:
+        app.logger.debug(f"[REDIS HIT] get_dashboard_y_data c_a_balances_d for user {user_id}")
+    
+    # Filter by year
+    c_a_balances_d = [
+        row for row in c_a_balances_d 
+        if first_day <= (datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']) <= last_day
+    ]
 
-        cursor.execute("""
-            SELECT * FROM c_a_balances_d
-            WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
-            AND date BETWEEN %s AND %s
-            ORDER BY account_id ASC, date ASC
-        """, (user_id, first_day, last_day))
-        c_a_balances_d = cursor.fetchall()
-
-        cursor.execute("""
-            SELECT * FROM savings_entries
-            WHERE user_id = %s AND date BETWEEN %s AND %s
-            ORDER BY date ASC
-        """, (user_id, first_day, last_day))
-        savings_entries = cursor.fetchall()
-
-        cursor.close()
+    # Try Redis first for savings entries
+    savings_entries = _get_savings_entries_from_redis(user_id)
+    if savings_entries is None:
+        # Redis miss - fallback to MySQL
+        app.logger.info(f"[REDIS MISS] get_dashboard_y_data savings_entries for user {user_id}")
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM savings_entries
+                WHERE user_id = %s
+                ORDER BY date ASC
+            """, (user_id,))
+            savings_entries = cursor.fetchall()
+            cursor.close()
+        # Update Redis cache
+        _set_savings_entries_to_redis(user_id, savings_entries)
+    else:
+        app.logger.debug(f"[REDIS HIT] get_dashboard_y_data savings_entries for user {user_id}")
+    
+    # Filter by year
+    savings_entries = [
+        row for row in savings_entries 
+        if first_day <= (datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']) <= last_day
+    ]
 
     return {
         "status": "success",
@@ -4785,29 +7266,63 @@ def get_dashboard_y_data():
 @app.route('/profile', methods=['GET'])
 @login_required
 def profile():
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
+    # Try to get user settings from Redis first
+    redis_key = f"users:v1:{current_user.id}"
+    user_data = None
+    
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+        except Exception as e:
+            app.logger.warning(f"[REDIS][user_settings] GET error: {e}")
+    
+    # If not in Redis, load from MySQL
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, and mfa_secret
-        cursor.execute("""
-            SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret
-            FROM users 
-            WHERE id = %s
-        """, (current_user.id,))
-        user_data = cursor.fetchone()
-
-        # Fetch starting balance from income_entries where category is "Starting Balance"
-        cursor.execute("""
-            SELECT amount
-            FROM income_entries 
-            WHERE category_id = (
+            # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, and mfa_secret
+            cursor.execute("""
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret
+                FROM users 
+                WHERE id = %s
+            """, (current_user.id,))
+            user_data = cursor.fetchone()
+            cursor.close()
+    
+    # Fetch starting balance from income_entries (check Redis first)
+    income_entries = _get_entries_from_redis('income_entries', current_user.id)
+    
+    starting_balance_data = None
+    if income_entries is None:
+        # Load from MySQL
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT ie.amount, ic.id as category_id
+                FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.name = 'Starting Balance' AND ic.user_id = %s 
+                LIMIT 1
+            """, (current_user.id,))
+            starting_balance_data = cursor.fetchone()
+            cursor.close()
+    else:
+        # Find Starting Balance entry in Redis data
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
                 SELECT id FROM income_categories WHERE name = 'Starting Balance' AND user_id = %s LIMIT 1
-            ) 
-            LIMIT 1
-        """, (current_user.id,))
-        starting_balance_data = cursor.fetchone()
-
-        cursor.close()
+            """, (current_user.id,))
+            cat_row = cursor.fetchone()
+            cursor.close()
+        
+        if cat_row:
+            starting_balance_entry = next((e for e in income_entries if int(e.get('category_id', 0)) == int(cat_row['id'])), None)
+            if starting_balance_entry:
+                starting_balance_data = {'amount': starting_balance_entry.get('amount', 0)}
 
     # Extract values from the query result
     profile_picture = user_data['profile_picture'] if user_data else None
@@ -4842,12 +7357,27 @@ def settings():
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
         # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, and mfa_secret
-        cursor.execute("""
-            SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret
-            FROM users 
-            WHERE id = %s
-        """, (current_user.id,))
-        user_data = cursor.fetchone()
+        # Try Redis first
+        user_data = None
+        redis_key = f"users:v1:{current_user.id}"
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(redis_key)
+                if cached:
+                    user_data = json.loads(cached)
+                    app.logger.debug(f"[REDIS HIT] settings user data for user {current_user.id}")
+            except Exception as e:
+                app.logger.error(f"[REDIS ERROR] settings user data: {str(e)}")
+        
+        # Fallback to MySQL
+        if not user_data:
+            cursor.execute("""
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret
+                FROM users 
+                WHERE id = %s
+            """, (current_user.id,))
+            user_data = cursor.fetchone()
+            app.logger.debug(f"[MYSQL] settings user data for user {current_user.id}")
 
         # Fetch starting balance from income_entries where category is "Starting Balance"
         cursor.execute("""
@@ -4894,16 +7424,8 @@ def update_goofy_week_mode():
     goofy_week_mode = request.form.get('goofy_week_mode', type=int)
     
     try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-            # Update the goofy_week_mode column for the current user
-            query = "UPDATE users SET goofy_week_mode = %s WHERE id = %s"
-            cursor.execute(query, (goofy_week_mode, current_user.id))
-            
-            # Commit the changes
-            conn.commit()
-            cursor.close()
+        # Update in Redis only - flush worker will persist to MySQL
+        _update_user_setting_in_redis(current_user.id, 'goofy_week_mode', goofy_week_mode)
         
         return jsonify({'status': 'success'})
     except Exception as e:
@@ -4925,15 +7447,27 @@ def update_profile_picture():
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
-        # Get the current user's profile picture
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT profile_picture FROM users WHERE id = %s", (current_user.id,))
-            user_data = cursor.fetchone()
-            cursor.close()
+        # Get the current user's profile picture from Redis first
+        redis_key = f"users:v1:{current_user.id}"
+        user_data = None
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(redis_key)
+                if cached:
+                    user_data = json.loads(cached)
+            except Exception as e:
+                app.logger.error(f"[REDIS ERROR] profile picture lookup: {str(e)}")
+        
+        # Fallback to MySQL if not in Redis
+        if not user_data:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT profile_picture FROM users WHERE id = %s", (current_user.id,))
+                user_data = cursor.fetchone()
+                cursor.close()
 
         # Delete the old profile picture file if it exists
-        if user_data and user_data['profile_picture']:
+        if user_data and user_data.get('profile_picture'):
             old_filepath = os.path.join(app.config['UPLOAD_FOLDER'], user_data['profile_picture'])
             if os.path.exists(old_filepath):
                 os.remove(old_filepath)
@@ -4941,16 +7475,8 @@ def update_profile_picture():
         # Save the new profile picture file
         file.save(filepath)
 
-        # Update the user's profile picture in the database
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE users 
-                SET profile_picture = %s 
-                WHERE id = %s
-            """, (filename, current_user.id))
-            conn.commit()
-            cursor.close()
+        # Update in Redis only - flush worker will persist to MySQL
+        _update_user_setting_in_redis(current_user.id, 'profile_picture', filename)
 
         flash('Profile picture updated successfully.')
         return redirect(url_for('profile'))
@@ -4963,12 +7489,8 @@ def update_profile_picture():
 def update_first_name():
     new_first_name = request.form['first_name']
     
-    with get_db_pool().get_cursor(commit=True) as cursor:
-        cursor.execute("""
-            UPDATE users 
-            SET first_name = %s 
-            WHERE id = %s
-        """, (new_first_name, current_user.id))
+    # Update in Redis only - flush worker will persist to MySQL
+    _update_user_setting_in_redis(current_user.id, 'first_name', new_first_name)
 
     flash('First name updated successfully.')
     return redirect(url_for('profile', success='first_name'))
@@ -4978,12 +7500,8 @@ def update_first_name():
 def update_last_name():
     new_last_name = request.form['last_name']
     
-    with get_db_pool().get_cursor(commit=True) as cursor:
-        cursor.execute("""
-            UPDATE users 
-            SET last_name = %s 
-            WHERE id = %s
-        """, (new_last_name, current_user.id))
+    # Update in Redis only - flush worker will persist to MySQL
+    _update_user_setting_in_redis(current_user.id, 'last_name', new_last_name)
 
     flash('Last name updated successfully.')
     return redirect(url_for('profile', success='last_name'))
@@ -4993,12 +7511,8 @@ def update_last_name():
 def update_username():
     new_username = request.form['username']
 
-    with get_db_pool().get_cursor(commit=True) as cursor:
-        cursor.execute("""
-            UPDATE users 
-            SET username = %s 
-            WHERE id = %s
-        """, (new_username, current_user.id))
+    # Update in Redis only - flush worker will persist to MySQL
+    _update_user_setting_in_redis(current_user.id, 'username', new_username)
 
     flash('Username updated successfully.')
     return redirect(url_for('profile', success='email'))
@@ -5010,12 +7524,8 @@ def update_password():
 
     hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
 
-    with get_db_pool().get_cursor(commit=True) as cursor:
-        cursor.execute("""
-            UPDATE users 
-            SET password = %s 
-            WHERE id = %s
-        """, (hashed_password, current_user.id))
+    # Update in Redis only - flush worker will persist to MySQL
+    _update_user_setting_in_redis(current_user.id, 'password', hashed_password)
 
     flash('Password updated successfully.')
     return redirect(url_for('profile', success='password'))
@@ -5027,9 +7537,8 @@ def enable_mfa():
         # Generate a new secret
         secret = pyotp.random_base32()
         
-        # Save it to the user
-        with get_db_pool().get_cursor(commit=True) as cursor:
-            cursor.execute("UPDATE users SET mfa_secret = %s WHERE id = %s", (secret, current_user.id))
+        # Update in Redis only - flush worker will persist to MySQL
+        _update_user_setting_in_redis(current_user.id, 'mfa_secret', secret)
 
         # Generate provisioning URI for Google Authenticator
         uri = pyotp.totp.TOTP(secret).provisioning_uri(name=current_user.username, issuer_name="Blankee")
@@ -5050,16 +7559,34 @@ def enable_mfa():
 def verify_mfa():
     code = request.form.get('code')
     
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT mfa_secret FROM users WHERE id = %s", (current_user.id,))
-        result = cursor.fetchone()
-        cursor.close()
+    # Get mfa_secret from Redis first
+    redis_key = f"users:v1:{current_user.id}"
+    user_data = None
+    secret = None
+    
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+                secret = user_data.get('mfa_secret')
+        except Exception as e:
+            app.logger.error(f"[REDIS ERROR] verify_mfa lookup: {str(e)}")
+    
+    # Fallback to MySQL if not in Redis
+    if not secret:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT mfa_secret FROM users WHERE id = %s", (current_user.id,))
+            result = cursor.fetchone()
+            cursor.close()
+            
+            if result and result[0]:
+                secret = result[0]
         
-    if not result or not result[0]:
+    if not secret:
         return jsonify({'status': 'error', 'message': 'No MFA secret set'}), 400
     
-    secret = result[0]
     totp = pyotp.TOTP(secret)
     if totp.verify(code):
         # Optionally set a session flag for MFA
@@ -5070,8 +7597,8 @@ def verify_mfa():
 @app.route('/disable_mfa', methods=['POST'])
 @login_required
 def disable_mfa():
-    with get_db_pool().get_cursor(commit=True) as cursor:
-        cursor.execute("UPDATE users SET mfa_secret = NULL WHERE id = %s", (current_user.id,))
+    # Update in Redis only - flush worker will persist to MySQL
+    _update_user_setting_in_redis(current_user.id, 'mfa_secret', None)
     
     return jsonify({'status': 'success'})
 
@@ -5082,10 +7609,14 @@ def update_starting_balance():
     new_balance = request.form.get('starting_balance')
 
     if new_balance:
+        # Update starting_savings in Redis (will be flushed to MySQL)
+        _update_user_setting_in_redis(current_user.id, 'starting_savings', float(new_balance))
+        
+        # Also update the Starting Balance income entry
         with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-            # First, find the 'Starting Balance' category for the current user
+            # Find the 'Starting Balance' category for the current user
             cursor.execute("""
                 SELECT id FROM income_categories 
                 WHERE name = 'Starting Balance' AND user_id = %s LIMIT 1
@@ -5094,33 +7625,37 @@ def update_starting_balance():
             result = cursor.fetchone()
 
             if result:
-                STARTING_BALANCE_CATEGORY_ID = result[0]  # Access the first element of the tuple
+                STARTING_BALANCE_CATEGORY_ID = result['id']
 
-                # Check if there is already an entry in the income_entries table for this category
-                cursor.execute("""
-                    SELECT id FROM income_entries 
-                    WHERE category_id = %s LIMIT 1
-                """, (STARTING_BALANCE_CATEGORY_ID,))
+                # Check if there is already an entry in Redis or MySQL
+                income_entries = _get_entries_from_redis('income_entries', current_user.id)
                 
-                entry_result = cursor.fetchone()
-
-                if entry_result:
-                    # Update the existing starting balance entry, only the amount, not the date
+                if income_entries is None:
+                    # Load from MySQL
                     cursor.execute("""
-                        UPDATE income_entries
-                        SET amount = %s  -- Use the correct column name here for the amount
-                        WHERE id = %s
-                    """, (new_balance, entry_result[0]))  # Access the first element of the tuple
+                        SELECT ie.* FROM income_entries ie
+                        JOIN income_categories ic ON ie.category_id = ic.id
+                        WHERE ic.user_id = %s
+                    """, (current_user.id,))
+                    income_entries = list(cursor.fetchall())
+                
+                # Find existing starting balance entry
+                existing_entry = next((e for e in income_entries if int(e.get('category_id', 0)) == int(STARTING_BALANCE_CATEGORY_ID)), None)
+                
+                if existing_entry:
+                    # Update existing entry in Redis
+                    entry_date = existing_entry.get('date')
+                    if isinstance(entry_date, str):
+                        entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                    _update_entry_in_redis('income_entries', current_user.id, 
+                                         STARTING_BALANCE_CATEGORY_ID, entry_date, 
+                                         float(new_balance))
                 else:
-                    # Insert a new starting balance entry if it doesn't exist
-                    cursor.execute("""
-                        INSERT INTO income_entries (category_id, amount, date)  -- Use the correct column name here
-                        VALUES (%s, %s, CURDATE())
-                    """, (STARTING_BALANCE_CATEGORY_ID, new_balance))
+                    # Create new entry in Redis
+                    _update_entry_in_redis('income_entries', current_user.id, 
+                                         STARTING_BALANCE_CATEGORY_ID, date.today(), 
+                                         float(new_balance))
 
-                # Commit the transaction
-                conn.commit()
-            
             cursor.close()
 
     return redirect(url_for('profile'))
@@ -5131,14 +7666,15 @@ def update_balance_threshold():
     # Retrieve the new balance threshold from the form
     new_threshold = request.form.get('balance_threshold')
     
+    app.logger.info(f"[UPDATE THRESHOLD] User {current_user.id}: new_threshold='{new_threshold}' (type: {type(new_threshold)})")
+    app.logger.info(f"[UPDATE THRESHOLD] request.form: {dict(request.form)}")
+    
     if new_threshold:
-        with get_db_pool().get_cursor(commit=True) as cursor:
-            # Update the user's balance threshold
-            cursor.execute("""
-                UPDATE users 
-                SET balance_threshold = %s 
-                WHERE id = %s
-            """, (new_threshold, current_user.id))
+        # Update balance_threshold in Redis (will be flushed to MySQL)
+        _update_user_setting_in_redis(current_user.id, 'balance_threshold', float(new_threshold))
+        app.logger.info(f"[UPDATE THRESHOLD] Successfully called _update_user_setting_in_redis for user {current_user.id}")
+    else:
+        app.logger.warning(f"[UPDATE THRESHOLD] new_threshold is empty/None for user {current_user.id}")
 
     return redirect(url_for('profile'))
 
@@ -5147,23 +7683,38 @@ def update_balance_threshold():
 @app.route('/remove_profile_picture', methods=['POST'])
 @login_required
 def remove_profile_picture():
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
+    # Get current profile picture from Redis first
+    redis_key = f"users:v1:{current_user.id}"
+    user_data = None
+    profile_pic = None
+    
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+                profile_pic = user_data.get('profile_picture')
+        except Exception as e:
+            app.logger.error(f"[REDIS ERROR] remove_profile_picture lookup: {str(e)}")
+    
+    # Fallback to MySQL if not in Redis
+    if profile_pic is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT profile_picture FROM users WHERE id = %s", (current_user.id,))
+            result = cursor.fetchone()
+            cursor.close()
+            
+            if result and result[0]:
+                profile_pic = result[0]
 
-        # Fetch the current user's profile picture
-        cursor.execute("SELECT profile_picture FROM users WHERE id = %s", (current_user.id,))
-        user_data = cursor.fetchone()
+    if profile_pic:
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], profile_pic)
+        if os.path.exists(filepath) and profile_pic != 'DefaultProfilePicture.svg':
+            os.remove(filepath)  # Delete the file from the server
 
-        if user_data and user_data[0]:
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], user_data[0])
-            if os.path.exists(filepath) and user_data[0] != 'DefaultProfilePicture.svg':
-                os.remove(filepath)  # Delete the file from the server
-
-            # Update the database to set profile_picture to None or to the default picture
-            cursor.execute("UPDATE users SET profile_picture = NULL WHERE id = %s", (current_user.id,))
-            conn.commit()
-        
-        cursor.close()
+        # Update in Redis only - flush worker will persist to MySQL
+        _update_user_setting_in_redis(current_user.id, 'profile_picture', None)
 
     return jsonify({'status': 'success'})  # Return a JSON response indicating success
 
@@ -5173,6 +7724,18 @@ def delete_user(username):
     if username != current_user.username:
         flash('You can only delete your own account.')
         return jsonify({'status': 'error', 'message': 'You can only delete your own account.'})
+
+    # Get user_id before deletion
+    user_id = current_user.id
+
+    # Dehydrate user data from Redis before deleting from MySQL
+    if app.config.get('REDIS_OK'):
+        try:
+            from redis_manager import invalidate_user_cache
+            invalidate_user_cache(user_id)
+            app.logger.info(f"[USER DELETE] Dehydrated user {user_id} ({username}) from Redis")
+        except Exception as e:
+            app.logger.warning(f"[USER DELETE] Failed to dehydrate user {user_id}: {e}")
 
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor()
@@ -5205,8 +7768,8 @@ def update_currency_type():
         return jsonify({'status': 'error', 'message': 'Invalid currency type'}), 400
 
     try:
-        with get_db_pool().get_cursor(commit=True) as cursor:
-            cursor.execute("UPDATE users SET currency_type = %s WHERE id = %s", (currency_type, current_user.id))
+        # Update in Redis only - flush worker will persist to MySQL
+        _update_user_setting_in_redis(current_user.id, 'currency_type', currency_type)
         
         return jsonify({'status': 'success'})
     except Exception as e:
@@ -5219,23 +7782,34 @@ def update_currency_type():
 @app.route('/recurring-income')
 @login_required
 def recurring_income():
+    # Try Redis first
+    recurring_income_records = _get_recurring_from_redis('recurring_income', current_user.id)
+    
+    if recurring_income_records is None:
+        # Fallback to MySQL
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # Fetch recurring income records, including no_end_date and name from income_categories
+            cursor.execute("""
+                SELECT ri.id, ri.user_id, ri.category_id, ic.name as category_name, ri.amount, 
+                       ri.cadence_interval, ri.cadence_unit, ri.weekdays, ri.monthly_days, 
+                       ri.start_date, ri.end_date, ri.yearly_day, ri.yearly_month,
+                       ic.no_end_date
+                FROM recurring_income ri
+                JOIN income_categories ic ON ri.category_id = ic.id
+                WHERE ri.user_id = %s
+            """, (current_user.id,))
+
+            recurring_income_records = cursor.fetchall()
+            cursor.close()
+            
+            # Cache to Redis
+            _set_recurring_to_redis('recurring_income', current_user.id, recurring_income_records)
+    
+    # Fetch user profile data
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-        
-        # Fetch recurring income records, including no_end_date from income_categories
-        cursor.execute("""
-            SELECT ri.id, ri.category_id, ic.name as category_name, ri.amount, 
-                   ri.cadence_interval, ri.cadence_unit, ri.weekdays, ri.monthly_days, 
-                   ri.start_date, ri.end_date, ri.yearly_day, ri.yearly_month,
-                   ic.no_end_date
-            FROM recurring_income ri
-            JOIN income_categories ic ON ri.category_id = ic.id
-            WHERE ri.user_id = %s
-        """, (current_user.id,))
-
-        recurring_income_records = cursor.fetchall()
-
-        # Fetch user profile data (profile picture, first name, last name, landing_page, currency_type)
         cursor.execute("SELECT profile_picture, first_name, last_name, landing_page, currency_type FROM users WHERE id = %s", (current_user.id,))
         user_data = cursor.fetchone()
         cursor.close()
@@ -5323,33 +7897,40 @@ def add_recurring_income():
             # Get the ID of the newly inserted income category
             category_id = cursor.lastrowid
 
-            # Step 3: Insert the recurring income record
-            cursor.execute("""
-                INSERT INTO recurring_income 
-                (user_id, category_id, amount, cadence_interval, cadence_unit, weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                current_user.id, category_id, amount, cadence_interval, cadence_unit, 
-                ','.join(weekdays) if weekdays else None, 
-                ','.join(map(str, monthly_days)) if monthly_days else None,  # Store multiple monthly days as a comma-separated string
-                yearly_day if yearly_day else None, 
-                yearly_month if yearly_month else None, 
-                start_date, 
-                end_date
-            ))
-
-            # Get the ID of the newly inserted recurring income record
-            recurring_id = cursor.lastrowid
+            # Step 3: Create recurring income record in Redis
+            recurring_data = {
+                'id': None,  # Will be generated by Redis helper
+                'user_id': current_user.id,
+                'category_id': category_id,
+                'category_name': category_name,  # Include the category name
+                'amount': float(amount),
+                'cadence_interval': cadence_interval,
+                'cadence_unit': cadence_unit,
+                'weekdays': ','.join(weekdays) if weekdays else None,
+                'monthly_days': ','.join(map(str, monthly_days)) if monthly_days else None,
+                'yearly_day': yearly_day if yearly_day else None,
+                'yearly_month': yearly_month if yearly_month else None,
+                'start_date': start_date,
+                'end_date': end_date,
+                'no_end_date': no_end_date
+            }
             
-            # Commit the transaction
+            _update_recurring_in_redis('recurring_income', current_user.id, recurring_data)
+            
+            # Use a temporary ID for generating entries (will be replaced on flush)
+            recurring_id = recurring_data['id']
+            
+            # Commit the category changes
             conn.commit()
             cursor.close()
 
         # Generate income entries based on the cadence
-        generate_income_entries(
-            recurring_id, category_id, amount, cadence_interval, cadence_unit, 
-            start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
-        )
+        # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
+        if recurring_id:
+            generate_income_entries(
+                recurring_id, category_id, amount, cadence_interval, cadence_unit, 
+                start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
+            )
 
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring income added successfully!'})
 
@@ -5358,36 +7939,38 @@ def add_recurring_income():
 
 
 def generate_income_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit, start_date_str, end_date_str, weekdays=None, monthly_days=None, yearly_day=None, yearly_month=None):
+    # Get user_id from the category
     with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT user_id FROM income_categories WHERE id = %s", (category_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        if not result:
+            return
+        user_id = result['user_id']
 
-        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-        current_date = start_date
-        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+    current_date = start_date
+    end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
 
-        while current_date <= end_date:
-            delta = None
+    while current_date <= end_date:
+        delta = None
 
-            if cadence_unit == 'days':
-                # Insert entry for the current date
-                cursor.execute("""
-                    INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                    VALUES (%s, %s, %s, %s)
-                """, (recurring_id, category_id, current_date, amount))
-                delta = timedelta(days=int(cadence_interval))
+        if cadence_unit == 'days':
+            # Insert entry to Redis
+            _update_entry_in_redis('income_entries', user_id, category_id, current_date, float(amount), processed=0, entry_id=None)
+            delta = timedelta(days=int(cadence_interval))
 
-            elif cadence_unit == 'weeks':
-                for weekday in weekdays:
-                    weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
-                    weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
-                    if start_date <= weekday_date <= end_date:
-                        cursor.execute("""
-                            INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, weekday_date, amount))
-                delta = timedelta(weeks=int(cadence_interval))
+        elif cadence_unit == 'weeks':
+            for weekday in weekdays:
+                weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
+                weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
+                if start_date <= weekday_date <= end_date:
+                    # Insert entry to Redis
+                    _update_entry_in_redis('income_entries', user_id, category_id, weekday_date, float(amount), processed=0, entry_id=None)
+            delta = timedelta(weeks=int(cadence_interval))
 
-            elif cadence_unit == 'months':
+        elif cadence_unit == 'months':
                 if monthly_days:
                     # Convert all days to int, except 'Last Day'
                     monthly_days_cleaned = []
@@ -5420,10 +8003,8 @@ def generate_income_entries(recurring_id, category_id, amount, cadence_interval,
                                 continue
                             if entry_date > end_date:
                                 continue
-                            cursor.execute("""
-                                INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                                VALUES (%s, %s, %s, %s)
-                            """, (recurring_id, category_id, entry_date, amount))
+                            # Insert entry to Redis
+                            _update_entry_in_redis('income_entries', user_id, category_id, entry_date, float(amount), processed=0, entry_id=None)
                         # Move to next month by cadence_interval
                         month += int(cadence_interval)
                         while month > 12:
@@ -5443,10 +8024,8 @@ def generate_income_entries(recurring_id, category_id, amount, cadence_interval,
                         elif entry_date > end_date:
                             break
                         else:
-                            cursor.execute("""
-                                INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                                VALUES (%s, %s, %s, %s)
-                            """, (recurring_id, category_id, entry_date, amount))
+                            # Insert entry to Redis
+                            _update_entry_in_redis('income_entries', user_id, category_id, entry_date, float(amount), processed=0, entry_id=None)
                         # Move to next month by cadence_interval
                         month += int(cadence_interval)
                         while month > 12:
@@ -5456,50 +8035,43 @@ def generate_income_entries(recurring_id, category_id, amount, cadence_interval,
                             break
                 break  # Exit the outer while loop after handling months
 
-            elif cadence_unit == 'years':
-                if yearly_day and yearly_month:
-                    interval = int(cadence_interval)
-                    year = start_date.year
-                    while True:
-                        try:
-                            yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
-                        except ValueError:
-                            year += interval
-                            continue
-                        if yearly_entry_date < start_date:
-                            year += interval
-                            continue
-                        if yearly_entry_date > end_date:
-                            break
-                        cursor.execute("""
-                            INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, yearly_entry_date, amount))
+        elif cadence_unit == 'years':
+            if yearly_day and yearly_month:
+                interval = int(cadence_interval)
+                year = start_date.year
+                while True:
+                    try:
+                        yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
+                    except ValueError:
                         year += interval
-                else:
-                    interval = int(cadence_interval)
-                    year = start_date.year
-                    while True:
-                        yearly_entry_date = date(year=year, month=1, day=1)
-                        if yearly_entry_date < start_date:
-                            year += interval
-                            continue
-                        if yearly_entry_date > end_date:
-                            break
-                        cursor.execute("""
-                            INSERT INTO income_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, yearly_entry_date, amount))
+                        continue
+                    if yearly_entry_date < start_date:
                         year += interval
-
-            # Increment current_date
-            if delta:
-                current_date += delta
+                        continue
+                    if yearly_entry_date > end_date:
+                        break
+                    # Insert entry to Redis
+                    _update_entry_in_redis('income_entries', user_id, category_id, yearly_entry_date, float(amount), processed=0, entry_id=None)
+                    year += interval
             else:
-                break
+                interval = int(cadence_interval)
+                year = start_date.year
+                while True:
+                    yearly_entry_date = date(year=year, month=1, day=1)
+                    if yearly_entry_date < start_date:
+                        year += interval
+                        continue
+                    if yearly_entry_date > end_date:
+                        break
+                    # Insert entry to Redis
+                    _update_entry_in_redis('income_entries', user_id, category_id, yearly_entry_date, float(amount), processed=0, entry_id=None)
+                    year += interval
 
-        conn.commit()
-        cursor.close()
+        # Increment current_date
+        if delta:
+            current_date += delta
+        else:
+            break
 
 @app.route('/delete-recurring-income', methods=['POST'])
 @login_required
@@ -5510,18 +8082,30 @@ def delete_recurring_income():
         if not recurring_id:
             return jsonify({'status': 'error', 'message': 'Recurring ID not provided.'}), 400
 
+        # First, try to find the recurring record in Redis
+        category_id = None
+        cached_recurring = _get_recurring_from_redis('recurring_income', current_user.id)
+        if cached_recurring:
+            for rec in cached_recurring:
+                if rec.get('id') == int(recurring_id):
+                    category_id = rec.get('category_id')
+                    break
+        
+        # If not found in Redis (or Redis not available), check MySQL
+        if category_id is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT category_id FROM recurring_income WHERE id = %s AND user_id = %s
+                """, (recurring_id, current_user.id))
+                category = cursor.fetchone()
+                cursor.close()
+                if not category:
+                    return jsonify({'status': 'error', 'message': 'Recurring income not found.'}), 404
+                category_id = category[0]
+        
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-
-            # Get the category_id for this recurring income
-            cursor.execute("""
-                SELECT category_id FROM recurring_income WHERE id = %s AND user_id = %s
-            """, (recurring_id, current_user.id))
-            category = cursor.fetchone()
-            if not category:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Recurring income not found.'}), 404
-            category_id = category[0]
 
             # Find Auto Adjustments income category for this user
             cursor.execute("""
@@ -5556,9 +8140,15 @@ def delete_recurring_income():
                 cursor.execute("UPDATE income_entries SET recurring_id = NULL WHERE id = %s", (entry_id,))
                 cursor.execute("DELETE FROM income_entries WHERE id = %s", (entry_id,))
 
-            # Delete all future entries and the recurring record/category
-            cursor.execute("DELETE FROM income_entries WHERE recurring_id = %s", (recurring_id,))
-            cursor.execute("DELETE FROM recurring_income WHERE id = %s AND user_id = %s", (recurring_id, current_user.id))
+            # Delete all future entries from Redis
+            _delete_entry_in_redis('income_entries', current_user.id, category_id, today, date(9999, 12, 31))
+            
+            # Delete the recurring record from Redis (this will mark it for deletion)
+            _delete_recurring_in_redis('recurring_income', current_user.id, recurring_id)
+            
+            # Delete the category from MySQL immediately
+            # Note: Categories aren't separately cached in Redis yet, but they're included in recurring records
+            # The _delete_recurring_in_redis call above handles removing the recurring record (with its category_name)
             cursor.execute("DELETE FROM income_categories WHERE id = %s AND user_id = %s", (category_id, current_user.id))
 
             conn.commit()
@@ -5604,18 +8194,31 @@ def update_recurring_income_inner(data, user_id):
         if datetime.strptime(end_date, '%Y-%m-%d') < datetime.strptime(start_date, '%Y-%m-%d'):
             return jsonify({'status': 'error', 'message': 'End date cannot be earlier than start date'}), 400
 
+        # First, try to find the recurring record in Redis (handles temp negative IDs)
+        cached_recurring = _get_recurring_from_redis('recurring_income', user_id)
+        category_id = None
+        
+        if cached_recurring:
+            for rec in cached_recurring:
+                if int(rec.get('id')) == int(recurring_id):
+                    category_id = rec.get('category_id')
+                    break
+        
+        # If not in Redis, fall back to MySQL
+        if not category_id:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT category_id FROM recurring_income WHERE id = %s AND user_id = %s
+                """, (recurring_id, user_id))
+                result = cursor.fetchone()
+                cursor.close()
+                if not result:
+                    return jsonify({'status': 'error', 'message': 'Recurring income not found'}), 404
+                category_id = result[0]
+        
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-
-            # Step 1: Fetch the category_id from recurring_income
-            cursor.execute("""
-                SELECT category_id FROM recurring_income WHERE id = %s AND user_id = %s
-            """, (recurring_id, user_id))
-            result = cursor.fetchone()
-            if not result:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Recurring income not found'}), 404
-            category_id = result[0]
 
             # Step 2: Update the category name in the income_categories table
             cursor.execute("""
@@ -5627,31 +8230,38 @@ def update_recurring_income_inner(data, user_id):
             # Convert the monthly_days array into a comma-separated string for storage, if it exists
             monthly_days_str = ','.join(map(str, monthly_days)) if monthly_days else None
 
-            # Step 2: Update the recurring income record in the database
-            cursor.execute("""
-                UPDATE recurring_income
-                SET category_id = %s, amount = %s, cadence_interval = %s, cadence_unit = %s, weekdays = %s, monthly_days = %s, yearly_day = %s, yearly_month = %s, start_date = %s, end_date = %s
-                WHERE id = %s AND user_id = %s
-            """, (category_id, amount, cadence_interval, cadence_unit,
-                  ','.join(weekdays) if weekdays else None,  # Store weekdays as a comma-separated string
-                  monthly_days_str,  # Store monthly days as a comma-separated string
-                  yearly_day if yearly_day else None,
-                  yearly_month if yearly_month else None,
-                  start_date, end_date, recurring_id, current_user.id))
+            # Step 2: Update the recurring income record in Redis
+            recurring_data = {
+                'id': recurring_id,
+                'user_id': user_id,
+                'category_id': category_id,
+                'category_name': category_name,  # Include the category name
+                'amount': float(amount),
+                'cadence_interval': cadence_interval,
+                'cadence_unit': cadence_unit,
+                'weekdays': ','.join(weekdays) if weekdays else None,
+                'monthly_days': monthly_days_str,
+                'yearly_day': yearly_day if yearly_day else None,
+                'yearly_month': yearly_month if yearly_month else None,
+                'start_date': start_date,
+                'end_date': end_date,
+                'no_end_date': no_end_date
+            }
+            
+            _update_recurring_in_redis('recurring_income', user_id, recurring_data)
 
-            # Step 3: Delete old income entries for today and the future related to this recurring record
-            cursor.execute("""
-                DELETE FROM income_entries
-                WHERE recurring_id = %s AND date >= %s
-            """, (recurring_id, today))
+            # Step 3: Delete old income entries for today and the future from Redis
+            _delete_entry_in_redis('income_entries', user_id, category_id, today, date(9999, 12, 31))
 
-            # Commit the deletion before generating new entries
+            # Commit the category changes
             conn.commit()
             cursor.close()
 
         # Step 4: Recreate the income entries with the updated details (only for today and future)
-        generate_income_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit,
-                                start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month)
+        # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
+        if recurring_id:
+            generate_income_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit,
+                                    start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month)
 
         return jsonify({'status': 'success', 'message': 'Recurring income updated successfully!'})
 
@@ -5726,23 +8336,34 @@ def get_cadence_description(cadence_interval, cadence_unit, weekdays=None, month
 @app.route('/recurring-expense')
 @login_required
 def recurring_expense():
+    # Try Redis first
+    recurring_expense_records = _get_recurring_from_redis('recurring_expense', current_user.id)
+    
+    if recurring_expense_records is None:
+        # Fallback to MySQL
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # Fetch recurring expense records, including no_end_date and name from expense_categories
+            cursor.execute("""
+                SELECT ri.id, ri.user_id, ri.category_id, ic.name as category_name, ri.amount, 
+                       ri.cadence_interval, ri.cadence_unit, ri.weekdays, ri.monthly_days, 
+                       ri.start_date, ri.end_date, ri.yearly_day, ri.yearly_month,
+                       ic.no_end_date
+                FROM recurring_expense ri
+                JOIN expense_categories ic ON ri.category_id = ic.id
+                WHERE ri.user_id = %s
+            """, (current_user.id,))
+
+            recurring_expense_records = cursor.fetchall()
+            cursor.close()
+            
+            # Cache to Redis
+            _set_recurring_to_redis('recurring_expense', current_user.id, recurring_expense_records)
+    
+    # Fetch user profile data
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-        
-        # Fetch recurring expense records, including no_end_date from expense_categories
-        cursor.execute("""
-            SELECT ri.id, ri.category_id, ic.name as category_name, ri.amount, 
-                   ri.cadence_interval, ri.cadence_unit, ri.weekdays, ri.monthly_days, 
-                   ri.start_date, ri.end_date, ri.yearly_day, ri.yearly_month,
-                   ic.no_end_date
-            FROM recurring_expense ri
-            JOIN expense_categories ic ON ri.category_id = ic.id
-            WHERE ri.user_id = %s
-        """, (current_user.id,))
-
-        recurring_expense_records = cursor.fetchall()
-
-        # Fetch user profile data (profile picture, first name, last name, landing_page, currency_type)
         cursor.execute("SELECT profile_picture, first_name, last_name, landing_page, currency_type FROM users WHERE id = %s", (current_user.id,))
         user_data = cursor.fetchone()
         cursor.close()
@@ -5830,34 +8451,41 @@ def add_recurring_expense():
             # Get the ID of the newly inserted expense category
             category_id = cursor.lastrowid
 
-            # Step 3: Insert the recurring expense record
-            cursor.execute("""
-                INSERT INTO recurring_expense 
-                (user_id, category_id, amount, cadence_interval, cadence_unit, weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                current_user.id, category_id, amount, cadence_interval, cadence_unit, 
-                ','.join(weekdays) if weekdays else None, 
-                ','.join(map(str, monthly_days)) if monthly_days else None,  # Store multiple monthly days as a comma-separated string
-                yearly_day if yearly_day else None, 
-                yearly_month if yearly_month else None, 
-                start_date, 
-                end_date
-            ))
-
-            # Get the ID of the newly inserted recurring expense record
-            recurring_id = cursor.lastrowid
+            # Step 3: Create recurring expense record in Redis
+            recurring_data = {
+                'id': None,  # Will be generated by Redis helper
+                'user_id': current_user.id,
+                'category_id': category_id,
+                'category_name': category_name,  # Include the category name
+                'amount': float(amount),
+                'cadence_interval': cadence_interval,
+                'cadence_unit': cadence_unit,
+                'weekdays': ','.join(weekdays) if weekdays else None,
+                'monthly_days': ','.join(map(str, monthly_days)) if monthly_days else None,
+                'yearly_day': yearly_day if yearly_day else None,
+                'yearly_month': yearly_month if yearly_month else None,
+                'start_date': start_date,
+                'end_date': end_date,
+                'no_end_date': no_end_date
+            }
             
-            # Commit the transaction
+            _update_recurring_in_redis('recurring_expense', current_user.id, recurring_data)
+            
+            # Use a temporary ID for generating entries (will be replaced on flush)
+            recurring_id = recurring_data['id']
+            
+            # Commit the category changes
             conn.commit()
             cursor.close()
 
         # Generate expense entries based on the cadence
-        generate_expense_entries(
-            recurring_id, category_id, amount, cadence_interval, cadence_unit, 
-            start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
-        )
-
+        # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
+        if recurring_id:
+            generate_expense_entries(
+                recurring_id, category_id, amount, cadence_interval, cadence_unit,
+                start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
+            )
+        
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring expense added successfully!'})
 
     except Exception as e:
@@ -5865,36 +8493,38 @@ def add_recurring_expense():
 
 
 def generate_expense_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit, start_date_str, end_date_str, weekdays=None, monthly_days=None, yearly_day=None, yearly_month=None):
+    # Get user_id from the category
     with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT user_id FROM expense_categories WHERE id = %s", (category_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        if not result:
+            return
+        user_id = result['user_id']
 
-        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-        current_date = start_date
-        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+    current_date = start_date
+    end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
 
-        while current_date <= end_date:
-            delta = None
+    while current_date <= end_date:
+        delta = None
 
-            if cadence_unit == 'days':
-                # Insert entry for the current date
-                cursor.execute("""
-                    INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                    VALUES (%s, %s, %s, %s)
-                """, (recurring_id, category_id, current_date, amount))
-                delta = timedelta(days=int(cadence_interval))
+        if cadence_unit == 'days':
+            # Insert entry to Redis
+            _update_entry_in_redis('expense_entries', user_id, category_id, current_date, float(amount), processed=0, entry_id=None)
+            delta = timedelta(days=int(cadence_interval))
 
-            elif cadence_unit == 'weeks':
-                for weekday in weekdays:
-                    weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
-                    weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
-                    if start_date <= weekday_date <= end_date:
-                        cursor.execute("""
-                            INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, weekday_date, amount))
-                delta = timedelta(weeks=int(cadence_interval))
+        elif cadence_unit == 'weeks':
+            for weekday in weekdays:
+                weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
+                weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
+                if start_date <= weekday_date <= end_date:
+                    # Insert entry to Redis
+                    _update_entry_in_redis('expense_entries', user_id, category_id, weekday_date, float(amount), processed=0, entry_id=None)
+            delta = timedelta(weeks=int(cadence_interval))
 
-            elif cadence_unit == 'months':
+        elif cadence_unit == 'months':
                 if monthly_days:
                     # Convert all days to int, except 'Last Day'
                     monthly_days_cleaned = []
@@ -5927,10 +8557,8 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                                 continue
                             if entry_date > end_date:
                                 continue
-                            cursor.execute("""
-                                INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                                VALUES (%s, %s, %s, %s)
-                            """, (recurring_id, category_id, entry_date, amount))
+                            # Insert entry to Redis
+                            _update_entry_in_redis('expense_entries', user_id, category_id, entry_date, float(amount), processed=0, entry_id=None)
                         # Move to next month by cadence_interval
                         month += int(cadence_interval)
                         while month > 12:
@@ -5950,10 +8578,8 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                         elif entry_date > end_date:
                             break
                         else:
-                            cursor.execute("""
-                                INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                                VALUES (%s, %s, %s, %s)
-                            """, (recurring_id, category_id, entry_date, amount))
+                            # Insert entry to Redis
+                            _update_entry_in_redis('expense_entries', user_id, category_id, entry_date, float(amount), processed=0, entry_id=None)
                         # Move to next month by cadence_interval
                         month += int(cadence_interval)
                         while month > 12:
@@ -5963,50 +8589,43 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                             break
                 break  # Exit the outer while loop after handling months
 
-            elif cadence_unit == 'years':
-                if yearly_day and yearly_month:
-                    interval = int(cadence_interval)
-                    year = start_date.year
-                    while True:
-                        try:
-                            yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
-                        except ValueError:
-                            year += interval
-                            continue
-                        if yearly_entry_date < start_date:
-                            year += interval
-                            continue
-                        if yearly_entry_date > end_date:
-                            break
-                        cursor.execute("""
-                            INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, yearly_entry_date, amount))
+        elif cadence_unit == 'years':
+            if yearly_day and yearly_month:
+                interval = int(cadence_interval)
+                year = start_date.year
+                while True:
+                    try:
+                        yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
+                    except ValueError:
                         year += interval
-                else:
-                    interval = int(cadence_interval)
-                    year = start_date.year
-                    while True:
-                        yearly_entry_date = date(year=year, month=1, day=1)
-                        if yearly_entry_date < start_date:
-                            year += interval
-                            continue
-                        if yearly_entry_date > end_date:
-                            break
-                        cursor.execute("""
-                            INSERT INTO expense_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, yearly_entry_date, amount))
+                        continue
+                    if yearly_entry_date < start_date:
                         year += interval
-
-            # Increment current_date
-            if delta:
-                current_date += delta
+                        continue
+                    if yearly_entry_date > end_date:
+                        break
+                    # Insert entry to Redis
+                    _update_entry_in_redis('expense_entries', user_id, category_id, yearly_entry_date, float(amount), processed=0, entry_id=None)
+                    year += interval
             else:
-                break
+                interval = int(cadence_interval)
+                year = start_date.year
+                while True:
+                    yearly_entry_date = date(year=year, month=1, day=1)
+                    if yearly_entry_date < start_date:
+                        year += interval
+                        continue
+                    if yearly_entry_date > end_date:
+                        break
+                    # Insert entry to Redis
+                    _update_entry_in_redis('expense_entries', user_id, category_id, yearly_entry_date, float(amount), processed=0, entry_id=None)
+                    year += interval
 
-        conn.commit()
-        cursor.close()
+        # Increment current_date
+        if delta:
+            current_date += delta
+        else:
+            break
 
 @app.route('/delete-recurring-expense', methods=['POST'])
 @login_required
@@ -6017,18 +8636,30 @@ def delete_recurring_expense():
         if not recurring_id:
             return jsonify({'status': 'error', 'message': 'Recurring ID not provided.'}), 400
 
+        # First, try to find the recurring record in Redis
+        category_id = None
+        cached_recurring = _get_recurring_from_redis('recurring_expense', current_user.id)
+        if cached_recurring:
+            for rec in cached_recurring:
+                if rec.get('id') == int(recurring_id):
+                    category_id = rec.get('category_id')
+                    break
+        
+        # If not found in Redis (or Redis not available), check MySQL
+        if category_id is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT category_id FROM recurring_expense WHERE id = %s AND user_id = %s
+                """, (recurring_id, current_user.id))
+                category = cursor.fetchone()
+                cursor.close()
+                if not category:
+                    return jsonify({'status': 'error', 'message': 'Recurring expense not found.'}), 404
+                category_id = category[0]
+        
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-
-            # Get the category_id for this recurring expense
-            cursor.execute("""
-                SELECT category_id FROM recurring_expense WHERE id = %s AND user_id = %s
-            """, (recurring_id, current_user.id))
-            category = cursor.fetchone()
-            if not category:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Recurring expense not found.'}), 404
-            category_id = category[0]
 
             # Find Auto Adjustments expense category for this user
             cursor.execute("""
@@ -6063,9 +8694,15 @@ def delete_recurring_expense():
                 cursor.execute("UPDATE expense_entries SET recurring_id = NULL WHERE id = %s", (entry_id,))
                 cursor.execute("DELETE FROM expense_entries WHERE id = %s", (entry_id,))
 
-            # Delete all future entries and the recurring record/category
-            cursor.execute("DELETE FROM expense_entries WHERE recurring_id = %s", (recurring_id,))
-            cursor.execute("DELETE FROM recurring_expense WHERE id = %s AND user_id = %s", (recurring_id, current_user.id))
+            # Delete all future entries from Redis
+            _delete_entry_in_redis('expense_entries', current_user.id, category_id, today, date(9999, 12, 31))
+            
+            # Delete the recurring record from Redis (this will mark it for deletion)
+            _delete_recurring_in_redis('recurring_expense', current_user.id, recurring_id)
+            
+            # Delete the category from MySQL immediately
+            # Note: Categories aren't separately cached in Redis yet, but they're included in recurring records
+            # The _delete_recurring_in_redis call above handles removing the recurring record (with its category_name)
             cursor.execute("DELETE FROM expense_categories WHERE id = %s AND user_id = %s", (category_id, current_user.id))
 
             conn.commit()
@@ -6111,18 +8748,31 @@ def update_recurring_expense_inner(data, user_id):
         if datetime.strptime(end_date, '%Y-%m-%d') < datetime.strptime(start_date, '%Y-%m-%d'):
             return jsonify({'status': 'error', 'message': 'End date cannot be earlier than start date'}), 400
 
+        # First, try to find the recurring record in Redis (handles temp negative IDs)
+        cached_recurring = _get_recurring_from_redis('recurring_expense', user_id)
+        category_id = None
+        
+        if cached_recurring:
+            for rec in cached_recurring:
+                if int(rec.get('id')) == int(recurring_id):
+                    category_id = rec.get('category_id')
+                    break
+        
+        # If not in Redis, fall back to MySQL
+        if not category_id:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT category_id FROM recurring_expense WHERE id = %s AND user_id = %s
+                """, (recurring_id, user_id))
+                result = cursor.fetchone()
+                cursor.close()
+                if not result:
+                    return jsonify({'status': 'error', 'message': 'Recurring expense not found'}), 404
+                category_id = result[0]
+        
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-
-            # Step 1: Fetch the category_id from recurring_expense
-            cursor.execute("""
-                SELECT category_id FROM recurring_expense WHERE id = %s AND user_id = %s
-            """, (recurring_id, user_id))
-            result = cursor.fetchone()
-            if not result:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Recurring expense not found'}), 404
-            category_id = result[0]
 
             # Step 2: Update the category name in the expense_categories table
             cursor.execute("""
@@ -6134,31 +8784,38 @@ def update_recurring_expense_inner(data, user_id):
             # Convert the monthly_days array into a comma-separated string for storage, if it exists
             monthly_days_str = ','.join(map(str, monthly_days)) if monthly_days else None
 
-            # Step 2: Update the recurring expense record in the database
-            cursor.execute("""
-                UPDATE recurring_expense
-                SET category_id = %s, amount = %s, cadence_interval = %s, cadence_unit = %s, weekdays = %s, monthly_days = %s, yearly_day = %s, yearly_month = %s, start_date = %s, end_date = %s
-                WHERE id = %s AND user_id = %s
-            """, (category_id, amount, cadence_interval, cadence_unit, 
-                  ','.join(weekdays) if weekdays else None,  # Store weekdays as a comma-separated string
-                  monthly_days_str,  # Store monthly days as a comma-separated string
-                  yearly_day if yearly_day else None, 
-                  yearly_month if yearly_month else None, 
-                  start_date, end_date, recurring_id, current_user.id))
+            # Step 2: Update the recurring expense record in Redis
+            recurring_data = {
+                'id': recurring_id,
+                'user_id': user_id,
+                'category_id': category_id,
+                'category_name': category_name,  # Include the category name
+                'amount': float(amount),
+                'cadence_interval': cadence_interval,
+                'cadence_unit': cadence_unit,
+                'weekdays': ','.join(weekdays) if weekdays else None,
+                'monthly_days': monthly_days_str,
+                'yearly_day': yearly_day if yearly_day else None,
+                'yearly_month': yearly_month if yearly_month else None,
+                'start_date': start_date,
+                'end_date': end_date,
+                'no_end_date': no_end_date
+            }
+            
+            _update_recurring_in_redis('recurring_expense', user_id, recurring_data)
 
-            # Step 3: Delete old expense entries for today and the future related to this recurring record
-            cursor.execute("""
-                DELETE FROM expense_entries
-                WHERE recurring_id = %s AND date >= %s
-            """, (recurring_id, today))
+            # Step 3: Delete old expense entries for today and the future from Redis
+            _delete_entry_in_redis('expense_entries', user_id, category_id, today, date(9999, 12, 31))
 
-            # Commit the deletion before generating new entries
+            # Commit the category changes
             conn.commit()
             cursor.close()
         
         # Step 4: Recreate the expense entries with the updated details (only for today and future)
-        generate_expense_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit, 
-                                start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month)
+        # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
+        if recurring_id:
+            generate_expense_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit, 
+                                    start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month)
         
         return jsonify({'status': 'success', 'message': 'Recurring expense updated successfully!'})
 
@@ -6232,22 +8889,35 @@ def get_cadence_description(cadence_interval, cadence_unit, weekdays=None, month
 @app.route('/recurring-ca-expense')
 @login_required
 def recurring_ca_expense():
+    # Try Redis first
+    recurring_ca_expense_records = _get_recurring_from_redis('recurring_c_expense', current_user.id)
+    
+    if recurring_ca_expense_records is None:
+        # Fallback to MySQL
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+            # Fetch recurring CA expense records, including no_end_date and name from c_expense_categories
+            cursor.execute("""
+                SELECT rce.id, rce.user_id, rce.category_id, cec.account_id, cec.name as category_name, rce.amount, 
+                       rce.cadence_interval, rce.cadence_unit, rce.weekdays, rce.monthly_days, 
+                       rce.start_date, rce.end_date, rce.yearly_day, rce.yearly_month,
+                       cec.no_end_date
+                FROM recurring_c_expense rce
+                JOIN c_expense_categories cec ON rce.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE rce.user_id = %s
+            """, (current_user.id,))
+            recurring_ca_expense_records = cursor.fetchall()
+            cursor.close()
+            
+            # Cache to Redis
+            _set_recurring_to_redis('recurring_c_expense', current_user.id, recurring_ca_expense_records)
+    
+    # Fetch credit accounts and user profile data
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-        # Fetch recurring CA expense records, including no_end_date from c_expense_categories
-        cursor.execute("""
-            SELECT rce.id, rce.category_id, cec.account_id, cec.name as category_name, rce.amount, 
-                   rce.cadence_interval, rce.cadence_unit, rce.weekdays, rce.monthly_days, 
-                   rce.start_date, rce.end_date, rce.yearly_day, rce.yearly_month,
-                   cec.no_end_date
-            FROM recurring_c_expense rce
-            JOIN c_expense_categories cec ON rce.category_id = cec.id
-            JOIN credit_accounts ca ON cec.account_id = ca.id
-            WHERE rce.user_id = %s
-        """, (current_user.id,))
-        recurring_ca_expense_records = cursor.fetchall()
-
+        
         # Fetch all credit accounts for the current user
         cursor.execute("""
             SELECT * FROM credit_accounts
@@ -6338,31 +9008,46 @@ def add_recurring_ca_expense():
 
             # Get the ID of the newly inserted CA expense category
             category_id = cursor.lastrowid
+            
+            # Fetch account_id for the category we just created
+            cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (category_id,))
+            account_row = cursor.fetchone()
+            account_id_value = account_row[0] if account_row else None
 
-            # Step 3: Insert the recurring CA expense record
-            cursor.execute("""
-                INSERT INTO recurring_c_expense 
-                (user_id, category_id, amount, cadence_interval, cadence_unit, weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                current_user.id, category_id, amount, cadence_interval, cadence_unit,
-                ','.join(weekdays) if weekdays else None,
-                ','.join(map(str, monthly_days)) if monthly_days else None,
-                yearly_day if yearly_day else None,
-                yearly_month if yearly_month else None,
-                start_date,
-                end_date
-            ))
-
-            recurring_id = cursor.lastrowid
+            # Step 3: Create recurring CA expense record in Redis
+            recurring_data = {
+                'id': None,  # Will be generated by Redis helper
+                'user_id': current_user.id,
+                'category_id': category_id,
+                'account_id': account_id_value,  # Include the account_id
+                'category_name': category_name,  # Include the category name
+                'amount': float(amount),
+                'cadence_interval': cadence_interval,
+                'cadence_unit': cadence_unit,
+                'weekdays': ','.join(weekdays) if weekdays else None,
+                'monthly_days': ','.join(map(str, monthly_days)) if monthly_days else None,
+                'yearly_day': yearly_day if yearly_day else None,
+                'yearly_month': yearly_month if yearly_month else None,
+                'start_date': start_date,
+                'end_date': end_date,
+                'no_end_date': no_end_date
+            }
+            
+            _update_recurring_in_redis('recurring_c_expense', current_user.id, recurring_data)
+            
+            # Use a temporary ID for generating entries (will be replaced on flush)
+            recurring_id = recurring_data['id']
+            
             conn.commit()
             cursor.close()
 
         # Generate CA expense entries based on the cadence
-        generate_ca_expense_entries(
-            recurring_id, category_id, amount, cadence_interval, cadence_unit,
-            start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
-        )
+        # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
+        if recurring_id:
+            generate_ca_expense_entries(
+                recurring_id, category_id, amount, cadence_interval, cadence_unit,
+                start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
+            )
 
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring CA expense added successfully!'})
 
@@ -6370,35 +9055,43 @@ def add_recurring_ca_expense():
         return jsonify({'status': 'error', 'message': f'An error occurred while adding the recurring CA expense: {str(e)}'}), 500
 
 def generate_ca_expense_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit, start_date_str, end_date_str, weekdays=None, monthly_days=None, yearly_day=None, yearly_month=None):
+    # Get user_id from the category via credit_accounts
     with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("""
+            SELECT ca.user_id 
+            FROM c_expense_categories cec
+            JOIN credit_accounts ca ON cec.account_id = ca.id
+            WHERE cec.id = %s
+        """, (category_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        if not result:
+            return
+        user_id = result['user_id']
 
-        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-        current_date = start_date
-        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+    current_date = start_date
+    end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
 
-        while current_date <= end_date:
-            delta = None
+    while current_date <= end_date:
+        delta = None
 
-            if cadence_unit == 'days':
-                cursor.execute("""
-                    INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                    VALUES (%s, %s, %s, %s)
-                """, (recurring_id, category_id, current_date, amount))
-                delta = timedelta(days=int(cadence_interval))
+        if cadence_unit == 'days':
+            # Insert entry to Redis
+            _update_entry_in_redis('c_expense_entries', user_id, category_id, current_date, float(amount), processed=0, entry_id=None)
+            delta = timedelta(days=int(cadence_interval))
 
-            elif cadence_unit == 'weeks':
-                for weekday in weekdays:
-                    weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
-                    weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
-                    if start_date <= weekday_date <= end_date:
-                        cursor.execute("""
-                            INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, weekday_date, amount))
-                delta = timedelta(weeks=int(cadence_interval))
+        elif cadence_unit == 'weeks':
+            for weekday in weekdays:
+                weekday_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(weekday)
+                weekday_date = current_date + timedelta(days=(weekday_num - current_date.weekday()) % 7)
+                if start_date <= weekday_date <= end_date:
+                    # Insert entry to Redis
+                    _update_entry_in_redis('c_expense_entries', user_id, category_id, weekday_date, float(amount), processed=0, entry_id=None)
+            delta = timedelta(weeks=int(cadence_interval))
 
-            elif cadence_unit == 'months':
+        elif cadence_unit == 'months':
                 if monthly_days:
                     monthly_days_cleaned = []
                     for day in monthly_days:
@@ -6428,10 +9121,8 @@ def generate_ca_expense_entries(recurring_id, category_id, amount, cadence_inter
                                 continue
                             if entry_date > end_date:
                                 continue
-                            cursor.execute("""
-                                INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                                VALUES (%s, %s, %s, %s)
-                            """, (recurring_id, category_id, entry_date, amount))
+                            # Insert entry to Redis
+                            _update_entry_in_redis('c_expense_entries', user_id, category_id, entry_date, float(amount), processed=0, entry_id=None)
                         month += int(cadence_interval)
                         while month > 12:
                             month -= 12
@@ -6448,10 +9139,8 @@ def generate_ca_expense_entries(recurring_id, category_id, amount, cadence_inter
                         elif entry_date > end_date:
                             break
                         else:
-                            cursor.execute("""
-                                INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                                VALUES (%s, %s, %s, %s)
-                            """, (recurring_id, category_id, entry_date, amount))
+                            # Insert entry to Redis
+                            _update_entry_in_redis('c_expense_entries', user_id, category_id, entry_date, float(amount), processed=0, entry_id=None)
                         month += int(cadence_interval)
                         while month > 12:
                             month -= 12
@@ -6460,49 +9149,43 @@ def generate_ca_expense_entries(recurring_id, category_id, amount, cadence_inter
                             break
                 break
 
-            elif cadence_unit == 'years':
-                if yearly_day and yearly_month:
-                    interval = int(cadence_interval)
-                    year = start_date.year
-                    while True:
-                        try:
-                            yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
-                        except ValueError:
-                            year += interval
-                            continue
-                        if yearly_entry_date < start_date:
-                            year += interval
-                            continue
-                        if yearly_entry_date > end_date:
-                            break
-                        cursor.execute("""
-                            INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, yearly_entry_date, amount))
+        elif cadence_unit == 'years':
+            if yearly_day and yearly_month:
+                interval = int(cadence_interval)
+                year = start_date.year
+                while True:
+                    try:
+                        yearly_entry_date = date(year=year, month=int(yearly_month), day=int(yearly_day))
+                    except ValueError:
                         year += interval
-                else:
-                    interval = int(cadence_interval)
-                    year = start_date.year
-                    while True:
-                        yearly_entry_date = date(year=year, month=1, day=1)
-                        if yearly_entry_date < start_date:
-                            year += interval
-                            continue
-                        if yearly_entry_date > end_date:
-                            break
-                        cursor.execute("""
-                            INSERT INTO c_expense_entries (recurring_id, category_id, date, amount)
-                            VALUES (%s, %s, %s, %s)
-                        """, (recurring_id, category_id, yearly_entry_date, amount))
+                        continue
+                    if yearly_entry_date < start_date:
                         year += interval
-
-            if delta:
-                current_date += delta
+                        continue
+                    if yearly_entry_date > end_date:
+                        break
+                    # Insert entry to Redis
+                    _update_entry_in_redis('c_expense_entries', user_id, category_id, yearly_entry_date, float(amount), processed=0, entry_id=None)
+                    year += interval
             else:
-                break
+                interval = int(cadence_interval)
+                year = start_date.year
+                while True:
+                    yearly_entry_date = date(year=year, month=1, day=1)
+                    if yearly_entry_date < start_date:
+                        year += interval
+                        continue
+                    if yearly_entry_date > end_date:
+                        break
+                    # Insert entry to Redis
+                    _update_entry_in_redis('c_expense_entries', user_id, category_id, yearly_entry_date, float(amount), processed=0, entry_id=None)
+                    year += interval
 
-        conn.commit()
-        cursor.close()
+        # Increment current_date
+        if delta:
+            current_date += delta
+        else:
+            break
 
 @app.route('/delete-recurring-ca-expense', methods=['POST'])
 @login_required
@@ -6513,18 +9196,30 @@ def delete_recurring_ca_expense():
         if not recurring_id:
             return jsonify({'status': 'error', 'message': 'Recurring ID not provided.'}), 400
 
+        # First, try to find the recurring record in Redis
+        category_id = None
+        cached_recurring = _get_recurring_from_redis('recurring_c_expense', current_user.id)
+        if cached_recurring:
+            for rec in cached_recurring:
+                if rec.get('id') == int(recurring_id):
+                    category_id = rec.get('category_id')
+                    break
+        
+        # If not found in Redis (or Redis not available), check MySQL
+        if category_id is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT category_id FROM recurring_c_expense WHERE id = %s AND user_id = %s
+                """, (recurring_id, current_user.id))
+                category = cursor.fetchone()
+                cursor.close()
+                if not category:
+                    return jsonify({'status': 'error', 'message': 'Recurring CA expense not found.'}), 404
+                category_id = category[0]
+        
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-
-            # Get the category_id for this recurring CA expense
-            cursor.execute("""
-                SELECT category_id FROM recurring_c_expense WHERE id = %s AND user_id = %s
-            """, (recurring_id, current_user.id))
-            category = cursor.fetchone()
-            if not category:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Recurring CA expense not found.'}), 404
-            category_id = category[0]
 
             # Find account_id for this CA category
             cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (category_id,))
@@ -6564,9 +9259,15 @@ def delete_recurring_ca_expense():
                 cursor.execute("UPDATE c_expense_entries SET recurring_id = NULL WHERE id = %s", (entry_id,))
                 cursor.execute("DELETE FROM c_expense_entries WHERE id = %s", (entry_id,))
 
-            # Delete all future entries and the recurring record/category
-            cursor.execute("DELETE FROM c_expense_entries WHERE recurring_id = %s", (recurring_id,))
-            cursor.execute("DELETE FROM recurring_c_expense WHERE id = %s AND user_id = %s", (recurring_id, current_user.id))
+            # Delete all future entries from Redis
+            _delete_entry_in_redis('c_expense_entries', current_user.id, category_id, today, date(9999, 12, 31))
+            
+            # Delete the recurring record from Redis (this will mark it for deletion)
+            _delete_recurring_in_redis('recurring_c_expense', current_user.id, recurring_id)
+            
+            # Delete the category from MySQL immediately
+            # Note: Categories aren't separately cached in Redis yet, but they're included in recurring records
+            # The _delete_recurring_in_redis call above handles removing the recurring record (with its category_name and account_id)
             cursor.execute("DELETE FROM c_expense_categories WHERE id = %s", (category_id,))
 
             conn.commit()
@@ -6607,47 +9308,75 @@ def update_recurring_ca_expense_inner(data, user_id):
         if datetime.strptime(end_date, '%Y-%m-%d') < datetime.strptime(start_date, '%Y-%m-%d'):
             return jsonify({'status': 'error', 'message': 'End date cannot be earlier than start date'}), 400
 
+        # First, try to find the recurring record in Redis (handles temp negative IDs)
+        cached_recurring = _get_recurring_from_redis('recurring_c_expense', user_id)
+        category_id = None
+        existing_category_name = None
+        account_id_value = None
+        
+        if cached_recurring:
+            for rec in cached_recurring:
+                if int(rec.get('id')) == int(recurring_id):
+                    category_id = rec.get('category_id')
+                    existing_category_name = rec.get('category_name')
+                    account_id_value = rec.get('account_id')
+                    break
+        
+        # If not in Redis, fall back to MySQL
+        if not category_id:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT rce.category_id, cec.name as category_name, cec.account_id 
+                    FROM recurring_c_expense rce
+                    JOIN c_expense_categories cec ON rce.category_id = cec.id
+                    WHERE rce.id = %s AND rce.user_id = %s
+                """, (recurring_id, user_id))
+                result = cursor.fetchone()
+                cursor.close()
+                if not result:
+                    return jsonify({'status': 'error', 'message': 'Recurring CA expense not found'}), 404
+                category_id = result[0]
+                existing_category_name = result[1]
+                account_id_value = result[2]
+        
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
 
-            # Step 1: Fetch the category_id from recurring_c_expense
-            cursor.execute("""
-                SELECT category_id FROM recurring_c_expense WHERE id = %s AND user_id = %s
-            """, (recurring_id, user_id))
-            result = cursor.fetchone()
-            if not result:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Recurring CA expense not found'}), 404
-            category_id = result[0]
+            # Step 2: Update the recurring CA expense record in Redis
+            recurring_data = {
+                'id': recurring_id,
+                'user_id': user_id,
+                'category_id': category_id,
+                'account_id': account_id_value,  # Include the account_id
+                'category_name': existing_category_name,  # Include the category name
+                'amount': float(amount),
+                'cadence_interval': cadence_interval,
+                'cadence_unit': cadence_unit,
+                'weekdays': ','.join(weekdays) if weekdays else None,
+                'monthly_days': ','.join(map(str, monthly_days)) if monthly_days else None,
+                'yearly_day': yearly_day if yearly_day else None,
+                'yearly_month': yearly_month if yearly_month else None,
+                'start_date': start_date,
+                'end_date': end_date,
+                'no_end_date': no_end_date
+            }
+            
+            _update_recurring_in_redis('recurring_c_expense', user_id, recurring_data)
 
-            # Step 2: Update the recurring CA expense record in the database
-            cursor.execute("""
-                UPDATE recurring_c_expense
-                SET amount = %s, cadence_interval = %s, cadence_unit = %s, weekdays = %s, monthly_days = %s, yearly_day = %s, yearly_month = %s, start_date = %s, end_date = %s
-                WHERE id = %s AND user_id = %s
-            """, (
-                amount, cadence_interval, cadence_unit,
-                ','.join(weekdays) if weekdays else None,
-                ','.join(map(str, monthly_days)) if monthly_days else None,
-                yearly_day if yearly_day else None,
-                yearly_month if yearly_month else None,
-                start_date, end_date, recurring_id, user_id
-            ))
-
-            # Step 3: Delete old CA expense entries for today and the future related to this recurring record
-            cursor.execute("""
-                DELETE FROM c_expense_entries
-                WHERE recurring_id = %s AND date >= %s
-            """, (recurring_id, today))
+            # Step 3: Delete old CA expense entries for today and the future from Redis
+            _delete_entry_in_redis('c_expense_entries', user_id, category_id, today, date(9999, 12, 31))
 
             conn.commit()
             cursor.close()
 
         # Step 4: Recreate the CA expense entries with the updated details (only for today and future)
-        generate_ca_expense_entries(
-            recurring_id, category_id, amount, cadence_interval, cadence_unit,
-            start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
-        )
+        # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
+        if recurring_id:
+            generate_ca_expense_entries(
+                recurring_id, category_id, amount, cadence_interval, cadence_unit,
+                start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
+            )
 
         return jsonify({'status': 'success', 'message': 'Recurring CA expense updated successfully!'})
 
@@ -6666,6 +9395,8 @@ def footer_add_entry():
     category_id = data.get('category')
     amount = data.get('amount')
     entry_date = data.get('date')
+    
+    app.logger.info(f"[FOOTER ADD ENTRY] User {current_user.id}: type={entry_type}, category={category_id}, amount={amount}, date={entry_date}")
 
     if not all([entry_type, category_id, amount, entry_date]):
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
@@ -6673,6 +9404,8 @@ def footer_add_entry():
     # Establish a database connection
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        ca_triggered = False
 
         # Determine the appropriate table
         if entry_type == 'income':
@@ -6706,47 +9439,130 @@ def footer_add_entry():
             if not cat_row:
                 cursor.close()
                 return jsonify({'status': 'error', 'message': 'Invalid category_id for this entry type'}), 400
-
-        # Check if an entry already exists for the given category and date
-        cursor.execute(f"SELECT id, amount, processed FROM {table_name} WHERE category_id = %s AND date = %s", (category_id, entry_date))
-        existing_entry = cursor.fetchone()
-
-        if existing_entry:
-            new_amount = existing_entry['amount'] + Decimal(amount)
-            new_processed = existing_entry['processed'] + 1  # Increment the processed value by 1
-            cursor.execute(f"UPDATE {table_name} SET amount = %s, processed = %s WHERE id = %s", (new_amount, new_processed, existing_entry['id']))
-        else:
-            cursor.execute(f"INSERT INTO {table_name} (category_id, date, amount, processed) VALUES (%s, %s, %s, %s)", (category_id, entry_date, amount, 1))
-
-        # If this is an expense category and is_credit_account=1, add payment record to c_payment_entries and run save_ca_daily_balance()
-        ca_triggered = False
-        if entry_type == 'expense' and cat_row.get('is_credit_account', 0) == 1:
-            payment_category_name = cat_row['name']
-            cursor.execute("""
-                SELECT ca.id AS account_id
-                FROM credit_accounts ca
-                WHERE ca.user_id = %s AND %s LIKE CONCAT(ca.name, ' payment')
-                LIMIT 1
-            """, (current_user.id, payment_category_name))
-            account_row = cursor.fetchone()
-            if account_row:
-                account_id = account_row['account_id']
-                cursor.execute("""
-                    DELETE FROM c_payment_entries
-                    WHERE account_id = %s AND date = %s
-                """, (account_id, entry_date))
-                cursor.execute("""
-                    INSERT INTO c_payment_entries (account_id, date, amount, processed)
-                    VALUES (%s, %s, %s, 1)
-                """, (account_id, entry_date, amount))
-                ca_triggered = True
-
+        
+        # Make a copy of cat_row data before closing cursor
+        cat_data = dict(cat_row) if cat_row else {}
+        app.logger.info(f"[FOOTER ADD ENTRY] Category data for category {category_id}: name='{cat_data.get('name')}', is_credit_account={cat_data.get('is_credit_account', 'MISSING')}")
         cursor.close()
-        conn.commit()
+
+    # Add to Redis only - flush worker will persist to MySQL
+    # Get existing entries to check if we need to add or update
+    existing_data = _get_entries_from_redis(table_name, current_user.id)
+    
+    # If not in Redis, load from MySQL first
+    if existing_data is None:
+        existing_data = []
+        with get_db_pool().get_connection() as conn:
+            cursor2 = conn.cursor(pymysql.cursors.DictCursor)
+            if entry_type == 'income':
+                cursor2.execute("""
+                    SELECT ie.* FROM income_entries ie
+                    JOIN income_categories ic ON ie.category_id = ic.id
+                    WHERE ic.user_id = %s
+                """, (current_user.id,))
+            elif entry_type == 'expense':
+                cursor2.execute("""
+                    SELECT ee.* FROM expense_entries ee
+                    JOIN expense_categories ec ON ee.category_id = ec.id
+                    WHERE ec.user_id = %s
+                """, (current_user.id,))
+            elif entry_type.startswith('ca_') or entry_type == 'ca':
+                cursor2.execute("""
+                    SELECT cee.* FROM c_expense_entries cee
+                    JOIN c_expense_categories cec ON cee.category_id = cec.id
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (current_user.id,))
+            existing_data = list(cursor2.fetchall())
+            cursor2.close()
+        # Filter out entries marked for deletion
+        existing_data = _filter_pending_deletions(table_name, current_user.id, existing_data)
+        app.logger.info(f"[REDIS][{table_name}] Loaded {len(existing_data)} entries from MySQL (after filtering pending deletions)")
+    
+    existing_entry = None
+    
+    if existing_data:
+        for entry in existing_data:
+            if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(entry_date):
+                existing_entry = entry
+                break
+    
+    if existing_entry:
+        new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(amount)
+        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(new_amount))
+    else:
+        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(amount))
+
+    # Check if this is a savings category - update savings if so
+    is_savings_category = False
+    if entry_type in ['income', 'expense'] and cat_data.get('name') == 'Savings':
+        is_savings_category = True
+
+    # If this is an expense category and is_credit_account=1, add payment entry and trigger CA balance update
+    app.logger.info(f"[FOOTER CA PAYMENT DEBUG] entry_type={entry_type}, cat_data={cat_data}")
+    if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
+        ca_triggered = True
+        app.logger.info(f"[FOOTER CA PAYMENT] Detected payment category for user {current_user.id}, category {category_id}")
+        # Find the credit account by matching category name
+        category_name = cat_data.get('name', '')
+        app.logger.info(f"[FOOTER CA PAYMENT] Category name: '{category_name}'")
+        if category_name.endswith(' payment'):
+            account_name = category_name[:-8]  # Remove ' payment' suffix
+            app.logger.info(f"[FOOTER CA PAYMENT] Looking for credit account with name: '{account_name}'")
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
+                """, (current_user.id, account_name))
+                account_row = cursor.fetchone()
+                app.logger.info(f"[FOOTER CA PAYMENT] Credit account query result: {account_row}")
+                if account_row:
+                    account_id = account_row['id']
+                    app.logger.info(f"[FOOTER CA PAYMENT] Found credit account_id={account_id}, adding payment entry for date={entry_date}, amount={amount}")
+                    # Add or update payment entry in Redis
+                    payment_entries = _get_entries_from_redis('c_payment_entries', current_user.id)
+                    app.logger.info(f"[FOOTER CA PAYMENT] Current payment_entries from Redis: {len(payment_entries) if payment_entries else 'None'}")
+                    if payment_entries is None:
+                        # Load from MySQL first
+                        cursor.execute("""
+                            SELECT cpe.* FROM c_payment_entries cpe
+                            JOIN credit_accounts ca ON cpe.account_id = ca.id
+                            WHERE ca.user_id = %s
+                        """, (current_user.id,))
+                        payment_entries = list(cursor.fetchall())
+                        payment_entries = _filter_pending_deletions('c_payment_entries', current_user.id, payment_entries)
+                        app.logger.info(f"[FOOTER CA PAYMENT] Loaded {len(payment_entries)} payment_entries from MySQL")
+                    
+                    # Check if payment entry already exists for this date/account
+                    existing_payment = None
+                    for pe in payment_entries:
+                        if str(pe.get('account_id')) == str(account_id) and str(pe.get('date')) == str(entry_date):
+                            existing_payment = pe
+                            break
+                    
+                    if existing_payment:
+                        new_payment_amount = Decimal(existing_payment.get('amount', 0)) + Decimal(amount)
+                        app.logger.info(f"[FOOTER CA PAYMENT] Updating existing payment: {existing_payment.get('amount')} + {amount} = {new_payment_amount}")
+                        _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(new_payment_amount))
+                    else:
+                        app.logger.info(f"[FOOTER CA PAYMENT] Creating new payment entry: account_id={account_id}, date={entry_date}, amount={amount}")
+                        _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
+                    app.logger.info(f"[FOOTER CA PAYMENT] Payment entry operation completed")
+                else:
+                    app.logger.warning(f"[FOOTER CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
+                cursor.close()
+        else:
+            app.logger.warning(f"[FOOTER CA PAYMENT] Category name '{category_name}' does not end with ' payment'")
+    else:
+        app.logger.info(f"[FOOTER CA PAYMENT] Not a payment category: entry_type={entry_type}, is_credit_account={cat_data.get('is_credit_account', 0)}")
 
     # For CA, update balances
     if entry_type.startswith('ca_') or entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()
+    
+    # Update totals and savings if this is a savings category
+    if is_savings_category:
+        save_totals_remainders_d()
 
     return jsonify({"status": "success"})
 
@@ -6759,41 +9575,74 @@ def footer_add_entry():
 def buds():
     bud_id = request.args.get('bud_id', type=int)
 
+    # Try Redis first for buds
+    buds_list = _get_buds_from_redis(current_user.id)
+    if buds_list is None:
+        # Fallback to MySQL
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT b.id, b.name, b.expense_category_id, b.created_at, b.active, ec.name AS category_name
+                FROM buds b
+                LEFT JOIN expense_categories ec ON b.expense_category_id = ec.id
+                WHERE b.user_id = %s
+                ORDER BY b.created_at DESC
+            """, (current_user.id,))
+            buds_list = cursor.fetchall()
+            cursor.close()
+    else:
+        # Ensure buds from Redis have category_name field for template compatibility
+        for bud in buds_list:
+            if 'category_name' not in bud:
+                bud['category_name'] = None
+
+    # Determine selected bud
+    selected_bud = None
+    if buds_list:
+        if bud_id:
+            selected_bud = next((bud for bud in buds_list if int(bud['id']) == bud_id), buds_list[0])
+        else:
+            selected_bud = buds_list[0]
+
+    # Try Redis first for bud_items
+    all_bud_items = _get_bud_items_from_redis(current_user.id)
+    if all_bud_items is None:
+        # Fallback to MySQL - get ALL bud_items for this user's buds
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT bi.* FROM bud_items bi
+                INNER JOIN buds b ON bi.bud_id = b.id
+                WHERE b.user_id = %s
+                ORDER BY bi.id DESC
+            """, (current_user.id,))
+            all_bud_items = cursor.fetchall()
+            cursor.close()
+
+    # Ensure all_bud_items is at least an empty list
+    if all_bud_items is None:
+        all_bud_items = []
+
+    # Group all bud_items by bud_id for all buds
+    bud_items_by_bud = {}
+    if buds_list:
+        # Create a set of valid bud IDs for quick lookup
+        valid_bud_ids = {int(bud['id']) for bud in buds_list}
+        
+        for bud in buds_list:
+            bud_items = [item for item in all_bud_items if int(item['bud_id']) == int(bud['id'])]
+            bud_items_by_bud[bud['id']] = bud_items
+        
+        # Check for orphaned bud_items (items with bud_id not in buds_list)
+        orphaned_items = [item for item in all_bud_items if int(item['bud_id']) not in valid_bud_ids]
+        if orphaned_items:
+            app.logger.warning(f"[BUDS] Found {len(orphaned_items)} orphaned bud_items for user {current_user.id}: {[{'id': item['id'], 'bud_id': item['bud_id'], 'name': item['name']} for item in orphaned_items]}")
+            # Optionally: add orphaned items to a special "Orphaned Items" bud for visibility
+            # For now, we just log them
+
+    # Fetch other data from MySQL (categories, accounts, user settings)
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-        # Use LEFT JOIN to include buds with no expense_category_id
-        cursor.execute("""
-            SELECT b.id, b.name, b.expense_category_id, b.created_at, b.active, ec.name AS category_name
-            FROM buds b
-            LEFT JOIN expense_categories ec ON b.expense_category_id = ec.id
-            WHERE b.user_id = %s
-            ORDER BY b.created_at DESC
-        """, (current_user.id,))
-        buds = cursor.fetchall()
-
-        # Determine selected bud
-        selected_bud = None
-        if buds:
-            if bud_id:
-                selected_bud = next((bud for bud in buds if bud['id'] == bud_id), buds[0])
-            else:
-                selected_bud = buds[0]
-        else:
-            selected_bud = None
-
-        # Get all bud items for the selected bud
-        bud_items_by_bud = {}
-        if selected_bud:
-            cursor.execute("""
-                SELECT * FROM bud_items
-                WHERE bud_id = %s
-                ORDER BY id DESC
-            """, (selected_bud['id'],))
-            bud_items = cursor.fetchall()
-            bud_items_by_bud[selected_bud['id']] = bud_items
-        else:
-            bud_items = []
 
         # Fetch all expense categories for the user
         cursor.execute("""
@@ -6823,11 +9672,11 @@ def buds():
 
     return render_template(
         'buds.html',
-        buds=buds,
+        buds=buds_list,
         selected_bud=selected_bud,
         bud_items_by_bud=bud_items_by_bud,
         expense_categories=expense_categories,
-        credit_accounts=credit_accounts,  # <-- Pass credit accounts to the template
+        credit_accounts=credit_accounts,
         landing_page=landing_page,
         currency_type=currency_type
     )
@@ -6840,19 +9689,31 @@ def add_bud():
     if not bud_name:
         return jsonify({'status': 'error', 'message': 'Bud name required.'}), 400
 
+    # Insert to MySQL first to get real ID
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-        # Only create the buds record, do NOT create the expense category here
         cursor.execute("""
-            INSERT INTO buds (user_id, name, active)
-            VALUES (%s, %s, 0)
+            INSERT INTO buds (user_id, name, expense_category_id, active, created_at)
+            VALUES (%s, %s, NULL, 0, NOW())
         """, (current_user.id, bud_name))
-
+        new_bud_id = cursor.lastrowid
         conn.commit()
         cursor.close()
 
-    return jsonify({'status': 'success'})
+    # Create bud data for Redis
+    bud_data = {
+        'id': new_bud_id,
+        'user_id': current_user.id,
+        'name': bud_name,
+        'expense_category_id': None,
+        'active': 0,
+        'created_at': datetime.now().isoformat()
+    }
+
+    # Add to Redis
+    _update_bud_in_redis(current_user.id, bud_data)
+
+    return jsonify({'status': 'success', 'bud_id': new_bud_id})
 
 @app.route('/add-bud-item', methods=['POST'])
 @login_required
@@ -6862,50 +9723,116 @@ def add_bud_item():
     value = data.get('value', None)
     date_val = data.get('date', None)
     bud_id = int(data.get('bud_id', 0))
-    active = int(data.get('active', 0))  # Default to 0 if not provided
-    account = data.get('account', '').strip()  # <-- Get the selected account
+    active = int(data.get('active', 0))
+    account = data.get('account', '').strip()
 
     if not name or not value or not date_val or not bud_id:
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
+    # Validate that the bud exists before creating the item
+    buds = _get_buds_from_redis(current_user.id)
+    if buds is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT id FROM buds WHERE user_id = %s AND id = %s", (current_user.id, bud_id))
+            bud_exists = cursor.fetchone()
+            cursor.close()
+            if not bud_exists:
+                return jsonify({'status': 'error', 'message': 'Parent bud not found'}), 404
+    else:
+        bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
+        if not bud:
+            return jsonify({'status': 'error', 'message': 'Parent bud not found'}), 404
+
+    # Insert to MySQL first to get real ID
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-        
-        # Insert bud_item with account value
-        cursor.execute(
-            "INSERT INTO bud_items (bud_id, name, value, date, account) VALUES (%s, %s, %s, %s, %s)",
-            (bud_id, name, value, date_val, account)
-        )
-        bud_item_id = cursor.lastrowid  # Get the new bud_item's id
-
-        # Only add expense entry if active flag is set
-        if active:
-            add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
-
+        cursor.execute("""
+            INSERT INTO bud_items (bud_id, account, name, value, date, description)
+            VALUES (%s, %s, %s, %s, %s, NULL)
+        """, (bud_id, account, name, float(value), date_val))
+        new_item_id = cursor.lastrowid
         conn.commit()
         cursor.close()
 
+    # Create bud_item data for Redis
+    bud_item_data = {
+        'id': new_item_id,
+        'bud_id': bud_id,
+        'account': account,
+        'name': name,
+        'value': float(value),
+        'date': date_val,
+        'description': None
+    }
+
+    # Add to Redis
+    _update_bud_item_in_redis(current_user.id, bud_item_data)
+
+    # Only add expense entry if active flag is set
+    if active:
+        # Need to use MySQL for expense entry creation (existing pattern)
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            add_expense_entry_for_bud_item(cursor, bud_id, new_item_id, value, date_val)
+            conn.commit()
+            cursor.close()
+
     if active:
         save_ca_daily_balance()
-    return jsonify({'status': 'success'})
+    return jsonify({'status': 'success', 'item_id': new_item_id})
 
 def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val):
-    cursor.execute("SELECT account FROM bud_items WHERE id = %s", (bud_item_id,))
-    bud_item_row = cursor.fetchone()
-    account = bud_item_row['account'] if bud_item_row else "Blankee"
+    # Ensure date_val is a date object for comparison
+    if isinstance(date_val, str):
+        date_val_obj = datetime.strptime(date_val, '%Y-%m-%d').date()
+    else:
+        date_val_obj = date_val
+    
+    # Get bud_item account - try Redis first
+    bud_items = _get_bud_items_from_redis(current_user.id)
+    if bud_items:
+        bud_item = next((item for item in bud_items if int(item['id']) == int(bud_item_id)), None)
+        account = bud_item['account'] if bud_item else "Blankee"
+    else:
+        cursor.execute("SELECT account FROM bud_items WHERE id = %s", (bud_item_id,))
+        bud_item_row = cursor.fetchone()
+        account = bud_item_row['account'] if bud_item_row else "Blankee"
 
-    # Always fetch bud_row for bud name and expense_category_id
-    cursor.execute("SELECT name, expense_category_id FROM buds WHERE id = %s", (bud_id,))
-    bud_row = cursor.fetchone()
-    bud_name = bud_row['name'] if bud_row else "Bud"
-    expense_category_id = bud_row['expense_category_id'] if bud_row else None
+    # Get bud info - try Redis first
+    buds = _get_buds_from_redis(current_user.id)
+    if buds:
+        bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
+        bud_name = bud['name'] if bud else "Bud"
+        expense_category_id = bud.get('expense_category_id') if bud else None
+    else:
+        cursor.execute("SELECT name, expense_category_id FROM buds WHERE id = %s", (bud_id,))
+        bud_row = cursor.fetchone()
+        bud_name = bud_row['name'] if bud_row else "Bud"
+        expense_category_id = bud_row['expense_category_id'] if bud_row else None
 
     if account.lower() == "blankee":
         if expense_category_id:
-            cursor.execute(
-                "INSERT INTO expense_entries (category_id, date, amount, bud_item_id) VALUES (%s, %s, %s, %s)",
-                (expense_category_id, date_val, value, bud_item_id)
-            )
+            # Check if entry exists for this date and category, add to it if so
+            expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+            existing_entry = None
+            if expense_entries:
+                for e in expense_entries:
+                    e_date = e.get('date')
+                    if isinstance(e_date, str):
+                        e_date = datetime.strptime(e_date, '%Y-%m-%d').date()
+                    if int(e.get('category_id', 0) or 0) == int(expense_category_id) and e_date == date_val_obj:
+                        existing_entry = e
+                        break
+            
+            if existing_entry:
+                # Add to existing entry - preserve original bud_item_id
+                new_amount = float(existing_entry.get('amount', 0)) + float(value)
+                original_bud_item_id = existing_entry.get('bud_item_id')
+                _update_entry_in_redis('expense_entries', current_user.id, expense_category_id, date_val, new_amount, bud_item_id=original_bud_item_id)
+            else:
+                # Create new entry
+                _update_entry_in_redis('expense_entries', current_user.id, expense_category_id, date_val, float(value), bud_item_id=bud_item_id)
     else:
         cursor.execute(
             "SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s",
@@ -6934,10 +9861,26 @@ def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
                 category_id = cursor.lastrowid
             else:
                 category_id = cat_row['id']
-            cursor.execute(
-                "INSERT INTO c_expense_entries (category_id, date, amount, bud_item_id) VALUES (%s, %s, %s, %s)",
-                (category_id, date_val, value, bud_item_id)
-            )
+            # Check if entry exists for this date and category, add to it if so
+            c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+            existing_entry = None
+            if c_expense_entries:
+                for e in c_expense_entries:
+                    e_date = e.get('date')
+                    if isinstance(e_date, str):
+                        e_date = datetime.strptime(e_date, '%Y-%m-%d').date()
+                    if int(e.get('category_id', 0) or 0) == int(category_id) and e_date == date_val_obj:
+                        existing_entry = e
+                        break
+            
+            if existing_entry:
+                # Add to existing entry - preserve original bud_item_id
+                new_amount = float(existing_entry.get('amount', 0)) + float(value)
+                original_bud_item_id = existing_entry.get('bud_item_id')
+                _update_entry_in_redis('c_expense_entries', current_user.id, category_id, date_val, new_amount, bud_item_id=original_bud_item_id)
+            else:
+                # Create new entry
+                _update_entry_in_redis('c_expense_entries', current_user.id, category_id, date_val, float(value), bud_item_id=bud_item_id)
 
 @app.route('/update-bud-item', methods=['POST'])
 @login_required
@@ -6950,33 +9893,51 @@ def update_bud_item():
     if not item_id or field not in allowed_fields:
         return jsonify({'status': 'error', 'message': 'Invalid request'}), 400
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
+    # Get the bud_item from Redis first
+    bud_items = _get_bud_items_from_redis(current_user.id)
+    if bud_items is None:
+        # Fallback to MySQL
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM bud_items WHERE id = %s", (item_id,))
+            bud_item = cursor.fetchone()
+            cursor.close()
+    else:
+        bud_item = next((item for item in bud_items if int(item['id']) == int(item_id)), None)
 
-        # Update bud_items table
-        query = f"UPDATE bud_items SET {field} = %s WHERE id = %s"
-        cursor.execute(query, (value, item_id))
+    if not bud_item:
+        return jsonify({'status': 'error', 'message': 'Bud item not found'}), 404
 
-        # Get the account and bud active status after update
-        cursor.execute("SELECT account, bud_id FROM bud_items WHERE id = %s", (item_id,))
-        bud_item = cursor.fetchone()
-        account = bud_item['account'].lower() if bud_item and 'account' in bud_item else "blankee"
-        bud_id = bud_item['bud_id'] if bud_item and 'bud_id' in bud_item else None
+    # Update the field
+    bud_item[field] = value if field != 'value' else float(value)
 
-        bud_active = 0
-        if bud_id:
+    # Update in Redis
+    _update_bud_item_in_redis(current_user.id, bud_item)
+
+    # Get bud active status
+    bud_id = bud_item['bud_id']
+    buds = _get_buds_from_redis(current_user.id)
+    if buds:
+        bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
+        bud_active = bud['active'] if bud else 0
+    else:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("SELECT active FROM buds WHERE id = %s", (bud_id,))
             bud_row = cursor.fetchone()
-            bud_active = bud_row['active'] if bud_row and 'active' in bud_row else 0
+            bud_active = bud_row['active'] if bud_row else 0
+            cursor.close()
 
-        # Only update expense entry if bud is active
-        if bud_active == 1:
+    # Only update expense entry if bud is active
+    if bud_active == 1:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             update_expense_entry_for_bud_item(cursor, item_id, field, value)
-
-        conn.commit()
-        cursor.close()
+            conn.commit()
+            cursor.close()
 
     # Only run save_ca_daily_balance if account is not Blankee and bud is active
+    account = bud_item.get('account', '').lower()
     if account != "blankee" and bud_active == 1:
         save_ca_daily_balance()
     return jsonify({'status': 'success'})
@@ -7076,34 +10037,42 @@ def delete_bud_item():
     if not item_id:
         return jsonify({'status': 'error', 'message': 'Missing item id'}), 400
 
+    today = date.today()
+
+    # Get bud_item info from Redis first
+    all_bud_items = _get_bud_items_from_redis(current_user.id)
+    if all_bud_items is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM bud_items WHERE bud_id IN (SELECT id FROM buds WHERE user_id = %s)", (current_user.id,))
+            all_bud_items = cursor.fetchall()
+            cursor.close()
+    
+    bud_item = next((item for item in all_bud_items if int(item['id']) == int(item_id)), None)
+    if not bud_item:
+        return jsonify({'status': 'error', 'message': 'Item not found'}), 404
+
+    bud_id = bud_item['bud_id']
+    account = bud_item.get('account', 'Blankee')
+
+    # Get bud active status from Redis
+    buds = _get_buds_from_redis(current_user.id)
+    if buds is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM buds WHERE user_id = %s", (current_user.id,))
+            buds = cursor.fetchall()
+            cursor.close()
+    
+    bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
+    bud_active = bud['active'] if bud else 0
+
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # Get bud_item info
-        cursor.execute("SELECT bud_id, account FROM bud_items WHERE id = %s", (item_id,))
-        bud_item = cursor.fetchone()
-        if not bud_item:
-            cursor.close()
-            return jsonify({'status': 'error', 'message': 'Item not found'}), 404
-
-        bud_id = bud_item['bud_id']
-        account = bud_item['account']
-        today = date.today()
-
-        bud_active = 0
-        if bud_id:
-            cursor.execute("SELECT active FROM buds WHERE id = %s", (bud_id,))
-            bud_row = cursor.fetchone()
-            bud_active = bud_row['active'] if bud_row and 'active' in bud_row else 0
-
         if account.lower() == "blankee":
             # Get expense_category_id for this bud
-            cursor.execute("SELECT expense_category_id FROM buds WHERE id = %s", (bud_id,))
-            bud_row = cursor.fetchone()
-            if not bud_row:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Bud not found'}), 404
-            expense_category_id = bud_row['expense_category_id']
+            expense_category_id = bud.get('expense_category_id') if bud else None
 
             # Find Auto Adjustments category for this user
             cursor.execute("SELECT id FROM expense_categories WHERE user_id = %s AND name = %s", (current_user.id, "Auto Adjustments"))
@@ -7113,19 +10082,37 @@ def delete_bud_item():
                 return jsonify({'status': 'error', 'message': 'Auto Adjustments category not found'}), 404
             auto_adj_id = auto_adj['id']
 
-            # Get all expense_entries for this bud_item
-            cursor.execute("SELECT * FROM expense_entries WHERE bud_item_id = %s", (item_id,))
-            entries = cursor.fetchall()
-
-            # For entries before today, move to Auto Adjustments
-            for entry in entries:
-                if entry['date'] < today:
-                    cursor.execute("""
-                        INSERT INTO expense_entries (category_id, date, amount, bud_item_id, processed)
-                        VALUES (%s, %s, %s, NULL, 1)
-                    """, (auto_adj_id, entry['date'], entry['amount']))
-                # Delete the entry
-                cursor.execute("DELETE FROM expense_entries WHERE id = %s", (entry['id'],))
+            # Get all expense_entries for this bud_item from Redis
+            expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+            if expense_entries:
+                # Collect Auto Adjustments entries to create
+                auto_adj_entries_to_create = []
+                
+                for e in expense_entries:
+                    if int(e.get('bud_item_id', 0)) == int(item_id):
+                        entry_date = e.get('date')
+                        if isinstance(entry_date, str):
+                            entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                        
+                        if entry_date < today:
+                            # Collect for Auto Adjustments
+                            auto_adj_entries_to_create.append({
+                                'date': entry_date,
+                                'amount': float(e.get('amount', 0))
+                            })
+                
+                # Remove all entries with this bud_item_id
+                entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id', 0)) != int(item_id)]
+                
+                # Save filtered entries first
+                _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
+                
+                # Now create Auto Adjustments entries
+                for auto_adj_entry in auto_adj_entries_to_create:
+                    _update_entry_in_redis('expense_entries', current_user.id, 
+                                         auto_adj_id, auto_adj_entry['date'], 
+                                         auto_adj_entry['amount'], 
+                                         processed=1, bud_item_id=None)
 
         else:
             # CA: Find the credit account
@@ -7144,25 +10131,43 @@ def delete_bud_item():
                 return jsonify({'status': 'error', 'message': 'Auto Adjustments CA category not found'}), 404
             auto_adj_id = auto_adj['id']
 
-            # Get all c_expense_entries for this bud_item
-            cursor.execute("SELECT * FROM c_expense_entries WHERE bud_item_id = %s", (item_id,))
-            entries = cursor.fetchall()
-
-            # For entries before today, move to Auto Adjustments CA
-            for entry in entries:
-                if entry['date'] < today:
-                    cursor.execute("""
-                        INSERT INTO c_expense_entries (category_id, date, amount, bud_item_id, processed)
-                        VALUES (%s, %s, %s, NULL, 1)
-                    """, (auto_adj_id, entry['date'], entry['amount']))
-                # Delete the entry
-                cursor.execute("DELETE FROM c_expense_entries WHERE id = %s", (entry['id'],))
-
-        # Delete the bud_item itself (will also delete future expense_entries/c_expense_entries if ON DELETE CASCADE)
-        cursor.execute("DELETE FROM bud_items WHERE id = %s", (item_id,))
+            # Get all c_expense_entries for this bud_item from Redis
+            c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+            if c_expense_entries:
+                # Collect Auto Adjustments entries to create
+                ca_auto_adj_entries_to_create = []
+                
+                for e in c_expense_entries:
+                    if int(e.get('bud_item_id', 0)) == int(item_id):
+                        entry_date = e.get('date')
+                        if isinstance(entry_date, str):
+                            entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                        
+                        if entry_date < today:
+                            # Collect for Auto Adjustments
+                            ca_auto_adj_entries_to_create.append({
+                                'date': entry_date,
+                                'amount': float(e.get('amount', 0))
+                            })
+                
+                # Remove all entries with this bud_item_id
+                ca_entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id', 0)) != int(item_id)]
+                
+                # Save filtered entries first
+                _set_entries_to_redis('c_expense_entries', current_user.id, ca_entries_to_keep)
+                
+                # Now create Auto Adjustments entries
+                for ca_auto_adj_entry in ca_auto_adj_entries_to_create:
+                    _update_entry_in_redis('c_expense_entries', current_user.id, 
+                                         auto_adj_id, ca_auto_adj_entry['date'], 
+                                         ca_auto_adj_entry['amount'], 
+                                         processed=1, bud_item_id=None)
 
         conn.commit()
         cursor.close()
+    
+    # Delete the bud_item from Redis
+    _delete_bud_item_in_redis(current_user.id, item_id)
         
     # Only run save_ca_daily_balance if account is not Blankee and bud is active
     if account.lower() != "blankee" and bud_active == 1:
@@ -7177,27 +10182,48 @@ def delete_bud():
     if not bud_id:
         return jsonify({'status': 'error', 'message': 'Missing bud_id'}), 400
 
+    today = date.today()
+
+    # Get bud info from Redis first
+    buds = _get_buds_from_redis(current_user.id)
+    if buds is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM buds WHERE user_id = %s", (current_user.id,))
+            buds = cursor.fetchall()
+            cursor.close()
+    
+    bud_row = next((b for b in buds if int(b['id']) == int(bud_id)), None)
+    if not bud_row:
+        return jsonify({'status': 'error', 'message': 'Bud not found'}), 404
+    
+    bud_name = bud_row['name']
+    bud_expense_category_id = bud_row.get('expense_category_id')
+
+    # Get all bud_items for this bud from Redis
+    all_bud_items = _get_bud_items_from_redis(current_user.id)
+    if all_bud_items is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM bud_items WHERE bud_id IN (SELECT id FROM buds WHERE user_id = %s)", (current_user.id,))
+            all_bud_items = cursor.fetchall()
+            cursor.close()
+    
+    bud_items = [item for item in all_bud_items if int(item['bud_id']) == int(bud_id)]
+
+    # Track CA categories to delete
+    ca_category_ids_to_delete = set()
+    bud_category_ids_to_delete = set()
+
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # Get all bud_items for this bud
-        cursor.execute("SELECT id, account FROM bud_items WHERE bud_id = %s", (bud_id,))
-        bud_items = cursor.fetchall()
-        today = date.today()
-
-        # Track CA categories to delete
-        ca_category_ids_to_delete = set()
-        bud_category_ids_to_delete = set()
-
-        # Get bud name and expense_category_id
-        cursor.execute("SELECT name, expense_category_id FROM buds WHERE id = %s", (bud_id,))
-        bud_row = cursor.fetchone()
-        bud_name = bud_row['name'] if bud_row else None
-        bud_expense_category_id = bud_row['expense_category_id'] if bud_row else None
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
 
         for bud_item in bud_items:
             item_id = bud_item['id']
-            account = bud_item['account'].lower() if bud_item['account'] else "blankee"
+            account = bud_item.get('account', '').lower() if bud_item.get('account') else "blankee"
 
             if account == "blankee":
                 # Find Auto Adjustments expense category for this user
@@ -7210,18 +10236,37 @@ def delete_bud():
                     continue
                 auto_adj_id = auto_adj['id']
 
-                # Get all expense_entries for this bud_item
-                cursor.execute("SELECT * FROM expense_entries WHERE bud_item_id = %s", (item_id,))
-                entries = cursor.fetchall()
-
-                # For entries before today, move to Auto Adjustments
-                for entry in entries:
-                    if entry['date'] < today:
-                        cursor.execute("""
-                            INSERT INTO expense_entries (category_id, date, amount, bud_item_id, processed)
-                            VALUES (%s, %s, %s, NULL, 1)
-                        """, (auto_adj_id, entry['date'], entry['amount']))
-                    cursor.execute("DELETE FROM expense_entries WHERE id = %s", (entry['id'],))
+                # Get all expense_entries for this bud_item from Redis
+                expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+                if expense_entries:
+                    # Collect Auto Adjustments entries to create
+                    auto_adj_entries_to_create = []
+                    
+                    for e in expense_entries:
+                        if int(e.get('bud_item_id') or 0) == int(item_id):
+                            entry_date = e.get('date')
+                            if isinstance(entry_date, str):
+                                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                            
+                            if entry_date < today:
+                                # Collect for Auto Adjustments
+                                auto_adj_entries_to_create.append({
+                                    'date': entry_date,
+                                    'amount': float(e.get('amount', 0))
+                                })
+                    
+                    # Remove all entries with this bud_item_id
+                    entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id') or 0) != int(item_id)]
+                    
+                    # Save filtered entries first
+                    _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
+                    
+                    # Now create Auto Adjustments entries
+                    for auto_adj_entry in auto_adj_entries_to_create:
+                        _update_entry_in_redis('expense_entries', current_user.id, 
+                                             auto_adj_id, auto_adj_entry['date'], 
+                                             auto_adj_entry['amount'], 
+                                             processed=1, bud_item_id=None)
 
                 # Track bud expense category for deletion
                 if bud_expense_category_id:
@@ -7245,18 +10290,37 @@ def delete_bud():
                     continue
                 auto_adj_id = auto_adj['id']
 
-                # Get all c_expense_entries for this bud_item
-                cursor.execute("SELECT * FROM c_expense_entries WHERE bud_item_id = %s", (item_id,))
-                entries = cursor.fetchall()
-
-                # For entries before today, move to Auto Adjustments CA
-                for entry in entries:
-                    if entry['date'] < today:
-                        cursor.execute("""
-                            INSERT INTO c_expense_entries (category_id, date, amount, bud_item_id, processed)
-                            VALUES (%s, %s, %s, NULL, 1)
-                        """, (auto_adj_id, entry['date'], entry['amount']))
-                    cursor.execute("DELETE FROM c_expense_entries WHERE id = %s", (entry['id'],))
+                # Get all c_expense_entries for this bud_item from Redis
+                c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+                if c_expense_entries:
+                    # Collect Auto Adjustments entries to create
+                    ca_auto_adj_entries_to_create = []
+                    
+                    for e in c_expense_entries:
+                        if int(e.get('bud_item_id') or 0) == int(item_id):
+                            entry_date = e.get('date')
+                            if isinstance(entry_date, str):
+                                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                            
+                            if entry_date < today:
+                                # Collect for Auto Adjustments
+                                ca_auto_adj_entries_to_create.append({
+                                    'date': entry_date,
+                                    'amount': float(e.get('amount', 0))
+                                })
+                    
+                    # Remove all entries with this bud_item_id
+                    ca_entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id') or 0) != int(item_id)]
+                    
+                    # Save filtered entries first
+                    _set_entries_to_redis('c_expense_entries', current_user.id, ca_entries_to_keep)
+                    
+                    # Now create Auto Adjustments entries
+                    for ca_auto_adj_entry in ca_auto_adj_entries_to_create:
+                        _update_entry_in_redis('c_expense_entries', current_user.id, 
+                                             auto_adj_id, ca_auto_adj_entry['date'], 
+                                             ca_auto_adj_entry['amount'], 
+                                             processed=1, bud_item_id=None)
 
                 # Track CA categories created for this bud (by bud name)
                 if bud_name:
@@ -7266,12 +10330,6 @@ def delete_bud():
                     cat_row = cursor.fetchone()
                     if cat_row:
                         ca_category_ids_to_delete.add(cat_row['id'])
-
-        # Delete all bud_items for this bud (will also delete future entries via ON DELETE CASCADE)
-        cursor.execute("DELETE FROM bud_items WHERE bud_id = %s", (bud_id,))
-
-        # Delete the bud itself
-        cursor.execute("DELETE FROM buds WHERE id = %s", (bud_id,))
 
         # Delete the bud's expense category if present
         for bud_cat_id in bud_category_ids_to_delete:
@@ -7283,6 +10341,13 @@ def delete_bud():
 
         conn.commit()
         cursor.close()
+    
+    # Delete all bud_items for this bud from Redis
+    for bud_item in bud_items:
+        _delete_bud_item_in_redis(current_user.id, bud_item['id'])
+
+    # Delete the bud itself from Redis
+    _delete_bud_in_redis(current_user.id, bud_id)
         
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
@@ -7298,16 +10363,34 @@ def toggle_bud_active():
     if not bud_id:
         return jsonify({'status': 'error', 'message': 'Missing bud_id'}), 400
 
+    # Try Redis first for bud data
+    buds = _get_buds_from_redis(current_user.id)
+    if buds is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM buds WHERE user_id = %s", (current_user.id,))
+            buds = cursor.fetchall()
+            cursor.close()
+    
+    bud_row = next((b for b in buds if int(b['id']) == int(bud_id)), None)
+    if not bud_row:
+        return jsonify({'status': 'error', 'message': 'Bud not found'}), 404
+
+    bud_name = bud_row['name']
+
+    # Try Redis first for bud_items
+    all_bud_items = _get_bud_items_from_redis(current_user.id)
+    if all_bud_items is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM bud_items WHERE bud_id IN (SELECT id FROM buds WHERE user_id = %s)", (current_user.id,))
+            all_bud_items = cursor.fetchall()
+            cursor.close()
+    
+    bud_items = [item for item in all_bud_items if int(item['bud_id']) == int(bud_id)]
+
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-        cursor.execute("SELECT * FROM buds WHERE id = %s AND user_id = %s", (bud_id, current_user.id))
-        bud_row = cursor.fetchone()
-        if not bud_row:
-            cursor.close()
-            return jsonify({'status': 'error', 'message': 'Bud not found'}), 404
-
-        bud_name = bud_row['name']
 
         cursor.execute("""
             SELECT id FROM expense_categories WHERE user_id = %s AND name = 'Auto Adjustments' LIMIT 1
@@ -7327,11 +10410,8 @@ def toggle_bud_active():
             if ca_auto_adj:
                 ca_auto_adj_ids[ca_id] = ca_auto_adj['id']
 
-        cursor.execute("SELECT id, account, value, date FROM bud_items WHERE bud_id = %s", (bud_id,))
-        bud_items = cursor.fetchall()
-
         if active == 1:
-            if not bud_row['expense_category_id']:
+            if not bud_row.get('expense_category_id'):
                 cursor.execute("""
                     SELECT COALESCE(MAX(display_order), 0) FROM expense_categories WHERE user_id = %s
                 """, (current_user.id,))
@@ -7341,34 +10421,87 @@ def toggle_bud_active():
                     VALUES (%s, %s, %s, 1)
                 """, (current_user.id, bud_name, max_order + 1))
                 expense_category_id = cursor.lastrowid
-                cursor.execute("""
-                    UPDATE buds SET active = %s, expense_category_id = %s WHERE id = %s AND user_id = %s
-                """, (active, expense_category_id, bud_id, current_user.id))
-                cursor.execute("SELECT * FROM buds WHERE id = %s AND user_id = %s", (bud_id, current_user.id))
-                bud_row = cursor.fetchone()
+                
+                # Update bud in Redis with new expense_category_id
+                bud_row['expense_category_id'] = expense_category_id
+                bud_row['active'] = active
+                _update_bud_in_redis(current_user.id, bud_row)
             else:
-                cursor.execute("""
-                    UPDATE buds SET active = %s WHERE id = %s AND user_id = %s
-                """, (active, bud_id, current_user.id))
+                # Update bud active status in Redis
+                bud_row['active'] = active
+                _update_bud_in_redis(current_user.id, bud_row)
 
+            # Get list of bud_item_ids for this bud to check against auto adjustments
+            bud_item_ids = [int(item['id']) for item in bud_items]
+            
             for item in bud_items:
                 item_id = item['id']
                 account = item['account']
                 value = item['value']
                 item_date = item['date']
                 if account and account.lower() == "blankee":
-                    cursor.execute("""
-                        SELECT id FROM expense_entries WHERE category_id = %s AND bud_item_id = %s
-                    """, (bud_row['expense_category_id'], item_id))
-                    exists = cursor.fetchone()
-                    if not exists:
-                        cursor.execute("""
-                            INSERT INTO expense_entries (category_id, date, amount, bud_item_id, processed)
-                            VALUES (%s, %s, %s, %s, 0)
-                        """, (bud_row['expense_category_id'], item_date, value, item_id))
-                    cursor.execute("""
-                        DELETE FROM expense_entries WHERE category_id = %s AND bud_item_id = %s
-                    """, (auto_adj_id, item_id))
+                    # Transfer any auto adjustment entries for this item to bud category
+                    # Only transfer if bud_item_id matches one of this bud's items
+                    if auto_adj_id:
+                        expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+                        if expense_entries:
+                            # Find auto adjustment entries to transfer
+                            auto_adj_entries_to_transfer = [e for e in expense_entries if (
+                                int(e.get('category_id', 0) or 0) == int(auto_adj_id) and 
+                                int(e.get('bud_item_id') or 0) == int(item_id) and
+                                int(e.get('bud_item_id') or 0) in bud_item_ids
+                            )]
+                            
+                            # Remove auto adjustment entries
+                            entries_to_keep = [e for e in expense_entries if not (
+                                int(e.get('category_id', 0) or 0) == int(auto_adj_id) and 
+                                int(e.get('bud_item_id') or 0) == int(item_id) and
+                                int(e.get('bud_item_id') or 0) in bud_item_ids
+                            )]
+                            _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
+                            
+                            # Transfer to bud category
+                            for auto_entry in auto_adj_entries_to_transfer:
+                                entry_date = auto_entry.get('date')
+                                if isinstance(entry_date, str):
+                                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                                _update_entry_in_redis('expense_entries', current_user.id, 
+                                                     bud_row['expense_category_id'], entry_date, 
+                                                     float(auto_entry.get('amount', 0)), bud_item_id=item_id)
+                    
+                    # Create expense entry for new items (with item_date)
+                    # Check if entry exists for this date and category, add to it if so
+                    expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+                    existing_entry = None
+                    
+                    # Ensure item_date is a date object for comparison
+                    if isinstance(item_date, str):
+                        item_date_obj = datetime.strptime(item_date, '%Y-%m-%d').date()
+                    else:
+                        item_date_obj = item_date
+                    
+                    if expense_entries:
+                        for e in expense_entries:
+                            e_date = e.get('date')
+                            if isinstance(e_date, str):
+                                e_date = datetime.strptime(e_date, '%Y-%m-%d').date()
+                            if int(e.get('category_id', 0) or 0) == int(bud_row['expense_category_id']) and e_date == item_date_obj:
+                                existing_entry = e
+                                break
+                    
+                    if existing_entry:
+                        # Add to existing entry - preserve original bud_item_id
+                        new_amount = float(existing_entry.get('amount', 0)) + float(value)
+                        original_bud_item_id = existing_entry.get('bud_item_id')
+                        _update_entry_in_redis('expense_entries', current_user.id, 
+                                             bud_row['expense_category_id'], item_date, 
+                                             new_amount, bud_item_id=original_bud_item_id)
+                    else:
+                        # Create new entry
+                        _update_entry_in_redis('expense_entries', current_user.id, 
+                                             bud_row['expense_category_id'], item_date, 
+                                             float(value), bud_item_id=item_id)
+                    
                 elif account and account.lower() != "blankee":
                     cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s", (current_user.id, account))
                     ca_row = cursor.fetchone()
@@ -7385,55 +10518,110 @@ def toggle_bud_active():
                         bud_cat_id = cursor.lastrowid
                     else:
                         bud_cat_id = cat_row['id']
-                    cursor.execute("""
-                        SELECT id FROM c_expense_entries WHERE category_id = %s AND bud_item_id = %s
-                    """, (bud_cat_id, item_id))
-                    exists = cursor.fetchone()
-                    if not exists:
-                        cursor.execute("""
-                            INSERT INTO c_expense_entries (category_id, date, amount, bud_item_id, processed)
-                            VALUES (%s, %s, %s, %s, 0)
-                        """, (bud_cat_id, item_date, value, item_id))
+                    
+                    # Transfer any auto adjustment entries for this item to bud category
+                    # Only transfer if bud_item_id matches one of this bud's items
                     ca_auto_adj_id = ca_auto_adj_ids.get(ca_id)
                     if ca_auto_adj_id:
-                        cursor.execute("""
-                            DELETE FROM c_expense_entries WHERE category_id = %s AND bud_item_id = %s
-                        """, (ca_auto_adj_id, item_id))
-
-            if not bud_row['expense_category_id']:
-                cursor.execute("""
-                    SELECT COALESCE(MAX(display_order), 0) FROM expense_categories WHERE user_id = %s
-                """, (current_user.id,))
-                max_order = cursor.fetchone()['COALESCE(MAX(display_order), 0)']
-                cursor.execute("""
-                    INSERT INTO expense_categories (user_id, name, display_order, is_bud)
-                    VALUES (%s, %s, %s, 1)
-                """, (current_user.id, bud_name, max_order + 1))
-                expense_category_id = cursor.lastrowid
-                cursor.execute("""
-                    UPDATE buds SET active = %s, expense_category_id = %s WHERE id = %s AND user_id = %s
-                """, (active, expense_category_id, bud_id, current_user.id))
-            else:
-                cursor.execute("""
-                    UPDATE buds SET active = %s WHERE id = %s AND user_id = %s
-                """, (active, bud_id, current_user.id))
+                        c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+                        if c_expense_entries:
+                            # Find auto adjustment entries to transfer
+                            ca_auto_adj_entries_to_transfer = [e for e in c_expense_entries if (
+                                int(e.get('category_id', 0) or 0) == int(ca_auto_adj_id) and 
+                                int(e.get('bud_item_id') or 0) == int(item_id) and
+                                int(e.get('bud_item_id') or 0) in bud_item_ids
+                            )]
+                            
+                            # Remove auto adjustment entries
+                            entries_to_keep = [e for e in c_expense_entries if not (
+                                int(e.get('category_id', 0) or 0) == int(ca_auto_adj_id) and 
+                                int(e.get('bud_item_id') or 0) == int(item_id) and
+                                int(e.get('bud_item_id') or 0) in bud_item_ids
+                            )]
+                            _set_entries_to_redis('c_expense_entries', current_user.id, entries_to_keep)
+                            
+                            # Transfer to bud category
+                            for ca_auto_entry in ca_auto_adj_entries_to_transfer:
+                                entry_date = ca_auto_entry.get('date')
+                                if isinstance(entry_date, str):
+                                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                                _update_entry_in_redis('c_expense_entries', current_user.id, 
+                                                     bud_cat_id, entry_date, 
+                                                     float(ca_auto_entry.get('amount', 0)), bud_item_id=item_id)
+                    
+                    # Create c_expense entry for new items (with item_date)
+                    # Check if entry exists for this date and category, add to it if so
+                    c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+                    existing_entry = None
+                    
+                    # Ensure item_date is a date object for comparison
+                    if isinstance(item_date, str):
+                        item_date_obj = datetime.strptime(item_date, '%Y-%m-%d').date()
+                    else:
+                        item_date_obj = item_date
+                    
+                    if c_expense_entries:
+                        for e in c_expense_entries:
+                            e_date = e.get('date')
+                            if isinstance(e_date, str):
+                                e_date = datetime.strptime(e_date, '%Y-%m-%d').date()
+                            if int(e.get('category_id', 0) or 0) == int(bud_cat_id) and e_date == item_date_obj:
+                                existing_entry = e
+                                break
+                    
+                    if existing_entry:
+                        # Add to existing entry - preserve original bud_item_id
+                        new_amount = float(existing_entry.get('amount', 0)) + float(value)
+                        original_bud_item_id = existing_entry.get('bud_item_id')
+                        _update_entry_in_redis('c_expense_entries', current_user.id, 
+                                             bud_cat_id, item_date, 
+                                             new_amount, bud_item_id=original_bud_item_id)
+                    else:
+                        # Create new entry
+                        _update_entry_in_redis('c_expense_entries', current_user.id, 
+                                             bud_cat_id, item_date, 
+                                             float(value), bud_item_id=item_id)
 
         elif active == 0:
-            if bud_row['expense_category_id']:
+            if bud_row.get('expense_category_id'):
                 for item in bud_items:
                     item_id = item['id']
-                    cursor.execute("""
-                        SELECT * FROM expense_entries
-                        WHERE category_id = %s AND bud_item_id = %s
-                    """, (bud_row['expense_category_id'], item_id))
-                    entries = cursor.fetchall()
-                    for entry in entries:
-                        if entry['date'] < today:
-                            cursor.execute("""
-                                INSERT INTO expense_entries (category_id, date, amount, bud_item_id, processed)
-                                VALUES (%s, %s, %s, %s, 1)
-                            """, (auto_adj_id, entry['date'], entry['amount'], item_id))
-                        cursor.execute("DELETE FROM expense_entries WHERE id = %s", (entry['id'],))
+                    # Get and filter entries from Redis
+                    expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+                    if expense_entries:
+                        # Collect Auto Adjustments entries to create
+                        auto_adj_entries_to_create = []
+                        
+                        for e in expense_entries:
+                            if int(e.get('category_id', 0) or 0) == int(bud_row['expense_category_id']) and \
+                               int(e.get('bud_item_id') or 0) == int(item_id):
+                                entry_date = e.get('date')
+                                if isinstance(entry_date, str):
+                                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                                
+                                if entry_date < today and auto_adj_id:
+                                    # Collect for Auto Adjustments (preserve bud_item_id)
+                                    auto_adj_entries_to_create.append({
+                                        'date': entry_date,
+                                        'amount': float(e.get('amount', 0)),
+                                        'bud_item_id': int(e.get('bud_item_id', 0))
+                                    })
+                        
+                        # Remove entries with this bud category and bud_item_id
+                        entries_to_keep = [e for e in expense_entries if not (
+                            int(e.get('category_id', 0) or 0) == int(bud_row['expense_category_id']) and 
+                            int(e.get('bud_item_id') or 0) == int(item_id)
+                        )]
+                        
+                        # Save filtered entries first
+                        _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
+                        
+                        # Now create Auto Adjustments entries (preserve bud_item_id for reactivation)
+                        for auto_adj_entry in auto_adj_entries_to_create:
+                            _update_entry_in_redis('expense_entries', current_user.id, 
+                                                 auto_adj_id, auto_adj_entry['date'], 
+                                                 auto_adj_entry['amount'], 
+                                                 processed=1, bud_item_id=auto_adj_entry['bud_item_id'])
 
             for item in bud_items:
                 item_id = item['id']
@@ -7445,41 +10633,66 @@ def toggle_bud_active():
                         continue
                     ca_id = ca_row['id']
                     ca_auto_adj_id = ca_auto_adj_ids.get(ca_id)
-                    if not ca_auto_adj_id:
-                        continue
                     cursor.execute("SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s", (ca_id, bud_name))
                     cat_row = cursor.fetchone()
                     if not cat_row:
                         continue
                     bud_cat_id = cat_row['id']
-                    cursor.execute("""
-                        SELECT * FROM c_expense_entries
-                        WHERE category_id = %s AND bud_item_id = %s
-                    """, (bud_cat_id, item_id))
-                    ca_entries = cursor.fetchall()
-                    for entry in ca_entries:
-                        if entry['date'] < today:
-                            cursor.execute("""
-                                INSERT INTO c_expense_entries (category_id, date, amount, bud_item_id, processed)
-                                VALUES (%s, %s, %s, %s, 1)
-                            """, (ca_auto_adj_id, entry['date'], entry['amount'], item_id))
-                        cursor.execute("DELETE FROM c_expense_entries WHERE id = %s", (entry['id'],))
+                    
+                    # Get and filter c_expense entries from Redis
+                    c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+                    if c_expense_entries:
+                        # Collect Auto Adjustments entries to create
+                        ca_auto_adj_entries_to_create = []
+                        
+                        for e in c_expense_entries:
+                            if int(e.get('category_id', 0) or 0) == int(bud_cat_id) and \
+                               int(e.get('bud_item_id') or 0) == int(item_id):
+                                entry_date = e.get('date')
+                                if isinstance(entry_date, str):
+                                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                                
+                                if entry_date < today and ca_auto_adj_id:
+                                    # Collect for Auto Adjustments (preserve bud_item_id)
+                                    ca_auto_adj_entries_to_create.append({
+                                        'date': entry_date,
+                                        'amount': float(e.get('amount', 0)),
+                                        'bud_item_id': int(e.get('bud_item_id', 0))
+                                    })
+                        
+                        # Remove entries with this bud category and bud_item_id
+                        ca_entries_to_keep = [e for e in c_expense_entries if not (
+                            int(e.get('category_id', 0) or 0) == int(bud_cat_id) and 
+                            int(e.get('bud_item_id') or 0) == int(item_id)
+                        )]
+                        
+                        # Save filtered entries first
+                        _set_entries_to_redis('c_expense_entries', current_user.id, ca_entries_to_keep)
+                        
+                        # Now create Auto Adjustments entries (preserve bud_item_id for reactivation)
+                        for ca_auto_adj_entry in ca_auto_adj_entries_to_create:
+                            _update_entry_in_redis('c_expense_entries', current_user.id, 
+                                                 ca_auto_adj_id, ca_auto_adj_entry['date'], 
+                                                 ca_auto_adj_entry['amount'], 
+                                                 processed=1, bud_item_id=ca_auto_adj_entry['bud_item_id'])
 
-            if bud_row['expense_category_id']:
+            if bud_row.get('expense_category_id'):
                 cursor.execute("""
                     DELETE FROM expense_categories WHERE id = %s AND user_id = %s
                 """, (bud_row['expense_category_id'], current_user.id))
-                cursor.execute("""
-                    UPDATE buds SET active = %s, expense_category_id = NULL WHERE id = %s AND user_id = %s
-                """, (active, bud_id, current_user.id))
+                
+                # Update bud in Redis - set inactive and remove expense_category_id
+                bud_row['active'] = active
+                bud_row['expense_category_id'] = None
+                _update_bud_in_redis(current_user.id, bud_row)
             else:
-                cursor.execute("""
-                    UPDATE buds SET active = %s WHERE id = %s AND user_id = %s
-                """, (active, bud_id, current_user.id))
+                # Update bud active status in Redis
+                bud_row['active'] = active
+                _update_bud_in_redis(current_user.id, bud_row)
         else:
-            cursor.execute("""
-                UPDATE buds SET active = %s WHERE id = %s AND user_id = %s
-            """, (active, bud_id, current_user.id))
+            # Update bud active status in Redis
+            bud_row['active'] = active
+            _update_bud_in_redis(current_user.id, bud_row)
 
         conn.commit()
         cursor.close()
