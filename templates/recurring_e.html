@@ -885,7 +885,6 @@
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error('Error:', xhr.responseText);
                     alert('An error occurred: ' + xhr.responseText);
                 }
             });
@@ -983,11 +982,9 @@
                         // Update the local totals and remainders here or refresh the view
                         // Optionally: update the totals and remainders in the UI without reloading the page
                     } else {
-                        console.error('Failed to save totals and remainders:', response.message);
                     }
                 },
                 error: function(error) {
-                    console.error('An error occurred while saving totals and remainders:', error);
                 }
             });
         }
@@ -1002,11 +999,9 @@
                 success: function(response) {
                     if (response.status === "success") {
                     } else {
-                        console.error("Failed to save totals and remainders:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error during AJAX request:", error);
                 },
                 complete: function() {
                     // Hide the loading screen after the AJAX request completes
@@ -1045,7 +1040,6 @@
                         }
                     },
                     error: function(xhr, status, error) {
-                        console.error('Error:', xhr.responseText);
                         alert('An error occurred: ' + xhr.responseText);
                     }
                 });
@@ -1234,7 +1228,6 @@
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error('Error:', xhr.responseText);
                     alert('An error occurred: ' + xhr.responseText);
                 }
             });

@@ -511,11 +511,9 @@
                         // Update the local totals and remainders here or refresh the view
                         // Optionally: update the totals and remainders in the UI without reloading the page
                     } else {
-                        console.error('Failed to save totals and remainders:', response.message);
                     }
                 },
                 error: function(error) {
-                    console.error('An error occurred while saving totals and remainders:', error);
                 }
             });
         }        

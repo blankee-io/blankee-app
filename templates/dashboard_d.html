@@ -21,6 +21,7 @@
     <meta name="apple-mobile-web-app-title" content="Blankee">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+    {% include 'redis_auto_refresh.html' %}
 </head>
 <body id="dashboard-d-body">
     <!-- Include the navigation bar -->
@@ -1021,11 +1022,9 @@
                     if (response.status === "success") {
                     updateDashboardDView()
                     } else {
-                        console.error("Failed to save totals and remainders:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error during AJAX request:", error);
                 },
                 complete: function() {
                     // Hide the loading screen after the AJAX request completes
@@ -1135,13 +1134,11 @@
                         if (response.status === 'success') {
                             saveDailyTotalsAndRemainders(endDate);
                         } else {
-                            console.error('Failed to delete the entry.');
                             // If delete failed on server, restore the UI by refreshing
                             updateDashboardDView();
                         }
                     },
                     error: function() {
-                        console.error('An error occurred while deleting the entry.');
                         // If delete failed due to an error, restore the UI by refreshing
                         updateDashboardDView();
                     }
@@ -1204,12 +1201,9 @@
 
                             saveDailyTotalsAndRemainders(endDate);
                         } else {
-                            console.error('Failed to update the entry.');
                         }
                     },
                     error: function(xhr) {
-                        console.error('An error occurred while updating the entry.');
-                        console.error(xhr.responseText);
                     }
                 });
             }
@@ -1397,7 +1391,6 @@
             };
 
             if (!formData.entryType || !formData.category || !formData.amount || !formData.date) {
-                console.error("Please fill in all required fields.");
                 return;
             }
 
@@ -1618,7 +1611,6 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                 entriesDiv = parentContainer.querySelector(`.dashboard-d-credit-account[data-account-id="${accountId}"]`);
                 
                 if (!entriesDiv) {
-                    console.log('Credit account section not found for account:', accountId, 'in date:', formattedDate);
                     // The account div might not exist yet if this is the first entry
                     // Let's check if we have any credit account divider
                     const creditDivider = parentContainer.querySelector('.dashboard-d-credit-divider');
@@ -1631,7 +1623,6 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                         // Find the account info to get the name
                         const accountInfo = credit_accounts.find(a => String(a.id) === String(accountId));
                         if (!accountInfo) {
-                            console.error('Could not find account info for account ID:', accountId);
                             return false;
                         }
                         
@@ -1657,7 +1648,6 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                         
                         // Balance row will be added after the entry is inserted
                     } else {
-                        console.error('No credit divider found');
                         return false; // No credit divider found
                     }
                 }
@@ -1814,11 +1804,9 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                         saveDailyTotalsAndRemainders(formData.date);
                         if (typeof callback === "function") callback(response);
                     } else {
-                        console.error('Failed to add entry: ' + response.message);
                     }
                 },
                 error: function(error) {
-                    console.error('Error adding entry:', error);
                 }
             });
         }
@@ -1835,7 +1823,6 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
             // Ensure the main container is found
             const mainContainer = document.getElementById('main-container');
             if (!mainContainer) {
-                console.error('Main container not found!');
                 return;
             }
 
@@ -1895,11 +1882,9 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                                 input.classList.remove('paid');
                             }
                         } else {
-                            console.error('Failed to update the status.');
                         }
                     },
                     error: function (error) {
-                        console.error('Error updating status:', error);
                     }
                 });
             }
@@ -2403,11 +2388,9 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                         window.c_expense_entries = response.c_expense_entries;
                         if (typeof callback === "function") callback();
                     } else {
-                        console.error("Failed to fetch dashboard data:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error fetching dashboard data:", error);
                 }
             });
         }

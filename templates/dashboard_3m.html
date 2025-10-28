@@ -21,6 +21,8 @@
     <meta name="apple-mobile-web-app-title" content="Blankee">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+    {% include 'redis_auto_refresh.html' %}
+</head>
 <body id="dashboard">
     <!-- Include the navigation bar (sidenav) from a separate HTML file -->
     {% include 'nav.html' %}
@@ -1857,11 +1859,9 @@
                             const incomeTotal = parseFloat(response.total_income) || 0;
                             total += incomeTotal;
                         } else {
-                            console.error('Failed to fetch total income:', response.message);
                         }
                     },
                     error: function() {
-                        console.error('An error occurred while fetching the total income.');
                     }
                 });
 
@@ -1885,7 +1885,6 @@
                 const date = tdElement.getAttribute('data-date');
 
                 if (!date || date === 'null') {
-                    console.error('Date is missing or invalid:', date);
                     continue;
                 }
 
@@ -1900,11 +1899,9 @@
                             const expenseTotal = parseFloat(response.total_expenses) || 0;
                             total += expenseTotal;
                         } else {
-                            console.error('Failed to fetch total expenses:', response.message);
                         }
                     },
                     error: function() {
-                        console.error('An error occurred while fetching the total expenses.');
                     }
                 });
 
@@ -1976,11 +1973,9 @@
                         if (response.status === 'success') {
                             lastRemainder = parseFloat(response.last_remainder) || 0;
                         } else {
-                            console.error('Failed to fetch last remainder:', response.message);
                         }
                     },
                     error: function() {
-                        console.error('An error occurred while fetching the last remainder.');
                     }
                 });
 
@@ -1995,11 +1990,9 @@
                         if (response.status === 'success') {
                             remainder = parseFloat(response.remainder) || 0;
                         } else {
-                            console.error('Failed to fetch remainder:', response.message);
                         }
                     },
                     error: function() {
-                        console.error('An error occurred while fetching the remainder.');
                     }
                 });
 
@@ -2073,11 +2066,9 @@
                         updateView();
                         showDashboardSpinner(false);
                     } else {
-                        console.error("Failed to save totals and remainders:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error during AJAX request:", error);
                 },
                 complete: function() {
                     // Hide the loading screen after the AJAX request completes
@@ -2109,11 +2100,9 @@
                         updateCaBalance();
                         showDashboardSpinner(false);
                     } else {
-                        console.error("Failed to save CA balances:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error during AJAX request:", error);
                 },
                 complete: function() {
                     document.getElementById('loading-screen').style.display = 'none';
@@ -2345,11 +2334,9 @@
                         saveDailyTotalsAndRemainders();
                         location.reload();
                     } else {
-                        console.error('Failed to delete income category.');
                     }
                 },
                 error: function() {
-                    console.error('An error occurred while deleting the income category.');
                 }
             });
         }
@@ -2372,11 +2359,9 @@
                         saveDailyTotalsAndRemainders();
                         location.reload();
                     } else {
-                        console.error('Failed to delete expense category.');
                     }
                 },
                 error: function() {
-                    console.error('An error occurred while deleting the expense category.');
                 }
             });
         }
@@ -2397,11 +2382,9 @@
                         saveCaDailyBalance();
                         location.reload();
                     } else {
-                        console.error('Failed to delete credit account category.');
                     }
                 },
                 error: function() {
-                    console.error('An error occurred while deleting the credit account category.');
                 }
             });
         }
@@ -2536,16 +2519,13 @@
             let entryProcessed = false;  // New flag to track if the entry has been processed
 
             input.addEventListener('focus', function () {
-                console.log('[FOCUS] Starting focus handler', { entryProcessed, ignoreBlur });
                 // Reset the processed flag when focusing on the input
                 entryProcessed = false;
-                console.log('[FOCUS] Reset entryProcessed to false');
                 // Remove $ only if present
                 if (input.value.trim().startsWith('$')) {
                     input.value = input.value.trim().substring(1).trim();
                 }
                 originalValue = input.value;
-                console.log('[FOCUS] Original value set to:', originalValue);
                 input.select();
             });
 
@@ -2556,40 +2536,32 @@
 
             input.addEventListener('keypress', function (event) {
                 if (event.key === 'Enter') {
-                    console.log('[ENTER] Enter key pressed', { originalValue, currentValue: input.value.trim(), entryProcessed, ignoreBlur });
                     event.preventDefault();
                     ignoreBlur = true;
                     entryProcessed = true;  // Mark as processed
-                    console.log('[ENTER] Flags set:', { entryProcessed, ignoreBlur });
                     const newValue = input.value.trim();
                     if (originalValue === '' && newValue === '') {
-                        console.log('[ENTER] Both values empty, resetting flags');
                         input.value = originalValue;
                         ignoreBlur = false;
                         entryProcessed = false;
                         return;
                     }
                     if (newValue === '') {
-                        console.log('[ENTER] Deleting entry (newValue empty)');
                         updateEntryInput(input, type);
                         return;
                     }
                     if (originalValue === '') {
-                        console.log('[ENTER] Creating new entry');
                         // Creating a new entry
                         updateEntryInput(input, type);
                         return;
                     }
                     if (newValue !== originalValue) {
-                        console.log('[ENTER] Editing existing entry, showing modal');
                         // Editing an existing entry
                         showEntryUpdateModal(
                             function() { 
-                                console.log('[ENTER-MODAL] Confirmed, updating entry');
                                 updateEntryInput(input, type);
                             },
                             function() { 
-                                console.log('[ENTER-MODAL] Cancelled, restoring value and resetting flags');
                                 input.value = originalValue;
                                 ignoreBlur = false;
                                 entryProcessed = false;
@@ -2604,10 +2576,8 @@
             });
 
             input.addEventListener('blur', function () {
-                console.log('[BLUR] Blur event fired', { originalValue, currentValue: input.value.trim(), entryProcessed, ignoreBlur });
                 
                 if (ignoreBlur) {
-                    console.log('[BLUR] ignoreBlur is true, resetting flags and returning');
                     ignoreBlur = false;
                     entryProcessed = false;
                     return;
@@ -2615,45 +2585,36 @@
                 
                 // If already processed via Enter key, don't process again
                 if (entryProcessed) {
-                    console.log('[BLUR] entryProcessed is true, resetting and returning');
                     entryProcessed = false;
                     return;
                 }
                 
                 const newValue = input.value.trim().replace(currencySymbol, '').trim();
                 if (newValue !== originalValue) {
-                    console.log('[BLUR] Value changed, processing', { originalValue, newValue });
                     // Mark as processed to prevent duplicate submissions
                     entryProcessed = true;
-                    console.log('[BLUR] Set entryProcessed to true');
                     
                     // If value changed, submit (with confirmation if needed)
                     if (originalValue === '' && newValue === '') {
-                        console.log('[BLUR] Both empty, resetting');
                         input.value = originalValue;
                         entryProcessed = false;
                         return;
                     }
                     if (newValue === '') {
-                        console.log('[BLUR] Deleting entry (newValue empty)');
                         updateEntryInput(input, type);
                         return;
                     }
                     if (originalValue === '') {
-                        console.log('[BLUR] Creating new entry');
                         // Creating a new entry
                         updateEntryInput(input, type);
                         return;
                     }
-                    console.log('[BLUR] Editing existing entry, showing modal');
                     // Only show the modal when editing an existing value
                     showEntryUpdateModal(
                         function() { 
-                            console.log('[BLUR-MODAL] Confirmed, updating entry');
                             updateEntryInput(input, type);
                         },
                         function() { 
-                            console.log('[BLUR-MODAL] Cancelled, restoring value and resetting flag');
                             input.value = originalValue;
                             entryProcessed = false;
                         }
@@ -2979,16 +2940,13 @@
                                 inputContainer.style.display = 'none';
                             }, 0);
                         } else {
-                            console.error('Failed to add income category.');
                         }
                     },
                     error: function() {
-                        console.error('An error occurred while adding the income category.');
                         $("#income-categories-table tbody").sortable("enable");
                     }
                 });
             } else {
-                console.error('Please enter a category name.');
             }
         }
 
@@ -3050,16 +3008,13 @@
                                 inputContainer.style.display = 'none';
                             }, 0);
                         } else {
-                            console.error('Failed to add expense category.');
                         }
                     },
                     error: function() {
-                        console.error('An error occurred while adding the expense category.');
                         $("#expense-categories-table tbody").sortable("enable");
                     }
                 });
             } else {
-                console.error('Please enter a category name.');
             }
         }
 
@@ -3070,7 +3025,6 @@
             const categoryName = input.value.trim();
 
             if (!categoryName || !accountId) {
-                console.error('Please enter a category name and ensure accountId is found.');
                 return;
             }
 
@@ -3119,11 +3073,9 @@
                             inputContainer.style.display = 'none';
                         }, 0);
                     } else {
-                        console.error('Failed to add credit account category.');
                     }
                 },
                 error: function() {
-                    console.error('An error occurred while adding the credit account category.');
                     $("#ca-categories-table-" + accountId + " tbody").sortable("enable");
                 }
             });
@@ -3305,11 +3257,9 @@
                                 categorySpan.innerHTML = iconHtml + ' ' + newCategoryName;
                             }
                         } else {
-                            console.error('Failed to update category name.');
                         }
                     },
                     error: function (xhr, status, error) {
-                        console.error('An error occurred while updating the category name: ' + xhr.responseText);
                     }
                 });
             }
@@ -3358,11 +3308,9 @@
                     if (response.status === 'success') {
                         updateView();
                     } else {
-                        console.error('Failed to update category order.');
                     }
                 },
                 error: function() {
-                    console.error('An error occurred while updating the category order.');
                 }
             });
         }
@@ -3414,11 +3362,9 @@
                             }
                             updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                         } else {
-                            console.error('Failed to delete the entries.');
                         }
                     },
                     error: function() {
-                        console.error('An error occurred while deleting the entries.');
                     }
                 });
             } else {
@@ -3458,11 +3404,9 @@
                             }
                             updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                         } else {
-                            console.error('Failed to update the entry.');
                         }
                     },
                     error: function() {
-                        console.error('An error occurred while updating the entry.');
                     }
                 });
             }
@@ -4059,7 +4003,6 @@
             const expenseCategoriesBody = document.querySelector('#expenses-table #expense-categories-body');
 
             if (!incomeCategoriesBody && !expenseCategoriesBody) {
-                console.error('Income or Expense categories body not found!');
                 return;
             }
 
@@ -4124,11 +4067,9 @@
                                 currentCell.classList.remove('paid');
                             }
                         } else {
-                            console.error('Failed to update the status.');
                         }
                     },
                     error: function (error) {
-                        console.error('Error updating status:', error);
                     }
                 });
             }

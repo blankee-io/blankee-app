@@ -898,7 +898,6 @@
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error('Error:', xhr.responseText);
                     alert('An error occurred: ' + xhr.responseText);
                 }
             });
@@ -1000,11 +999,9 @@
                 success: function(response) {
                     if (response.status === "success") {
                     } else {
-                        console.error("Failed to save CA balances:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error during AJAX request:", error);
                 },
                 complete: function() {
                     document.getElementById('loading-screen').style.display = 'none';
@@ -1042,7 +1039,6 @@
                         }
                     },
                     error: function(xhr, status, error) {
-                        console.error('Error:', xhr.responseText);
                         alert('An error occurred: ' + xhr.responseText);
                     }
                 });
@@ -1231,7 +1227,6 @@
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error('Error:', xhr.responseText);
                     alert('An error occurred: ' + xhr.responseText);
                 }
             });

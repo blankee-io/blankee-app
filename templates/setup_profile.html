@@ -208,7 +208,6 @@
                             }
                         },
                         error: function (error) {
-                            console.error('Error:', error);
                             alert('An error occurred during profile setup.');
                         }
                     });
@@ -242,11 +241,9 @@
                 success: function(response) {
                     if (response.status === "success") {
                     } else {
-                        console.error("Failed to save totals and remainders:", response.message);
                     }
                 },
                 error: function(xhr, status, error) {
-                    console.error("Error during AJAX request:", error);
                 },
                 complete: function() {
                     // Hide the loading screen after the AJAX request completes
