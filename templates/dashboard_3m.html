@@ -3361,14 +3361,16 @@
                         if (response.status === 'success') {
                             input.value = '';
                             updateLocalState(type, categoryId, startDate, 0, true, endDate);
-                            // Only update affected UI sections, no need to recalculate backend
-                            updateView(["updateIncomeTotals", "updateExpenseTotals", "updateCaBalance", "updateRemainderRows"]);
-                            showDashboardSpinner(false);
+                            if (type === 'ca') {
+                                saveCaDailyBalance(startDate);
+                            } else {
+                                saveDailyTotalsAndRemainders(startDate);
+                            }
+                            updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                         } else {
                         }
                     },
                     error: function() {
-                        showDashboardSpinner(false);
                     }
                 });
             } else {
@@ -3401,14 +3403,16 @@
                         if (response.status === 'success') {
                             input.value = currencySymbol + Math.round(amount);
                             updateLocalState(type, categoryId, endDate, amount, false, endDate);
-                            // Only update affected UI sections, no need to recalculate backend
-                            updateView(["updateIncomeTotals", "updateExpenseTotals", "updateCaBalance", "updateRemainderRows"]);
-                            showDashboardSpinner(false);
+                            if (type === 'ca') {
+                                saveCaDailyBalance(startDate);
+                            } else {
+                                saveDailyTotalsAndRemainders(startDate);
+                            }
+                            updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                         } else {
                         }
                     },
                     error: function() {
-                        showDashboardSpinner(false);
                     }
                 });
             }

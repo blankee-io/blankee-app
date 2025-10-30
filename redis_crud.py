@@ -314,55 +314,19 @@ def bulk_update_entries(table: str, updates: List[Dict[str, Any]], user_id: Opti
         return True
     
     try:
-        # Update MySQL - use batch update for better performance
+        # Update MySQL
         with get_db_pool().get_cursor(commit=True) as cursor:
-            # Group updates by columns being updated for efficient batching
-            updates_by_columns = {}
             for update_data in updates:
+                # Make a copy to avoid modifying the original
                 update = dict(update_data)
                 entry_id = update.pop('id')
                 
                 if not update:
                     continue
-                
-                # Create a key from sorted column names
-                col_key = tuple(sorted(update.keys()))
-                if col_key not in updates_by_columns:
-                    updates_by_columns[col_key] = []
-                updates_by_columns[col_key].append((entry_id, update))
-            
-            # Execute batched updates for each column set
-            for columns, batch in updates_by_columns.items():
-                if not batch:
-                    continue
-                
-                # For single column updates, use CASE statement for efficiency
-                if len(columns) == 1:
-                    col = columns[0]
-                    ids = [item[0] for item in batch]
                     
-                    # Build CASE statement for batch update
-                    case_parts = []
-                    params = []
-                    for entry_id, update_dict in batch:
-                        case_parts.append("WHEN id = %s THEN %s")
-                        params.extend([entry_id, update_dict[col]])
-                    
-                    case_stmt = " ".join(case_parts)
-                    params.extend(ids)
-                    
-                    query = f"""
-                        UPDATE {table}
-                        SET {col} = CASE {case_stmt} END
-                        WHERE id IN ({','.join(['%s'] * len(ids))})
-                    """
-                    cursor.execute(query, params)
-                else:
-                    # For multiple columns, fall back to individual updates
-                    for entry_id, update_dict in batch:
-                        set_clause = ', '.join([f"{col} = %s" for col in update_dict.keys()])
-                        query = f"UPDATE {table} SET {set_clause} WHERE id = %s"
-                        cursor.execute(query, (*update_dict.values(), entry_id))
+                set_clause = ', '.join([f"{col} = %s" for col in update.keys()])
+                query = f"UPDATE {table} SET {set_clause} WHERE id = %s"
+                cursor.execute(query, (*update.values(), entry_id))
             
             logger.debug(f"Bulk updated {len(updates)} entries in {table}")
         
