@@ -4435,19 +4435,7 @@ def move_entry_d():
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         try:
             if entry_type == 'income':
-                cursor.execute("""
-                    SELECT ie.category_id
-                    FROM income_entries ie
-                    JOIN income_categories ic ON ie.category_id = ic.id
-                    WHERE ie.id = %s AND ic.user_id = %s
-                """, (entry_id, current_user.id))
-                row = cursor.fetchone()
-                if not row:
-                    cursor.close()
-                    return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
-                category_id = row['category_id']
-                
-                # Get entries from Redis
+                # Get entries from Redis first
                 entries = _get_entries_from_redis('income_entries', current_user.id)
                 
                 # If not in Redis, load from MySQL first
@@ -4461,7 +4449,7 @@ def move_entry_d():
                     entries = list(cursor.fetchall())
                     app.logger.info(f"[REDIS][income_entries] Loaded {len(entries)} entries from MySQL")
                 
-                # Find the entry to move
+                # Find the entry to move in Redis first
                 entry_to_move = None
                 for entry in entries:
                     if str(entry.get('id')) == str(entry_id):
@@ -4471,6 +4459,17 @@ def move_entry_d():
                 if not entry_to_move:
                     cursor.close()
                     return jsonify({'status': 'error', 'message': 'Entry not found in cache'}), 404
+                
+                category_id = entry_to_move.get('category_id')
+                
+                # Verify authorization - check that this category belongs to the user
+                cursor.execute("""
+                    SELECT id FROM income_categories 
+                    WHERE id = %s AND user_id = %s
+                """, (category_id, current_user.id))
+                if not cursor.fetchone():
+                    cursor.close()
+                    return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
                 
                 amount = Decimal(entry_to_move.get('amount', 0))
                 old_date = entry_to_move.get('date')
@@ -4495,20 +4494,7 @@ def move_entry_d():
                     _delete_entry_in_redis('income_entries', current_user.id, category_id, old_date, old_date)
 
             elif entry_type == 'expense':
-                cursor.execute("""
-                    SELECT ee.category_id, ec.is_credit_account, ec.name
-                    FROM expense_entries ee
-                    JOIN expense_categories ec ON ee.category_id = ec.id
-                    WHERE ee.id = %s AND ec.user_id = %s
-                """, (entry_id, current_user.id))
-                row = cursor.fetchone()
-                if not row:
-                    cursor.close()
-                    return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
-                category_id = row['category_id']
-                is_credit = row['is_credit_account']
-                
-                # Get entries from Redis
+                # Get entries from Redis first
                 entries = _get_entries_from_redis('expense_entries', current_user.id)
                 
                 # If not in Redis, load from MySQL first
@@ -4522,7 +4508,7 @@ def move_entry_d():
                     entries = list(cursor.fetchall())
                     app.logger.info(f"[REDIS][expense_entries] Loaded {len(entries)} entries from MySQL")
                 
-                # Find the entry to move
+                # Find the entry to move in Redis first
                 entry_to_move = None
                 for entry in entries:
                     if str(entry.get('id')) == str(entry_id):
@@ -4532,6 +4518,20 @@ def move_entry_d():
                 if not entry_to_move:
                     cursor.close()
                     return jsonify({'status': 'error', 'message': 'Entry not found in cache'}), 404
+                
+                category_id = entry_to_move.get('category_id')
+                
+                # Verify authorization and get category details
+                cursor.execute("""
+                    SELECT id, is_credit_account, name 
+                    FROM expense_categories 
+                    WHERE id = %s AND user_id = %s
+                """, (category_id, current_user.id))
+                row = cursor.fetchone()
+                if not row:
+                    cursor.close()
+                    return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
+                is_credit = row['is_credit_account']
                 
                 amount = Decimal(entry_to_move.get('amount', 0))
                 old_date = entry_to_move.get('date')
@@ -4560,20 +4560,7 @@ def move_entry_d():
                     ca_triggered = True
 
             elif entry_type == 'ca':
-                cursor.execute("""
-                    SELECT cee.category_id
-                    FROM c_expense_entries cee
-                    JOIN c_expense_categories cec ON cee.category_id = cec.id
-                    JOIN credit_accounts ca ON cec.account_id = ca.id
-                    WHERE cee.id = %s AND ca.user_id = %s
-                """, (entry_id, current_user.id))
-                row = cursor.fetchone()
-                if not row:
-                    cursor.close()
-                    return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
-                category_id = row['category_id']
-                
-                # Get entries from Redis
+                # Get entries from Redis first
                 entries = _get_entries_from_redis('c_expense_entries', current_user.id)
                 
                 # If not in Redis, load from MySQL first
@@ -4588,7 +4575,7 @@ def move_entry_d():
                     entries = list(cursor.fetchall())
                     app.logger.info(f"[REDIS][c_expense_entries] Loaded {len(entries)} entries from MySQL")
                 
-                # Find the entry to move
+                # Find the entry to move in Redis first
                 entry_to_move = None
                 for entry in entries:
                     if str(entry.get('id')) == str(entry_id):
@@ -4598,6 +4585,19 @@ def move_entry_d():
                 if not entry_to_move:
                     cursor.close()
                     return jsonify({'status': 'error', 'message': 'Entry not found in cache'}), 404
+                
+                category_id = entry_to_move.get('category_id')
+                
+                # Verify authorization - check that this category belongs to a credit account owned by the user
+                cursor.execute("""
+                    SELECT cec.id 
+                    FROM c_expense_categories cec
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE cec.id = %s AND ca.user_id = %s
+                """, (category_id, current_user.id))
+                if not cursor.fetchone():
+                    cursor.close()
+                    return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
                 
                 amount = Decimal(entry_to_move.get('amount', 0))
                 old_date = entry_to_move.get('date')
