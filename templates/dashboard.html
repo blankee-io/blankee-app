@@ -2083,6 +2083,15 @@
                         // Get the start and end of the week for the current cell's Friday
                         const { startOfWeek, endOfWeek } = calculateWeekRange(cellDate);
 
+                        // ...inside populateIncomeData, inside cells.forEach(td => { ... })...
+                        const matchingEntries = incomeEntries.filter(e => {
+                            const d = new Date(e.date);
+                            const isMatch = String(e.category_id) === String(entry.category_id) && d >= startOfWeek && d <= endOfWeek;
+                            if (isMatch) {
+                            }
+                            return isMatch;
+                        });
+
                         // Check if entryDate falls between startOfWeek and endOfWeek (inclusive)
                         if (entryDate >= startOfWeek && entryDate <= endOfWeek) {
                             matchedCell = td;
@@ -2151,6 +2160,11 @@
                         // Get the start and end of the week for the current cell's Friday
                         const { startOfWeek, endOfWeek } = calculateWeekRange(cellDate);
 
+                        const matchingEntries = expenseEntries.filter(e => {
+                            const d = new Date(e.date);
+                            return String(e.category_id) === String(entry.category_id) && d >= startOfWeek && d <= endOfWeek;
+                        });
+
                         // Check if entryDate falls between startOfWeek and endOfWeek (inclusive)
                         if (entryDate >= startOfWeek && entryDate <= endOfWeek) {
                             matchedCell = td;
@@ -2200,16 +2214,6 @@
         }
 
         function populateCaData() {
-            // Pre-index c_expense_entries by category_id for O(1) lookup
-            const entriesByCategory = {};
-            c_expense_entries.forEach(entry => {
-                const catId = String(entry.category_id);
-                if (!entriesByCategory[catId]) {
-                    entriesByCategory[catId] = [];
-                }
-                entriesByCategory[catId].push(entry);
-            });
-
             // For each credit account, populate its CA category rows in the month view
             document.querySelectorAll('table[id^="cas-table-"]').forEach(caTable => {
                 const accountId = caTable.id.replace('cas-table-', '');
@@ -2218,8 +2222,10 @@
 
                 caRows.forEach(row => {
                     const categoryId = row.getAttribute('data-category-id');
-                    // Get pre-filtered entries for this category
-                    const entries = entriesByCategory[String(categoryId)] || [];
+                    // Find all entries for this CA category and account
+                    const entries = c_expense_entries.filter(entry =>
+                        String(entry.category_id) === String(categoryId)
+                    );
 
                     // For each cell in the row (each Friday)
                     Array.from(row.children).forEach(td => {
@@ -3387,14 +3393,16 @@
                         if (response.status === 'success') {
                             input.value = '';
                             updateLocalState(type, categoryId, startDate, 0, true, endDate);
-                            // Only update affected UI sections, no need to recalculate backend
-                            updateView(["updateIncomeTotals", "updateExpenseTotals", "updateCaBalance", "updateRemainderRows"]);
-                            showDashboardSpinner(false);
+                            if (type === 'ca') {
+                                saveCaDailyBalance(startDate);
+                            } else {
+                                saveDailyTotalsAndRemainders(startDate);
+                            }
+                            updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                         } else {
                         }
                     },
                     error: function() {
-                        showDashboardSpinner(false);
                     }
                 });
             } else {
@@ -3427,14 +3435,16 @@
                         if (response.status === 'success') {
                             input.value = currencySymbol + Math.round(amount);
                             updateLocalState(type, categoryId, endDate, amount, false, endDate);
-                            // Only update affected UI sections, no need to recalculate backend
-                            updateView(["updateIncomeTotals", "updateExpenseTotals", "updateCaBalance", "updateRemainderRows"]);
-                            showDashboardSpinner(false);
+                            if (type === 'ca') {
+                                saveCaDailyBalance(startDate);
+                            } else {
+                                saveDailyTotalsAndRemainders(startDate);
+                            }
+                            updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                         } else {
                         }
                     },
                     error: function() {
-                        showDashboardSpinner(false);
                     }
                 });
             }
