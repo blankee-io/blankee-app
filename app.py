@@ -4420,6 +4420,8 @@ def save_ca_daily_balance():
 @app.route('/move_entry_d', methods=['POST'])
 @login_required
 def move_entry_d():
+    from redis_crud import get_entries, bulk_update_entries
+    
     data = request.get_json()
     entry_id = data.get('entry_id')
     new_date = data.get('new_date')
@@ -4428,237 +4430,121 @@ def move_entry_d():
     if not entry_id or not new_date or not entry_type:
         return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
 
-    ca_triggered = False
-    category_id = None
-
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-        try:
-            if entry_type == 'income':
-                cursor.execute("""
-                    SELECT ie.category_id
-                    FROM income_entries ie
-                    JOIN income_categories ic ON ie.category_id = ic.id
-                    WHERE ie.id = %s AND ic.user_id = %s
-                """, (entry_id, current_user.id))
-                row = cursor.fetchone()
-                if not row:
-                    cursor.close()
-                    return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
-                category_id = row['category_id']
-                
-                # Get entries from Redis
-                entries = _get_entries_from_redis('income_entries', current_user.id)
-                
-                # If not in Redis, load from MySQL first
-                if entries is None:
-                    entries = []
-                    cursor.execute("""
-                        SELECT ie.* FROM income_entries ie
-                        JOIN income_categories ic ON ie.category_id = ic.id
-                        WHERE ic.user_id = %s
-                    """, (current_user.id,))
-                    entries = list(cursor.fetchall())
-                    app.logger.info(f"[REDIS][income_entries] Loaded {len(entries)} entries from MySQL")
-                
-                # Find the entry to move
-                entry_to_move = None
-                for entry in entries:
-                    if str(entry.get('id')) == str(entry_id):
-                        entry_to_move = entry
-                        break
-                
-                if not entry_to_move:
-                    cursor.close()
-                    return jsonify({'status': 'error', 'message': 'Entry not found in cache'}), 404
-                
-                amount = Decimal(entry_to_move.get('amount', 0))
-                old_date = entry_to_move.get('date')
-                
-                # Check if entry exists at new date
-                existing_at_new_date = None
-                for entry in entries:
-                    if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(new_date):
-                        existing_at_new_date = entry
-                        break
-                
-                if existing_at_new_date:
-                    # Add to existing entry at new date
-                    new_amount = Decimal(existing_at_new_date.get('amount', 0)) + amount
-                    _update_entry_in_redis('income_entries', current_user.id, category_id, new_date, float(new_amount))
-                    # Delete old entry
-                    _delete_entry_in_redis('income_entries', current_user.id, category_id, old_date, old_date)
-                else:
-                    # Update date on existing entry
-                    _update_entry_in_redis('income_entries', current_user.id, category_id, new_date, float(amount), entry_id=int(entry_id))
-                    # Delete old date entry
-                    _delete_entry_in_redis('income_entries', current_user.id, category_id, old_date, old_date)
-
-            elif entry_type == 'expense':
-                cursor.execute("""
-                    SELECT ee.category_id, ec.is_credit_account, ec.name
-                    FROM expense_entries ee
-                    JOIN expense_categories ec ON ee.category_id = ec.id
-                    WHERE ee.id = %s AND ec.user_id = %s
-                """, (entry_id, current_user.id))
-                row = cursor.fetchone()
-                if not row:
-                    cursor.close()
-                    return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
-                category_id = row['category_id']
-                is_credit = row['is_credit_account']
-                
-                # Get entries from Redis
-                entries = _get_entries_from_redis('expense_entries', current_user.id)
-                
-                # If not in Redis, load from MySQL first
-                if entries is None:
-                    entries = []
-                    cursor.execute("""
-                        SELECT ee.* FROM expense_entries ee
-                        JOIN expense_categories ec ON ee.category_id = ec.id
-                        WHERE ec.user_id = %s
-                    """, (current_user.id,))
-                    entries = list(cursor.fetchall())
-                    app.logger.info(f"[REDIS][expense_entries] Loaded {len(entries)} entries from MySQL")
-                
-                # Find the entry to move
-                entry_to_move = None
-                for entry in entries:
-                    if str(entry.get('id')) == str(entry_id):
-                        entry_to_move = entry
-                        break
-                
-                if not entry_to_move:
-                    cursor.close()
-                    return jsonify({'status': 'error', 'message': 'Entry not found in cache'}), 404
-                
-                amount = Decimal(entry_to_move.get('amount', 0))
-                old_date = entry_to_move.get('date')
-                
-                # Check if entry exists at new date
-                existing_at_new_date = None
-                for entry in entries:
-                    if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(new_date):
-                        existing_at_new_date = entry
-                        break
-                
-                if existing_at_new_date:
-                    # Add to existing entry at new date
-                    new_amount = Decimal(existing_at_new_date.get('amount', 0)) + amount
-                    _update_entry_in_redis('expense_entries', current_user.id, category_id, new_date, float(new_amount))
-                    # Delete old entry
-                    _delete_entry_in_redis('expense_entries', current_user.id, category_id, old_date, old_date)
-                else:
-                    # Update date on existing entry
-                    _update_entry_in_redis('expense_entries', current_user.id, category_id, new_date, float(amount), entry_id=int(entry_id))
-                    # Delete old date entry
-                    _delete_entry_in_redis('expense_entries', current_user.id, category_id, old_date, old_date)
-
-                # If is_credit_account, trigger CA balance update
-                if is_credit == 1:
-                    ca_triggered = True
-
-            elif entry_type == 'ca':
-                cursor.execute("""
-                    SELECT cee.category_id
-                    FROM c_expense_entries cee
-                    JOIN c_expense_categories cec ON cee.category_id = cec.id
-                    JOIN credit_accounts ca ON cec.account_id = ca.id
-                    WHERE cee.id = %s AND ca.user_id = %s
-                """, (entry_id, current_user.id))
-                row = cursor.fetchone()
-                if not row:
-                    cursor.close()
-                    return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
-                category_id = row['category_id']
-                
-                # Get entries from Redis
-                entries = _get_entries_from_redis('c_expense_entries', current_user.id)
-                
-                # If not in Redis, load from MySQL first
-                if entries is None:
-                    entries = []
-                    cursor.execute("""
-                        SELECT cee.* FROM c_expense_entries cee
-                        JOIN c_expense_categories cec ON cee.category_id = cec.id
-                        JOIN credit_accounts ca ON cec.account_id = ca.id
-                        WHERE ca.user_id = %s
-                    """, (current_user.id,))
-                    entries = list(cursor.fetchall())
-                    app.logger.info(f"[REDIS][c_expense_entries] Loaded {len(entries)} entries from MySQL")
-                
-                # Find the entry to move
-                entry_to_move = None
-                for entry in entries:
-                    if str(entry.get('id')) == str(entry_id):
-                        entry_to_move = entry
-                        break
-                
-                if not entry_to_move:
-                    cursor.close()
-                    return jsonify({'status': 'error', 'message': 'Entry not found in cache'}), 404
-                
-                amount = Decimal(entry_to_move.get('amount', 0))
-                old_date = entry_to_move.get('date')
-                
-                # Check if entry exists at new date
-                existing_at_new_date = None
-                for entry in entries:
-                    if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(new_date):
-                        existing_at_new_date = entry
-                        break
-                
-                if existing_at_new_date:
-                    # Add to existing entry at new date
-                    new_amount = Decimal(existing_at_new_date.get('amount', 0)) + amount
-                    _update_entry_in_redis('c_expense_entries', current_user.id, category_id, new_date, float(new_amount))
-                    # Delete old entry
-                    _delete_entry_in_redis('c_expense_entries', current_user.id, category_id, old_date, old_date)
-                else:
-                    # Update date on existing entry
-                    _update_entry_in_redis('c_expense_entries', current_user.id, category_id, new_date, float(amount), entry_id=int(entry_id))
-                    # Delete old date entry
-                    _delete_entry_in_redis('c_expense_entries', current_user.id, category_id, old_date, old_date)
-                
-                ca_triggered = True
-
+    try:
+        ca_triggered = False
+        category_id = None
+        is_savings_category = False
+        
+        # Determine table name
+        if entry_type == 'income':
+            table_name = 'income_entries'
+        elif entry_type == 'expense':
+            table_name = 'expense_entries'
+        elif entry_type == 'ca':
+            table_name = 'c_expense_entries'
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
+        
+        # Get all entries using Redis-first approach
+        entries = get_entries(table_name, user_id=current_user.id)
+        
+        # Find the entry to move
+        entry_to_move = None
+        for entry in entries:
+            if str(entry.get('id')) == str(entry_id):
+                entry_to_move = entry
+                break
+        
+        if not entry_to_move:
+            return jsonify({'status': 'error', 'message': 'Entry not found'}), 404
+        
+        category_id = entry_to_move.get('category_id')
+        amount = Decimal(str(entry_to_move.get('amount', 0)))
+        old_date = entry_to_move.get('date')
+        if isinstance(old_date, str):
+            old_date_str = old_date
+        else:
+            old_date_str = old_date.strftime('%Y-%m-%d') if hasattr(old_date, 'strftime') else str(old_date)
+        
+        app.logger.info(f"[MOVE ENTRY] Moving {entry_type} entry {entry_id} from {old_date_str} to {new_date}, category {category_id}, amount {amount}")
+        
+        # Check if entry exists at new date
+        existing_at_new_date = None
+        for entry in entries:
+            entry_date = entry.get('date')
+            if isinstance(entry_date, str):
+                entry_date_str = entry_date
             else:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
+                entry_date_str = entry_date.strftime('%Y-%m-%d') if hasattr(entry_date, 'strftime') else str(entry_date)
+            
+            if str(entry.get('category_id')) == str(category_id) and entry_date_str == new_date:
+                existing_at_new_date = entry
+                break
+        
+        if existing_at_new_date:
+            # Add to existing entry at new date
+            new_amount = Decimal(str(existing_at_new_date.get('amount', 0))) + amount
+            app.logger.info(f"[MOVE ENTRY] Merging with existing entry at {new_date}, new amount: {new_amount}")
+            
+            # Update existing entry with combined amount
+            success = bulk_update_entries(table_name, [
+                {'id': existing_at_new_date['id'], 'amount': float(new_amount)}
+            ], user_id=current_user.id)
+            
+            if not success:
+                return jsonify({'status': 'error', 'message': 'Failed to update entry at new date'}), 500
+            
+            # Delete the old entry
+            success = bulk_update_entries(table_name, [
+                {'id': int(entry_id), 'amount': 0}
+            ], user_id=current_user.id)
+            
+            # Actually delete it by setting a deletion marker
+            _delete_entry_in_redis(table_name, current_user.id, category_id, old_date_str, old_date_str)
+        else:
+            # Update date on existing entry
+            app.logger.info(f"[MOVE ENTRY] Moving entry to new date {new_date}")
+            success = bulk_update_entries(table_name, [
+                {'id': int(entry_id), 'date': new_date}
+            ], user_id=current_user.id)
+            
+            if not success:
+                return jsonify({'status': 'error', 'message': 'Failed to move entry'}), 500
+        
+        # Check for special handling
+        if entry_type == 'expense':
+            # Check if this is a credit account category
+            expense_cats = get_entries('expense_categories', {'id': int(category_id)}, user_id=current_user.id)
+            if expense_cats and expense_cats[0].get('is_credit_account') == 1:
+                ca_triggered = True
+            
+            # Check if this is savings
+            if expense_cats and expense_cats[0].get('name') == 'Savings':
+                is_savings_category = True
+        
+        elif entry_type == 'income':
+            # Check if this is savings
+            income_cats = get_entries('income_categories', {'id': int(category_id)}, user_id=current_user.id)
+            if income_cats and income_cats[0].get('name') == 'Savings':
+                is_savings_category = True
+        
+        elif entry_type == 'ca':
+            ca_triggered = True
+        
+        # Update aggregated data
+        if entry_type == 'ca' or ca_triggered:
+            save_ca_daily_balance()
+        
+        if is_savings_category or entry_type in ['income', 'expense']:
+            save_totals_remainders_d()
+        
+        return jsonify({'status': 'success'})
+        
+    except Exception as e:
+        app.logger.error(f"Error in move_entry_d: {str(e)}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
-            cursor.close()
-            
-            # Check if this is a savings category
-            is_savings_category = False
-            if entry_type in ['income', 'expense']:
-                # Get category name to check if savings
-                if entry_type == 'income':
-                    cursor = conn.cursor(pymysql.cursors.DictCursor)
-                    cursor.execute("SELECT name FROM income_categories WHERE id = %s", (category_id,))
-                    cat = cursor.fetchone()
-                    if cat and cat.get('name') == 'Savings':
-                        is_savings_category = True
-                    cursor.close()
-                elif entry_type == 'expense':
-                    cursor = conn.cursor(pymysql.cursors.DictCursor)
-                    cursor.execute("SELECT name FROM expense_categories WHERE id = %s", (category_id,))
-                    cat = cursor.fetchone()
-                    if cat and cat.get('name') == 'Savings':
-                        is_savings_category = True
-                    cursor.close()
-            
-            if entry_type == 'ca' or ca_triggered:
-                save_ca_daily_balance()
-            
-            # Update totals and savings for income/expense moves
-            if is_savings_category or entry_type in ['income', 'expense']:
-                save_totals_remainders_d()
-                
-            return jsonify({'status': 'success'})
-        except Exception as e:
-            cursor.close()
-            return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 ##############################################################################
 ############################### DASHBOARD WEEK ###############################
