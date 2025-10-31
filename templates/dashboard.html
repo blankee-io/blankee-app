@@ -798,7 +798,7 @@
 
         }
 
-        function updateView(sections = ["all"]) {
+        async function updateView(sections = ["all"]) {
             const savingsRowRight = document.getElementById('savings-row-right');
             const totalMonths = baseYear * 12 + currentMonthIndex;
             let year = Math.floor(totalMonths / 12);
@@ -826,6 +826,14 @@
                     "incomeFooter", "expenseFooter", "caFooter", "lastRemainder", "remainder", 
                     "populateIncome", "populateExpense", "populateCa", "updateIncomeTotals", 
                     "updateExpenseTotals", "updateCaBalance", "updateRemainderRows", "highlightCurrentWeek", "addCurrentWeekDiv"
+                ];
+            }
+
+            // If "totals" is provided, only update totals/remainders (no blinking!)
+            if (sections.includes("totals")) {
+                sections = [
+                    "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance", 
+                    "updateRemainderRows"
                 ];
             }
 
@@ -870,12 +878,15 @@
                 addCellsToRemainderRow(globalFridays, remainderRowRight);
             }
 
+            // Collect all async operations
+            const asyncOperations = [];
+
             if (sections.includes("populateIncome")) {
                 populateIncomeData();
             }
 
             if (sections.includes("updateIncomeTotals")) {
-                updateIncomeTotals();
+                asyncOperations.push(updateIncomeTotals());
             }
 
             if (sections.includes("populateExpense")) {
@@ -887,15 +898,20 @@
             }
 
             if (sections.includes("updateExpenseTotals")) {
-                updateExpenseTotals();
+                asyncOperations.push(updateExpenseTotals());
             }
 
             if (sections.includes("updateCaBalance")) {
-                updateCaBalance();
+                asyncOperations.push(updateCaBalance());
             }
 
             if (sections.includes("updateRemainderRows")) {
-                updateRemainderRows();
+                asyncOperations.push(updateRemainderRows());
+            }
+
+            // Wait for all async operations to complete before continuing
+            if (asyncOperations.length > 0) {
+                await Promise.all(asyncOperations);
             }
 
             addCellsToSavingsRow(globalFridays, savingsRowRight);
@@ -927,7 +943,7 @@
         }
 
         const _origUpdateView = updateView;
-        updateView = function(sections = ["all"]) {
+        updateView = async function(sections = ["all"]) {
             // Store information about focused/highlighted elements before update
             let focusedElements = [];
             
@@ -985,30 +1001,44 @@
                 }
             });
             
-            // Run the original update view function
-            _origUpdateView(sections);
+            // Run the original update view function (which may return promises)
+            const result = _origUpdateView(sections);
+            
+            // If the original function returned a promise (or was async), wait for it
+            if (result && typeof result.then === 'function') {
+                await result;
+            }
 
             // Restore focus to elements that were focused before
+            // BUT only if the user hasn't moved focus elsewhere during the update
             setTimeout(() => {
-                focusedElements.forEach(element => {
-                    let selector;
-                    if (element.type === 'income') {
-                        selector = `#income-categories-body tr[data-category-id="${element.categoryId}"] td[data-date="${element.date}"] input`;
-                    } else if (element.type === 'expense') {
-                        selector = `#expense-categories-body tr[data-category-id="${element.categoryId}"] td[data-date="${element.date}"] input`;
-                    } else if (element.type === 'ca') {
-                        selector = `#ca-categories-body-${element.accountId} tr[data-category-id="${element.categoryId}"] td[data-date="${element.date}"] input`;
-                    }
-                    
-                    const input = document.querySelector(selector);
-                    if (input) {
-                        input.focus();
-                        // If the input had a value before, restore it
-                        if (element.value) {
-                            input.value = element.value;
+                // Check if user has already focused something else
+                const currentlyFocused = document.activeElement;
+                const userMovedFocus = currentlyFocused && 
+                    (currentlyFocused.tagName === 'INPUT' || currentlyFocused.tagName === 'TEXTAREA' || currentlyFocused.tagName === 'BUTTON');
+                
+                // Only restore focus if user hasn't manually focused something else
+                if (!userMovedFocus) {
+                    focusedElements.forEach(element => {
+                        let selector;
+                        if (element.type === 'income') {
+                            selector = `#income-categories-body tr[data-category-id="${element.categoryId}"] td[data-date="${element.date}"] input`;
+                        } else if (element.type === 'expense') {
+                            selector = `#expense-categories-body tr[data-category-id="${element.categoryId}"] td[data-date="${element.date}"] input`;
+                        } else if (element.type === 'ca') {
+                            selector = `#ca-categories-body-${element.accountId} tr[data-category-id="${element.categoryId}"] td[data-date="${element.date}"] input`;
                         }
-                    }
-                });
+                        
+                        const input = document.querySelector(selector);
+                        if (input) {
+                            input.focus();
+                            // If the input had a value before, restore it
+                            if (element.value) {
+                                input.value = element.value;
+                            }
+                        }
+                    });
+                }
             }, 0);
 
             // Reapply filters for income, expense, and CA categories
@@ -1795,33 +1825,32 @@
             const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
             const numberOfColumns = incomeBottomRow.children.length;
 
+            // Create array of promises for all AJAX requests
+            const promises = [];
             for (let i = 0; i < numberOfColumns; i++) {
-                let total = 0;
-
-                // Get the date associated with the current column
+                const tdElement = incomeBottomRow.children[i];
                 const date = lastRemainderRowRight.children[i].getAttribute('data-date');
 
-                // Fetch the total income for this date from the server
-                $.ajax({
-                    url: '/get_total_income',
-                    method: 'GET',
-                    data: { date: date },
-                    async: false, // We make it synchronous to wait for the result (not recommended, but simple)
-                    success: function(response) {
+                promises.push(
+                    $.ajax({
+                        url: '/get_total_income',
+                        method: 'GET',
+                        data: { date: date }
+                    }).then(function(response) {
                         if (response.status === 'success') {
                             const incomeTotal = parseFloat(response.total_income) || 0;
-                            total += incomeTotal;
+                            tdElement.textContent = formatCurrency(incomeTotal);
                         } else {
+                            tdElement.textContent = formatCurrency(0);
                         }
-                    },
-                    error: function() {
-                    }
-                });
-
-                // Update the total cell with the calculated sum, formatted to 2 decimal places with a dollar sign
-                incomeBottomRow.children[i].textContent = formatCurrency(total);
+                    }).catch(function() {
+                        tdElement.textContent = formatCurrency(0);
+                    })
+                );
             }
             
+            // Wait for all requests to complete
+            return Promise.all(promises);
         }
 
         function updateExpenseTotals() {
@@ -1830,10 +1859,9 @@
             const expensesBottomRow = document.getElementById('expenses-bottom-row');
             const numberOfColumns = expensesBottomRow.children.length;
 
+            // Create array of promises for all AJAX requests
+            const promises = [];
             for (let i = 0; i < numberOfColumns; i++) {
-                let total = 0;
-
-                // Get the correct td element and its data-date attribute
                 const tdElement = expensesBottomRow.children[i];
                 const date = tdElement.getAttribute('data-date');
 
@@ -1841,29 +1869,31 @@
                     continue;
                 }
 
-                // Fetch the total expenses for this date from the server
-                $.ajax({
-                    url: '/get_total_expenses',
-                    method: 'GET',
-                    data: { date: date },
-                    async: false, // Synchronous request (not recommended for production)
-                    success: function(response) {
+                promises.push(
+                    $.ajax({
+                        url: '/get_total_expenses',
+                        method: 'GET',
+                        data: { date: date }
+                    }).then(function(response) {
                         if (response.status === 'success') {
                             const expenseTotal = parseFloat(response.total_expenses) || 0;
-                            total += expenseTotal;
+                            tdElement.textContent = formatCurrency(expenseTotal);
                         } else {
+                            tdElement.textContent = formatCurrency(0);
                         }
-                    },
-                    error: function() {
-                    }
-                });
-
-                // Update the total cell with the calculated sum, formatted to 2 decimal places with a dollar sign
-                expensesBottomRow.children[i].textContent = formatCurrency(total);
+                    }).catch(function() {
+                        tdElement.textContent = formatCurrency(0);
+                    })
+                );
             }
+            
+            // Wait for all requests to complete
+            return Promise.all(promises);
         }
 
         function updateCaBalance() {
+            const allPromises = [];
+            
             document.querySelectorAll('table[id^="cas-table-"]').forEach(caTable => {
                 const accountId = caTable.id.replace('cas-table-', '');
                 const caBottomRow = document.getElementById(`cas-bottom-row-${accountId}`);
@@ -1880,25 +1910,27 @@
                     }
 
                     // Fetch the CA balance for this account and date from the server
-                    $.ajax({
-                        url: '/get_ca_balance',
-                        method: 'GET',
-                        data: { account_id: accountId, date: date },
-                        async: false, // Synchronous for consistency with other totals
-                        success: function(response) {
+                    allPromises.push(
+                        $.ajax({
+                            url: '/get_ca_balance',
+                            method: 'GET',
+                            data: { account_id: accountId, date: date }
+                        }).then(function(response) {
                             if (response.status === 'success') {
                                 const balance = parseFloat(response.balance) || 0;
                                 tdElement.textContent = formatCurrency(balance);
                             } else {
                                 tdElement.textContent = currencySymbol + '0.00';
                             }
-                        },
-                        error: function() {
+                        }).catch(function() {
                             tdElement.textContent = currencySymbol + '0.00';
-                        }
-                    });
+                        })
+                    );
                 }
             });
+            
+            // Wait for all requests to complete
+            return Promise.all(allPromises);
         }
 
         // Function to update the remainder and last remainder rows
@@ -1909,74 +1941,90 @@
             const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
             const numberOfColumns = remainderRowRight.children.length;
 
+            // Create array of promises for all AJAX requests
+            const promises = [];
+            
             for (let i = 0; i < numberOfColumns; i++) {
-                let lastRemainder = 0;
-                let remainder = 0;
+                const remainderCell = remainderRowRight.children[i];
+                const lastRemainderCell = lastRemainderRowRight.children[i];
+                const date = remainderCell.getAttribute('data-date');
 
-                // Get the date associated with the current column
-                const date = remainderRowRight.children[i].getAttribute('data-date');
-
-                // Fetch the last remainder for this date from the server
-                $.ajax({
+                // Fetch both last remainder and remainder for this date
+                const lastRemainderPromise = $.ajax({
                     url: '/get_last_remainder',
                     method: 'GET',
-                    data: { date: date },
-                    async: false, // Synchronous to wait for the result (not recommended, but simple)
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            lastRemainder = parseFloat(response.last_remainder) || 0;
-                        } else {
-                        }
-                    },
-                    error: function() {
-                    }
+                    data: { date: date }
                 });
 
-                // Fetch the remainder for this date from the server
-                $.ajax({
+                const remainderPromise = $.ajax({
                     url: '/get_remainder',
                     method: 'GET',
-                    data: { date: date },
-                    async: false, // Synchronous to wait for the result (not recommended, but simple)
-                    success: function(response) {
-
-                        if (response.status === 'success') {
-                            remainder = parseFloat(response.remainder) || 0;
-                        } else {
-                        }
-                    },
-                    error: function() {
-                    }
+                    data: { date: date }
                 });
 
-                // Update the last remainder cell with the fetched value
-                lastRemainderRowRight.children[i].textContent = formatCurrency(lastRemainder);
+                // Wait for both promises and update the cells
+                promises.push(
+                    Promise.all([lastRemainderPromise, remainderPromise]).then(function([lastRemainderResponse, remainderResponse]) {
+                        const lastRemainder = (lastRemainderResponse.status === 'success') 
+                            ? parseFloat(lastRemainderResponse.last_remainder) || 0 
+                            : 0;
+                        const remainder = (remainderResponse.status === 'success') 
+                            ? parseFloat(remainderResponse.remainder) || 0 
+                            : 0;
 
-                // Update the remainder cell with the fetched value and apply conditional styling
-                const remainderCell = remainderRowRight.children[i];
-                remainderCell.textContent = formatCurrency(remainder);
+                        // Format values
+                        const formattedLast = formatCurrency(lastRemainder);
+                        const formattedRemainder = formatCurrency(remainder);
 
-                // Remove any previous threshold classes
-                remainderCell.classList.remove('below-threshold', 'negative', 'above-threshold');
-                // Only apply threshold classes if the date is on or after member_since
-                let applyThresholdClass = true;
-                if (member_since) {
-                    const cellDate = new Date(remainderCell.getAttribute('data-date'));
-                    const memberSinceDate = new Date(member_since);
-                    if (cellDate < memberSinceDate) {
-                        applyThresholdClass = false;
-                    }
-                }
-                if (applyThresholdClass) {
-                    if (remainder < 0) {
-                        remainderCell.classList.add('negative');
-                    } else if (remainder < balance_threshold) {
-                        remainderCell.classList.add('below-threshold');
-                    } else {
-                        remainderCell.classList.add('above-threshold');
-                    }
-                }
+                        // Determine threshold class
+                        let thresholdClass = '';
+                        let applyThresholdClass = true;
+                        if (member_since) {
+                            const cellDate = new Date(remainderCell.getAttribute('data-date'));
+                            const memberSinceDate = new Date(member_since);
+                            if (cellDate < memberSinceDate) {
+                                applyThresholdClass = false;
+                            }
+                        }
+                        if (applyThresholdClass) {
+                            if (remainder < 0) {
+                                thresholdClass = 'negative';
+                            } else if (remainder < balance_threshold) {
+                                thresholdClass = 'below-threshold';
+                            } else {
+                                thresholdClass = 'above-threshold';
+                            }
+                        }
+
+                        // Only update if values have changed
+                        if (lastRemainderCell.textContent !== formattedLast) {
+                            lastRemainderCell.textContent = formattedLast;
+                        }
+
+                        if (remainderCell.textContent !== formattedRemainder) {
+                            remainderCell.textContent = formattedRemainder;
+                        }
+
+                        // Only update classes if needed
+                        const currentClass = remainderCell.classList.contains('negative') ? 'negative' 
+                            : remainderCell.classList.contains('below-threshold') ? 'below-threshold'
+                            : remainderCell.classList.contains('above-threshold') ? 'above-threshold' : '';
+                        
+                        if (currentClass !== thresholdClass) {
+                            remainderCell.classList.remove('below-threshold', 'negative', 'above-threshold');
+                            if (thresholdClass) {
+                                remainderCell.classList.add(thresholdClass);
+                            }
+                        }
+                    }).catch(function() {
+                        lastRemainderCell.textContent = formatCurrency(0);
+                        remainderCell.textContent = formatCurrency(0);
+                    })
+                );
             }
+            
+            // Wait for all requests to complete
+            return Promise.all(promises);
         }
 
         function updateLocalTotalsRemainders(updatedData, updatedSavings = null) {
@@ -2016,7 +2064,7 @@
 
                         // Optionally update other UI elements if needed
                         updateLocalTotalsRemainders(response.updated_totals_remainders, response.updated_savings_entries);
-                        updateView();
+                        updateView(["totals"]);
                         showDashboardSpinner(false);
                     } else {
                     }
@@ -2572,11 +2620,21 @@
                     }
                     if (newValue === '') {
                         updateEntryInput(input, type);
+                        // Refocus immediately after blur and select text
+                        setTimeout(() => {
+                            input.focus();
+                            input.select();
+                        }, 0);
                         return;
                     }
                     if (originalValue === '') {
                         // Creating a new entry
                         updateEntryInput(input, type);
+                        // Refocus immediately after blur and select text
+                        setTimeout(() => {
+                            input.focus();
+                            input.select();
+                        }, 0);
                         return;
                     }
                     if (newValue !== originalValue) {
@@ -2584,6 +2642,11 @@
                         showEntryUpdateModal(
                             function() { 
                                 updateEntryInput(input, type);
+                                // Refocus immediately after blur and select text
+                                setTimeout(() => {
+                                    input.focus();
+                                    input.select();
+                                }, 0);
                             },
                             function() { 
                                 input.value = originalValue;
@@ -3367,6 +3430,10 @@
         function updateEntryInput(input, type) {
             // Similar to your updateEntry, but get data from input.parentElement (td)
             const td = input.parentElement;
+            
+            // Blur the input immediately to release focus and allow navigation
+            input.blur();
+            
             showDashboardSpinner(true);
             const newValue = input.value.trim();
 
@@ -3398,7 +3465,10 @@
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
-                            updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
+                            // Defer updateView to next tick to avoid blocking
+                            setTimeout(() => {
+                                updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
+                            }, 0);
                         } else {
                         }
                     },
@@ -3433,14 +3503,17 @@
                     success: function(response) {
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
-                            input.value = currencySymbol + Math.round(amount);
+                            input.value = Math.round(amount).toString();
                             updateLocalState(type, categoryId, endDate, amount, false, endDate);
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
-                            updateView(["lastRemainder", "updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
+                            // Defer updateView to next tick to avoid blocking
+                            setTimeout(() => {
+                                updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
+                            }, 0);
                         } else {
                         }
                     },
@@ -4000,7 +4073,7 @@
         });
 
         // Automatically generate the month view when the page loads
-        window.onload = function() {
+        window.onload = async function() {
             const lastViewed = getLastViewedMonth();
             
             if (lastViewed) {
@@ -4010,7 +4083,12 @@
                 currentMonthIndex = (today.getUTCFullYear() - baseYear) * 12 + today.getUTCMonth();
             }
 
-            updateView();
+            // Ensure the initial render completes before highlighting/outline logic runs
+            await updateView();
+
+            // Nudge layout-sensitive outline logic to run after the first paint
+            // Triggers the existing resize listener that recalculates the current-week outline
+            setTimeout(() => { window.dispatchEvent(new Event('resize')); }, 0);
             // Start the guided tour overlay after updateView completes
             setTimeout(startGuidedTourOverlay, 0);
 
@@ -4340,15 +4418,45 @@
             ['scroll', 'resize'].forEach(evt => window.addEventListener(evt, updateCurrentWeekOutline, true));
             if (typeof updateView === 'function') {
                 const origUpdateView = updateView;
-                window.updateView = function() {
+                window.updateView = async function() {
                     const result = origUpdateView.apply(this, arguments);
-                    setTimeout(() => { updateCurrentWeekOutline(); }, 0);
+                    // Await async updateView if it returns a promise
+                    if (result && typeof result.then === 'function') {
+                        await result;
+                    }
+                    // Ensure highlight classes are applied after content rebuild
+                    if (typeof highlightCurrentWeek === 'function') {
+                        try { highlightCurrentWeek(); } catch (e) {}
+                    }
+                    // Run outline on next frame to use final layout metrics
+                    requestAnimationFrame(() => { try { updateCurrentWeekOutline(); } catch (e) {} });
                     return result;
                 };
             } else {
-                document.addEventListener('DOMContentLoaded', updateCurrentWeekOutline);
+                document.addEventListener('DOMContentLoaded', () => {
+                    if (typeof highlightCurrentWeek === 'function') {
+                        try { highlightCurrentWeek(); } catch (e) {}
+                    }
+                    updateCurrentWeekOutline();
+                });
             }
             setTimeout(updateCurrentWeekOutline, 100);
+
+            // Also re-run highlight/outline after nav button clicks
+            ['next-month-btn','previous-nav-btn','current-nav-btn'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.addEventListener('click', () => {
+                        // Defer to run after the view update triggered by the nav action
+                        setTimeout(() => {
+                            if (typeof highlightCurrentWeek === 'function') {
+                                try { highlightCurrentWeek(); } catch (e) {}
+                            }
+                            try { updateCurrentWeekOutline(); } catch (e) {}
+                        }, 0);
+                    });
+                }
+            });
         });
 
         // Function to show the context menu with dynamic position and corner rounding
