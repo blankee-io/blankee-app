@@ -2593,9 +2593,10 @@
             input.addEventListener('focus', function () {
                 // Reset the processed flag when focusing on the input
                 entryProcessed = false;
-                // Remove $ only if present
-                if (input.value.trim().startsWith('$')) {
-                    input.value = input.value.trim().substring(1).trim();
+                // Remove currency symbol only if present
+                const trimmed = input.value.trim();
+                if (trimmed.startsWith(currencySymbol)) {
+                    input.value = trimmed.substring(currencySymbol.length).trim();
                 }
                 originalValue = input.value;
                 input.select();
@@ -2706,28 +2707,31 @@
                             entryProcessed = false;
                         }
                     );
-                } else {
-                    // Restore original value or format properly if it's a number
-                    setTimeout(function () {
+                }
+                
+                // ALWAYS format with currency when blur completes (unless refocused immediately)
+                // Use requestAnimationFrame for better timing than setTimeout
+                requestAnimationFrame(function () {
+                    // Only format if the input is not currently focused
+                    if (document.activeElement !== input) {
                         const trimmedValue = input.value.trim();
                         if (trimmedValue === '') {
                             // If empty, keep it empty
                             input.value = '';
                         } else {
+                            // Remove any existing currency symbol first
+                            const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
                             // Parse as int only if it's a number
-                            const numValue = parseInt(trimmedValue, 10);
+                            const numValue = parseInt(cleanValue, 10);
                             if (!isNaN(numValue)) {
                                 input.value = currencySymbol + numValue;
-                            } else if (trimmedValue.startsWith(currencySymbol)) {
-                                // Leave currency-formatted values as is
-                                input.value = trimmedValue;
-                            } else {
-                                // Restore original value if not a number and doesn't have currency symbol
+                            } else if (originalValue) {
+                                // Restore original value if not a number
                                 input.value = originalValue;
                             }
                         }
-                    }, 0);
-                }
+                    }
+                });
             });
 
             input.addEventListener('input', function () {
@@ -2866,6 +2870,15 @@
             }
 
             if (nextInput) {
+                // Format current input with currency before moving focus
+                const trimmedValue = input.value.trim();
+                if (trimmedValue !== '') {
+                    const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
+                    const numValue = parseInt(cleanValue, 10);
+                    if (!isNaN(numValue)) {
+                        input.value = currencySymbol + numValue;
+                    }
+                }
                 nextInput.focus();
                 event.preventDefault();
             }
@@ -3431,9 +3444,6 @@
             // Similar to your updateEntry, but get data from input.parentElement (td)
             const td = input.parentElement;
             
-            // Blur the input immediately to release focus and allow navigation
-            input.blur();
-            
             showDashboardSpinner(true);
             const newValue = input.value.trim();
 
@@ -3503,7 +3513,14 @@
                     success: function(response) {
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
-                            input.value = Math.round(amount).toString();
+                            // Format the value with currency symbol if not focused
+                            const rounded = Math.round(amount).toString();
+                            // Only add currency if input is not currently focused
+                            if (document.activeElement !== input) {
+                                input.value = currencySymbol + rounded;
+                            } else {
+                                input.value = rounded;
+                            }
                             updateLocalState(type, categoryId, endDate, amount, false, endDate);
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
