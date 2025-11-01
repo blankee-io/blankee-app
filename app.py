@@ -33,7 +33,7 @@ login_manager.init_app(app)
 app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
 
 # Define the upload folder and allowed file extensions
-UPLOAD_FOLDER = '/var/www/html/budget/static/uploads'  # Make sure this folder exists
+UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')  # Relative to application root
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.logger.setLevel(logging.INFO)
