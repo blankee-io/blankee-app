@@ -60,13 +60,24 @@
                                 <!-- Floating prompt for uploading a new profile picture -->
                                 <div id="uploadModalOverlay" class="center-modal-overlay">
                                     <div id="uploadPrompt" class="center-modal-content">
-                                        <form method="POST" action="{{ url_for('update_profile_picture') }}" enctype="multipart/form-data" style="display: flex; flex-direction: column; align-items: center;">
-                                            <img id="profile-picture-preview" class="profile-pic-preview" src="" alt="Preview" style="display:none;">
-                                            <input type="file" name="profile_picture" id="profile_picture" class="file-input">
-                                            <label for="profile_picture" class="file-input-label profile-pic-placeholder">
+                                        <form id="profile-upload-form" method="POST" action="{{ url_for('update_profile_picture') }}" enctype="multipart/form-data">
+                                            <div id="image-crop-container">
+                                                <div class="zoom-buttons">
+                                                    <button type="button" id="zoom-out-btn"><i class="fas fa-magnifying-glass-minus"></i></button>
+                                                    <button type="button" id="zoom-in-btn"><i class="fas fa-magnifying-glass-plus"></i></button>
+                                                </div>
+                                                <canvas id="crop-canvas" width="200" height="200"></canvas>
+                                                <p class="crop-hint">Drag to reposition</p>
+                                            </div>
+                                            <input type="file" name="profile_picture" id="profile_picture" class="file-input" accept=".png,.jpg,.jpeg,.gif">
+                                            <label for="profile_picture" id="file-input-label" class="file-input-label profile-pic-placeholder">
                                                 <i class="fas fa-upload"></i>
                                             </label>
-                                            <button type="submit" class="upload-button">Done</button>
+                                            <p class="format-hint">Accepted formats: PNG, JPG, JPEG, GIF</p>
+                                            <div class="upload-modal-buttons">
+                                                <button type="button" class="cancel-upload-button" onclick="toggleUploadPrompt()">Cancel</button>
+                                                <button type="submit" class="upload-button">Upload</button>
+                                            </div>
                                         </form>
                                     </div>
                                 </div>
@@ -518,70 +529,230 @@
             });
         }        
 
+        // Image cropping functionality
+        let cropperState = {
+            image: null,
+            scale: 1,
+            offsetX: 0,
+            offsetY: 0,
+            isDragging: false,
+            startX: 0,
+            startY: 0
+        };
+
         document.addEventListener("DOMContentLoaded", function() {
             const fileInput = document.getElementById('profile_picture');
-            const previewImg = document.getElementById('profile-picture-preview');
+            const canvas = document.getElementById('crop-canvas');
+            const ctx = canvas.getContext('2d');
+            const cropContainer = document.getElementById('image-crop-container');
+            const placeholder = document.getElementById('file-input-label');
+            const zoomInBtn = document.getElementById('zoom-in-btn');
+            const zoomOutBtn = document.getElementById('zoom-out-btn');
 
-            if (fileInput && previewImg) {
+            if (fileInput && canvas) {
                 fileInput.addEventListener('change', function(event) {
                     const file = event.target.files[0];
                     if (file && file.type.startsWith('image/')) {
                         const reader = new FileReader();
                         reader.onload = function(e) {
-                            previewImg.src = e.target.result;
-                            previewImg.style.display = 'block';
+                            const img = new Image();
+                            img.onload = function() {
+                                cropperState.image = img;
+                                // Calculate initial scale to fit image in circle
+                                const minDimension = Math.min(img.width, img.height);
+                                cropperState.scale = 200 / minDimension;
+                                cropperState.offsetX = 0;
+                                cropperState.offsetY = 0;
+                                
+                                cropContainer.style.display = 'block';
+                                placeholder.style.display = 'none';
+                                drawImage();
+                            };
+                            img.src = e.target.result;
                         };
                         reader.readAsDataURL(file);
-                    } else {
-                        previewImg.src = '';
-                        previewImg.style.display = 'none';
                     }
                 });
+
+                // Zoom controls
+                zoomInBtn.addEventListener('click', function() {
+                    cropperState.scale *= 1.1;
+                    drawImage();
+                });
+
+                zoomOutBtn.addEventListener('click', function() {
+                    cropperState.scale *= 0.9;
+                    drawImage();
+                });
+
+                // Mouse drag events
+                canvas.addEventListener('mousedown', function(e) {
+                    cropperState.isDragging = true;
+                    cropperState.startX = e.offsetX;
+                    cropperState.startY = e.offsetY;
+                });
+
+                canvas.addEventListener('mousemove', function(e) {
+                    if (cropperState.isDragging) {
+                        const dx = e.offsetX - cropperState.startX;
+                        const dy = e.offsetY - cropperState.startY;
+                        cropperState.offsetX += dx;
+                        cropperState.offsetY += dy;
+                        cropperState.startX = e.offsetX;
+                        cropperState.startY = e.offsetY;
+                        drawImage();
+                    }
+                });
+
+                canvas.addEventListener('mouseup', function() {
+                    cropperState.isDragging = false;
+                });
+
+                canvas.addEventListener('mouseleave', function() {
+                    cropperState.isDragging = false;
+                });
+
+                // Touch events for mobile
+                canvas.addEventListener('touchstart', function(e) {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    const rect = canvas.getBoundingClientRect();
+                    cropperState.isDragging = true;
+                    cropperState.startX = touch.clientX - rect.left;
+                    cropperState.startY = touch.clientY - rect.top;
+                });
+
+                canvas.addEventListener('touchmove', function(e) {
+                    e.preventDefault();
+                    if (cropperState.isDragging) {
+                        const touch = e.touches[0];
+                        const rect = canvas.getBoundingClientRect();
+                        const x = touch.clientX - rect.left;
+                        const y = touch.clientY - rect.top;
+                        const dx = x - cropperState.startX;
+                        const dy = y - cropperState.startY;
+                        cropperState.offsetX += dx;
+                        cropperState.offsetY += dy;
+                        cropperState.startX = x;
+                        cropperState.startY = y;
+                        drawImage();
+                    }
+                });
+
+                canvas.addEventListener('touchend', function() {
+                    cropperState.isDragging = false;
+                });
+            }
+
+            function drawImage() {
+                if (!cropperState.image) return;
+                
+                const canvas = document.getElementById('crop-canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // Clear canvas
+                ctx.clearRect(0, 0, 200, 200);
+                
+                // Save context
+                ctx.save();
+                
+                // Create circular clipping path
+                ctx.beginPath();
+                ctx.arc(100, 100, 100, 0, Math.PI * 2);
+                ctx.clip();
+                
+                // Calculate scaled dimensions
+                const scaledWidth = cropperState.image.width * cropperState.scale;
+                const scaledHeight = cropperState.image.height * cropperState.scale;
+                
+                // Center image initially
+                const x = 100 - (scaledWidth / 2) + cropperState.offsetX;
+                const y = 100 - (scaledHeight / 2) + cropperState.offsetY;
+                
+                // Draw image
+                ctx.drawImage(cropperState.image, x, y, scaledWidth, scaledHeight);
+                
+                // Restore context
+                ctx.restore();
+                
+                // Draw circular border
+                ctx.beginPath();
+                ctx.arc(100, 100, 100, 0, Math.PI * 2);
+                ctx.strokeStyle = '#ddd';
+                ctx.lineWidth = 2;
+                ctx.stroke();
             }
         });
 
         function toggleUploadPrompt() {
             const overlay = document.getElementById('uploadModalOverlay');
+            const cropContainer = document.getElementById('image-crop-container');
+            const placeholder = document.getElementById('file-input-label');
+            
             if (overlay) {
-                overlay.style.display = (overlay.style.display === 'flex') ? 'none' : 'flex';
+                if (overlay.style.display === 'flex') {
+                    overlay.style.display = 'none';
+                    // Reset cropper state
+                    cropperState = {
+                        image: null,
+                        scale: 1,
+                        offsetX: 0,
+                        offsetY: 0,
+                        isDragging: false,
+                        startX: 0,
+                        startY: 0
+                    };
+                    cropContainer.style.display = 'none';
+                    placeholder.style.display = 'flex';
+                    document.getElementById('profile_picture').value = '';
+                } else {
+                    overlay.style.display = 'flex';
+                }
             }
         }
-
-        document.addEventListener("DOMContentLoaded", function() {
-            const fileInput = document.getElementById('profile_picture');
-            const previewImg = document.getElementById('profile-picture-preview');
-            const placeholder = document.querySelector('.profile-pic-placeholder');
-
-            if (fileInput && previewImg && placeholder) {
-                fileInput.addEventListener('change', function(event) {
-                    const file = event.target.files[0];
-                    if (file && file.type.startsWith('image/')) {
-                        const reader = new FileReader();
-                        reader.onload = function(e) {
-                            previewImg.src = e.target.result;
-                            previewImg.style.display = 'block';
-                            placeholder.style.display = 'none';
-                        };
-                        reader.readAsDataURL(file);
-                    } else {
-                        previewImg.src = '';
-                        previewImg.style.display = 'none';
-                        placeholder.style.display = 'flex';
-                    }
-                });
-            }
-        });
 
         document.addEventListener("DOMContentLoaded", function() {
             const overlay = document.getElementById('uploadModalOverlay');
             const modalContent = document.getElementById('uploadPrompt');
 
+            // Prevent closing modal on clicking outside
             if (overlay && modalContent) {
                 overlay.addEventListener('click', function(e) {
-                    // Only close if clicking directly on the overlay, not inside the modal
-                    if (e.target === overlay) {
-                        overlay.style.display = 'none';
+                    // Do nothing - modal can only be closed with Cancel or Done button
+                    e.stopPropagation();
+                });
+            }
+
+            // Handle form submission to send cropped image
+            const uploadForm = document.getElementById('profile-upload-form');
+            if (uploadForm) {
+                uploadForm.addEventListener('submit', function(e) {
+                    // If an image has been cropped, use the canvas data
+                    if (cropperState.image) {
+                        e.preventDefault();
+                        
+                        const canvas = document.getElementById('crop-canvas');
+                        canvas.toBlob(function(blob) {
+                            const formData = new FormData();
+                            formData.append('profile_picture', blob, 'profile_picture.png');
+                            
+                            // Send via AJAX
+                            fetch('{{ url_for("update_profile_picture") }}', {
+                                method: 'POST',
+                                body: formData
+                            })
+                            .then(response => response.text())
+                            .then(html => {
+                                // Reload the page to show the updated profile picture
+                                window.location.reload();
+                            })
+                            .catch(error => {
+                                console.error('Error uploading:', error);
+                                alert('Error uploading profile picture');
+                            });
+                        }, 'image/png');
                     }
+                    // If no image was cropped, let the form submit normally
                 });
             }
         });

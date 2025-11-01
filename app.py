@@ -21,6 +21,7 @@ from dateutil.relativedelta import relativedelta
 from decimal import Decimal
 import threading
 from collections import defaultdict
+from PIL import Image
 from db_connections import init_db_pool, get_db_pool, dispose_db_pool
 from redis_manager import init_redis_manager, shutdown_redis_manager, DecimalEncoder
 from middleware import init_redis_middleware, init_redis_routes
@@ -7562,8 +7563,45 @@ def update_profile_picture():
             if os.path.exists(old_filepath):
                 os.remove(old_filepath)
 
-        # Save the new profile picture file
-        file.save(filepath)
+        # Open, resize, and save the new profile picture file
+        try:
+            # Ensure upload folder exists
+            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+            
+            img = Image.open(file)
+            
+            # Convert RGBA to RGB if necessary (for PNG with transparency)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = background
+            
+            # Resize so the shortest dimension is 150px while maintaining aspect ratio
+            width, height = img.size
+            if width < height:
+                new_width = 150
+                new_height = int((150 / width) * height)
+            else:
+                new_height = 150
+                new_width = int((150 / height) * width)
+            
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Crop to 150x150 from center
+            left = (new_width - 150) / 2
+            top = (new_height - 150) / 2
+            right = left + 150
+            bottom = top + 150
+            img = img.crop((left, top, right, bottom))
+            
+            # Save with optimization
+            img.save(filepath, optimize=True, quality=85)
+        except Exception as e:
+            app.logger.error(f"Error processing image: {str(e)}")
+            flash('Error processing image')
+            return redirect(url_for('profile'))
 
         # Update in Redis only - flush worker will persist to MySQL
         _update_user_setting_in_redis(current_user.id, 'profile_picture', filename)
