@@ -2113,6 +2113,7 @@
 
         function populateIncomeData() {
             const weekEntriesMap = {}; // Map to track entries for each week
+            const allCells = new Set(); // Track all cells to identify empty ones
 
             incomeEntries.forEach(entry => {
                 const entryDate = new Date(entry.date); // Date of the income entry
@@ -2143,6 +2144,7 @@
                         // Check if entryDate falls between startOfWeek and endOfWeek (inclusive)
                         if (entryDate >= startOfWeek && entryDate <= endOfWeek) {
                             matchedCell = td;
+                            allCells.add(td);
                             const weekKey = `${startOfWeek.toISOString()}_${entry.category_id}`; // Unique key for each week-category pair
 
                             if (!weekEntriesMap[weekKey]) {
@@ -2186,10 +2188,26 @@
                     }
                 });
             });
+
+            // Clear cells that don't have any entries
+            document.querySelectorAll('#income-table tr[data-category-id]').forEach(row => {
+                row.querySelectorAll('td').forEach(td => {
+                    if (!allCells.has(td)) {
+                        const input = td.querySelector('input');
+                        if (input && !input.disabled) {
+                            input.value = '';
+                            td.removeAttribute('data-processed');
+                            td.setAttribute('data-processed', '0');
+                            td.classList.remove('paid');
+                        }
+                    }
+                });
+            });
         }
 
         function populateExpenseData() {
             const weekEntriesMap = {}; // Map to track entries for each week
+            const allCells = new Set(); // Track all cells to identify empty ones
 
             expenseEntries.forEach(entry => {
                 const entryDate = new Date(entry.date); // Date of the expense entry
@@ -2216,6 +2234,7 @@
                         // Check if entryDate falls between startOfWeek and endOfWeek (inclusive)
                         if (entryDate >= startOfWeek && entryDate <= endOfWeek) {
                             matchedCell = td;
+                            allCells.add(td);
                             const weekKey = `${startOfWeek.toISOString()}_${entry.category_id}`; // Unique key for each week-category pair
 
                             if (!weekEntriesMap[weekKey]) {
@@ -2256,6 +2275,21 @@
                         cell.classList.add('paid');
                     } else {
                         cell.classList.remove('paid');
+                    }
+                });
+            });
+
+            // Clear cells that don't have any entries
+            document.querySelectorAll('#expenses-table tr[data-category-id]').forEach(row => {
+                row.querySelectorAll('td').forEach(td => {
+                    if (!allCells.has(td)) {
+                        const input = td.querySelector('input');
+                        if (input && !input.disabled) {
+                            input.value = '';
+                            td.removeAttribute('data-processed');
+                            td.setAttribute('data-processed', '0');
+                            td.classList.remove('paid');
+                        }
                     }
                 });
             });
@@ -2293,6 +2327,10 @@
                                 input.value = currencySymbol + Math.round(entry.total_amount);
                             } else {
                                 input.value = '';
+                                // Clear processed status when no entry exists
+                                td.removeAttribute('data-processed');
+                                td.setAttribute('data-processed', '0');
+                                td.classList.remove('paid');
                             }
                         }
 
@@ -2665,48 +2703,50 @@
 
             input.addEventListener('blur', function () {
                 
+                // Check if we should skip processing (but not formatting)
+                const shouldSkipProcessing = ignoreBlur || entryProcessed;
+                
                 if (ignoreBlur) {
                     ignoreBlur = false;
-                    entryProcessed = false;
-                    return;
                 }
                 
-                // If already processed via Enter key, don't process again
                 if (entryProcessed) {
                     entryProcessed = false;
-                    return;
                 }
                 
-                const newValue = input.value.trim().replace(currencySymbol, '').trim();
-                if (newValue !== originalValue) {
-                    // Mark as processed to prevent duplicate submissions
-                    entryProcessed = true;
-                    
-                    // If value changed, submit (with confirmation if needed)
-                    if (originalValue === '' && newValue === '') {
-                        input.value = originalValue;
-                        entryProcessed = false;
-                        return;
-                    }
-                    if (newValue === '') {
-                        updateEntryInput(input, type);
-                        return;
-                    }
-                    if (originalValue === '') {
-                        // Creating a new entry
-                        updateEntryInput(input, type);
-                        return;
-                    }
-                    // Only show the modal when editing an existing value
-                    showEntryUpdateModal(
-                        function() { 
-                            updateEntryInput(input, type);
-                        },
-                        function() { 
+                // Only process if not already handled by Enter key
+                if (!shouldSkipProcessing) {
+                    const newValue = input.value.trim().replace(currencySymbol, '').trim();
+                    if (newValue !== originalValue) {
+                        // Mark as processed to prevent duplicate submissions
+                        entryProcessed = true;
+                        
+                        // If value changed, submit (with confirmation if needed)
+                        if (originalValue === '' && newValue === '') {
                             input.value = originalValue;
                             entryProcessed = false;
+                            // Don't return - still need to format
+                        } else if (newValue === '') {
+                            updateEntryInput(input, type);
+                            return; // Exit after delete
+                        } else if (originalValue === '') {
+                            // Creating a new entry
+                            updateEntryInput(input, type);
+                            return; // Exit after create
+                        } else {
+                            // Only show the modal when editing an existing value
+                            showEntryUpdateModal(
+                                function() { 
+                                    updateEntryInput(input, type);
+                                },
+                                function() { 
+                                    input.value = originalValue;
+                                    entryProcessed = false;
+                                }
+                            );
+                            return; // Exit while modal is showing
                         }
-                    );
+                    }
                 }
                 
                 // ALWAYS format with currency when blur completes (unless refocused immediately)
@@ -2870,16 +2910,20 @@
             }
 
             if (nextInput) {
-                // Format current input with currency before moving focus
-                const trimmedValue = input.value.trim();
-                if (trimmedValue !== '') {
-                    const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
-                    const numValue = parseInt(cleanValue, 10);
-                    if (!isNaN(numValue)) {
-                        input.value = currencySymbol + numValue;
+                // Trigger blur on current input to save changes
+                input.blur();
+                // Then format and move focus
+                requestAnimationFrame(() => {
+                    const trimmedValue = input.value.trim();
+                    if (trimmedValue !== '') {
+                        const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
+                        const numValue = parseInt(cleanValue, 10);
+                        if (!isNaN(numValue)) {
+                            input.value = currencySymbol + numValue;
+                        }
                     }
-                }
-                nextInput.focus();
+                    nextInput.focus();
+                });
                 event.preventDefault();
             }
         }
@@ -3469,6 +3513,11 @@
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
                             input.value = '';
+                            // Remove processed status from the cell
+                            td.removeAttribute('data-processed');
+                            td.setAttribute('data-processed', '0');
+                            td.classList.remove('paid');
+                            
                             updateLocalState(type, categoryId, startDate, 0, true, endDate);
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
