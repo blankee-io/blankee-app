@@ -1961,14 +1961,7 @@ def _set_totals_remainders_to_redis(table_name, user_id, data):
         app.logger.warning(f"[REDIS][{table_name}] SET error user={user_id}: {e}")
 
 def _update_totals_remainders_in_redis(table_name, user_id, updates):
-    """
-    Update specific rows in Redis cache.
-    
-    Args:
-        table_name: Table name
-        user_id: User ID
-        updates: List of dicts with updated values (must include 'date' key)
-    """
+    """Update specific totals/remainders rows in Redis cache."""
     if not app.config.get('REDIS_OK'):
         return
     
@@ -2030,6 +2023,21 @@ def _update_totals_remainders_in_redis(table_name, user_id, updates):
             app.logger.info(f"[REDIS][{table_name}] CREATE user={user_id}, rows={len(updates)}")
     except Exception as e:
         app.logger.warning(f"[REDIS][{table_name}] UPDATE error user={user_id}: {e}")
+
+
+def _processed_flag_is_true(value):
+    """Normalize tinyint/boolean/string processed flags into a boolean value."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, Decimal):
+        return int(value) == 1
+    if isinstance(value, (int, float)):
+        return int(value) == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y"}
+    return False
 
 def _get_ca_balances_from_redis(table_name, user_id, account_id=None, start_date=None):
     """
@@ -5122,7 +5130,8 @@ def dashboard():
         income_entries = []
         for key, total_amount in income_map.items():
             processed_list = processed_map[key]
-            processed = 1 if all(p == 1 for p in processed_list) else 0
+            processed_flags = [_processed_flag_is_true(p) for p in processed_list]
+            processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, week_key = key
             income_entries.append({
                 'category_id': category_id,
@@ -5162,7 +5171,8 @@ def dashboard():
         expense_entries = []
         for key, total_amount in expense_map.items():
             processed_list = expense_processed_map[key]
-            processed = 1 if all(p == 1 for p in processed_list) else 0
+            processed_flags = [_processed_flag_is_true(p) for p in processed_list]
+            processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, week_key = key
             expense_entries.append({
                 'category_id': category_id,
@@ -5204,7 +5214,8 @@ def dashboard():
         c_expense_entries = []
         for key, total_amount in c_expense_map.items():
             processed_list = c_expense_processed_map[key]
-            processed = 1 if all(p == 1 for p in processed_list) else 0
+            processed_flags = [_processed_flag_is_true(p) for p in processed_list]
+            processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, week_key = key
             c_expense_entries.append({
                 'category_id': category_id,
@@ -6200,7 +6211,8 @@ def dashboard_3m():
         income_entries = []
         for key, total_amount in income_map.items():
             processed_list = processed_map[key]
-            processed = 1 if all(p == 1 for p in processed_list) else 0
+            processed_flags = [_processed_flag_is_true(p) for p in processed_list]
+            processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, month_end = key
             income_entries.append({
                 'category_id': category_id,
@@ -6238,7 +6250,8 @@ def dashboard_3m():
         expense_entries = []
         for key, total_amount in expense_map.items():
             processed_list = expense_processed_map[key]
-            processed = 1 if all(p == 1 for p in processed_list) else 0
+            processed_flags = [_processed_flag_is_true(p) for p in processed_list]
+            processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, month_end = key
             expense_entries.append({
                 'category_id': category_id,
@@ -6278,7 +6291,8 @@ def dashboard_3m():
         c_expense_entries = []
         for key, total_amount in c_expense_map.items():
             processed_list = c_expense_processed_map[key]
-            processed = 1 if all(p == 1 for p in processed_list) else 0
+            processed_flags = [_processed_flag_is_true(p) for p in processed_list]
+            processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, month_end = key
             c_expense_entries.append({
                 'category_id': category_id,
