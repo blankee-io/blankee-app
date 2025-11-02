@@ -25,7 +25,7 @@
     <div class="calendarnav">
         <div class="calendarnavbuttonscontainer">   
             <div class="nav-buttons">
-                <a href="{{ request.referrer if request.referrer else url_for('dashboard') }}" class="nav-button">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
                     <i class="fa-solid fa-turn-left"></i>
                     <span class="nav-tooltip">Back</span>
                 </a>
