@@ -107,7 +107,7 @@
                     <label for="dashboard-d-amount">Amount:</label>
                     <div class="currency-input-container">
                         <span class="d-d-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                        <input type="number" id="dashboard-d-amount" name="amount" step="1" min="0" required inputmode="decimal" placeholder="0" pattern="\\d*">
+                        <input type="number" id="dashboard-d-amount" name="amount" step="1" min="0.01" required inputmode="decimal" placeholder="0" pattern="\\d*">
                     </div>
                 </div>
 
