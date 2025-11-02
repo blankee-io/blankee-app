@@ -23,8 +23,7 @@ build/
 *.wsgi
 
 # Ignore all uploads except the default picture
-static/uploads/*
-!static/uploads/DefaultProfilePicture.svg
+static/uploads
 
 # Ignore python cache
 __pycache__/
