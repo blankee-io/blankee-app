@@ -5589,6 +5589,9 @@
                         // 5. Show or hide clear button
                         clearBtn.style.display = filter ? 'inline-flex' : 'none';
                     }
+                    searchField.addEventListener('input', function() {
+                        filterCategories();
+                    });
                     searchField.addEventListener('blur', function() {
                         if (searchField.value.trim()) {
                             clearBtn.style.display = 'inline-flex';
@@ -5660,6 +5663,9 @@
                         // 5. Show or hide clear button
                         clearBtn.style.display = filter ? 'inline-flex' : 'none';
                     }
+                    searchField.addEventListener('input', function() {
+                        filterCategories();
+                    });
                     searchField.addEventListener('blur', function() {
                         if (searchField.value.trim()) {
                             clearBtn.style.display = 'inline-flex';
