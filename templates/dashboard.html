@@ -3541,7 +3541,7 @@
                     return;
                 }
                 const amount = parseFloat(newValue);
-                if (isNaN(amount)) {
+                if (isNaN(amount) || amount === 0) {
                     input.value = '';
                     return;
                 }
