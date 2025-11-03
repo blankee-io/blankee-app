@@ -97,9 +97,9 @@
                 <!-- Select Category -->
                 <div class="dashboard-d-form-group">
                     <label for="dashboard-d-category">Category:</label>
-                    <select id="dashboard-d-category" name="category" disabled>
-                        <option value="">Select Category</option>
-                    </select>
+                    <input type="text" id="dashboard-d-category-input" placeholder="Type to search..." disabled autocomplete="off">
+                    <input type="hidden" id="dashboard-d-category" name="category">
+                    <div id="dashboard-d-category-dropdown" class="category-dropdown" style="display: none;"></div>
                 </div>
 
                 <!-- Enter Amount -->
@@ -292,55 +292,115 @@
             populateEntryTypeDropdown();
             document.getElementById('dashboard-d-entryDate').value = date;
             document.getElementById('dashboard-d-addEntryModal').style.display = 'block';
+            document.body.classList.add('modal-open');
+            document.documentElement.classList.add('modal-open');
         }
 
         // Function to close the add entry modal
         function dashboardDCloseModal() {
             document.getElementById('dashboard-d-addEntryModal').style.display = 'none';
+            document.body.classList.remove('modal-open');
+            document.documentElement.classList.remove('modal-open');
         }
 
         // Close dashboard-d-addEntryModal when clicking outside the modal content (blur)
         document.getElementById('dashboard-d-addEntryModal').addEventListener('mousedown', function(event) {
             if (event.target === this) {
                 this.style.display = 'none';
+                document.body.classList.remove('modal-open');
+                document.documentElement.classList.remove('modal-open');
             }
         });
 
+        let dashboardDCategories = [];
+
         function dashboardDUpdateCategoryOptions() {
             const entryType = document.getElementById('dashboard-d-entryType').value;
-            const categoryDropdown = document.getElementById('dashboard-d-category');
-            categoryDropdown.innerHTML = '<option value="">Select Category</option>';
+            const categoryInput = document.getElementById('dashboard-d-category-input');
+            const categoryHidden = document.getElementById('dashboard-d-category');
+            const dropdown = document.getElementById('dashboard-d-category-dropdown');
+            
+            dashboardDCategories = [];
+            categoryInput.value = '';
+            categoryHidden.value = '';
+            dropdown.style.display = 'none';
 
             if (!entryType) {
-                categoryDropdown.disabled = true;
+                categoryInput.disabled = true;
                 return;
             }
-            categoryDropdown.disabled = false;
+            categoryInput.disabled = false;
 
             if (entryType === 'income') {
                 incomeCategories.forEach(category => {
-                    // Do not show is_bud categories
                     if (!category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
-                        categoryDropdown.innerHTML += `<option value="${category.id}">${category.name}</option>`;
+                        dashboardDCategories.push({ id: category.id, name: category.name });
                     }
                 });
             } else if (entryType === 'expense') {
                 expenseCategories.forEach(category => {
-                    // Do not show is_bud categories
                     if (!category.hidden && !category.is_bud) {
-                        categoryDropdown.innerHTML += `<option value="${category.id}">${category.name}</option>`;
+                        dashboardDCategories.push({ id: category.id, name: category.name });
                     }
                 });
             } else if (entryType.startsWith('ca_')) {
                 const accountId = parseInt(entryType.split('_')[1]);
                 c_expense_categories.forEach(category => {
-                    // Do not show is_bud categories
                     if (category.account_id === accountId && !category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
-                        categoryDropdown.innerHTML += `<option value="${category.id}">${category.name}</option>`;
+                        dashboardDCategories.push({ id: category.id, name: category.name });
                     }
                 });
             }
         }
+
+        // Category search and dropdown functionality for dashboard_d
+        const dashboardDCategoryInput = document.getElementById('dashboard-d-category-input');
+        const dashboardDCategoryHidden = document.getElementById('dashboard-d-category');
+        const dashboardDDropdown = document.getElementById('dashboard-d-category-dropdown');
+
+        function showDashboardDCategoryDropdown(searchText = '') {
+            dashboardDDropdown.innerHTML = '';
+            const filtered = searchText.length === 0 
+                ? dashboardDCategories 
+                : dashboardDCategories.filter(cat => cat.name.toLowerCase().includes(searchText));
+
+            if (filtered.length > 0) {
+                dashboardDDropdown.style.display = 'block';
+                filtered.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.textContent = cat.name;
+                    div.className = 'category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        dashboardDCategoryInput.value = cat.name;
+                        dashboardDCategoryHidden.value = cat.id;
+                        dashboardDDropdown.style.display = 'none';
+                    });
+                    dashboardDDropdown.appendChild(div);
+                });
+            } else {
+                dashboardDDropdown.style.display = 'none';
+            }
+        }
+
+        dashboardDCategoryInput.addEventListener('input', function() {
+            const searchText = this.value.toLowerCase();
+            if (searchText.length === 0) {
+                dashboardDCategoryHidden.value = '';
+            }
+            showDashboardDCategoryDropdown(searchText);
+        });
+
+        dashboardDCategoryInput.addEventListener('focus', function() {
+            if (dashboardDCategories.length > 0) {
+                showDashboardDCategoryDropdown(this.value.toLowerCase());
+            }
+        });
+
+        document.addEventListener('click', function(e) {
+            if (!dashboardDCategoryInput.contains(e.target) && !dashboardDDropdown.contains(e.target)) {
+                dashboardDDropdown.style.display = 'none';
+            }
+        });
         
         function calculateWeek(selectedDate, goofyWeekMode) {
 
@@ -1275,7 +1335,7 @@
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-right');
-            setTimeout(() => mainContainer.classList.remove('slide-right'), 250);
+            setTimeout(() => mainContainer.classList.remove('slide-right'), 300);
 
             document.getElementById('loading-screen').style.display = 'none';
             selectedDate.setUTCDate(selectedDate.getUTCDate() - 7);
@@ -1292,7 +1352,7 @@
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-left');
-            setTimeout(() => mainContainer.classList.remove('slide-left'), 250);
+            setTimeout(() => mainContainer.classList.remove('slide-left'), 300);
 
             document.getElementById('loading-screen').style.display = 'none';
             selectedDate.setUTCDate(selectedDate.getUTCDate() + 7);
