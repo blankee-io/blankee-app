@@ -6817,3 +6817,55 @@ form button[type="submit"] {
     background-color: #A9A9A9;
     color: white;
 }
+/* Category Dropdown Autocomplete Styles */
+.category-dropdown {
+    position: absolute;
+    background-color: #fff;
+    border: 1px solid #575757;
+    border-radius: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    width: calc(100% - 2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin-top: 2px;
+}
+
+.category-dropdown-item {
+    padding: 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background-color 0.2s;
+}
+
+.category-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.category-dropdown-item:hover {
+    background-color: #f5f5f5;
+}
+
+.dashboard-d-form-group,
+.footer-form-group {
+    position: relative;
+}
+
+#dashboard-d-category-input,
+#footer-category-input,
+#footer-ca-category-input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #575757;
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+/* Prevent scrolling when modal is open */
+body.modal-open,
+html.modal-open {
+    overflow: hidden !important;
+    height: 100%;
+    position: fixed;
+    width: 100%;
+}

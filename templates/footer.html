@@ -45,9 +45,9 @@
             <!-- Dropdown for category (populated dynamically via AJAX) -->
             <div class="footer-form-group">
                 <label for="footer-category">Category:</label>
-                <select id="footer-category" name="category" disabled>
-                    <option value="">Select Category</option>
-                </select>
+                <input type="text" id="footer-category-input" placeholder="Type to search..." disabled autocomplete="off">
+                <input type="hidden" id="footer-category" name="category">
+                <div id="footer-category-dropdown" class="category-dropdown" style="display: none;"></div>
             </div>
 
             <!-- Input field for amount -->
@@ -86,9 +86,9 @@
             <!-- Category Dropdown -->
             <div class="footer-form-group">
                 <label for="footer-ca-category">Category:</label>
-                <select id="footer-ca-category" name="category" disabled>
-                    <option value="">Select Category</option>
-                </select>
+                <input type="text" id="footer-ca-category-input" placeholder="Type to search..." disabled autocomplete="off">
+                <input type="hidden" id="footer-ca-category" name="category">
+                <div id="footer-ca-category-dropdown" class="category-dropdown" style="display: none;"></div>
             </div>
             <!-- Amount Input -->
             <div class="footer-form-group">
@@ -149,7 +149,8 @@
     const expenseButton = document.getElementById('footer-expense-button');
     const autobalanceButton = document.getElementById('footer-autobalance-button');
     const modal = document.getElementById('footer-addEntryModal');
-    const categoryDropdown = document.getElementById('footer-category');
+    const categoryInput = document.getElementById('footer-category-input');
+    const categoryHidden = document.getElementById('footer-category');
 
     // Toggle sub-buttons (income & expense) when clicking the FAB
     addButton.addEventListener('click', function (e) {
@@ -178,6 +179,8 @@
     autobalanceButton.addEventListener('click', function() {
         const abModal = document.getElementById('autobalance-modal');
         abModal.style.display = 'flex';
+        document.body.classList.add('modal-open');
+        document.documentElement.classList.add('modal-open');
     });
 
     const autobalanceLabel = document.getElementById('footer-autobalance-label');
@@ -190,14 +193,18 @@
     function handleTypeClick(type) {
         document.getElementById('footer-entryType').value = type;
         updateCategoryOptions();              // Fetch and populate categories
-        categoryDropdown.disabled = false;
+        categoryInput.disabled = false;
         modal.style.display = 'flex';         // Show modal
         footerBar.classList.remove('active'); // Hide sub-buttons
+        document.body.classList.add('modal-open');
+        document.documentElement.classList.add('modal-open');
     }
 
     // Close modal
     function closeAddEntryModal() {
         modal.style.display = 'none';
+        document.body.classList.remove('modal-open');
+        document.documentElement.classList.remove('modal-open');
     }
 
     // Close modal or sub-buttons when clicking outside
@@ -212,34 +219,36 @@
         }
     });
 
+    let footerCategories = [];
+
     function updateCategoryOptions() {
         const entryType = document.getElementById('footer-entryType').value;
-        const categoryDropdown = document.getElementById('footer-category');
-        categoryDropdown.innerHTML = '<option value="">Select Category</option>';
+        const categoryInput = document.getElementById('footer-category-input');
+        const categoryHidden = document.getElementById('footer-category');
+        const dropdown = document.getElementById('footer-category-dropdown');
+        
+        footerCategories = [];
+        categoryInput.value = '';
+        categoryHidden.value = '';
+        dropdown.style.display = 'none';
 
         if (!entryType) {
-            categoryDropdown.disabled = true;
+            categoryInput.disabled = true;
             return;
         }
-        categoryDropdown.disabled = false;
+        categoryInput.disabled = false;
 
         // Use global expenseCategories/incomeCategories arrays, filter out is_bud and (for income) Starting Balance
         if (entryType === 'income') {
             incomeCategories.forEach(category => {
                 if (!category.hidden && !category.is_bud && category.name !== "Starting Balance") {
-                    const option = document.createElement('option');
-                    option.value = category.id;
-                    option.textContent = category.name;
-                    categoryDropdown.appendChild(option);
+                    footerCategories.push({ id: category.id, name: category.name });
                 }
             });
         } else if (entryType === 'expense') {
             expenseCategories.forEach(category => {
                 if (!category.hidden && !category.is_bud) {
-                    const option = document.createElement('option');
-                    option.value = category.id;
-                    option.textContent = category.name;
-                    categoryDropdown.appendChild(option);
+                    footerCategories.push({ id: category.id, name: category.name });
                 }
             });
         }
@@ -320,20 +329,32 @@
         // Close logic
         document.getElementById('autobalance-close').onclick = function() {
             abModal.style.display = 'none';
+            document.body.classList.remove('modal-open');
+            document.documentElement.classList.remove('modal-open');
         };
         abModal.onclick = function(e) {
-            if (e.target === abModal) abModal.style.display = 'none';
+            if (e.target === abModal) {
+                abModal.style.display = 'none';
+                document.body.classList.remove('modal-open');
+                document.documentElement.classList.remove('modal-open');
+            }
         };
         // Close logic for no adjustment modal
         document.getElementById('no-adjustment-close').onclick = function() {
             noAdjModal.style.display = 'none';
+            document.body.classList.remove('modal-open');
+            document.documentElement.classList.remove('modal-open');
         };
         document.getElementById('no-adjustment-ok').onclick = function() {
             noAdjModal.style.display = 'none';
+            document.body.classList.remove('modal-open');
+            document.documentElement.classList.remove('modal-open');
         };
         // Focus input when modal opens
         autobalanceButton.addEventListener('click', function() {
             abModal.style.display = 'flex';
+            document.body.classList.add('modal-open');
+            document.documentElement.classList.add('modal-open');
         });
         // Prevent form submit from refreshing page
         document.getElementById('autobalance-form').onsubmit = function(e) { e.preventDefault(); };
@@ -346,6 +367,8 @@
                 return;
             }
             abModal.style.display = 'none';
+            document.body.classList.remove('modal-open');
+            document.documentElement.classList.remove('modal-open');
             showDashboardSpinner(true);
             // Get today's date
             const today = new Date();
@@ -365,6 +388,8 @@
                         if (Math.abs(diff) < 0.01) {
                             document.getElementById('loading-screen').style.display = 'none';
                             noAdjModal.style.display = 'flex';
+                            document.body.classList.add('modal-open');
+                            document.documentElement.classList.add('modal-open');
                             resetAutoBalanceForm();
                             return;
                         }
@@ -484,11 +509,15 @@
         caAccountDropdown.value = '';
         caCategoryDropdown.innerHTML = '<option value="">Select Category</option>';
         document.getElementById('footer-bar').classList.remove('active');
+        document.body.classList.add('modal-open');
+        document.documentElement.classList.add('modal-open');
     }
 
     // Close modal
     function closeCaEntryModal() {
         caModal.style.display = 'none';
+        document.body.classList.remove('modal-open');
+        document.documentElement.classList.remove('modal-open');
     }
 
     // Populate credit account dropdown
@@ -505,12 +534,21 @@
     // Update category dropdown for credit accounts (footer-ca-category)
     caAccountDropdown.addEventListener('change', function() {
         const accountId = caAccountDropdown.value;
-        caCategoryDropdown.innerHTML = '<option value="">Select Category</option>';
+        const caCategoryInput = document.getElementById('footer-ca-category-input');
+        const caCategoryHidden = document.getElementById('footer-ca-category');
+        const caDropdown = document.getElementById('footer-ca-category-dropdown');
+        
+        footerCaCategories = [];
+        caCategoryInput.value = '';
+        caCategoryHidden.value = '';
+        caDropdown.style.display = 'none';
+        
         if (!accountId) {
-            caCategoryDropdown.disabled = true;
+            caCategoryInput.disabled = true;
             return;
         }
-        caCategoryDropdown.disabled = false;
+        caCategoryInput.disabled = false;
+        
         // Filter categories for this account, exclude bud categories
         c_expense_categories.forEach(category => {
             if (
@@ -519,10 +557,7 @@
                 category.name !== "Starting Balance" &&
                 !category.is_bud
             ) {
-                const option = document.createElement('option');
-                option.value = category.id;
-                option.textContent = category.name;
-                caCategoryDropdown.appendChild(option);
+                footerCaCategories.push({ id: category.id, name: category.name });
             }
         });
     });
@@ -612,8 +647,10 @@
 
     function resetAddEntryForm() {
         document.getElementById('footer-entryType').value = '';
-        document.getElementById('footer-category').innerHTML = '<option value="">Select Category</option>';
-        document.getElementById('footer-category').disabled = true;
+        document.getElementById('footer-category-input').value = '';
+        document.getElementById('footer-category').value = '';
+        document.getElementById('footer-category-input').disabled = true;
+        document.getElementById('footer-category-dropdown').style.display = 'none';
         document.getElementById('footer-amount').value = '';
         // Reset date to today
         const today = new Date();
@@ -625,8 +662,10 @@
 
     function resetCaEntryForm() {
         document.getElementById('footer-ca-account').value = '';
-        document.getElementById('footer-ca-category').innerHTML = '<option value="">Select Category</option>';
-        document.getElementById('footer-ca-category').disabled = true;
+        document.getElementById('footer-ca-category-input').value = '';
+        document.getElementById('footer-ca-category').value = '';
+        document.getElementById('footer-ca-category-input').disabled = true;
+        document.getElementById('footer-ca-category-dropdown').style.display = 'none';
         document.getElementById('footer-ca-amount').value = '';
         // Reset date to today
         document.getElementById('footer-ca-entryDate').value = getTodayDate();
@@ -635,5 +674,104 @@
     function resetAutoBalanceForm() {
         document.getElementById('autobalance-current-balance').value = '';
     }
+
+    // Category search and dropdown functionality for footer main category
+    const footerCategoryInput = document.getElementById('footer-category-input');
+    const footerCategoryHidden = document.getElementById('footer-category');
+    const footerDropdown = document.getElementById('footer-category-dropdown');
+
+    function showFooterCategoryDropdown(searchText = '') {
+        footerDropdown.innerHTML = '';
+        const filtered = searchText.length === 0 
+            ? footerCategories 
+            : footerCategories.filter(cat => cat.name.toLowerCase().includes(searchText));
+
+        if (filtered.length > 0) {
+            footerDropdown.style.display = 'block';
+            filtered.forEach(cat => {
+                const div = document.createElement('div');
+                div.textContent = cat.name;
+                div.className = 'category-dropdown-item';
+                div.addEventListener('click', function() {
+                    footerCategoryInput.value = cat.name;
+                    footerCategoryHidden.value = cat.id;
+                    footerDropdown.style.display = 'none';
+                });
+                footerDropdown.appendChild(div);
+            });
+        } else {
+            footerDropdown.style.display = 'none';
+        }
+    }
+
+    footerCategoryInput.addEventListener('input', function() {
+        const searchText = this.value.toLowerCase();
+        if (searchText.length === 0) {
+            footerCategoryHidden.value = '';
+        }
+        showFooterCategoryDropdown(searchText);
+    });
+
+    footerCategoryInput.addEventListener('focus', function() {
+        if (footerCategories.length > 0) {
+            showFooterCategoryDropdown(this.value.toLowerCase());
+        }
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!footerCategoryInput.contains(e.target) && !footerDropdown.contains(e.target)) {
+            footerDropdown.style.display = 'none';
+        }
+    });
+
+    // Category search and dropdown functionality for footer credit account category
+    let footerCaCategories = [];
+    const footerCaCategoryInput = document.getElementById('footer-ca-category-input');
+    const footerCaCategoryHidden = document.getElementById('footer-ca-category');
+    const footerCaDropdown = document.getElementById('footer-ca-category-dropdown');
+
+    function showFooterCaCategoryDropdown(searchText = '') {
+        footerCaDropdown.innerHTML = '';
+        const filtered = searchText.length === 0 
+            ? footerCaCategories 
+            : footerCaCategories.filter(cat => cat.name.toLowerCase().includes(searchText));
+
+        if (filtered.length > 0) {
+            footerCaDropdown.style.display = 'block';
+            filtered.forEach(cat => {
+                const div = document.createElement('div');
+                div.textContent = cat.name;
+                div.className = 'category-dropdown-item';
+                div.addEventListener('click', function() {
+                    footerCaCategoryInput.value = cat.name;
+                    footerCaCategoryHidden.value = cat.id;
+                    footerCaDropdown.style.display = 'none';
+                });
+                footerCaDropdown.appendChild(div);
+            });
+        } else {
+            footerCaDropdown.style.display = 'none';
+        }
+    }
+
+    footerCaCategoryInput.addEventListener('input', function() {
+        const searchText = this.value.toLowerCase();
+        if (searchText.length === 0) {
+            footerCaCategoryHidden.value = '';
+        }
+        showFooterCaCategoryDropdown(searchText);
+    });
+
+    footerCaCategoryInput.addEventListener('focus', function() {
+        if (footerCaCategories.length > 0) {
+            showFooterCaCategoryDropdown(this.value.toLowerCase());
+        }
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!footerCaCategoryInput.contains(e.target) && !footerCaDropdown.contains(e.target)) {
+            footerCaDropdown.style.display = 'none';
+        }
+    });
 
 </script>
