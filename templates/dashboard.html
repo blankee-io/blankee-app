@@ -762,6 +762,10 @@
 
         // Function to go to the next month
         function nextMonth() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-left');
+            setTimeout(() => mainContainer.classList.remove('slide-left'), 250);
 
             document.getElementById('loading-screen').style.display = 'flex';
             const totalMonths = (currentYear - baseYear) * 12 + currentMonthIndex + 1;
@@ -807,6 +811,10 @@
 
         // Function to go to the previous month
         function previousMonth() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-right');
+            setTimeout(() => mainContainer.classList.remove('slide-right'), 250);
 
             document.getElementById('loading-screen').style.display = 'flex';
             currentMonthIndex--;

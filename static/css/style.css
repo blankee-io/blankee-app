@@ -1929,6 +1929,45 @@ input#setup-profile-starting-balance {
 /*////////////////////// Dashboard Week Styles ///////////////////////////*/
 .main-container {
     padding: 10px;
+    transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+}
+
+.main-container.slide-left {
+    animation: slideLeft 0.3s ease-out;
+}
+
+.main-container.slide-right {
+    animation: slideRight 0.3s ease-out;
+}
+
+.main-container.slide-left-slow {
+    animation: slideLeft 0.4s ease-out;
+}
+
+.main-container.slide-right-slow {
+    animation: slideRight 0.4s ease-out;
+}
+
+@keyframes slideLeft {
+    from {
+        transform: translateX(100%);
+        opacity: 0.5;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideRight {
+    from {
+        transform: translateX(-100%);
+        opacity: 0.5;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }
 
 #table-container {

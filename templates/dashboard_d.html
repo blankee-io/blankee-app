@@ -1272,6 +1272,11 @@
         }
 
         function previousWeek() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-right');
+            setTimeout(() => mainContainer.classList.remove('slide-right'), 250);
+
             document.getElementById('loading-screen').style.display = 'none';
             selectedDate.setUTCDate(selectedDate.getUTCDate() - 7);
             const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
@@ -1284,6 +1289,11 @@
         }
 
         function nextWeek() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-left');
+            setTimeout(() => mainContainer.classList.remove('slide-left'), 250);
+
             document.getElementById('loading-screen').style.display = 'none';
             selectedDate.setUTCDate(selectedDate.getUTCDate() + 7);
             const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);

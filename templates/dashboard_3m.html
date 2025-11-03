@@ -762,6 +762,11 @@
 
         // Function to go to the next month
         function nextCluster() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-left');
+            setTimeout(() => mainContainer.classList.remove('slide-left'), 250);
+
             // Calculate current year and month
             const totalMonths = baseYear * 12 + currentMonthIndex;
             let year = Math.floor(totalMonths / 12);
@@ -804,6 +809,11 @@
 
         // Function to go to the previous month
         function previousCluster() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-right');
+            setTimeout(() => mainContainer.classList.remove('slide-right'), 250);
+
             // Calculate current year and month
             const totalMonths = baseYear * 12 + currentMonthIndex;
             let year = Math.floor(totalMonths / 12);
