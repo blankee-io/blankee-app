@@ -107,7 +107,7 @@
                     <label for="dashboard-d-amount">Amount:</label>
                     <div class="currency-input-container">
                         <span class="d-d-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                        <input type="number" id="dashboard-d-amount" name="amount" step="1" min="0.01" required inputmode="decimal" placeholder="0" pattern="\\d*">
+                        <input type="number" id="dashboard-d-amount" name="amount" step="1" min="1" required inputmode="numeric" placeholder="0">
                     </div>
                 </div>
 
@@ -442,6 +442,8 @@
             weekDates.forEach(date => {
                 const container = document.createElement('div');
                 container.classList.add('dashboard-d-container');
+                container.classList.add('dashboard-d-date-container');
+                container.setAttribute('data-date', date);
 
                 // Highlight today
                 const currentLocalDate = new Date();
@@ -1352,9 +1354,12 @@
 
         window.onload = function() {
 
-            // Check if there's a 'date' parameter in the URL
+            // Check if there's a 'date' parameter or 'year/month/day' parameters in the URL
             const url = new URL(window.location.href);
             const dateParam = url.searchParams.get("date");
+            const yearParam = url.searchParams.get("year");
+            const monthParam = url.searchParams.get("month");
+            const dayParam = url.searchParams.get("day");
 
             if (dateParam) {
                 // Remove the 'date' query parameter from the URL
@@ -1363,6 +1368,55 @@
                 // Optionally, store the selected date in localStorage or perform other actions
                 const selectedDate = new Date(dateParam);
                 storeLastViewedFriday(selectedDate);
+            } else if (yearParam !== null && monthParam !== null && dayParam !== null) {
+                // Handle year/month/day parameters
+                const year = parseInt(yearParam);
+                const month = parseInt(monthParam); // 0-indexed
+                const day = parseInt(dayParam);
+                
+                if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+                    // Remove the query parameters from the URL
+                    window.history.replaceState({}, document.title, "/dashboard_d");
+                    
+                    // Create a date object for the clicked date
+                    const clickedDate = new Date(year, month, day);
+                    const dayOfWeek = clickedDate.getDay(); // 0 = Sunday, 6 = Saturday
+                    
+                    // Calculate the Friday for the week containing this date
+                    let fridayDate;
+                    if (goofyWeekMode) {
+                        // Goofy week mode: week starts on Friday, ends on Thursday
+                        if (dayOfWeek >= 5) {
+                            // If clicked date is Friday (5) or Saturday (6), use this Friday
+                            fridayDate = new Date(clickedDate);
+                            fridayDate.setDate(clickedDate.getDate() - (dayOfWeek - 5));
+                        } else {
+                            // If clicked date is Sunday (0) to Thursday (4), use the previous Friday
+                            fridayDate = new Date(clickedDate);
+                            fridayDate.setDate(clickedDate.getDate() - (dayOfWeek + 2));
+                        }
+                    } else {
+                        // Regular week mode: week starts on Saturday, ends on Friday
+                        if (dayOfWeek === 6) {
+                            // If clicked date is Saturday, move forward to the next Friday
+                            fridayDate = new Date(clickedDate);
+                            fridayDate.setDate(clickedDate.getDate() + 6);
+                        } else if (dayOfWeek < 5) {
+                            // If before Friday (Sunday - Thursday), move forward to the upcoming Friday
+                            fridayDate = new Date(clickedDate);
+                            fridayDate.setDate(clickedDate.getDate() + (5 - dayOfWeek));
+                        } else {
+                            // If clicked date is Friday, use it
+                            fridayDate = new Date(clickedDate);
+                        }
+                    }
+                    
+                    // Store the calculated Friday
+                    storeLastViewedFriday(fridayDate);
+                    
+                    // Store the clicked date for scrolling after load
+                    sessionStorage.setItem('scrollToDate', clickedDate.toISOString().split('T')[0]);
+                }
             }
 
             // Load the last viewed Friday week, or go to the current week
@@ -1371,6 +1425,26 @@
             // Calculate start and end of the week based on tempDate, not modifying selectedDate
             const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
             const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+            
+            // Check if we need to scroll to a specific date
+            const scrollToDate = sessionStorage.getItem('scrollToDate');
+            if (scrollToDate) {
+                sessionStorage.removeItem('scrollToDate');
+                // Wait for the DOM to be fully rendered
+                setTimeout(() => {
+                    const dateContainer = document.querySelector(`.dashboard-d-date-container[data-date="${scrollToDate}"]`);
+                    if (dateContainer) {
+                        dateContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        // Optionally highlight the date briefly
+                        dateContainer.style.transition = 'background-color 0.5s ease';
+                        const originalBg = dateContainer.style.backgroundColor;
+                        dateContainer.style.backgroundColor = 'rgba(228, 95, 28, 0.3)';
+                        setTimeout(() => {
+                            dateContainer.style.backgroundColor = originalBg;
+                        }, 1500);
+                    }
+                }, 500);
+            }
         };
 
         // Attach touch event listeners for sliding interaction

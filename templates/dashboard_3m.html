@@ -1099,23 +1099,23 @@
             // Reapply filters for income, expense, and CA categories
             if (currentIncomeFilter) {
                 const searchField = document.getElementById('income-category-search-field');
-                if (searchField) {
+                if (searchField && document.activeElement !== searchField) {
                     searchField.value = currentIncomeFilter;
-                    searchField.dispatchEvent(new Event('blur'));
+                    searchField.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
             if (currentExpenseFilter) {
                 const searchField = document.getElementById('expense-category-search-field');
-                if (searchField) {
+                if (searchField && document.activeElement !== searchField) {
                     searchField.value = currentExpenseFilter;
-                    searchField.dispatchEvent(new Event('blur'));
+                    searchField.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
             Object.keys(currentCaFilters).forEach(accountId => {
                 const searchField = document.getElementById(`ca-category-search-field-${accountId}`);
-                if (searchField) {
+                if (searchField && document.activeElement !== searchField) {
                     searchField.value = currentCaFilters[accountId];
-                    searchField.dispatchEvent(new Event('blur'));
+                    searchField.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             });
         };
@@ -1199,7 +1199,7 @@
             monthDropdown.innerHTML = '';
             for (let i = 0; i < quarterNames.length; i++) {
                 const option = document.createElement('option');
-                option.value = i;
+                option.value = i * 3; // Q1=0, Q2=3, Q3=6, Q4=9
                 option.textContent = quarterNames[i];
                 // Select the current quarter based on monthIndex
                 if (i === Math.floor(monthIndex / 3)) option.selected = true;
@@ -1241,6 +1241,18 @@
                 const th = document.createElement('th');
                 th.setAttribute('data-date', monthObj.date);
                 th.textContent = monthObj.label;
+                th.style.cursor = 'pointer';
+                th.title = 'Click to view this month in weekly view';
+                th.addEventListener('click', function() {
+                    // Navigate to dashboard.html with the specific year and month
+                    // Parse the date string properly to avoid timezone issues
+                    const dateParts = monthObj.date.split('-');
+                    const year = parseInt(dateParts[0]);
+                    const month = parseInt(dateParts[1]) - 1; // Month is 0-indexed (0-11)
+                    const url = `{{ url_for('dashboard') }}?year=${year}&month=${month}`;
+                    console.log('Navigating to:', url, 'Label:', monthObj.label, 'Date:', monthObj.date, 'Year:', year, 'Month:', month);
+                    window.location.href = url;
+                });
                 fridayDatesRow.appendChild(th);
             });
 
@@ -4542,16 +4554,18 @@
             if (document.getElementById('month-dropdown')) document.getElementById('month-dropdown').remove();
             if (document.getElementById('year-dropdown')) document.getElementById('year-dropdown').remove();
 
-            // Create month dropdown
+            // Create quarter dropdown (instead of month)
             const monthSelect = document.createElement('select');
             monthSelect.id = 'month-dropdown';
-            monthNames.forEach((name, idx) => {
+            quarterNames.forEach((name, idx) => {
                 const opt = document.createElement('option');
-                opt.value = idx;
+                opt.value = idx * 3; // Q1=0, Q2=3, Q3=6, Q4=9
                 opt.textContent = name;
                 monthSelect.appendChild(opt);
             });
-            monthSelect.value = monthIndex;
+            // Calculate which quarter the current month belongs to
+            const currentQuarter = Math.floor(monthIndex / 3);
+            monthSelect.value = currentQuarter * 3;
 
             // Create year dropdown
             const yearSelect = document.createElement('select');
@@ -4596,13 +4610,14 @@
                 monthYearHeader.appendChild(yearDropdown);
             }
 
-            // Populate month dropdown
+            // Populate quarter dropdown (instead of month)
             monthDropdown.innerHTML = '';
-            for (let i = 0; i < monthNames.length; i++) {
+            for (let i = 0; i < quarterNames.length; i++) {
                 const option = document.createElement('option');
-                option.value = i;
-                option.textContent = monthNames[i];
-                if (i === monthIndex) option.selected = true;
+                option.value = i * 3; // Q1=0, Q2=3, Q3=6, Q4=9
+                option.textContent = quarterNames[i];
+                const currentQuarter = Math.floor(monthIndex / 3);
+                if (i === currentQuarter) option.selected = true;
                 monthDropdown.appendChild(option);
             }
 
@@ -5444,7 +5459,7 @@
             if (incomeSearch) {
                 function filterIncomeCategories() {
                     const searchField = document.getElementById('income-category-search-field');
-                    currentIncomeFilter = searchField.value.trim().toLowerCase();
+                    currentIncomeFilter = searchField.value.trim();
                     const filter = incomeSearch.value.trim().toLowerCase();
                     // 1. Filter sidebar table
                     document.querySelectorAll('#income-categories-table tbody tr[data-category-id]').forEach(row => {
@@ -5485,7 +5500,7 @@
             if (expenseSearch) {
                 function filterExpenseCategories() {
                     const searchField = document.getElementById('expense-category-search-field');
-                    currentExpenseFilter = searchField.value.trim().toLowerCase();
+                    currentExpenseFilter = searchField.value.trim();
                     const filter = expenseSearch.value.trim().toLowerCase();
                     // 1. Filter sidebar table
                     document.querySelectorAll('#expense-categories-table tbody tr[data-category-id]').forEach(row => {
@@ -5533,7 +5548,7 @@
                 if (searchField && clearBtn && sidebarTable && monthBody) {
                     function filterCategories() {
                         const searchField = document.getElementById(`ca-category-search-field-${accountId}`);
-                        currentCaFilters[accountId] = searchField.value.trim().toLowerCase();
+                        currentCaFilters[accountId] = searchField.value.trim();
                         const filter = searchField.value.trim().toLowerCase();
                         // 1. Filter sidebar table
                         sidebarTable.querySelectorAll('tbody tr[data-category-id]').forEach(row => {
@@ -5642,11 +5657,14 @@
                     searchField.addEventListener('input', function() {
                         filterCategories();
                     });
+                    searchField.addEventListener('focus', function() {
+                        // Ensure the field is editable when focused
+                        searchField.removeAttribute('readonly');
+                    });
                     searchField.addEventListener('blur', function() {
                         if (searchField.value.trim()) {
                             clearBtn.style.display = 'inline-flex';
                         }
-                        filterCategories();
                     });
                     searchField.addEventListener('keydown', function(e) {
                         if (e.key === 'Enter') {
@@ -5657,7 +5675,6 @@
                     clearBtn.addEventListener('click', function() {
                         searchField.value = '';
                         filterCategories();
-                        searchField.blur();
                         clearBtn.style.display = 'none';
                     });
                 }

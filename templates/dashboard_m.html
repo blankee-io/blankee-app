@@ -334,6 +334,12 @@
                     const dayCell = document.createElement('td');
                     const dayDiv = document.createElement('div');
                     dayDiv.classList.add('dashboard-m-date');
+                    
+                    // Store the date for navigation and make it clickable
+                    const dateStr = currentDay.toISOString().split('T')[0];
+                    dayDiv.setAttribute('data-date', dateStr);
+                    dayDiv.style.cursor = 'pointer';
+                    dayDiv.title = 'Click to view this day in daily view';
 
                     const todayContainerDiv = document.createElement('div');
                     todayContainerDiv.classList.add('dashboard-d-today-container');
@@ -404,7 +410,7 @@
                     caDivider.innerHTML = `<span class="dashboard-m-ca-divider-text">CA</span>`;
                     dayDiv.appendChild(caDivider);
 
-                    const dateStr = currentDay.toISOString().split('T')[0];
+                    // dateStr already declared above
 
                     credit_accounts.forEach(account => {
                         const caBalance = ca_balances_d.find(item => {
@@ -460,6 +466,20 @@
             }
 
             updateNextMonthIndicator();
+            
+            // Add click handlers to navigate to daily view
+            document.querySelectorAll('.dashboard-m-date').forEach(dateDiv => {
+                dateDiv.addEventListener('click', function() {
+                    const dateStr = this.getAttribute('data-date');
+                    if (dateStr) {
+                        const dateParts = dateStr.split('-');
+                        const year = parseInt(dateParts[0]);
+                        const month = parseInt(dateParts[1]) - 1; // 0-indexed
+                        const day = parseInt(dateParts[2]);
+                        window.location.href = `{{ url_for('dashboard_d') }}?year=${year}&month=${month}&day=${day}`;
+                    }
+                });
+            });
 
             document.getElementById('loading-screen').style.display = 'none';
         }
