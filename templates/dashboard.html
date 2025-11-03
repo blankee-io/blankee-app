@@ -1044,23 +1044,23 @@
             // Reapply filters for income, expense, and CA categories
             if (currentIncomeFilter) {
                 const searchField = document.getElementById('income-category-search-field');
-                if (searchField) {
+                if (searchField && document.activeElement !== searchField) {
                     searchField.value = currentIncomeFilter;
-                    searchField.dispatchEvent(new Event('blur'));
+                    searchField.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
             if (currentExpenseFilter) {
                 const searchField = document.getElementById('expense-category-search-field');
-                if (searchField) {
+                if (searchField && document.activeElement !== searchField) {
                     searchField.value = currentExpenseFilter;
-                    searchField.dispatchEvent(new Event('blur'));
+                    searchField.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
             Object.keys(currentCaFilters).forEach(accountId => {
                 const searchField = document.getElementById(`ca-category-search-field-${accountId}`);
-                if (searchField) {
+                if (searchField && document.activeElement !== searchField) {
                     searchField.value = currentCaFilters[accountId];
-                    searchField.dispatchEvent(new Event('blur'));
+                    searchField.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             });
         };
@@ -5471,7 +5471,7 @@
             if (incomeSearch) {
                 function filterIncomeCategories() {
                     const searchField = document.getElementById('income-category-search-field');
-                    currentIncomeFilter = searchField.value.trim().toLowerCase();
+                    currentIncomeFilter = searchField.value.trim();
                     const filter = incomeSearch.value.trim().toLowerCase();
                     // 1. Filter sidebar table
                     document.querySelectorAll('#income-categories-table tbody tr[data-category-id]').forEach(row => {
@@ -5511,7 +5511,7 @@
             if (expenseSearch) {
                 function filterExpenseCategories() {
                     const searchField = document.getElementById('expense-category-search-field');
-                    currentExpenseFilter = searchField.value.trim().toLowerCase();
+                    currentExpenseFilter = searchField.value.trim();
                     const filter = expenseSearch.value.trim().toLowerCase();
                     // 1. Filter sidebar table
                     document.querySelectorAll('#expense-categories-table tbody tr[data-category-id]').forEach(row => {
@@ -5558,7 +5558,7 @@
                 if (searchField && clearBtn && sidebarTable && monthBody) {
                     function filterCategories() {
                         const searchField = document.getElementById(`ca-category-search-field-${accountId}`);
-                        currentCaFilters[accountId] = searchField.value.trim().toLowerCase();
+                        currentCaFilters[accountId] = searchField.value.trim();
                         const filter = searchField.value.trim().toLowerCase();
                         // 1. Filter sidebar table
                         sidebarTable.querySelectorAll('tbody tr[data-category-id]').forEach(row => {
@@ -5592,11 +5592,14 @@
                     searchField.addEventListener('input', function() {
                         filterCategories();
                     });
+                    searchField.addEventListener('focus', function() {
+                        // Ensure the field is editable when focused
+                        searchField.removeAttribute('readonly');
+                    });
                     searchField.addEventListener('blur', function() {
                         if (searchField.value.trim()) {
                             clearBtn.style.display = 'inline-flex';
                         }
-                        filterCategories();
                     });
                     searchField.addEventListener('keydown', function(e) {
                         if (e.key === 'Enter') {
@@ -5607,7 +5610,6 @@
                     clearBtn.addEventListener('click', function() {
                         searchField.value = '';
                         filterCategories();
-                        searchField.blur();
                         clearBtn.style.display = 'none';
                     });
                 }
@@ -5666,11 +5668,14 @@
                     searchField.addEventListener('input', function() {
                         filterCategories();
                     });
+                    searchField.addEventListener('focus', function() {
+                        // Ensure the field is editable when focused
+                        searchField.removeAttribute('readonly');
+                    });
                     searchField.addEventListener('blur', function() {
                         if (searchField.value.trim()) {
                             clearBtn.style.display = 'inline-flex';
                         }
-                        filterCategories();
                     });
                     searchField.addEventListener('keydown', function(e) {
                         if (e.key === 'Enter') {
@@ -5681,7 +5686,6 @@
                     clearBtn.addEventListener('click', function() {
                         searchField.value = '';
                         filterCategories();
-                        searchField.blur();
                         clearBtn.style.display = 'none';
                     });
                 }
