@@ -141,22 +141,33 @@ body {
 }
 
 .nav-bar {
+    /* positioning */
+    position: sticky;
+    top: 0;
+    z-index: 100;
+
+    /* box model */
     display: flex;
     align-items: center; /* Vertically center the content */
-    background-color: #2aaaa8;
-    height: 50px; /* Adjusted height */
     justify-content: center; /* Ensure content is spaced between left and right */
+    height: 50px; /* Adjusted height */
     padding: 0 10px;
+
+    /* visual */
+    background-color: #2aaaa8; 
 }
 
 .nav-bar-container {
+    /* box model */
     display: flex;
     align-items: center; /* Vertically center the content */
-    background-color: transparent;
+    justify-content: space-between; /* Ensure content is spaced between left and right */
     width: 100%; /* Extend to the width of the viewport */
     height: 50px; /* Adjusted height */
-    justify-content: space-between; /* Ensure content is spaced between left and right */
     max-width: 875px;
+
+    /* visual */
+    background-color: transparent;
 }
 
 .nav-bar-container-login {
@@ -767,8 +778,6 @@ button#autobalance-submit:hover {
     background-color: #EF9F77;
 }
 
-autobalance-submit
-
 /* Mobile responsiveness */
 @media screen and (max-width: 600px) {
     .footer-modal-content {
@@ -847,9 +856,15 @@ autobalance-submit
 /*/////////////////////////////////  Calendar Nav ///////////////////////////*/
 
 .calendarnav {
-    padding-top: 15px;
-    margin-left: 10px;
-    margin-right: 10px;
+    /* positioning */
+    position: sticky;
+    top: 50px;
+    z-index: 99;
+    /* box model */
+    padding: 10px;
+    /* visual */
+    background-color: #f5fffe;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
 }
 
 .calendarnavbuttonscontainer {
@@ -1197,9 +1212,9 @@ label[for="goofy_week_mode"] {
     padding: 20px;
     border: 1px solid #575757;
     width: 400px;
-    max-width: 90%;
+    max-width: 75%;
     top: 130px;
-    border-radius: 10px;
+    border-radius: 20px;
     text-align: center;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
@@ -1302,9 +1317,10 @@ input#setup-profile-starting-savings {
 /* Title Styling */
 .modal-content-setup-profile h2 {
     font-size: 20px;
+    margin-top: 10px;
     margin-bottom: 20px;
     color: #575757;
-    text-align: left;
+    text-align: center;
 }
 
 /* Button container for aligning buttons */
@@ -1343,7 +1359,7 @@ input#setup-profile-starting-savings {
 @media (max-width: 600px) {
     #nav-inline-buttons {
         width: 100%;
-    justify-content: space-between; /* Evenly distribute buttons across the parent */
+        justify-content: space-between; /* Evenly distribute buttons across the parent */
     }
 
     #nav-inline-buttons.nav-button {
@@ -5662,9 +5678,9 @@ form button[type="submit"] {
 }
 
 @media (max-width: 600px) {
-    .floating-hint {
-        /* ...existing code... */
-    }
+    /*.floating-hint {
+         ...existing code... 
+    } */
     .floating-hint::after {
         left: -10px;
         border-right-width: 10px;
@@ -6098,9 +6114,9 @@ form button[type="submit"] {
 }
 
 @media (max-width: 600px) {
-    .floating-hint {
-        /* ...existing code... */
-    }
+    /*.floating-hint {
+         ...existing code... 
+    } */
     .floating-hint::after {
         left: -10px;
         border-right-width: 10px;
