@@ -286,6 +286,15 @@
                 monthDiv.classList.add('dashboard-y-month-container');
                 const monthTitle = document.createElement('h3');
                 monthTitle.textContent = monthNames[month];
+                monthTitle.style.cursor = 'pointer';
+                monthTitle.title = 'Click to view this month in weekly view';
+                monthTitle.setAttribute('data-year', year);
+                monthTitle.setAttribute('data-month', month);
+                monthTitle.addEventListener('click', function() {
+                    const y = this.getAttribute('data-year');
+                    const m = this.getAttribute('data-month');
+                    window.location.href = `{{ url_for('dashboard') }}?year=${y}&month=${m}`;
+                });
                 monthDiv.appendChild(monthTitle);
 
                 // Create table structure for the month
@@ -362,6 +371,21 @@
                     if (year === todayYear && month === todayMonth && dayCount === todayDate) {
                         dayContent.classList.add('dashboard-y-today'); // Add 'dashboard-y-today' class to the div
                     }
+
+                    // Make the cell clickable to navigate to daily view
+                    dayCell.style.cursor = 'pointer';
+                    dayCell.title = 'Click to view this day in daily view';
+                    dayCell.setAttribute('data-date', formattedDate);
+                    dayCell.addEventListener('click', function() {
+                        const dateStr = this.getAttribute('data-date');
+                        if (dateStr) {
+                            const dateParts = dateStr.split('-');
+                            const y = parseInt(dateParts[0]);
+                            const m = parseInt(dateParts[1]) - 1; // 0-indexed
+                            const d = parseInt(dateParts[2]);
+                            window.location.href = `{{ url_for('dashboard_d') }}?year=${y}&month=${m}&day=${d}`;
+                        }
+                    });
 
                     dayCell.appendChild(dayContent); // Append the div inside the td
                     week.appendChild(dayCell);

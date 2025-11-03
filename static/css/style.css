@@ -3026,7 +3026,12 @@ input#setup-profile-starting-balance {
     padding: 0;
     height: 25px;
     width: 100%;
-    cursor:pointer
+    cursor:pointer;
+    transition: background-color 0.2s ease;
+}
+
+#fridays-table th:hover {
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 #fridays-table th.current-week {
@@ -3500,6 +3505,11 @@ input#setup-profile-starting-balance {
     height: 100%; /* Make the div fill the td */
     box-sizing: border-box;
     margin-top: 20px;
+    transition: opacity 0.2s ease;
+}
+
+.dashboard-m-date:hover {
+    opacity: 0.8;
 }
 
 .dashboard-m-day-label {
@@ -3784,6 +3794,11 @@ input#setup-profile-starting-balance {
     height: clamp(15px, 3vw, 25px); /* Responsive height */
     width: clamp(15px, 3vw, 25px); /* Responsive width */
     box-sizing: border-box;
+    transition: opacity 0.2s ease;
+}
+
+.dashboard-y-calendar-table td:hover {
+    opacity: 0.7;
 }
 
 .dashboard-y-calendar-table tbody tr {
@@ -3824,6 +3839,11 @@ input#setup-profile-starting-balance {
     color: white;
     border-top-right-radius: 10px;
     border-top-left-radius: 10px;
+    transition: background-color 0.2s ease;
+}
+
+.dashboard-y-month-container h3:hover {
+    background-color: #808080;
 }
 
 .dashboard-y-today {

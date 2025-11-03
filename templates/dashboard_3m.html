@@ -1241,6 +1241,18 @@
                 const th = document.createElement('th');
                 th.setAttribute('data-date', monthObj.date);
                 th.textContent = monthObj.label;
+                th.style.cursor = 'pointer';
+                th.title = 'Click to view this month in weekly view';
+                th.addEventListener('click', function() {
+                    // Navigate to dashboard.html with the specific year and month
+                    // Parse the date string properly to avoid timezone issues
+                    const dateParts = monthObj.date.split('-');
+                    const year = parseInt(dateParts[0]);
+                    const month = parseInt(dateParts[1]) - 1; // Month is 0-indexed (0-11)
+                    const url = `{{ url_for('dashboard') }}?year=${year}&month=${month}`;
+                    console.log('Navigating to:', url, 'Label:', monthObj.label, 'Date:', monthObj.date, 'Year:', year, 'Month:', month);
+                    window.location.href = url;
+                });
                 fridayDatesRow.appendChild(th);
             });
 

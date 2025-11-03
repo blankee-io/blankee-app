@@ -517,6 +517,23 @@
         let baseYear = 2024; // Base year is set to 2024
         let currentYear = today.getUTCFullYear();
         let currentMonthIndex = (currentYear - baseYear) * 12 + today.getUTCMonth();
+        
+        // Check for year and month parameters in URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const yearParam = urlParams.get('year');
+        const monthParam = urlParams.get('month');
+        console.log('URL params - year:', yearParam, 'month:', monthParam);
+        if (yearParam !== null && monthParam !== null) {
+            const parsedYear = parseInt(yearParam);
+            const parsedMonth = parseInt(monthParam);
+            console.log('Parsed - year:', parsedYear, 'month:', parsedMonth);
+            if (!isNaN(parsedYear) && !isNaN(parsedMonth)) {
+                currentYear = parsedYear;
+                currentMonthIndex = (parsedYear - baseYear) * 12 + parsedMonth;
+                console.log('Set currentYear:', currentYear, 'currentMonthIndex:', currentMonthIndex);
+            }
+        }
+        
         const totalMonths = baseYear * 12 + currentMonthIndex;
 
         let year = Math.floor(totalMonths / 12);
@@ -4140,13 +4157,19 @@
 
         // Automatically generate the month view when the page loads
         window.onload = async function() {
-            const lastViewed = getLastViewedMonth();
+            // Check if URL parameters were provided (skip localStorage if so)
+            const urlParams = new URLSearchParams(window.location.search);
+            const hasUrlParams = urlParams.get('year') !== null && urlParams.get('month') !== null;
             
-            if (lastViewed) {
-                currentMonthIndex = (lastViewed.year - baseYear) * 12 + lastViewed.monthIndex;
-            } else {
-                today = new Date();
-                currentMonthIndex = (today.getUTCFullYear() - baseYear) * 12 + today.getUTCMonth();
+            if (!hasUrlParams) {
+                const lastViewed = getLastViewedMonth();
+                
+                if (lastViewed) {
+                    currentMonthIndex = (lastViewed.year - baseYear) * 12 + lastViewed.monthIndex;
+                } else {
+                    today = new Date();
+                    currentMonthIndex = (today.getUTCFullYear() - baseYear) * 12 + today.getUTCMonth();
+                }
             }
 
             // Ensure the initial render completes before highlighting/outline logic runs
