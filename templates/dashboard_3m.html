@@ -1199,7 +1199,7 @@
             monthDropdown.innerHTML = '';
             for (let i = 0; i < quarterNames.length; i++) {
                 const option = document.createElement('option');
-                option.value = i;
+                option.value = i * 3; // Q1=0, Q2=3, Q3=6, Q4=9
                 option.textContent = quarterNames[i];
                 // Select the current quarter based on monthIndex
                 if (i === Math.floor(monthIndex / 3)) option.selected = true;
@@ -4542,16 +4542,18 @@
             if (document.getElementById('month-dropdown')) document.getElementById('month-dropdown').remove();
             if (document.getElementById('year-dropdown')) document.getElementById('year-dropdown').remove();
 
-            // Create month dropdown
+            // Create quarter dropdown (instead of month)
             const monthSelect = document.createElement('select');
             monthSelect.id = 'month-dropdown';
-            monthNames.forEach((name, idx) => {
+            quarterNames.forEach((name, idx) => {
                 const opt = document.createElement('option');
-                opt.value = idx;
+                opt.value = idx * 3; // Q1=0, Q2=3, Q3=6, Q4=9
                 opt.textContent = name;
                 monthSelect.appendChild(opt);
             });
-            monthSelect.value = monthIndex;
+            // Calculate which quarter the current month belongs to
+            const currentQuarter = Math.floor(monthIndex / 3);
+            monthSelect.value = currentQuarter * 3;
 
             // Create year dropdown
             const yearSelect = document.createElement('select');
@@ -4596,13 +4598,14 @@
                 monthYearHeader.appendChild(yearDropdown);
             }
 
-            // Populate month dropdown
+            // Populate quarter dropdown (instead of month)
             monthDropdown.innerHTML = '';
-            for (let i = 0; i < monthNames.length; i++) {
+            for (let i = 0; i < quarterNames.length; i++) {
                 const option = document.createElement('option');
-                option.value = i;
-                option.textContent = monthNames[i];
-                if (i === monthIndex) option.selected = true;
+                option.value = i * 3; // Q1=0, Q2=3, Q3=6, Q4=9
+                option.textContent = quarterNames[i];
+                const currentQuarter = Math.floor(monthIndex / 3);
+                if (i === currentQuarter) option.selected = true;
                 monthDropdown.appendChild(option);
             }
 
