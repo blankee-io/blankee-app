@@ -1267,7 +1267,8 @@ label[for="setup-profile-balance-threshold"] {
 }
 
 input#setup-profile-balance-threshold,
-input#setup-profile-starting-balance {
+input#setup-profile-starting-balance,
+input#setup-profile-starting-savings {
     padding-right: 10px;
 }
 

@@ -11,6 +11,8 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
     <!-- Link to jQuery library for JavaScript functionality -->
     <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <!-- Google reCAPTCHA -->
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Blankee">
@@ -62,12 +64,18 @@
             </div>
             <!-- Input group for the confirm password -->
             <div class="login-row">
-                <label for="confirm-password">Confirm Password:</label>
+                <label for="confirm-password">Confirm:</label>
                 <input type="password" name="confirm-password" id="confirm-password" class="login-input" required>
             </div>
             <div id="password-match-requirements" class="password-requirements">
                 <p id="password-match-requirement"><span class="requirement-icon">✗</span> Passwords match</p> <!-- Password match check -->
             </div>
+            
+            <!-- Google reCAPTCHA -->
+            <div class="login-row" style="margin-top: 20px; display: flex; justify-content: center;">
+                <div class="g-recaptcha" data-sitekey="6LdmCgAsAAAAALGB6JYlus0Rr9hepw1fbK70Bx9v" data-callback="recaptchaCallback"></div>
+            </div>
+            
             <input type="hidden" name="member_since" id="member_since">
             <!-- Register button, initially disabled -->
             <button type="submit" id="register-button" class="login-button" disabled>Register</button>
@@ -99,6 +107,16 @@
             const passwordMatchRequirement = $('#password-match-requirement .requirement-icon');  // Password match requirement
 
             let isEmailValid = false;  // Track email validity
+            let isCaptchaValid = false;  // Track CAPTCHA validity
+            
+            // Set initial button color to grey
+            registerButton.css('background-color', '#ccc');
+            
+            // reCAPTCHA callback function
+            window.recaptchaCallback = function() {
+                isCaptchaValid = true;
+                checkFormValidity();
+            };
             let isPasswordValid = false;  // Track password validity
             let isPasswordMatchValid = false;  // Track if passwords match
 
@@ -111,7 +129,7 @@
 
             // Function to check overall form validity and enable/disable the register button accordingly
             function checkFormValidity() {
-                if (isEmailValid && isPasswordValid && isPasswordMatchValid) {
+                if (isEmailValid && isPasswordValid && isPasswordMatchValid && isCaptchaValid) {
                     registerButton.prop('disabled', false);  // Enable the register button
                     registerButton.css('background-color', '#F15025');  // Set the button background color
                 } else {
@@ -119,6 +137,8 @@
                     registerButton.css('background-color', '#ccc');  // Set the button background color
                 }
             }
+
+
 
             // Position the validation window to match the input field's width and position
             function adjustValidationWindowPosition(inputField, validationWindow) {
@@ -232,7 +252,7 @@
                 }
 
                 // Validate the presence of a symbol
-                if (/[!@#$%^&*(),.?":{}|<>]/g.test(password)) {
+                if (/[!@#$%^&*(),.?":{}|<>\-_]/g.test(password)) {
                     symbolRequirement.text('✓').addClass('valid');  // Indicate valid symbol
                 } else {
                     symbolRequirement.text('✗').removeClass('valid');  // Indicate missing symbol
@@ -290,6 +310,8 @@
                     }, 300);
                 }, 500);
             });
+
+
 
             // Hide password match requirements when user focuses out of the confirm password input
             confirmPasswordInput.on('focusout', function() {
