@@ -581,7 +581,7 @@
         let touchCurrentX = null;  // Declare touchCurrentX globally
         let isAnimating = false; // To prevent multiple swipes at once
         let containerWidth = null;
-        const monthTableContainer = document.getElementById('month-table-container');
+        const mainContainer = document.getElementById('main-container');
 
         fridayDatesRow = document.getElementById('friday-dates-row');
         lastRemainderRowRight = document.getElementById('last-remainder-row-right');
@@ -678,14 +678,8 @@
                 isHorizontalSwipe = true;
                 event.preventDefault();
 
-                // Move the month-table-container
-                monthTableContainer.style.transform = `translateX(${swipeDistanceX}px)`;
-
-                // Move the outline in sync
-                document.querySelectorAll('.current-week-outline').forEach(outline => {
-                    outline.style.transition = 'transform 0s';
-                    outline.style.transform = `translateX(${swipeDistanceX}px)`;
-                });
+                // Move the main-container
+                mainContainer.style.transform = `translateX(${swipeDistanceX}px)`;
             }
         }
 
@@ -706,11 +700,7 @@
                 }
             } else {
                 // Reset the container position if swipe is less than 20%
-                monthTableContainer.style.transform = 'translateX(0)';
-                document.querySelectorAll('.current-week-outline').forEach(outline => {
-                    outline.style.transition = 'transform 0.15s cubic-bezier(0.4,0,0.2,1)';
-                    outline.style.transform = 'translateX(0)';
-                });
+                mainContainer.style.transform = 'translateX(0)';
             }
 
             // Reset touch positions
@@ -724,21 +714,11 @@
             isAnimating = true;
 
             if (direction === 'left') {
-                monthTableContainer.style.transition = 'transform 0.1s ease-in-out';
-                monthTableContainer.style.transform = `translateX(-${window.innerWidth}px)`;
-                const outline = document.getElementById('current-week-outline');
-                if (outline) {
-                    outline.style.transition = 'transform 0.1s ease-in-out';
-                    outline.style.transform = `translateX(-${window.innerWidth}px)`;
-                }
+                mainContainer.style.transition = 'transform 0.1s ease-in-out';
+                mainContainer.style.transform = `translateX(-${window.innerWidth}px)`;
             } else if (direction === 'right') {
-                monthTableContainer.style.transition = 'transform 0.1s ease-in-out';
-                monthTableContainer.style.transform = `translateX(${window.innerWidth}px)`;
-                const outline = document.getElementById('current-week-outline');
-                if (outline) {
-                    outline.style.transition = 'transform 0.1s ease-in-out';
-                    outline.style.transform = `translateX(${window.innerWidth}px)`;
-                }
+                mainContainer.style.transition = 'transform 0.1s ease-in-out';
+                mainContainer.style.transform = `translateX(${window.innerWidth}px)`;
             }
 
             setTimeout(() => {
@@ -748,14 +728,9 @@
                     previousMonth();
                 }
 
-                // Reset the container and outline position after the view update
-                monthTableContainer.style.transition = 'none';
-                monthTableContainer.style.transform = 'translateX(0)';
-                const outline = document.getElementById('current-week-outline');
-                if (outline) {
-                    outline.style.transition = 'none';
-                    outline.style.transform = 'translateX(0)';
-                }
+                // Reset the container position after the view update
+                mainContainer.style.transition = 'none';
+                mainContainer.style.transform = 'translateX(0)';
                 isAnimating = false;
             }, 100); // This matches the CSS transition duration
         }
@@ -765,7 +740,7 @@
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-left');
-            setTimeout(() => mainContainer.classList.remove('slide-left'), 250);
+            setTimeout(() => mainContainer.classList.remove('slide-left'), 300);
 
             document.getElementById('loading-screen').style.display = 'flex';
             const totalMonths = (currentYear - baseYear) * 12 + currentMonthIndex + 1;
@@ -814,7 +789,7 @@
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-right');
-            setTimeout(() => mainContainer.classList.remove('slide-right'), 250);
+            setTimeout(() => mainContainer.classList.remove('slide-right'), 300);
 
             document.getElementById('loading-screen').style.display = 'flex';
             currentMonthIndex--;
