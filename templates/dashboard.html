@@ -522,15 +522,12 @@
         const urlParams = new URLSearchParams(window.location.search);
         const yearParam = urlParams.get('year');
         const monthParam = urlParams.get('month');
-        console.log('URL params - year:', yearParam, 'month:', monthParam);
         if (yearParam !== null && monthParam !== null) {
             const parsedYear = parseInt(yearParam);
             const parsedMonth = parseInt(monthParam);
-            console.log('Parsed - year:', parsedYear, 'month:', parsedMonth);
             if (!isNaN(parsedYear) && !isNaN(parsedMonth)) {
                 currentYear = parsedYear;
                 currentMonthIndex = (parsedYear - baseYear) * 12 + parsedMonth;
-                console.log('Set currentYear:', currentYear, 'currentMonthIndex:', currentMonthIndex);
             }
         }
         

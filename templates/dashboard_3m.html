@@ -918,7 +918,6 @@
             }
 
             if (sections.includes("updateIncomeTotals")) {
-                console.log('Starting updateIncomeTotals...');
                 asyncOperations.push(updateIncomeTotals());
             }
 
@@ -931,25 +930,20 @@
             }
 
             if (sections.includes("updateExpenseTotals")) {
-                console.log('Starting updateExpenseTotals...');
                 asyncOperations.push(updateExpenseTotals());
             }
 
             if (sections.includes("updateCaBalance")) {
-                console.log('Starting updateCaBalance...');
                 asyncOperations.push(updateCaBalance());
             }
 
             if (sections.includes("updateRemainderRows")) {
-                console.log('Starting updateRemainderRows...');
                 asyncOperations.push(updateRemainderRows());
             }
 
             // Wait for all async operations to complete before continuing
             if (asyncOperations.length > 0) {
-                console.log(`Waiting for ${asyncOperations.length} async operations...`);
                 await Promise.all(asyncOperations);
-                console.log('All async operations completed');
             }
 
             addCellsToSavingsRow(months, savingsRowRight);
@@ -1233,7 +1227,6 @@
                     const year = parseInt(dateParts[0]);
                     const month = parseInt(dateParts[1]) - 1; // Month is 0-indexed (0-11)
                     const url = `{{ url_for('dashboard') }}?year=${year}&month=${month}`;
-                    console.log('Navigating to:', url, 'Label:', monthObj.label, 'Date:', monthObj.date, 'Year:', year, 'Month:', month);
                     window.location.href = url;
                 });
                 fridayDatesRow.appendChild(th);
