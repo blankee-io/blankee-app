@@ -54,7 +54,10 @@
             <!-- Input group for the password -->
             <div class="login-row">
                 <label for="password">Password:</label>
-                <input type="password" name="password" id="password" class="login-input" required>
+                <div class="password-input-wrapper">
+                    <input type="password" name="password" id="password" class="login-input" required>
+                    <i class="fa-regular fa-eye password-toggle-icon" id="toggle-password"></i>
+                </div>
             </div>
             <div id="password-requirements" class="password-requirements">
                 <p id="length-requirement"><span class="requirement-icon">✗</span> At least 8 characters</p> <!-- Password length requirement -->
@@ -65,7 +68,10 @@
             <!-- Input group for the confirm password -->
             <div class="login-row">
                 <label for="confirm-password">Confirm:</label>
-                <input type="password" name="confirm-password" id="confirm-password" class="login-input" required>
+                <div class="password-input-wrapper">
+                    <input type="password" name="confirm-password" id="confirm-password" class="login-input" required>
+                    <i class="fa-regular fa-eye password-toggle-icon" id="toggle-confirm-password"></i>
+                </div>
             </div>
             <div id="password-match-requirements" class="password-requirements">
                 <p id="password-match-requirement"><span class="requirement-icon">✗</span> Passwords match</p> <!-- Password match check -->
@@ -92,6 +98,19 @@
             const passwordInput = $('#password');  // Select the password input field
             const confirmPasswordInput = $('#confirm-password');  // Select the confirm password input field
             const registerButton = $('#register-button');  // Select the register button
+            
+            // Password visibility toggle
+            $('#toggle-password').on('click', function() {
+                const type = passwordInput.attr('type') === 'password' ? 'text' : 'password';
+                passwordInput.attr('type', type);
+                $(this).toggleClass('fa-eye fa-eye-slash');
+            });
+
+            $('#toggle-confirm-password').on('click', function() {
+                const type = confirmPasswordInput.attr('type') === 'password' ? 'text' : 'password';
+                confirmPasswordInput.attr('type', type);
+                $(this).toggleClass('fa-eye fa-eye-slash');
+            });
             
             const emailRequirements = $('#email-requirements');  // Select the email requirements container
             const emailFormatRequirement = $('#email-format-requirement .requirement-icon');  // Select the email format requirement icon
@@ -142,11 +161,15 @@
 
             // Position the validation window to match the input field's width and position
             function adjustValidationWindowPosition(inputField, validationWindow) {
-                const offset = inputField.position();
+                // Use the wrapper position if the input is inside a password wrapper
+                const wrapper = inputField.closest('.password-input-wrapper');
+                const targetElement = wrapper.length > 0 ? wrapper : inputField;
+                
+                const offset = targetElement.position();
                 validationWindow.css({
                     top: offset.top - validationWindow.outerHeight() - 5 + 'px',
                     left: offset.left + 'px',
-                    width: inputField.outerWidth() + 'px',
+                    width: targetElement.outerWidth() + 'px',
                     position: 'absolute',
                     borderRadius: inputField.css('border-radius')
                 });
