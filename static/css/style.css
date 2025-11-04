@@ -6308,12 +6308,12 @@ form button[type="submit"] {
     border-top-right-radius: 10px; /* Round bottom-left corner */
 }
 
-.bud-header span {
+.bud-name {
     position: relative;
     color: white;
     text-align: center;
     flex: 1;  /* Take up remaining space */
-    left: 18px;
+    right: 50px;
 }
 
 .delete-bud-btn {
@@ -6642,6 +6642,69 @@ form button[type="submit"] {
 
 .bud-toggle-hidden {
     display: none !important;
+}
+
+.bud-status-text {
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    width: 100px;
+    position: relative;
+}
+
+.bud-status-active,
+.bud-status-inactive {
+    width: 100%;
+    text-align: left;
+    position: absolute;
+    left: 5px;
+}
+
+.bud-status-active {
+    color: #2AAAA8 !important;
+}
+
+.bud-status-inactive {
+    color: #ccc !important;
+}
+
+.bud-toggle-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.bud-toggle-tooltip {
+    visibility: hidden;
+    opacity: 0;
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 8px;
+    background-color: #333;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    width: 250px;
+    z-index: 1000;
+    transition: opacity 0.3s, visibility 0.3s;
+    line-height: 1.4;
+}
+
+.bud-toggle-tooltip::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 20px;
+    border-width: 6px;
+    border-style: solid;
+    border-color: #333 transparent transparent transparent;
+}
+
+.bud-toggle-container:hover .bud-toggle-tooltip {
+    visibility: visible;
+    opacity: 1;
 }
 
 /*/////////////////////////////  Credit Accounts ///////////////////////////*/
