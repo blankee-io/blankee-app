@@ -7,8 +7,14 @@
             </a>
         </div>
 
-        <!-- Profile dropdown container -->
-        <div class="sidenav-profile"> <!-- Use JavaScript to toggle the dropdown -->
+        <div class="nav-right-content">
+            <!-- Notifications bell icon -->
+            <a href="{{ url_for('notifications') }}" class="nav-notifications">
+                <i class="fa-solid fa-bell"></i>
+            </a>
+
+            <!-- Profile dropdown container -->
+            <div class="sidenav-profile"> <!-- Use JavaScript to toggle the dropdown -->
             <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}" 
                 alt="Profile Picture" class="sidenav-profile-pic">
             <!-- Dropdown Menu moved inside sidenav-profile for pure CSS width matching -->
@@ -53,6 +59,7 @@
                     <div class="dropdown-link"><a href="{{ url_for('logout') }}">Log out</a><i class="fa-regular fa-arrow-left-from-bracket"></i></div>
                 </div>
             </div>
+        </div>
         </div>
     </div>
 </div>
