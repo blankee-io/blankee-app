@@ -165,6 +165,11 @@
 
         const goofyWeekMode = {{ goofy_week_mode | tojson }};
 
+        // Flag to track if a new category was created (only declare if not already declared by footer)
+        if (typeof newCategoryCreated === 'undefined') {
+            var newCategoryCreated = false;
+        }
+
         // Pass the income and expense entries from the Flask backend
         const incomeEntries = {{ income_entries | tojson }};
         const expenseEntries = {{ expense_entries | tojson }};
@@ -360,11 +365,16 @@
 
         function showDashboardDCategoryDropdown(searchText = '') {
             dashboardDDropdown.innerHTML = '';
+            const searchLower = searchText.toLowerCase();
             const filtered = searchText.length === 0 
                 ? dashboardDCategories 
-                : dashboardDCategories.filter(cat => cat.name.toLowerCase().includes(searchText));
+                : dashboardDCategories.filter(cat => cat.name.toLowerCase().includes(searchLower));
 
-            if (filtered.length > 0) {
+            // Check if there's an exact match
+            const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
+            const hasMatches = filtered.length > 0;
+
+            if (hasMatches) {
                 dashboardDDropdown.style.display = 'block';
                 filtered.forEach(cat => {
                     const div = document.createElement('div');
@@ -377,22 +387,35 @@
                     });
                     dashboardDDropdown.appendChild(div);
                 });
-            } else {
+            }
+
+            // Show "Create new..." option if there's text and no exact match
+            if (searchText.length > 0 && !exactMatch) {
+                dashboardDDropdown.style.display = 'block';
+                const createDiv = document.createElement('div');
+                createDiv.className = 'category-dropdown-item create-new-category';
+                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+                createDiv.addEventListener('click', function() {
+                    createDashboardDCategory(searchText);
+                });
+                dashboardDDropdown.appendChild(createDiv);
+            }
+
+            if (!hasMatches && searchText.length === 0) {
                 dashboardDDropdown.style.display = 'none';
             }
         }
 
         dashboardDCategoryInput.addEventListener('input', function() {
-            const searchText = this.value.toLowerCase();
-            if (searchText.length === 0) {
+            if (this.value.length === 0) {
                 dashboardDCategoryHidden.value = '';
             }
-            showDashboardDCategoryDropdown(searchText);
+            showDashboardDCategoryDropdown(this.value);
         });
 
         dashboardDCategoryInput.addEventListener('focus', function() {
             if (dashboardDCategories.length > 0) {
-                showDashboardDCategoryDropdown(this.value.toLowerCase());
+                showDashboardDCategoryDropdown(this.value);
             }
         });
 
@@ -401,6 +424,98 @@
                 dashboardDDropdown.style.display = 'none';
             }
         });
+
+        // Function to create a new category from dashboard_d modal
+        function createDashboardDCategory(categoryName) {
+            const entryType = document.getElementById('dashboard-d-entryType').value;
+            
+            if (!categoryName || categoryName.trim().length === 0) return;
+            
+            let url, categoriesArray;
+            if (entryType === 'income') {
+                url = "{{ url_for('add_income_category') }}";
+                categoriesArray = incomeCategories;
+            } else if (entryType === 'expense') {
+                url = "{{ url_for('add_expense_category') }}";
+                categoriesArray = expenseCategories;
+            } else if (entryType.startsWith('ca_')) {
+                const accountId = parseInt(entryType.split('_')[1]);
+                url = "{{ url_for('add_ca_category') }}";
+                // For credit accounts, we'll handle differently
+                $.ajax({
+                    url: url,
+                    method: "POST",
+                    data: { 
+                        name: categoryName.trim(),
+                        account_id: accountId
+                    },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            // Set flag that new category was created
+                            newCategoryCreated = true;
+                            
+                            // Add to c_expense_categories array
+                            c_expense_categories.push({ 
+                                id: response.new_category_id, 
+                                name: categoryName.trim(),
+                                account_id: accountId,
+                                hidden: false,
+                                is_bud: false
+                            });
+                            
+                            // Refresh the categories list first
+                            dashboardDUpdateCategoryOptions();
+                            
+                            // Then update the input and hidden field with the new category
+                            dashboardDCategoryInput.value = categoryName.trim();
+                            dashboardDCategoryHidden.value = response.new_category_id;
+                            dashboardDDropdown.style.display = 'none';
+                        } else {
+                            alert('Failed to create category');
+                        }
+                    },
+                    error: function() {
+                        alert('Error creating category');
+                    }
+                });
+                return;
+            } else {
+                return;
+            }
+            
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: { name: categoryName.trim() },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Set flag that new category was created
+                        newCategoryCreated = true;
+                        
+                        // Add to appropriate categories array
+                        categoriesArray.push({ 
+                            id: response.new_category_id, 
+                            name: categoryName.trim(),
+                            hidden: false,
+                            is_bud: false
+                        });
+                        
+                        // Refresh the categories list first
+                        dashboardDUpdateCategoryOptions();
+                        
+                        // Then update the input and hidden field with the new category
+                        dashboardDCategoryInput.value = categoryName.trim();
+                        dashboardDCategoryHidden.value = response.new_category_id;
+                        dashboardDDropdown.style.display = 'none';
+                    } else {
+                        alert('Failed to create category');
+                    }
+                },
+                error: function() {
+                    alert('Error creating category');
+                }
+            });
+        }
         
         function calculateWeek(selectedDate, goofyWeekMode) {
 
@@ -1947,6 +2062,11 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                         // Local entry already updated, just save totals and remainders
                         saveDailyTotalsAndRemainders(formData.date);
                         if (typeof callback === "function") callback(response);
+                        
+                        // If a new category was created, reload the page
+                        if (newCategoryCreated) {
+                            location.reload();
+                        }
                     } else {
                     }
                 },

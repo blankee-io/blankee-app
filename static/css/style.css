@@ -6993,6 +6993,22 @@ form button[type="submit"] {
     background-color: #f5f5f5;
 }
 
+.category-dropdown-item.create-new-category {
+    background-color: #f8f9fa;
+    color: #007bff;
+    font-weight: 500;
+    border-top: 2px solid #e0e0e0;
+}
+
+.category-dropdown-item.create-new-category:hover {
+    background-color: #e7f3ff;
+    color: #0056b3;
+}
+
+.category-dropdown-item.create-new-category i {
+    margin-right: 6px;
+}
+
 .dashboard-d-form-group,
 .footer-form-group {
     position: relative;
