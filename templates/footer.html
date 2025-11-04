@@ -142,6 +142,11 @@
 
 <script>
 
+    // Flag to track if a new category was created (only declare if not already declared)
+    if (typeof newCategoryCreated === 'undefined') {
+        var newCategoryCreated = false;
+    }
+
     // Get references to DOM elements
     const addButton = document.getElementById('footer-add-button');
     const footerBar = document.getElementById('footer-bar');
@@ -296,7 +301,9 @@
                             true
                         );
                     }
-                    saveDailyTotalsAndRemainders();
+                    if (typeof saveDailyTotalsAndRemainders === "function") {
+                        saveDailyTotalsAndRemainders();
+                    }
                 } else {
                     alert('Failed to add entry: ' + response.message);
                 }
@@ -305,8 +312,13 @@
                 alert('An error occurred while adding the entry.');
             },
             complete: function() {
+                // If a new category was created, reload the page
+                if (newCategoryCreated) {
+                    location.reload();
+                    return;
+                }
                 document.getElementById('loading-screen').style.display = 'none'; // Hide loading
-                resetAddEntryForm(); // <-- Add this line
+                resetAddEntryForm();
             }
         });
     }, 10);
@@ -600,7 +612,9 @@
                                 true
                             );
                         }
-                        saveDailyTotalsAndRemainders();
+                        if (typeof saveDailyTotalsAndRemainders === "function") {
+                            saveDailyTotalsAndRemainders();
+                        }
                     } else {
                         alert('Failed to add entry: ' + response.message);
                     }
@@ -609,6 +623,11 @@
                     alert('An error occurred while adding the entry.');
                 },
                 complete: function() {
+                    // If a new category was created, reload the page
+                    if (newCategoryCreated) {
+                        location.reload();
+                        return;
+                    }
                     document.getElementById('loading-screen').style.display = 'none';
                     resetCaEntryForm();
                 }
@@ -682,11 +701,16 @@
 
     function showFooterCategoryDropdown(searchText = '') {
         footerDropdown.innerHTML = '';
+        const searchLower = searchText.toLowerCase();
         const filtered = searchText.length === 0 
             ? footerCategories 
-            : footerCategories.filter(cat => cat.name.toLowerCase().includes(searchText));
+            : footerCategories.filter(cat => cat.name.toLowerCase().includes(searchLower));
 
-        if (filtered.length > 0) {
+        // Check if there's an exact match
+        const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
+        const hasMatches = filtered.length > 0;
+
+        if (hasMatches) {
             footerDropdown.style.display = 'block';
             filtered.forEach(cat => {
                 const div = document.createElement('div');
@@ -699,22 +723,35 @@
                 });
                 footerDropdown.appendChild(div);
             });
-        } else {
+        }
+
+        // Show "Create new..." option if there's text and no exact match
+        if (searchText.length > 0 && !exactMatch) {
+            footerDropdown.style.display = 'block';
+            const createDiv = document.createElement('div');
+            createDiv.className = 'category-dropdown-item create-new-category';
+            createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+            createDiv.addEventListener('click', function() {
+                createFooterCategory(searchText);
+            });
+            footerDropdown.appendChild(createDiv);
+        }
+
+        if (!hasMatches && searchText.length === 0) {
             footerDropdown.style.display = 'none';
         }
     }
 
     footerCategoryInput.addEventListener('input', function() {
-        const searchText = this.value.toLowerCase();
-        if (searchText.length === 0) {
+        if (this.value.length === 0) {
             footerCategoryHidden.value = '';
         }
-        showFooterCategoryDropdown(searchText);
+        showFooterCategoryDropdown(this.value);
     });
 
     footerCategoryInput.addEventListener('focus', function() {
         if (footerCategories.length > 0) {
-            showFooterCategoryDropdown(this.value.toLowerCase());
+            showFooterCategoryDropdown(this.value);
         }
     });
 
@@ -724,6 +761,57 @@
         }
     });
 
+    // Function to create a new category from footer modal
+    function createFooterCategory(categoryName) {
+        const entryType = document.getElementById('footer-entryType').value;
+        
+        if (!categoryName || categoryName.trim().length === 0) return;
+        
+        let url, categoriesArray;
+        if (entryType === 'income') {
+            url = "{{ url_for('add_income_category') }}";
+            categoriesArray = incomeCategories;
+        } else if (entryType === 'expense') {
+            url = "{{ url_for('add_expense_category') }}";
+            categoriesArray = expenseCategories;
+        } else {
+            return;
+        }
+        
+        $.ajax({
+            url: url,
+            method: "POST",
+            data: { name: categoryName.trim() },
+            success: function(response) {
+                if (response.status === 'success') {
+                    // Set flag that new category was created
+                    newCategoryCreated = true;
+                    
+                    // Add to appropriate categories array
+                    categoriesArray.push({ 
+                        id: response.new_category_id, 
+                        name: categoryName.trim(),
+                        hidden: false,
+                        is_bud: false
+                    });
+                    
+                    // Refresh the categories list first
+                    updateCategoryOptions();
+                    
+                    // Then update the input and hidden field with the new category
+                    footerCategoryInput.value = categoryName.trim();
+                    footerCategoryHidden.value = response.new_category_id;
+                    footerDropdown.style.display = 'none';
+                } else {
+                    alert('Failed to create category');
+                }
+            },
+            error: function() {
+                alert('Error creating category');
+            }
+        });
+    }
+
     // Category search and dropdown functionality for footer credit account category
     let footerCaCategories = [];
     const footerCaCategoryInput = document.getElementById('footer-ca-category-input');
@@ -732,11 +820,16 @@
 
     function showFooterCaCategoryDropdown(searchText = '') {
         footerCaDropdown.innerHTML = '';
+        const searchLower = searchText.toLowerCase();
         const filtered = searchText.length === 0 
             ? footerCaCategories 
-            : footerCaCategories.filter(cat => cat.name.toLowerCase().includes(searchText));
+            : footerCaCategories.filter(cat => cat.name.toLowerCase().includes(searchLower));
 
-        if (filtered.length > 0) {
+        // Check if there's an exact match
+        const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
+        const hasMatches = filtered.length > 0;
+
+        if (hasMatches) {
             footerCaDropdown.style.display = 'block';
             filtered.forEach(cat => {
                 const div = document.createElement('div');
@@ -749,22 +842,35 @@
                 });
                 footerCaDropdown.appendChild(div);
             });
-        } else {
+        }
+
+        // Show "Create new..." option if there's text and no exact match
+        if (searchText.length > 0 && !exactMatch) {
+            footerCaDropdown.style.display = 'block';
+            const createDiv = document.createElement('div');
+            createDiv.className = 'category-dropdown-item create-new-category';
+            createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+            createDiv.addEventListener('click', function() {
+                createFooterCaCategory(searchText);
+            });
+            footerCaDropdown.appendChild(createDiv);
+        }
+
+        if (!hasMatches && searchText.length === 0) {
             footerCaDropdown.style.display = 'none';
         }
     }
 
     footerCaCategoryInput.addEventListener('input', function() {
-        const searchText = this.value.toLowerCase();
-        if (searchText.length === 0) {
+        if (this.value.length === 0) {
             footerCaCategoryHidden.value = '';
         }
-        showFooterCaCategoryDropdown(searchText);
+        showFooterCaCategoryDropdown(this.value);
     });
 
     footerCaCategoryInput.addEventListener('focus', function() {
         if (footerCaCategories.length > 0) {
-            showFooterCaCategoryDropdown(this.value.toLowerCase());
+            showFooterCaCategoryDropdown(this.value);
         }
     });
 
@@ -773,5 +879,50 @@
             footerCaDropdown.style.display = 'none';
         }
     });
+
+    // Function to create a new credit account category from footer modal
+    function createFooterCaCategory(categoryName) {
+        const accountId = document.getElementById('footer-ca-account').value;
+        
+        if (!categoryName || categoryName.trim().length === 0 || !accountId) return;
+        
+        $.ajax({
+            url: "{{ url_for('add_ca_category') }}",
+            method: "POST",
+            data: { 
+                name: categoryName.trim(),
+                account_id: accountId
+            },
+            success: function(response) {
+                if (response.status === 'success') {
+                    // Set flag that new category was created
+                    newCategoryCreated = true;
+                    
+                    // Add to c_expense_categories array
+                    c_expense_categories.push({ 
+                        id: response.new_category_id, 
+                        name: categoryName.trim(),
+                        account_id: parseInt(accountId),
+                        hidden: false,
+                        is_bud: false
+                    });
+                    
+                    // Refresh the categories list first - trigger the account dropdown change event
+                    const changeEvent = new Event('change');
+                    document.getElementById('footer-ca-account').dispatchEvent(changeEvent);
+                    
+                    // Then update the input and hidden field with the new category
+                    footerCaCategoryInput.value = categoryName.trim();
+                    footerCaCategoryHidden.value = response.new_category_id;
+                    footerCaDropdown.style.display = 'none';
+                } else {
+                    alert('Failed to create category');
+                }
+            },
+            error: function() {
+                alert('Error creating category');
+            }
+        });
+    }
 
 </script>
