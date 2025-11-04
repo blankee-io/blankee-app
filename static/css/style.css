@@ -1135,11 +1135,13 @@ button#autobalance-submit:hover {
     font-size: 12px;
 }
 
-.logincontainer form .login-row input[type="text"],
-.logincontainer form .login-row input[type="password"] {
-    width: 80%;
-    min-width: 0px;
-    margin-bottom: 0;
+.logincontainer form .login-row input[type="password"],
+.logincontainer form .login-row input[type="text"] {
+    width: 174px;
+}
+
+.logincontainer form .login-row .password-input-wrapper {
+    width: 174px;
 }
 
 .remember-me {
@@ -1160,6 +1162,33 @@ button#autobalance-submit:hover {
     box-sizing: border-box;
     font-size: 12px; /* Larger font size */
     height: 20px;
+}
+
+/* Password input wrapper for toggle icon */
+.password-input-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.password-input-wrapper .login-input {
+    width: 100%;
+    padding-right: 40px;
+    box-sizing: border-box;
+}
+
+.password-toggle-icon {
+    position: absolute;
+    right: 7px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    color: #575757;
+    font-size: 15px;
+    user-select: none;
+}
+
+.password-toggle-icon:hover {
+    color: #E45F1C;
 }
 
 /* Login Button */
