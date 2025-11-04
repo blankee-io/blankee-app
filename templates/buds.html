@@ -64,12 +64,21 @@
                 <div class="bud-header">
                     <!-- Active toggle switch -->
                     {% if selected_bud %}
-                        <button class="bud-active-toggle" data-bud-id="{{ selected_bud.id }}" aria-pressed="{{ 1 if selected_bud.active else 0 }}">
-                            <i class="fa-solid fa-toggle-on bud-toggle-on {% if not selected_bud.active %}bud-toggle-hidden{% endif %}"></i>
-                            <i class="fa-solid fa-toggle-off bud-toggle-off {% if selected_bud.active %}bud-toggle-hidden{% endif %}"></i>
-                        </button>
+                        <div class="bud-toggle-container">
+                            <button class="bud-active-toggle" data-bud-id="{{ selected_bud.id }}" aria-pressed="{{ 1 if selected_bud.active else 0 }}">
+                                <i class="fa-solid fa-toggle-on bud-toggle-on {% if not selected_bud.active %}bud-toggle-hidden{% endif %}"></i>
+                                <i class="fa-solid fa-toggle-off bud-toggle-off {% if selected_bud.active %}bud-toggle-hidden{% endif %}"></i>
+                            </button>
+                            <span class="bud-status-text">
+                                <span class="bud-status-active {% if not selected_bud.active %}bud-toggle-hidden{% endif %}">Active</span>
+                                <span class="bud-status-inactive {% if selected_bud.active %}bud-toggle-hidden{% endif %}">Inactive</span>
+                            </span>
+                            <span class="bud-toggle-tooltip">
+                                When active, items are added to "{{ selected_bud.name }}" category. When deactivated, future items are removed and past items move to Auto Adjustments.
+                            </span>
+                        </div>
                     {% endif %}
-                    <span>
+                    <span class="bud-name">
                     {% if selected_bud %}
                         {{ selected_bud.name }}
                     {% endif %}
@@ -286,6 +295,14 @@
                     budActiveToggle.setAttribute('aria-pressed', isActive ? '0' : '1');
                     budActiveToggle.querySelector('.bud-toggle-on').classList.toggle('bud-toggle-hidden', isActive);
                     budActiveToggle.querySelector('.bud-toggle-off').classList.toggle('bud-toggle-hidden', !isActive);
+                    
+                    // Toggle status text
+                    const statusText = document.querySelector('.bud-status-text');
+                    if (statusText) {
+                        statusText.querySelector('.bud-status-active').classList.toggle('bud-toggle-hidden', isActive);
+                        statusText.querySelector('.bud-status-inactive').classList.toggle('bud-toggle-hidden', !isActive);
+                    }
+                    
                     document.getElementById('loading-screen').style.display = 'flex';
                     fetch('/toggle-bud-active', {
                         method: 'POST',
