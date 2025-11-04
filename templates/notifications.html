@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Notifications</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="notifications-body">
+    {% include 'nav.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <!-- Notifications content will go here -->
+    </div>
+
+    {% include 'loading_modals.html' %}
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script type="text/javascript">
+        document.getElementById('loading-screen').style.display = 'none';
+    </script>
+</body>
+</html>

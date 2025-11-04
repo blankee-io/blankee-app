@@ -227,12 +227,16 @@
     <script type="text/javascript">
     document.getElementById('loading-screen').style.display = 'none';
         $(document).ready(function() {
+            let mfaVerified = false; // Track if MFA was successfully verified
+
             $('#enable-mfa-btn').on('click', function() {
+                mfaVerified = false; // Reset flag
                 // Existing enable MFA logic...
                 $.post('/enable_mfa', function(data) {
                     if (data.status === 'success' && data.qr_url) {
                         $('#mfa-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code" style="width:200px;height:200px;">');
                         $('#mfa-verify-message').text('');
+                        $('#mfa-code').val(''); // Clear previous code
                         $('#mfa-qr-modal').show();
                     } else {
                         $('#mfa-status-message').text('Error enabling MFA.');
@@ -255,9 +259,30 @@
                 }
             });
 
-            // Close modal
+            // Function to cancel MFA setup
+            function cancelMfaSetup() {
+                if (!mfaVerified) {
+                    $.post('/cancel_mfa', function(data) {
+                        if (data.status === 'success') {
+                            $('#mfa-code').val('');
+                            $('#mfa-verify-message').text('');
+                        }
+                    });
+                }
+            }
+
+            // Close modal and cancel MFA setup
             $('#close-mfa-modal').on('click', function() {
                 $('#mfa-qr-modal').hide();
+                cancelMfaSetup();
+            });
+
+            // Click outside modal to close
+            $('#mfa-qr-modal').on('click', function(e) {
+                if (e.target.id === 'mfa-qr-modal') {
+                    $('#mfa-qr-modal').hide();
+                    cancelMfaSetup();
+                }
             });
 
             // Verify MFA code
@@ -266,6 +291,7 @@
                 const code = $('#mfa-code').val();
                 $.post('/verify_mfa', {code: code}, function(data) {
                     if (data.status === 'success') {
+                        mfaVerified = true; // Mark as verified
                         $('#mfa-verify-message').css('color', 'green').text('MFA enabled successfully!');
                         // Update status and button in the profile section
                         $('#mfa-status-message').html('<span">Enabled</span>');

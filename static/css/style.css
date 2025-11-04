@@ -186,6 +186,44 @@ body {
     align-items: center;
 }
 
+.nav-right-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+}
+
+/* Custom bell shake animation */
+@keyframes bell-shake {
+    0%, 100% { transform: rotate(0deg); }
+    10%, 30%, 50%, 70%, 90% { transform: rotate(-10deg); }
+    20%, 40%, 60%, 80% { transform: rotate(10deg); }
+}
+
+.nav-notifications {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: transparent;
+    transition: background-color 0.3s ease;
+    color: white;
+    font-size: 17px;
+    text-decoration: none;
+}
+
+.nav-notifications i {
+    display: inline-block;
+    transform-origin: center top;
+}
+
+/* Play shake animation once on hover */
+.nav-notifications:hover i {
+    animation: bell-shake 0.8s ease-in-out 1;
+}
+
 .sidenavheader {
     height: 75px;
     display: flex;
@@ -207,7 +245,6 @@ body {
     cursor: pointer;
     height: 65px;
     box-sizing: border-box; /* Ensure padding is included in the width */
-    margin-left: auto; /* pushes it to the far right */
     position: relative;
 }
 

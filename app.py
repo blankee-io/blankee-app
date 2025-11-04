@@ -7441,6 +7441,45 @@ def profile():
         mfa_enabled=mfa_enabled
     )
 
+@app.route('/notifications', methods=['GET'])
+@login_required
+def notifications():
+    # Try to get user settings from Redis first
+    redis_key = f"users:v1:{current_user.id}"
+    user_data = None
+    
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+        except Exception as e:
+            app.logger.warning(f"[REDIS][user_settings] GET error: {e}")
+    
+    # If not in Redis, load from MySQL
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT profile_picture, landing_page
+                FROM users 
+                WHERE id = %s
+            """, (current_user.id,))
+            result = cursor.fetchone()
+            cursor.close()
+            
+            if result:
+                user_data = result
+
+    profile_picture = user_data['profile_picture'] if user_data else None
+    landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
+
+    return render_template(
+        'notifications.html',
+        profile_picture=profile_picture,
+        landing_page=landing_page
+    )
+
 @app.route('/settings', methods=['GET'])
 @login_required
 def settings():
@@ -7726,6 +7765,14 @@ def verify_mfa():
 @login_required
 def disable_mfa():
     # Update in Redis only - flush worker will persist to MySQL
+    _update_user_setting_in_redis(current_user.id, 'mfa_secret', None)
+    
+    return jsonify({'status': 'success'})
+
+@app.route('/cancel_mfa', methods=['POST'])
+@login_required
+def cancel_mfa():
+    # Clear the MFA secret if user cancels setup before verification
     _update_user_setting_in_redis(current_user.id, 'mfa_secret', None)
     
     return jsonify({'status': 'success'})
