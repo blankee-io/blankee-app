@@ -4732,6 +4732,16 @@ def delete_income_category():
 
             conn.commit()
             cursor.close()
+            
+            # Invalidate Redis cache for income entries
+            if app.config.get('REDIS_OK'):
+                try:
+                    redis_key = f"income_entries:v1:{current_user.id}"
+                    _redis_client.delete(redis_key)
+                    app.logger.debug(f"[REDIS] Invalidated income_entries cache for user {current_user.id} after category deletion")
+                except Exception as e:
+                    app.logger.warning(f"[REDIS] Error invalidating income_entries cache: {e}")
+            
             return jsonify({'status': 'success'})
 
     except Exception as e:
@@ -4796,6 +4806,16 @@ def delete_expense_category():
 
             conn.commit()
             cursor.close()
+            
+            # Invalidate Redis cache for expense entries
+            if app.config.get('REDIS_OK'):
+                try:
+                    redis_key = f"expense_entries:v1:{current_user.id}"
+                    _redis_client.delete(redis_key)
+                    app.logger.debug(f"[REDIS] Invalidated expense_entries cache for user {current_user.id} after category deletion")
+                except Exception as e:
+                    app.logger.warning(f"[REDIS] Error invalidating expense_entries cache: {e}")
+            
             return jsonify({'status': 'success'})
 
     except Exception as e:
@@ -4875,6 +4895,16 @@ def delete_ca_category():
 
             conn.commit()
             cursor.close()
+            
+            # Invalidate Redis cache for credit account expense entries
+            if app.config.get('REDIS_OK'):
+                try:
+                    redis_key = f"c_expense_entries:v1:{current_user.id}"
+                    _redis_client.delete(redis_key)
+                    app.logger.debug(f"[REDIS] Invalidated c_expense_entries cache for user {current_user.id} after CA category deletion")
+                except Exception as e:
+                    app.logger.warning(f"[REDIS] Error invalidating c_expense_entries cache: {e}")
+            
             return jsonify({'status': 'success'})
 
     except Exception as e:
