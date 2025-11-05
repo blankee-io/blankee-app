@@ -170,6 +170,40 @@
     </div>
 
     <!-- Modal for delete confirmation -->
+    <!-- Modal for adding bud item -->
+    <div id="add-bud-item-modal" class="footer-modal">
+        <div class="footer-modal-content">
+            <span class="footer-close-modal" id="add-bud-item-close">&times;</span>
+            <h3>Add Bud Item</h3>
+            <form id="add-bud-item-form">
+                <div class="footer-form-group">
+                    <label for="bud-item-name">Item Name:</label>
+                    <input type="text" id="bud-item-name" name="name" required placeholder="Item name">
+                </div>
+                <div class="footer-form-group">
+                    <label for="bud-item-value">Amount:</label>
+                    <input type="number" id="bud-item-value" name="value" min="0" step="1" required placeholder="Amount">
+                </div>
+                <div class="footer-form-group">
+                    <label for="bud-item-date">Payment Date:</label>
+                    <input type="date" id="bud-item-date" name="date" required>
+                </div>
+                <div class="footer-form-group">
+                    <label for="bud-item-account">Account:</label>
+                    <select id="bud-item-account" name="account" required>
+                        <option value="Blankee">Blankee</option>
+                        {% for account in credit_accounts %}
+                            <option value="{{ account.name }}">{{ account.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="footer-form-group">
+                    <button type="submit">Add Item</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div id="delete-bud-item-modal" class="delete-bud-item-modal">
         <div class="delete-bud-item-modal-content">
             <h3>Are you sure you want to delete this item? If the date for this item is in the past, the amount will be moved to Auto Adjustments for that date.</h3>
@@ -324,125 +358,84 @@
 
         $(function() {
             const $addBudItemsLink = $('.add-bud-items a');
-            const $budTableBody = $('.bud-table tbody');
             const $budsContainer = $('.buds-container');
 
+            // Show modal when Add new item link is clicked
             $addBudItemsLink.on('click', function(e) {
                 e.preventDefault();
+                $('#add-bud-item-modal').show();
+                // Clear the form
+                $('#add-bud-item-form')[0].reset();
+                // Focus on first input
+                $('#bud-item-name').focus();
+            });
 
-                // Remove any existing input row
-                $budTableBody.find('.bud-item-input-row').remove();
+            // Close modal on X click
+            $('#add-bud-item-close').on('click', function() {
+                $('#add-bud-item-modal').hide();
+            });
 
-                // Create new row with four inputs
-                const $newRow = $('<tr>').addClass('bud-item-input-row');
-
-                // Name input
-                const $nameTd = $('<td>');
-                const $nameInput = $('<input>')
-                    .attr('type', 'text')
-                    .addClass('bud-item-input')
-                    .attr('placeholder', 'Item name');
-                $nameTd.append($nameInput);
-
-                // Value input
-                const $valueTd = $('<td>');
-                const $valueInput = $('<input>')
-                    .attr('type', 'number')
-                    .addClass('bud-item-input')
-                    .attr('placeholder', 'Amount')
-                    .attr('step', '1')
-                    .attr('min', '0')
-                    .on('input', function() {
-                        let val = $(this).val();
-                        if (val && val.includes('.')) {
-                            $(this).val(val.split('.')[0]);
-                        }
-                    });
-                $valueTd.append($valueInput);
-
-                // Date input
-                const $dateTd = $('<td>');
-                const $dateInput = $('<input>')
-                    .attr('type', 'date')
-                    .addClass('bud-item-input');
-                $dateTd.append($dateInput);
-
-                // Account select
-                const $accountTd = $('<td>');
-                const $accountSelect = $('<select>')
-                    .addClass('bud-item-input bud-item-account-select');
-                $accountSelect.append($('<option>').val('Blankee').text('Blankee'));
-                // credit_accounts should be available in the template context
-                {% for account in credit_accounts %}
-                    $accountSelect.append($('<option>').val('{{ account.name|e }}').text('{{ account.name|e }}'));
-                {% endfor %}
-                $accountTd.append($accountSelect);
-
-                // Action cell (empty)
-                const $actionTd = $('<td>');
-
-                $newRow.append($nameTd, $valueTd, $dateTd, $accountTd, $actionTd);
-                $budTableBody.append($newRow);
-                $nameInput.focus();
-
-                function submitNewItem() {
-                    const itemName = $nameInput.val().trim();
-                    const itemValue = $valueInput.val().trim();
-                    const itemDate = $dateInput.val().trim();
-                    const itemAccount = $accountSelect.val();
-
-                    if (!itemName || !itemValue || !itemDate || !itemAccount) {
-                        $newRow.remove();
-                        return;
-                    }
-                    const budId = $budsContainer.data('bud-id');
-                    const budActive = $budsContainer.data('bud-active') === 1 ? 1 : 0;
-                    document.getElementById('loading-screen').style.display = 'flex';
-                    $.ajax({
-                        url: '/add-bud-item',
-                        method: 'POST',
-                        contentType: 'application/json',
-                        data: JSON.stringify({
-                            name: itemName,
-                            value: itemValue,
-                            date: itemDate,
-                            account: itemAccount,
-                            bud_id: budId,
-                            active: budActive
-                        }),
-                        dataType: 'json',
-                        success: function(data) {
-                            if (data.status === 'success') {
-                                saveDailyTotalsAndRemainders();
-                                location.reload();
-                            } else {
-                                $newRow.remove();
-                            }
-                        },
-                        error: function() {
-                            $newRow.remove();
-                        }
-                    });
+            // Close modal on clicking outside modal content
+            $('#add-bud-item-modal').on('mousedown', function(e) {
+                if (e.target === this) {
+                    $('#add-bud-item-modal').hide();
                 }
+            });
 
-                $nameInput.add($valueInput).add($dateInput).add($accountSelect).on('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        submitNewItem();
+            // Handle form submission
+            $('#add-bud-item-form').on('submit', function(e) {
+                e.preventDefault();
+                
+                const itemName = $('#bud-item-name').val().trim();
+                const itemValue = $('#bud-item-value').val().trim();
+                const itemDate = $('#bud-item-date').val().trim();
+                const itemAccount = $('#bud-item-account').val();
+                
+                if (!itemName || !itemValue || !itemDate || !itemAccount) {
+                    alert('Please fill in all fields.');
+                    return;
+                }
+                
+                const budId = $budsContainer.data('bud-id');
+                const budActive = $budsContainer.data('bud-active') === 1 ? 1 : 0;
+                
+                document.getElementById('loading-screen').style.display = 'flex';
+                $.ajax({
+                    url: '/add-bud-item',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        name: itemName,
+                        value: itemValue,
+                        date: itemDate,
+                        account: itemAccount,
+                        bud_id: budId,
+                        active: budActive
+                    }),
+                    dataType: 'json',
+                    success: function(data) {
+                        if (data.status === 'success') {
+                            $('#add-bud-item-modal').hide();
+                            saveDailyTotalsAndRemainders();
+                            location.reload();
+                        } else {
+                            alert(data.message || 'Error adding item.');
+                            document.getElementById('loading-screen').style.display = 'none';
+                        }
+                    },
+                    error: function() {
+                        alert('Error adding item.');
+                        document.getElementById('loading-screen').style.display = 'none';
                     }
                 });
+            });
 
-                $nameInput.add($valueInput).add($dateInput).add($accountSelect).on('blur', function(e) {
-                    setTimeout(function() {
-                        if (
-                            !$nameInput.is(':focus') &&
-                            !$valueInput.is(':focus') &&
-                            !$dateInput.is(':focus') &&
-                            !$accountSelect.is(':focus')
-                        ) {
-                            submitNewItem();
-                        }
-                    }, 0);
-                });
+            // Prevent decimal input on amount field
+            $('#bud-item-value').on('input', function() {
+                let val = $(this).val();
+                if (val && val.includes('.')) {
+                    $(this).val(val.split('.')[0]);
+                }
             });
         });
 
