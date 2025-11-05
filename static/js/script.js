@@ -1,5 +1,28 @@
 // General Functions
 
+// Function to refresh the notification badge in the nav
+function refreshNotificationBadge() {
+    $.ajax({
+        url: '/get-unread-notification-count',
+        method: 'GET',
+        success: function(response) {
+            const badge = $('.notification-badge');
+            const count = response.count || 0;
+            
+            if (count === 0) {
+                // Remove the badge if no unread notifications
+                badge.remove();
+            } else if (badge.length === 0) {
+                // Add badge if it doesn't exist and there are unread notifications
+                $('.nav-notifications').append('<span class="notification-badge"></span>');
+            }
+        },
+        error: function() {
+            console.error('Failed to refresh notification badge');
+        }
+    });
+}
+
 // Function to toggle the display of the side navigation
 function toggleSidenav() {
     const sidenav = document.getElementById('sidenav');

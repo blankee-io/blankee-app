@@ -212,6 +212,7 @@ body {
     color: white;
     font-size: 17px;
     text-decoration: none;
+    position: relative;
 }
 
 .nav-notifications i {
@@ -222,6 +223,18 @@ body {
 /* Play shake animation once on hover */
 .nav-notifications:hover i {
     animation: bell-shake 0.8s ease-in-out 1;
+}
+
+/* Notification badge (red dot) */
+.notification-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 10px;
+    height: 10px;
+    background-color: #F15025;
+    border-radius: 50%;
+    border: 2px solid #2aaaa8;
 }
 
 .sidenavheader {
@@ -3982,12 +3995,11 @@ input#setup-profile-starting-savings {
     text-align: center;
     max-width: 100%; /* Set a max-width to ensure it doesn't stretch too far */
     width: 875px; /* Allow the width to adjust based on content */
-    justify-content: space-between;
 }
 
 .profile-content {
     display: flex;
-    justify-content: space-between; /* Distribute space between the two sections */
+    justify-content: center; /* Distribute space between the two sections */
     align-items: center; /* Align content vertically */
     width: calc(100%-20px); /* Ensure the container takes up full width */
     height: 100%; /* Set height for the container (adjust if needed) */
@@ -4642,6 +4654,112 @@ input#setup-profile-starting-savings {
     min-width: 370px;
 }
 
+/* Notification Styles */
+
+.notification-section {
+    border: 1px solid #2AAAA8;
+    border-radius: 10px;
+    padding: 10px 0px; /* top right bottom left */
+    margin: 10px 0 25px 0; /* top right bottom left */
+    position: relative; /* Needed for absolute ::before */
+}
+
+.notification-item {
+    padding: 15px 20px;
+    transition: background-color 0.2s;
+}
+
+.notification-item.notification-read {
+    opacity: 0.6;
+}
+
+.notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.notification-date {
+    font-size: 12px;
+    color: #2AAAA8;
+    font-weight: 600;
+}
+
+.notification-message {
+    font-size: 14px;
+    color: #333;
+    line-height: 1.5;
+}
+
+.notification-message a {
+    color: #2AAAA8;
+    text-decoration: underline;
+    font-weight: 600;
+}
+
+.notification-message a:hover {
+    color: #6BAEAC;
+}
+
+.notification-buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.mark-read-button {
+    background-color: #2aaaa8;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    padding: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s;
+    transform: translateY(-28px);
+}
+
+.mark-read-button:hover {
+    background-color: #6BAEAC;
+}
+
+.mark-read-button i {
+    font-size: 12px;
+}
+
+.delete-notification-button {
+    background-color: #F15025;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    padding: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s;
+    transform: translateY(-28px);
+}
+
+.delete-notification-button:hover {
+    background-color: #d63e1a;
+}
+
+.delete-notification-button i {
+    font-size: 12px;
+}
+
+.clear-read-button {
+    color: #F15025;
+    background: none;
+    cursor: pointer;
+    border: none;
+    font-size: 18px;
+}
+
+.clear-read-button:hover {
+    color: #d63e1a;
+}
+
 /* MFA QR Modal Styles */
 #mfa-qr-modal {
     display: none;
@@ -5009,6 +5127,49 @@ input#setup-profile-starting-savings {
     background-color: rgba(0, 0, 0, 0.4);
     justify-content: center;
     align-items: center;
+}
+
+/* General Modal Content */
+.modal-content {
+    background-color: #f5fffe;
+    border-radius: 10px;
+    padding: 20px 30px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    position: relative;
+    text-align: center;
+}
+
+.modal-content h2 {
+    color: #2AAAA8;
+    margin-bottom: 15px;
+    font-size: 20px;
+}
+
+.modal-content p {
+    color: #333;
+    margin-bottom: 20px;
+    font-size: 14px;
+}
+
+.close-modal {
+    position: absolute;
+    top: 10px;
+    right: 18px;
+    font-size: 24px;
+    cursor: pointer;
+    color: #999;
+}
+
+.close-modal:hover {
+    color: #333;
+}
+
+.modal-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
 }
 
 /* Form Container Styling */

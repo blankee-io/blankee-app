@@ -167,6 +167,26 @@ class User(UserMixin):
             return User(id=user[0], username=user[1], password=user[2])
         return None
 
+@app.context_processor
+def inject_unread_notifications():
+    """Inject unread notification count into all templates for the nav badge"""
+    unread_count = 0
+    if current_user.is_authenticated:
+        try:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT COUNT(*) FROM notifications
+                    WHERE user_id = %s AND is_read = 0
+                """, (current_user.id,))
+                result = cursor.fetchone()
+                cursor.close()
+                if result:
+                    unread_count = result[0]
+        except Exception as e:
+            app.logger.error(f"Error fetching unread notification count: {e}")
+    return dict(unread_notifications_count=unread_count)
+
 #################################################################################
 ################################### HOME ########################################
 #################################################################################
@@ -4166,6 +4186,9 @@ def save_totals_remainders_d():
                 for row in cached_savings
             ]
             
+            # Check for negative remainders and create notifications
+            check_negative_remainders(user_id)
+            
             return jsonify({
                 "status": "success",
                 "updated_totals_remainders": results,
@@ -4250,6 +4273,9 @@ def save_totals_remainders_d():
             ]
             cursor.close()
 
+        # Check for negative remainders and create notifications
+        check_negative_remainders(user_id)
+        
         return jsonify({
             "status": "success",
             "updated_totals_remainders": results,
@@ -7504,11 +7530,103 @@ def notifications():
     profile_picture = user_data['profile_picture'] if user_data else None
     landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
 
+    # Fetch notifications for this user
+    notifications = []
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("""
+            SELECT id, date, message, is_read
+            FROM notifications
+            WHERE user_id = %s
+            ORDER BY date DESC
+            LIMIT 100
+        """, (current_user.id,))
+        notifications = cursor.fetchall()
+        cursor.close()
+
     return render_template(
         'notifications.html',
         profile_picture=profile_picture,
-        landing_page=landing_page
+        landing_page=landing_page,
+        notifications=notifications
     )
+
+@app.route('/mark-notification-read', methods=['POST'])
+@login_required
+def mark_notification_read():
+    """Mark a notification as read"""
+    data = request.get_json()
+    notification_id = data.get('notification_id')
+    
+    if not notification_id:
+        return jsonify({'success': False, 'error': 'No notification ID provided'}), 400
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        # Verify notification belongs to current user before updating
+        cursor.execute("""
+            UPDATE notifications
+            SET is_read = 1
+            WHERE id = %s AND user_id = %s
+        """, (notification_id, current_user.id))
+        conn.commit()
+        cursor.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/delete-notification', methods=['POST'])
+@login_required
+def delete_notification():
+    """Delete a notification"""
+    data = request.get_json()
+    notification_id = data.get('notification_id')
+    
+    if not notification_id:
+        return jsonify({'success': False, 'error': 'No notification ID provided'}), 400
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        # Verify notification belongs to current user before deleting
+        cursor.execute("""
+            DELETE FROM notifications
+            WHERE id = %s AND user_id = %s
+        """, (notification_id, current_user.id))
+        conn.commit()
+        cursor.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/clear-read-notifications', methods=['POST'])
+@login_required
+def clear_read_notifications():
+    """Delete all read notifications for the current user"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM notifications
+            WHERE user_id = %s AND is_read = 1
+        """, (current_user.id,))
+        deleted_count = cursor.rowcount
+        conn.commit()
+        cursor.close()
+    
+    return jsonify({'success': True, 'deleted_count': deleted_count})
+
+@app.route('/get-unread-notification-count', methods=['GET'])
+@login_required
+def get_unread_notification_count():
+    """Get the count of unread notifications for the current user"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM notifications
+            WHERE user_id = %s AND is_read = 0
+        """, (current_user.id,))
+        result = cursor.fetchone()
+        cursor.close()
+        unread_count = result[0] if result else 0
+    
+    return jsonify({'count': unread_count})
 
 @app.route('/settings', methods=['GET'])
 @login_required
@@ -10090,6 +10208,135 @@ def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
                 # Create new entry
                 _update_entry_in_redis('c_expense_entries', current_user.id, category_id, date_val, float(value), bud_item_id=bud_item_id)
 
+def add_notification(user_id, message, notification_date=None):
+    """
+    Create a new notification for a user.
+    
+    Args:
+        user_id: The user ID to create the notification for
+        message: The notification message text
+        notification_date: Optional datetime for the notification (defaults to now)
+    
+    Returns:
+        The ID of the created notification
+    """
+    if notification_date is None:
+        notification_date = datetime.now()
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO notifications (user_id, date, message, is_read)
+            VALUES (%s, %s, %s, 0)
+        """, (user_id, notification_date, message))
+        notification_id = cursor.lastrowid
+        conn.commit()
+        cursor.close()
+    
+    return notification_id
+
+def check_negative_remainders(user_id):
+    """
+    Check for negative remainders in the future and create notifications.
+    Checks the next 90 days for potential overdrafts.
+    """
+    app.logger.info(f"[NOTIFICATIONS] Starting check_negative_remainders for user {user_id}")
+    
+    today = date.today()
+    check_until = today + timedelta(days=90)
+    app.logger.info(f"[NOTIFICATIONS] Checking from {today} to {check_until}")
+    
+    # Get daily totals/remainders from Redis
+    cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id, today)
+    
+    if not cached_daily:
+        app.logger.info(f"[NOTIFICATIONS] Redis miss, falling back to MySQL")
+        # Fallback to MySQL if Redis doesn't have the data
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT date, remainder
+                FROM totals_remainders_d
+                WHERE user_id = %s AND date >= %s AND date <= %s
+                ORDER BY date ASC
+            """, (user_id, today, check_until))
+            cached_daily = cursor.fetchall()
+            cursor.close()
+            app.logger.info(f"[NOTIFICATIONS] MySQL returned {len(cached_daily) if cached_daily else 0} rows")
+    else:
+        app.logger.info(f"[NOTIFICATIONS] Redis hit, found {len(cached_daily)} rows")
+    
+    if not cached_daily:
+        app.logger.warning(f"[NOTIFICATIONS] No data found for user {user_id}, exiting")
+        return
+    
+    # Find the first negative remainder in the future
+    first_negative_date = None
+    first_negative_remainder = None
+    
+    for row in cached_daily:
+        row_date = row['date']
+        if isinstance(row_date, str):
+            row_date = datetime.strptime(row_date, '%Y-%m-%d').date()
+        
+        remainder = float(row.get('remainder', 0))
+        
+        # Only check future dates (tomorrow onwards)
+        if row_date > today and remainder < 0:
+            first_negative_date = row_date
+            first_negative_remainder = remainder
+            app.logger.info(f"[NOTIFICATIONS] Found first negative remainder: {row_date} = {remainder}")
+            break  # Stop at the first negative remainder
+    
+    if not first_negative_date:
+        app.logger.info(f"[NOTIFICATIONS] No negative remainders found in the future")
+        return
+    
+    # Check if we already have a notification for this date
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # Get existing notifications for overdraft warnings
+        cursor.execute("""
+            SELECT message FROM notifications
+            WHERE user_id = %s
+            AND message LIKE %s
+            AND is_read = 0
+            AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        """, (user_id, 'On %you will overdraft%'))
+        existing_notifications = cursor.fetchall()
+        
+        app.logger.info(f"[NOTIFICATIONS] Found {len(existing_notifications)} existing unread overdraft notifications")
+        
+        # Check if we already have a notification for this specific date
+        already_notified = False
+        for notif in existing_notifications:
+            try:
+                date_str = notif['message'].split('On ')[1].split(' you will')[0]
+                notif_date = datetime.strptime(date_str, '%B %d, %Y').date()
+                if notif_date == first_negative_date:
+                    already_notified = True
+                    app.logger.info(f"[NOTIFICATIONS] Already notified for date: {first_negative_date}")
+                    break
+            except Exception as e:
+                app.logger.error(f"[NOTIFICATIONS] Error parsing notification date: {e}")
+                pass
+        
+        cursor.close()
+    
+    # Create notification if not already exists
+    if not already_notified:
+        formatted_date = first_negative_date.strftime('%B %d, %Y')
+        message = f'On {formatted_date} you will overdraft. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
+        app.logger.info(f"[NOTIFICATIONS] Creating notification for {first_negative_date}: {message}")
+        try:
+            notification_id = add_notification(user_id, message)
+            app.logger.info(f"[NOTIFICATIONS] Successfully created notification ID {notification_id}")
+        except Exception as e:
+            app.logger.error(f"[NOTIFICATIONS] Error creating notification: {e}")
+    else:
+        app.logger.info(f"[NOTIFICATIONS] Skipping notification - already exists for {first_negative_date}")
+
 def check_and_hide_bud_category(bud_id):
     """
     Check if all items for this bud are in the past.
@@ -11118,6 +11365,11 @@ def toggle_bud_active():
     # Check if all bud items are in the past and hide category if so (when activating)
     if active == 1:
         check_and_hide_bud_category(bud_id)
+        # Add notification for activation
+        add_notification(current_user.id, f"Bud '{bud_name}' has been activated.")
+    else:
+        # Add notification for deactivation
+        add_notification(current_user.id, f"Bud '{bud_name}' has been deactivated.")
         
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
