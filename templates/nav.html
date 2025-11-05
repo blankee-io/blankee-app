@@ -11,6 +11,9 @@
             <!-- Notifications bell icon -->
             <a href="{{ url_for('notifications') }}" class="nav-notifications">
                 <i class="fa-solid fa-bell"></i>
+                {% if unread_notifications_count > 0 %}
+                <span class="notification-badge"></span>
+                {% endif %}
             </a>
 
             <!-- Profile dropdown container -->
