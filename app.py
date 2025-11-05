@@ -9985,6 +9985,9 @@ def add_bud_item():
 
     if active:
         save_ca_daily_balance()
+        # Check if all bud items are in the past and hide category if so
+        check_and_hide_bud_category(bud_id)
+    
     return jsonify({'status': 'success', 'item_id': new_item_id})
 
 def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val):
@@ -10087,6 +10090,66 @@ def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
                 # Create new entry
                 _update_entry_in_redis('c_expense_entries', current_user.id, category_id, date_val, float(value), bud_item_id=bud_item_id)
 
+def check_and_hide_bud_category(bud_id):
+    """
+    Check if all items for this bud are in the past.
+    If so, hide the expense and c_expense categories for this bud.
+    """
+    today = date.today()
+    
+    # Get all bud items for this bud
+    all_bud_items = _get_bud_items_from_redis(current_user.id)
+    if not all_bud_items:
+        return
+    
+    bud_items = [item for item in all_bud_items if int(item['bud_id']) == int(bud_id)]
+    if not bud_items:
+        return
+    
+    # Check if all items are in the past
+    all_in_past = True
+    for item in bud_items:
+        item_date = item['date']
+        if isinstance(item_date, str):
+            item_date = datetime.strptime(item_date, '%Y-%m-%d').date()
+        if item_date >= today:
+            all_in_past = False
+            break
+    
+    # Get bud info
+    buds = _get_buds_from_redis(current_user.id)
+    if not buds:
+        return
+    
+    bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
+    if not bud:
+        return
+    
+    bud_name = bud['name']
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # Hide or show expense category
+        if bud.get('expense_category_id'):
+            cursor.execute("""
+                UPDATE expense_categories 
+                SET hidden = %s 
+                WHERE id = %s AND user_id = %s
+            """, (1 if all_in_past else 0, bud['expense_category_id'], current_user.id))
+        
+        # Hide or show c_expense_categories for this bud
+        cursor.execute("""
+            UPDATE c_expense_categories 
+            SET hidden = %s 
+            WHERE name = %s 
+            AND account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+            AND is_bud = 1
+        """, (1 if all_in_past else 0, bud_name, current_user.id))
+        
+        conn.commit()
+        cursor.close()
+
 @app.route('/update-bud-item', methods=['POST'])
 @login_required
 def update_bud_item():
@@ -10148,6 +10211,11 @@ def update_bud_item():
     account = bud_item.get('account', '').lower()
     if account != "blankee" and bud_active == 1:
         save_ca_daily_balance()
+    
+    # Check if all bud items are in the past and hide category if so
+    if bud_active == 1 and field == 'date':
+        check_and_hide_bud_category(bud_item['bud_id'])
+    
     return jsonify({'status': 'success'})
 
 def update_expense_entry_for_bud_item(cursor, item_id, field, value, old_account=None):
@@ -10521,6 +10589,11 @@ def delete_bud_item():
     # Only run save_ca_daily_balance if account is not Blankee and bud is active
     if account.lower() != "blankee" and bud_active == 1:
         save_ca_daily_balance()
+    
+    # Check if all remaining bud items are in the past and hide category if so
+    if bud_active == 1:
+        check_and_hide_bud_category(bud_id)
+    
     return jsonify({'status': 'success'})
 
 @app.route('/delete-bud', methods=['POST'])
@@ -11041,6 +11114,10 @@ def toggle_bud_active():
 
         conn.commit()
         cursor.close()
+    
+    # Check if all bud items are in the past and hide category if so (when activating)
+    if active == 1:
+        check_and_hide_bud_category(bud_id)
         
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
