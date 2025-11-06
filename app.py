@@ -19,6 +19,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.utils import secure_filename
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
+from email_utils import send_verification_email, generate_verification_token, get_verification_token_expiry
 import threading
 from collections import defaultdict
 from PIL import Image
@@ -330,11 +331,17 @@ def register():
                 cursor.close()
                 return redirect(url_for('register'))
 
+            # Generate verification token
+            verification_token = generate_verification_token()
+            verification_expiry = get_verification_token_expiry()
+
             # Hash the password and insert the new user
             hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
             cursor.execute(
-                "INSERT INTO users (username, password, member_since) VALUES (%s, %s, %s)",
-                (username, hashed_password, member_since)
+                """INSERT INTO users (username, email, password, member_since, email_verified, 
+                   verification_token, verification_token_expires) 
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (username, username, hashed_password, member_since, 0, verification_token, verification_expiry)
             )
             new_user_id = cursor.lastrowid  # Get the ID of the newly created user
             conn.commit()
@@ -360,17 +367,156 @@ def register():
             cursor.close()
             conn.commit()
 
-        # Log the user in automatically after registration
-        user_obj = User(id=new_user_id, username=username, password=hashed_password)
-        login_user(user_obj)
+        # Send verification email
+        email_sent = send_verification_email(username, username, verification_token)
+        
+        if not email_sent:
+            app.logger.error(f"Failed to send verification email to {username}")
 
-        # Create totals_remainders for every Friday for the new user
-        create_totals_remainders_for_new_user(new_user_id)
-
-        # Redirect to the setup profile page after login
-        return redirect(url_for('setup_profile'))
+        # Show registration success page
+        return render_template('registration_success.html', email=username, email_sent=email_sent)
 
     return render_template('register.html')
+
+
+@app.route('/verify-email', methods=['GET'])
+def verify_email():
+    """Handle email verification when user clicks the link in their email"""
+    token = request.args.get('token')
+    
+    if not token:
+        flash('Invalid verification link.')
+        return redirect(url_for('login'))
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # Find user with this token
+        cursor.execute("""
+            SELECT id, username, email_verified, verification_token_expires 
+            FROM users 
+            WHERE verification_token = %s
+        """, (token,))
+        user = cursor.fetchone()
+        
+        if not user:
+            flash('Invalid or expired verification link.')
+            cursor.close()
+            return redirect(url_for('login'))
+        
+        # Check if already verified
+        if user['email_verified']:
+            flash('Your email is already verified. You can log in now.')
+            cursor.close()
+            return redirect(url_for('login'))
+        
+        # Check if token is expired
+        if user['verification_token_expires'] and datetime.now() > user['verification_token_expires']:
+            flash('Verification link has expired. Please register again or request a new verification link.')
+            cursor.close()
+            return redirect(url_for('login'))
+        
+        # Verify the email
+        cursor.execute("""
+            UPDATE users 
+            SET email_verified = 1, 
+                verification_token = NULL, 
+                verification_token_expires = NULL 
+            WHERE id = %s
+        """, (user['id'],))
+        conn.commit()
+        
+        # Create default categories and initialize the account
+        user_id = user['id']
+        
+        # Check if categories already exist (in case of re-verification)
+        cursor.execute("SELECT COUNT(*) FROM income_categories WHERE user_id = %s", (user_id,))
+        if cursor.fetchone()['COUNT(*)'] == 0:
+            # Create default income and expense categories
+            cursor.execute("""
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, 'Auto Adjustments', 1, 0, 1))
+            cursor.execute("""
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, 'Auto Adjustments', 1, 0, 1))
+            cursor.execute("""
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, 'Savings', -1, 0, 1))
+            cursor.execute("""
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, 'Savings', -1, 0, 1))
+            conn.commit()
+            
+            # Create totals_remainders for the new user
+            create_totals_remainders_for_new_user(user_id)
+        
+        cursor.close()
+        
+        # Log the user in automatically after verification
+        user_obj = User(id=user['id'], username=user['username'], password='')  # Password not needed for login_user
+        login_user(user_obj)
+        
+        flash('Email verified successfully! Please complete your profile setup.')
+        return redirect(url_for('setup_profile'))
+
+
+@app.route('/resend-verification', methods=['GET', 'POST'])
+def resend_verification():
+    """Resend verification email for users who didn't receive it or whose link expired"""
+    if request.method == 'GET':
+        return render_template('resend_verification.html')
+    
+    email = request.form.get('email')
+    
+    if not email:
+        return render_template('resend_verification.html', error_message='Please provide your email address.')
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        cursor.execute("""
+            SELECT id, username, email_verified 
+            FROM users 
+            WHERE email = %s OR username = %s
+        """, (email, email))
+        user = cursor.fetchone()
+        
+        if not user:
+            # Don't reveal if email exists or not for security
+            cursor.close()
+            return render_template('resend_verification.html', resend_success=True, user_email=email)
+        
+        if user['email_verified']:
+            cursor.close()
+            return render_template('resend_verification.html', error_message='Your email is already verified. You can log in now.')
+        
+        # Generate new token
+        verification_token = generate_verification_token()
+        verification_expiry = get_verification_token_expiry()
+        
+        cursor.execute("""
+            UPDATE users 
+            SET verification_token = %s, verification_token_expires = %s 
+            WHERE id = %s
+        """, (verification_token, verification_expiry, user['id']))
+        conn.commit()
+        cursor.close()
+        
+        # Send new verification email
+        email_sent = send_verification_email(user['username'], user['username'], verification_token)
+        
+        if email_sent:
+            return render_template('resend_verification.html', resend_success=True, user_email=email)
+        else:
+            app.logger.error(f"Failed to resend verification email to {user['username']}")
+            return render_template('resend_verification.html', error_message='Failed to send verification email. Please try again later or contact support.', user_email=email)
+    
+    # If we get here, something went wrong but don't reveal why
+    return render_template('login.html', resend_success=True, user_email=email)
 
 
 @app.route('/setup_profile', methods=['GET'])
@@ -539,11 +685,16 @@ def login():
         # Establish database connection
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, username, password, landing_page FROM users WHERE username = %s", (username,))
+            cursor.execute("SELECT id, username, password, landing_page, email_verified FROM users WHERE username = %s", (username,))
             user = cursor.fetchone()
 
             # Check if the user exists and if the password is correct
             if user and bcrypt.check_password_hash(user[2], password):
+                # Check if email is verified
+                if not user[4]:  # email_verified field
+                    cursor.close()
+                    return render_template('login.html', show_resend=True, user_email=username, 
+                                         verification_modal=True)
                 # Check for MFA using the same connection
                 cursor.execute("SELECT mfa_secret FROM users WHERE id = %s", (user[0],))
                 mfa_row = cursor.fetchone()
@@ -749,8 +900,7 @@ def login():
             else:
                 cursor.close()
                 # Invalid username or password, redirect back to login with an error message
-                flash("Invalid username or password")
-                return render_template('login.html')
+                return render_template('login.html', error_message="Invalid username or password")
 
     # If it's a GET request, render the login page
     return render_template('login.html')

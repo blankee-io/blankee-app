@@ -71,13 +71,57 @@
         {% endif %}
 
         {% with messages = get_flashed_messages() %}
-        {% if messages %}
-            <div class="login-error">{{ messages[0] }}</div>
-        {% endif %}
         {% endwith %}
     </div>
 
     <!-- Link to the external JavaScript file -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var modal = document.getElementById('loginModal');
+            var message = document.getElementById('loginMessage');
+            
+            {% if verification_modal %}
+            // Email verification required modal
+            var resendUrl = "{{ url_for('resend_verification') }}";
+            message.innerHTML = '<div class="modal-content-center">' +
+                               '<i class="fas fa-envelope verification-modal-icon"></i>' +
+                               '</div>' +
+                               '<div class="modal-content-center">' +
+                               '<strong>Email Verification Required</strong><br><br>' +
+                               'Please verify your email address before logging in.<br>' +
+                               'Check your inbox for the verification link.' +
+                               '</div>' +
+                               '<div class="verification-modal-divider modal-content-center">' +
+                               '<small class="verification-modal-help-text">Didn\'t receive the email?</small><br>' +
+                               '<a href="' + resendUrl + '" class="verification-modal-resend-btn">' +
+                               'Resend verification email</a>' +
+                               '</div>';
+            modal.style.display = 'flex';
+            
+            // Close only when clicking outside the modal content
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
+            {% elif error_message %}
+            // Error message modal
+            message.innerHTML = '<div class="modal-content-center">' +
+                               '<i class="fa-solid fa-siren-on error-modal-icon"></i>' +
+                               '<div class="error-modal-message">{{ error_message }}</div>' +
+                               '</div>';
+            modal.style.display = 'flex';
+            
+            // Close only when clicking outside the modal content
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
+            {% endif %}
+        });
+    </script>
 </body>
 </html>
