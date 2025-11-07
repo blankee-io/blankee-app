@@ -367,6 +367,9 @@ def register():
             cursor.close()
             conn.commit()
 
+        # Create totals_remainders for the new user right away
+        create_totals_remainders_for_new_user(new_user_id)
+
         # Send verification email
         email_sent = send_verification_email(username, username, verification_token)
         
@@ -450,18 +453,12 @@ def verify_email():
                 VALUES (%s, %s, %s, %s, %s)
             """, (user_id, 'Savings', -1, 0, 1))
             conn.commit()
-            
-            # Create totals_remainders for the new user
-            create_totals_remainders_for_new_user(user_id)
         
         cursor.close()
         
-        # Log the user in automatically after verification
-        user_obj = User(id=user['id'], username=user['username'], password='')  # Password not needed for login_user
-        login_user(user_obj)
-        
-        flash('Email verified successfully! Please complete your profile setup.')
-        return redirect(url_for('setup_profile'))
+        # Redirect to login page with success message
+        flash('Email verified successfully! You can now log in.')
+        return redirect(url_for('login'))
 
 
 @app.route('/resend-verification', methods=['GET', 'POST'])
@@ -529,6 +526,8 @@ def setup_profile():
 @app.route('/complete_profile_setup', methods=['POST'])
 @login_required
 def complete_profile_setup():
+    from datetime import date
+    
     if request.method == 'POST':
         starting_balance = request.json.get('starting_balance')
         starting_savings = request.json.get('starting_savings')  # <-- get the savings value
@@ -598,6 +597,31 @@ def complete_profile_setup():
 
             cursor.close()
             conn.commit()
+
+        # Ensure all base records exist (in case email verification didn't create them)
+        print(f"[complete_profile_setup] Checking if totals_remainders records exist for user {current_user.id}")
+        with get_db_pool().get_cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM totals_remainders WHERE user_id = %s", (current_user.id,))
+            tr_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM totals_remainders_d WHERE user_id = %s", (current_user.id,))
+            trd_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM totals_remainders_m WHERE user_id = %s", (current_user.id,))
+            trm_count = cursor.fetchone()[0]
+            
+            print(f"[complete_profile_setup] Record counts - weekly: {tr_count}, daily: {trd_count}, monthly: {trm_count}")
+            
+            # Only create if ALL tables are empty (first time setup)
+            if tr_count == 0 and trd_count == 0 and trm_count == 0:
+                print(f"[complete_profile_setup] Creating initial totals_remainders records...")
+                create_totals_remainders_for_new_user(current_user.id)
+                print(f"[complete_profile_setup] Initial records created")
+            else:
+                print(f"[complete_profile_setup] Records already exist, skipping creation")
+        
+        # Now recalculate all totals with the starting balance entry
+        print(f"[complete_profile_setup] Recalculating all totals...")
+        save_totals_remainders_d()
+        print(f"[complete_profile_setup] Completed all totals_remainders population")
 
         # Return success response
         return jsonify({'status': 'success'})
@@ -889,10 +913,22 @@ def login():
                 if last_ca_monthly_date is None or last_ca_monthly_date < cutoff_date:
                     add_one_year_of_ca_months(user_obj.id)
 
+                # Check if user needs to complete profile setup (first time login)
+                # Check if they have any income entries (starting balance is created during profile setup)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM income_entries 
+                    WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
+                """, (user_obj.id,))
+                entry_count = cursor.fetchone()[0]
+                
                 # Redirect to user's preferred landing page if set, else dashboard
                 landing_page = user[3] if len(user) > 3 else None
                 cursor.close()
-                if landing_page:
+                
+                # If no income entries exist, user hasn't completed setup yet
+                if entry_count == 0:
+                    return redirect(url_for('setup_profile'))
+                elif landing_page:
                     return redirect(url_for(landing_page))
                 else:
                     return redirect(url_for('dashboard'))

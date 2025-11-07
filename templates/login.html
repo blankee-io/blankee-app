@@ -120,6 +120,21 @@
                     modal.style.display = 'none';
                 }
             };
+            {% elif success_message %}
+            // Success message modal
+            message.innerHTML = '<div class="modal-content-center">' +
+                               '<i class="fas fa-check-circle success-modal-icon"></i>' +
+                               '<div class="success-modal-title">Success!</div>' +
+                               '<div class="success-modal-message">{{ success_message }}</div>' +
+                               '</div>';
+            modal.style.display = 'flex';
+            
+            // Close only when clicking outside the modal content
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
             {% endif %}
         });
     </script>
