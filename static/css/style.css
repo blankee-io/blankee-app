@@ -2025,8 +2025,15 @@ input#setup-profile-starting-savings {
 
 /*////////////////////// Dashboard Week Styles ///////////////////////////*/
 .main-container {
+    position: relative;
     padding: 10px;
     transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+}
+
+.dashboard-wrapper {
+    position: relative;
+    max-width: 875px;
+    margin: -40px auto 0;
 }
 
 .main-container.slide-left {
@@ -3864,13 +3871,64 @@ input#setup-profile-starting-savings {
     color: #fff;
     font-size: 13px;
     font-weight: bold;
-    padding: 4px 14px 4px 10px;
+    padding: 4px 39px 4px 10px;
     border-top-left-radius: 10px;
     border-bottom-right-radius: 12px;
     z-index: 20;
     box-shadow: 0 2px 8px rgba(42,170,168,0.08);
     letter-spacing: 1px;
     pointer-events: none;
+}
+
+/* Floating Today Banner */
+.today-floating-banner {
+    position: sticky;
+    top: 120px; /* 70px nav + 50px extra */
+    z-index: 999;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    background: #E45F1C;
+    color: #fff;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 4px 14px 4px 10px;
+    border-top-left-radius: 10px;
+    border-bottom-right-radius: 12px;
+    box-shadow: 0 2px 8px rgba(42,170,168,0.08);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    letter-spacing: 1px;
+    pointer-events: auto;
+    width: fit-content;
+    margin-bottom: 10px;
+}
+
+.today-floating-banner:hover {
+    background: #D04F0C;
+    box-shadow: 0 3px 10px rgba(228, 95, 28, 0.5);
+}
+
+.today-floating-banner:active {
+    transform: scale(0.98);
+}
+
+.today-banner-text {
+    font-size: 13px;
+}
+
+#today-banner-arrow {
+    font-size: 14px;
+    animation: bounce 1.5s ease-in-out infinite;
+}
+
+@keyframes bounce {
+    0%, 100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-3px);
+    }
 }
 
 .category-row-hidden {
