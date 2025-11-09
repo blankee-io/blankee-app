@@ -11,10 +11,10 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
     <!-- Include jQuery for easier DOM manipulation and AJAX -->
     <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
-    <!-- Include jQuery UI for sortable tables and other UI interactions -->
+    <!-- Include jQuery UI for date picker and other UI interactions -->
     <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
     <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
-    <!-- Link to the jQuery UI CSS for styling the sortable elements -->
+    <!-- Link to the jQuery UI CSS for styling UI elements -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/jquery-ui.css') }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <meta name="mobile-web-app-capable" content="yes">
@@ -208,7 +208,6 @@
         let touchEndX = null;
         let isAnimating = false;
         let containerWidth = null;
-        let isDashboardDragActive = false; // Global flag for drag state
 
         let moveEntryId = null;
         let moveEntryType = null;
@@ -218,7 +217,6 @@
 
         // Function to handle the start of a touch event
         function handleTouchStart(event) {
-            if (isDashboardDragActive) return; // Prevent swipe if dragging
             if (isAnimating) return;
 
             touchStartX = event.touches[0].screenX;
@@ -230,7 +228,6 @@
 
         // Function to handle touch movement
         function handleTouchMove(event) {
-            if (isDashboardDragActive) return; // Prevent swipe if dragging
             if (!touchStartX || isAnimating) return;
 
             touchCurrentX = event.touches[0].screenX;
@@ -250,7 +247,6 @@
 
         // Function to handle the end of a touch event
         function handleTouchEnd() {
-            if (isDashboardDragActive) return; // Prevent swipe if dragging
             if (!touchStartX || !isHorizontalSwipe) return; // Ignore if not a horizontal swipe
 
             const swipeDistanceX = touchCurrentX - touchStartX;
@@ -718,10 +714,9 @@
                         else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
                     }
                     incomeRow.innerHTML = `
-                        ${!isBud ? `<span class="dashboard-d-drag-handle"><i class="fa-solid fa-bars"></i></span>` : ''}
                         ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                             <span class="calendar-icon">
-                            <i class="fa-regular fa-calendar"></i>
+                            <i class="fa-light fa-up-down-left-right"></i>
                             </span>
                         </span>` : ''}
                         <div class="dashboard-d-label-cell">
@@ -780,10 +775,9 @@
                         else if (catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
                     }
                     expenseRow.innerHTML = `
-                        ${!isBud ? `<span class="dashboard-d-drag-handle"><i class="fa-solid fa-bars"></i></span>` : ''}
                         ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                             <span class="calendar-icon">
-                            <i class="fa-regular fa-calendar"></i>
+                            <i class="fa-light fa-up-down-left-right"></i>
                             </span>
                         </span>` : ''}
                         <div class="dashboard-d-label-cell">
@@ -898,10 +892,9 @@
                         const dataProcessed = entry.processed == 1 ? '1' : '0';
                         const paidClass = entry.processed == 1 ? 'paid' : '';
                         entryRow.innerHTML = `
-                            ${!isBud ? `<span class="dashboard-d-drag-handle"><i class="fa-solid fa-bars"></i></span>` : ''}
                             ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                                 <span class="calendar-icon">
-                                    <i class="fa-regular fa-calendar"></i>
+                                    <i class="fa-light fa-up-down-left-right"></i>
                                 </span>
                             </span>` : ''}
                             <div class="dashboard-d-label-cell">
@@ -972,234 +965,9 @@
 
             updateNextWeekIndicator();
             document.getElementById('loading-screen').style.display = 'none';
-            enableDragAndDrop();
             
             // Update today banner after containers are created
             setTimeout(updateTodayBanner, 100);
-        }
-
-        // Enable drag-and-drop for income and expense entries across days
-        function enableDragAndDrop() {
-            // Make each row draggable
-            $('.dashboard-d-row, .dashboard-d-credit-row').draggable({
-                handle: '.dashboard-d-drag-handle',
-                helper: 'clone',
-                appendTo: '.main-container',
-                zIndex: 9999,
-                revert: 'invalid',
-                revertDuration: 0,
-                axis: 'y',
-                scroll: true,
-                scrollSensitivity: 30,
-                scrollSpeed: 5,
-                start: function(event, ui) {
-                    mainContainer.style.transition = 'none';
-                    mainContainer.style.transform = 'translateX(0)';
-                    isDashboardDragActive = true;
-                    $(this).css('visibility', 'hidden');
-                    ui.helper.css({
-                        'z-index': 9999,
-                        'width': $(this).outerWidth(),
-                        'box-sizing': 'border-box',
-                        'background-color': $(this).css('background-color')
-                    });
-                    ui.helper.children().each(function(index) {
-                        var originalCell = $(event.target).children().eq(index);
-                        $(this).width(originalCell.width());
-                        $(this).css('background-color', originalCell.css('background-color'));
-                    });
-                },
-                drag: function(event, ui) {
-                    if (window.innerWidth <= 600) {
-                        ui.position.top -= 135;
-                    } else {
-                        ui.position.top -= 115;
-                    }
-                },
-                stop: function(event, ui) {
-                    isDashboardDragActive = false;
-                    $(this).css('visibility', 'visible');
-                }
-            });
-
-            // Accept credit rows as droppable
-            $('.dashboard-d-container').droppable({
-                accept: '.dashboard-d-row, .dashboard-d-credit-row',
-                tolerance: 'pointer',
-                over: function(event, ui) {
-                    $(this).addClass('dashboard-d-container-highlight');
-                },
-                out: function(event, ui) {
-                    $(this).removeClass('dashboard-d-container-highlight');
-                },
-                drop: function(event, ui) {
-                    $(this).removeClass('dashboard-d-container-highlight');
-                    var $draggedRow = ui.draggable;
-                    var entryId = $draggedRow.attr('data-entry-id');
-                    var categoryId = $draggedRow.attr('data-category-id');
-                    var amount = parseFloat($draggedRow.find('.dashboard-d-amount-cell').text().replace('$',''));
-                    var type = $draggedRow.hasClass('dashboard-d-credit-row') ? 'ca' :
-                        $draggedRow.closest('.dashboard-d-income-entries').length ? 'income' : 'expense';
-                    var $targetContainer = $(this);
-                    var newDate = $targetContainer.find('.dashboard-d-day-header').data('date');
-                    var oldDate = $draggedRow.attr('data-date');
-
-                    if (String(newDate) === String(oldDate)) {
-                        $draggedRow.removeAttr('style');
-                        $draggedRow.find('*').removeAttr('style');
-                        return;
-                    }
-
-                    showDashboardSpinner(true);
-
-                    // --- Check if an entry already exists at the target date for the same category ---
-                    let entriesArray;
-                    if (type === 'income') {
-                        entriesArray = incomeEntries;
-                    } else if (type === 'expense') {
-                        entriesArray = expenseEntries;
-                    } else if (type === 'ca') {
-                        entriesArray = c_expense_entries;
-                    }
-                    
-                    // Look for existing entry at target date with same category
-                    let existingEntry = null;
-                    let draggedEntry = null;
-                    let existingAmount = 0;
-                    let draggedAmount = parseFloat($draggedRow.find('input').val().replace(currencySymbol, '').trim()) || amount;
-                    
-                    // Find the entry we're moving and any existing entry at the target
-                    entriesArray.forEach(entry => {
-                        let entryDateString = new Date(entry.date).toISOString().split('T')[0];
-                        if (String(entry.category_id) === String(categoryId)) {
-                            if (entryDateString === oldDate) {
-                                draggedEntry = entry;
-                            } else if (entryDateString === newDate) {
-                                existingEntry = entry;
-                                existingAmount = parseFloat(entry.amount || entry.total_amount || 0);
-                            }
-                        }
-                    });
-                    
-                    // Check if target already has a row for this category
-                    let $existingRow = null;
-                    let $targetEntries = null;
-                    
-                    setTimeout(function() {
-                        if (type === 'income') {
-                            $targetEntries = $targetContainer.find('.dashboard-d-income-entries[data-date="' + newDate + '"]');
-                            if ($targetEntries.length === 0) {
-                                $targetEntries = $('<div>')
-                                    .addClass('dashboard-d-income-entries')
-                                    .attr('data-date', newDate)
-                                    .appendTo($targetContainer);
-                                
-                                // Insert before the income total
-                                var $incomeTotal = $targetContainer.find('.dashboard-d-income-total');
-                                if ($incomeTotal.length > 0) {
-                                    $targetEntries.insertBefore($incomeTotal);
-                                }
-                            }
-                            
-                            $existingRow = $targetEntries.find('.dashboard-d-row[data-category-id="' + categoryId + '"]');
-                            
-                        } else if (type === 'expense') {
-                            $targetEntries = $targetContainer.find('.dashboard-d-expense-entries[data-date="' + newDate + '"]');
-                            if ($targetEntries.length === 0) {
-                                $targetEntries = $('<div>')
-                                    .addClass('dashboard-d-expense-entries')
-                                    .attr('data-date', newDate)
-                                    .appendTo($targetContainer);
-                                
-                                // Insert before the expense total
-                                var $expenseTotal = $targetContainer.find('.dashboard-d-expense-total');
-                                if ($expenseTotal.length > 0) {
-                                    $targetEntries.insertBefore($expenseTotal);
-                                }
-                            }
-                            
-                            $existingRow = $targetEntries.find('.dashboard-d-row[data-category-id="' + categoryId + '"]');
-                            
-                        } else if (type === 'ca') {
-                            var accountId = $draggedRow.attr('data-account-id');
-                            $targetEntries = $targetContainer.find('.dashboard-d-credit-account[data-account-id="' + accountId + '"]');
-                            if ($targetEntries.length === 0) {
-                                $targetEntries = $('<div>')
-                                    .addClass('dashboard-d-credit-account')
-                                    .attr('data-account-id', accountId)
-                                    .appendTo($targetContainer);
-                            }
-                            
-                            $existingRow = $targetEntries.find('.dashboard-d-credit-row[data-category-id="' + categoryId + '"]');
-                        }
-                        
-                        if ($existingRow && $existingRow.length > 0) {
-                            // Combine entries - update existing row with combined amount
-                            const combinedAmount = existingAmount + draggedAmount;
-                            
-                            // Update input value in existing row
-                            const $input = $existingRow.find('input');
-                            $input.val(formatCurrency(combinedAmount));
-                            
-                            // Update data structure
-                            if (existingEntry) {
-                                existingEntry.amount = combinedAmount;
-                                if ('total_amount' in existingEntry) {
-                                    existingEntry.total_amount = combinedAmount;
-                                }
-                            }
-                            
-                            // Remove the original row from the source
-                            $draggedRow.remove();
-                            
-                            // Remove the entry from its original date
-                            if (draggedEntry) {
-                                const index = entriesArray.indexOf(draggedEntry);
-                                if (index !== -1) {
-                                    entriesArray.splice(index, 1);
-                                }
-                            }
-                        } else {
-                            // No existing entry with same category - move the row as usual
-                            if (draggedEntry) {
-                                draggedEntry.date = newDate;
-                            }
-                            
-                            // Move the row to target container
-                            if (type === 'income' || type === 'expense') {
-                                $targetEntries.append($draggedRow);
-                            } else if (type === 'ca') {
-                                // Insert before the balance row
-                                var $balanceRow = $targetEntries.find('.dashboard-d-credit-balance, .dashboard-d-credit-row').filter(function() {
-                                    return $(this).find('.dashboard-d-label-cell').text().trim() === 'Balance:';
-                                });
-                                if ($balanceRow.length > 0) {
-                                    $draggedRow.insertBefore($balanceRow);
-                                } else {
-                                    $targetEntries.append($draggedRow);
-                                }
-                            }
-                            
-                            $draggedRow.attr('data-date', newDate);
-                        }
-
-                        $.ajax({
-                            url: '/move_entry_d',
-                            method: 'POST',
-                            contentType: 'application/json',
-                            data: JSON.stringify({ entry_id: entryId, new_date: newDate, type: type }),
-                            success: function(response) {
-                                saveDailyTotalsAndRemainders(newDate);
-                                document.getElementById('loading-screen').style.display = 'none';
-                            },
-                            error: function() {
-                                alert('Failed to move entry.');
-                                document.getElementById('loading-screen').style.display = 'none';
-                            }
-                        });
-                    }, 10);
-                }
-            });
         }
 
         function saveDailyTotalsAndRemainders(startDate = null) {
@@ -1980,7 +1748,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
             row.setAttribute('data-category-id', categoryId);
             row.setAttribute('data-date', formattedDate);
             
-            // Add account ID attribute for credit account rows
+            // Add account ID attribute for credit account rows3
             if ((entryType === 'ca' || entryType.startsWith('ca')) && formData.account_id) {
                 row.setAttribute('data-account-id', formData.account_id);
             }
@@ -1998,10 +1766,9 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
             
             // Build the HTML
             row.innerHTML = `
-                ${!isBud ? `<span class="dashboard-d-drag-handle"><i class="fa-solid fa-bars"></i></span>` : ''}
                 ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                     <span class="calendar-icon">
-                    <i class="fa-regular fa-calendar"></i>
+                    <i class="fa-light fa-up-down-left-right"></i>
                     </span>
                 </span>` : ''}
                 <div class="dashboard-d-label-cell">
