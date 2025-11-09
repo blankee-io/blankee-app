@@ -1197,7 +1197,11 @@
                 //async: false,  // Make the request synchronous
                 success: function(response) {
                     if (response.status === "success") {
-                    updateDashboardDView()
+                        // Refresh notification badge in case new notifications were created
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
+                        }
+                        updateDashboardDView()
                     } else {
                     }
                 },

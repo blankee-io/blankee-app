@@ -167,6 +167,26 @@ class User(UserMixin):
             return User(id=user[0], username=user[1], password=user[2])
         return None
 
+@app.context_processor
+def inject_unread_notifications():
+    """Inject unread notification count into all templates for the nav badge"""
+    unread_count = 0
+    if current_user.is_authenticated:
+        try:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT COUNT(*) FROM notifications
+                    WHERE user_id = %s AND is_read = 0
+                """, (current_user.id,))
+                result = cursor.fetchone()
+                cursor.close()
+                if result:
+                    unread_count = result[0]
+        except Exception as e:
+            app.logger.error(f"Error fetching unread notification count: {e}")
+    return dict(unread_notifications_count=unread_count)
+
 #################################################################################
 ################################### HOME ########################################
 #################################################################################
@@ -4166,6 +4186,9 @@ def save_totals_remainders_d():
                 for row in cached_savings
             ]
             
+            # Check for negative remainders and create notifications
+            check_negative_remainders(user_id)
+            
             return jsonify({
                 "status": "success",
                 "updated_totals_remainders": results,
@@ -4250,6 +4273,9 @@ def save_totals_remainders_d():
             ]
             cursor.close()
 
+        # Check for negative remainders and create notifications
+        check_negative_remainders(user_id)
+        
         return jsonify({
             "status": "success",
             "updated_totals_remainders": results,
@@ -7504,11 +7530,103 @@ def notifications():
     profile_picture = user_data['profile_picture'] if user_data else None
     landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
 
+    # Fetch notifications for this user
+    notifications = []
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("""
+            SELECT id, date, message, is_read
+            FROM notifications
+            WHERE user_id = %s
+            ORDER BY date DESC
+            LIMIT 100
+        """, (current_user.id,))
+        notifications = cursor.fetchall()
+        cursor.close()
+
     return render_template(
         'notifications.html',
         profile_picture=profile_picture,
-        landing_page=landing_page
+        landing_page=landing_page,
+        notifications=notifications
     )
+
+@app.route('/mark-notification-read', methods=['POST'])
+@login_required
+def mark_notification_read():
+    """Mark a notification as read"""
+    data = request.get_json()
+    notification_id = data.get('notification_id')
+    
+    if not notification_id:
+        return jsonify({'success': False, 'error': 'No notification ID provided'}), 400
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        # Verify notification belongs to current user before updating
+        cursor.execute("""
+            UPDATE notifications
+            SET is_read = 1
+            WHERE id = %s AND user_id = %s
+        """, (notification_id, current_user.id))
+        conn.commit()
+        cursor.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/delete-notification', methods=['POST'])
+@login_required
+def delete_notification():
+    """Delete a notification"""
+    data = request.get_json()
+    notification_id = data.get('notification_id')
+    
+    if not notification_id:
+        return jsonify({'success': False, 'error': 'No notification ID provided'}), 400
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        # Verify notification belongs to current user before deleting
+        cursor.execute("""
+            DELETE FROM notifications
+            WHERE id = %s AND user_id = %s
+        """, (notification_id, current_user.id))
+        conn.commit()
+        cursor.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/clear-read-notifications', methods=['POST'])
+@login_required
+def clear_read_notifications():
+    """Delete all read notifications for the current user"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM notifications
+            WHERE user_id = %s AND is_read = 1
+        """, (current_user.id,))
+        deleted_count = cursor.rowcount
+        conn.commit()
+        cursor.close()
+    
+    return jsonify({'success': True, 'deleted_count': deleted_count})
+
+@app.route('/get-unread-notification-count', methods=['GET'])
+@login_required
+def get_unread_notification_count():
+    """Get the count of unread notifications for the current user"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM notifications
+            WHERE user_id = %s AND is_read = 0
+        """, (current_user.id,))
+        result = cursor.fetchone()
+        cursor.close()
+        unread_count = result[0] if result else 0
+    
+    return jsonify({'count': unread_count})
 
 @app.route('/settings', methods=['GET'])
 @login_required
@@ -9985,6 +10103,9 @@ def add_bud_item():
 
     if active:
         save_ca_daily_balance()
+        # Check if all bud items are in the past and hide category if so
+        check_and_hide_bud_category(bud_id)
+    
     return jsonify({'status': 'success', 'item_id': new_item_id})
 
 def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val):
@@ -10087,6 +10208,195 @@ def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
                 # Create new entry
                 _update_entry_in_redis('c_expense_entries', current_user.id, category_id, date_val, float(value), bud_item_id=bud_item_id)
 
+def add_notification(user_id, message, notification_date=None):
+    """
+    Create a new notification for a user.
+    
+    Args:
+        user_id: The user ID to create the notification for
+        message: The notification message text
+        notification_date: Optional datetime for the notification (defaults to now)
+    
+    Returns:
+        The ID of the created notification
+    """
+    if notification_date is None:
+        notification_date = datetime.now()
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO notifications (user_id, date, message, is_read)
+            VALUES (%s, %s, %s, 0)
+        """, (user_id, notification_date, message))
+        notification_id = cursor.lastrowid
+        conn.commit()
+        cursor.close()
+    
+    return notification_id
+
+def check_negative_remainders(user_id):
+    """
+    Check for negative remainders in the future and create notifications.
+    Checks the next 90 days for potential overdrafts.
+    """
+    app.logger.info(f"[NOTIFICATIONS] Starting check_negative_remainders for user {user_id}")
+    
+    today = date.today()
+    check_until = today + timedelta(days=90)
+    app.logger.info(f"[NOTIFICATIONS] Checking from {today} to {check_until}")
+    
+    # Get daily totals/remainders from Redis
+    cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id, today)
+    
+    if not cached_daily:
+        app.logger.info(f"[NOTIFICATIONS] Redis miss, falling back to MySQL")
+        # Fallback to MySQL if Redis doesn't have the data
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT date, remainder
+                FROM totals_remainders_d
+                WHERE user_id = %s AND date >= %s AND date <= %s
+                ORDER BY date ASC
+            """, (user_id, today, check_until))
+            cached_daily = cursor.fetchall()
+            cursor.close()
+            app.logger.info(f"[NOTIFICATIONS] MySQL returned {len(cached_daily) if cached_daily else 0} rows")
+    else:
+        app.logger.info(f"[NOTIFICATIONS] Redis hit, found {len(cached_daily)} rows")
+    
+    if not cached_daily:
+        app.logger.warning(f"[NOTIFICATIONS] No data found for user {user_id}, exiting")
+        return
+    
+    # Find the first negative remainder in the future
+    first_negative_date = None
+    first_negative_remainder = None
+    
+    for row in cached_daily:
+        row_date = row['date']
+        if isinstance(row_date, str):
+            row_date = datetime.strptime(row_date, '%Y-%m-%d').date()
+        
+        remainder = float(row.get('remainder', 0))
+        
+        # Only check future dates (tomorrow onwards)
+        if row_date > today and remainder < 0:
+            first_negative_date = row_date
+            first_negative_remainder = remainder
+            app.logger.info(f"[NOTIFICATIONS] Found first negative remainder: {row_date} = {remainder}")
+            break  # Stop at the first negative remainder
+    
+    if not first_negative_date:
+        app.logger.info(f"[NOTIFICATIONS] No negative remainders found in the future")
+        return
+    
+    # Check if we already have a notification for this date
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # Get existing notifications for overdraft warnings
+        cursor.execute("""
+            SELECT message FROM notifications
+            WHERE user_id = %s
+            AND message LIKE %s
+            AND is_read = 0
+            AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        """, (user_id, 'On %you will overdraft%'))
+        existing_notifications = cursor.fetchall()
+        
+        app.logger.info(f"[NOTIFICATIONS] Found {len(existing_notifications)} existing unread overdraft notifications")
+        
+        # Check if we already have a notification for this specific date
+        already_notified = False
+        for notif in existing_notifications:
+            try:
+                date_str = notif['message'].split('On ')[1].split(' you will')[0]
+                notif_date = datetime.strptime(date_str, '%B %d, %Y').date()
+                if notif_date == first_negative_date:
+                    already_notified = True
+                    app.logger.info(f"[NOTIFICATIONS] Already notified for date: {first_negative_date}")
+                    break
+            except Exception as e:
+                app.logger.error(f"[NOTIFICATIONS] Error parsing notification date: {e}")
+                pass
+        
+        cursor.close()
+    
+    # Create notification if not already exists
+    if not already_notified:
+        formatted_date = first_negative_date.strftime('%B %d, %Y')
+        message = f'On {formatted_date} you will overdraft. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
+        app.logger.info(f"[NOTIFICATIONS] Creating notification for {first_negative_date}: {message}")
+        try:
+            notification_id = add_notification(user_id, message)
+            app.logger.info(f"[NOTIFICATIONS] Successfully created notification ID {notification_id}")
+        except Exception as e:
+            app.logger.error(f"[NOTIFICATIONS] Error creating notification: {e}")
+    else:
+        app.logger.info(f"[NOTIFICATIONS] Skipping notification - already exists for {first_negative_date}")
+
+def check_and_hide_bud_category(bud_id):
+    """
+    Check if all items for this bud are in the past.
+    If so, hide the expense and c_expense categories for this bud.
+    """
+    today = date.today()
+    
+    # Get all bud items for this bud
+    all_bud_items = _get_bud_items_from_redis(current_user.id)
+    if not all_bud_items:
+        return
+    
+    bud_items = [item for item in all_bud_items if int(item['bud_id']) == int(bud_id)]
+    if not bud_items:
+        return
+    
+    # Check if all items are in the past
+    all_in_past = True
+    for item in bud_items:
+        item_date = item['date']
+        if isinstance(item_date, str):
+            item_date = datetime.strptime(item_date, '%Y-%m-%d').date()
+        if item_date >= today:
+            all_in_past = False
+            break
+    
+    # Get bud info
+    buds = _get_buds_from_redis(current_user.id)
+    if not buds:
+        return
+    
+    bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
+    if not bud:
+        return
+    
+    bud_name = bud['name']
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # Hide or show expense category
+        if bud.get('expense_category_id'):
+            cursor.execute("""
+                UPDATE expense_categories 
+                SET hidden = %s 
+                WHERE id = %s AND user_id = %s
+            """, (1 if all_in_past else 0, bud['expense_category_id'], current_user.id))
+        
+        # Hide or show c_expense_categories for this bud
+        cursor.execute("""
+            UPDATE c_expense_categories 
+            SET hidden = %s 
+            WHERE name = %s 
+            AND account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+            AND is_bud = 1
+        """, (1 if all_in_past else 0, bud_name, current_user.id))
+        
+        conn.commit()
+        cursor.close()
+
 @app.route('/update-bud-item', methods=['POST'])
 @login_required
 def update_bud_item():
@@ -10113,6 +10423,9 @@ def update_bud_item():
     if not bud_item:
         return jsonify({'status': 'error', 'message': 'Bud item not found'}), 404
 
+    # Save old account value before updating
+    old_account = bud_item.get('account', 'Blankee')
+
     # Update the field
     bud_item[field] = value if field != 'value' else float(value)
 
@@ -10137,7 +10450,7 @@ def update_bud_item():
     if bud_active == 1:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            update_expense_entry_for_bud_item(cursor, item_id, field, value)
+            update_expense_entry_for_bud_item(cursor, item_id, field, value, old_account)
             conn.commit()
             cursor.close()
 
@@ -10145,46 +10458,141 @@ def update_bud_item():
     account = bud_item.get('account', '').lower()
     if account != "blankee" and bud_active == 1:
         save_ca_daily_balance()
+    
+    # Check if all bud items are in the past and hide category if so
+    if bud_active == 1 and field == 'date':
+        check_and_hide_bud_category(bud_item['bud_id'])
+    
     return jsonify({'status': 'success'})
 
-def update_expense_entry_for_bud_item(cursor, item_id, field, value):
+def update_expense_entry_for_bud_item(cursor, item_id, field, value, old_account=None):
     """
     Updates the linked expense entry for a bud_item.
     If the account field changes, moves the entry between expense_entries and c_expense_entries.
     Otherwise, updates the corresponding entry's field.
     """
-    # Get current bud_item info
-    cursor.execute("""SELECT bud_id, date, value, account FROM bud_items WHERE id = %s""", (item_id,))
-    bud_item = cursor.fetchone()
-    if not bud_item:
+    # Get all bud items from Redis (already updated)
+    all_bud_items = _get_bud_items_from_redis(current_user.id)
+    if not all_bud_items:
         return
-
-    bud_id = bud_item['bud_id']
-    item_date = bud_item['date']
-    item_value = bud_item['value']
-    current_account = bud_item['account']
-
-    # Get bud name for category use
-    cursor.execute("SELECT name FROM buds WHERE id = %s", (bud_id,))
-    bud_row = cursor.fetchone()
-    bud_name = bud_row['name'] if bud_row and 'name' in bud_row else "Bud"
+    
+    # Find the current item
+    current_item = next((item for item in all_bud_items if int(item['id']) == int(item_id)), None)
+    if not current_item:
+        return
+    
+    bud_id = current_item['bud_id']
+    item_date = current_item['date']
+    item_value = current_item['value']
+    
+    # Get bud info from Redis
+    buds = _get_buds_from_redis(current_user.id)
+    if not buds:
+        return
+    
+    bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
+    if not bud:
+        return
+    
+    bud_name = bud['name']
 
     # If editing the account field, value is the new account
     if field == 'account':
         new_account = value
-        # Always delete from both tables to avoid duplicates
-        cursor.execute("DELETE FROM expense_entries WHERE bud_item_id = %s", (item_id,))
-        cursor.execute("DELETE FROM c_expense_entries WHERE bud_item_id = %s", (item_id,))
-        # Add entry to the new table
+        # Use old_account parameter to know where to remove from
+        if not old_account:
+            old_account = 'Blankee'
+        
+        # Get all items for this bud on this date with OLD account from Redis (excluding current item)
+        old_account_items = [
+            item for item in all_bud_items
+            if int(item['bud_id']) == int(bud_id) 
+            and item['date'] == item_date
+            and item['account'] == old_account
+            and int(item['id']) != int(item_id)
+        ]
+        
+        # Handle OLD account - remove all entries and re-add with correct total
+        if old_account.lower() == "blankee":
+            expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+            if expense_entries:
+                # Get all item IDs on old account (items still showing old account) PLUS current item being moved
+                old_item_ids = [int(item['id']) for item in all_bud_items
+                               if int(item['bud_id']) == int(bud_id) 
+                               and item['date'] == item_date
+                               and item['account'] == old_account]
+                # Add the current item being moved (it's already updated to new account in Redis)
+                old_item_ids.append(int(item_id))
+                
+                entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id') or 0) not in old_item_ids]
+                _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
+            
+            # If there are remaining items on old account, add them back
+            if old_account_items and bud.get('expense_category_id'):
+                old_category_id = bud['expense_category_id']
+                old_total = sum(float(item['value']) for item in old_account_items)
+                first_old_item_id = old_account_items[0]['id']
+                _update_entry_in_redis('expense_entries', current_user.id, 
+                                     old_category_id, item_date, 
+                                     old_total, bud_item_id=first_old_item_id)
+        else:
+            c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+            if c_expense_entries:
+                # Get all item IDs on old account (items still showing old account) PLUS current item being moved
+                old_item_ids = [int(item['id']) for item in all_bud_items
+                               if int(item['bud_id']) == int(bud_id) 
+                               and item['date'] == item_date
+                               and item['account'] == old_account]
+                # Add the current item being moved (it's already updated to new account in Redis)
+                old_item_ids.append(int(item_id))
+                
+                entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id') or 0) not in old_item_ids]
+                _set_entries_to_redis('c_expense_entries', current_user.id, entries_to_keep)
+            
+            # If there are remaining items on old account, add them back
+            if old_account_items:
+                cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s", (current_user.id, old_account))
+                old_ca_row = cursor.fetchone()
+                if old_ca_row:
+                    old_account_id = old_ca_row['id']
+                    cursor.execute("SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s", (old_account_id, bud_name))
+                    old_cat_row = cursor.fetchone()
+                    if old_cat_row:
+                        old_category_id = old_cat_row['id']
+                        old_total = sum(float(item['value']) for item in old_account_items)
+                        first_old_item_id = old_account_items[0]['id']
+                        _update_entry_in_redis('c_expense_entries', current_user.id, 
+                                             old_category_id, item_date, 
+                                             old_total, bud_item_id=first_old_item_id)
+        
+        # Handle NEW account - aggregate with other items on same date
+        # Get all items for this bud on this date with NEW account from Redis
+        new_account_items = [
+            item for item in all_bud_items
+            if int(item['bud_id']) == int(bud_id) 
+            and item['date'] == item_date
+            and item['account'] == new_account
+        ]
+        
         if new_account.lower() == "blankee":
-            cursor.execute("SELECT expense_category_id FROM buds WHERE id = %s", (bud_id,))
-            bud_row = cursor.fetchone()
-            if bud_row and bud_row['expense_category_id']:
-                expense_category_id = bud_row['expense_category_id']
-                cursor.execute(
-                    "INSERT INTO expense_entries (category_id, date, amount, bud_item_id) VALUES (%s, %s, %s, %s)",
-                    (expense_category_id, item_date, item_value, item_id)
-                )
+            if bud.get('expense_category_id'):
+                expense_category_id = bud['expense_category_id']
+                
+                # Calculate total amount for all items on new account
+                total_amount = sum(float(item['value']) for item in new_account_items)
+                
+                # Remove any existing entries for these items
+                expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+                if expense_entries:
+                    item_ids_on_date = [int(item['id']) for item in new_account_items]
+                    entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id') or 0) not in item_ids_on_date]
+                    _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
+                
+                # Add single combined entry
+                first_item_id = new_account_items[0]['id'] if new_account_items else item_id
+                _update_entry_in_redis('expense_entries', current_user.id, 
+                                     expense_category_id, item_date, 
+                                     total_amount, bud_item_id=first_item_id)
         else:
             cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s", (current_user.id, new_account))
             ca_row = cursor.fetchone()
@@ -10201,38 +10609,89 @@ def update_expense_entry_for_bud_item(cursor, item_id, field, value):
                     category_id = cursor.lastrowid
                 else:
                     category_id = cat_row['id']
-                cursor.execute(
-                    "INSERT INTO c_expense_entries (category_id, date, amount, bud_item_id) VALUES (%s, %s, %s, %s)",
-                    (category_id, item_date, item_value, item_id)
-                )
+                
+                # Calculate total amount for all items on new account
+                total_amount = sum(float(item['value']) for item in new_account_items)
+                
+                # Remove any existing entries for these items
+                c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+                if c_expense_entries:
+                    item_ids_on_date = [int(item['id']) for item in new_account_items]
+                    entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id') or 0) not in item_ids_on_date]
+                    _set_entries_to_redis('c_expense_entries', current_user.id, entries_to_keep)
+                
+                # Add single combined entry
+                first_item_id = new_account_items[0]['id'] if new_account_items else item_id
+                _update_entry_in_redis('c_expense_entries', current_user.id, 
+                                     category_id, item_date, 
+                                     total_amount, bud_item_id=first_item_id)
     else:
-        # Field is value or date, update the corresponding entry in the correct table
-        if current_account.lower() == "blankee":
-            if field == 'value':
-                cursor.execute("UPDATE expense_entries SET amount = %s WHERE bud_item_id = %s", (item_value, item_id))
-            elif field == 'date':
-                cursor.execute("UPDATE expense_entries SET date = %s WHERE bud_item_id = %s", (item_date, item_id))
-        else:
-            cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s", (current_user.id, current_account))
-            ca_row = cursor.fetchone()
-            if not ca_row:
-                return
-            account_id = ca_row['id']
-            # Use the bud's name for the category
-            cursor.execute("SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s", (account_id, bud_name))
-            cat_row = cursor.fetchone()
-            if not cat_row:
-                cursor.execute("SELECT COALESCE(MAX(display_order), 0) AS max_display_order FROM c_expense_categories WHERE account_id = %s", (account_id,))
-                max_order = cursor.fetchone()
-                display_order = max_order['max_display_order'] + 1 if max_order and max_order['max_display_order'] is not None else 1
-                cursor.execute("INSERT INTO c_expense_categories (account_id, name, display_order, is_bud) VALUES (%s, %s, %s, 1)", (account_id, bud_name, display_order))
-                category_id = cursor.lastrowid
+        # Field is value or date, need to recalculate total for all items on that date
+        # For these fields, use old_account since account hasn't changed (or get from current item)
+        if field == 'value' or field == 'date':
+            current_account = current_item.get('account', 'Blankee')
+            
+            # Get all items for this bud on this date with this account from Redis
+            items_on_date = [
+                item for item in all_bud_items
+                if int(item['bud_id']) == int(bud_id) 
+                and item['date'] == item_date
+                and item['account'] == current_account
+            ]
+            
+            if current_account.lower() == "blankee":
+                if bud.get('expense_category_id'):
+                    category_id = bud['expense_category_id']
+                    
+                    # Calculate total amount
+                    total_amount = sum(float(item['value']) for item in items_on_date)
+                    
+                    # Update Redis - remove all entries for these items, then add one combined entry
+                    expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+                    if expense_entries:
+                        item_ids_on_date = [int(item['id']) for item in items_on_date]
+                        entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id') or 0) not in item_ids_on_date]
+                        _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
+                    
+                    # Add single combined entry with the first item's ID as reference
+                    first_item_id = items_on_date[0]['id'] if items_on_date else item_id
+                    _update_entry_in_redis('expense_entries', current_user.id, 
+                                         category_id, item_date, 
+                                         total_amount, bud_item_id=first_item_id)
             else:
-                category_id = cat_row['id']
-            if field == 'value':
-                cursor.execute("UPDATE c_expense_entries SET amount = %s WHERE bud_item_id = %s", (item_value, item_id))
-            elif field == 'date':
-                cursor.execute("UPDATE c_expense_entries SET date = %s WHERE bud_item_id = %s", (item_date, item_id))
+                cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s", (current_user.id, current_account))
+                ca_row = cursor.fetchone()
+                if not ca_row:
+                    return
+                account_id = ca_row['id']
+                
+                # Use the bud's name for the category
+                cursor.execute("SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s", (account_id, bud_name))
+                cat_row = cursor.fetchone()
+                if not cat_row:
+                    cursor.execute("SELECT COALESCE(MAX(display_order), 0) AS max_display_order FROM c_expense_categories WHERE account_id = %s", (account_id,))
+                    max_order = cursor.fetchone()
+                    display_order = max_order['max_display_order'] + 1 if max_order and max_order['max_display_order'] is not None else 1
+                    cursor.execute("INSERT INTO c_expense_categories (account_id, name, display_order, is_bud) VALUES (%s, %s, %s, 1)", (account_id, bud_name, display_order))
+                    category_id = cursor.lastrowid
+                else:
+                    category_id = cat_row['id']
+                
+                # Calculate total amount
+                total_amount = sum(float(item['value']) for item in items_on_date)
+                
+                # Update Redis - remove all entries for these items, then add one combined entry
+                c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+                if c_expense_entries:
+                    item_ids_on_date = [int(item['id']) for item in items_on_date]
+                    entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id') or 0) not in item_ids_on_date]
+                    _set_entries_to_redis('c_expense_entries', current_user.id, entries_to_keep)
+                
+                # Add single combined entry with the first item's ID as reference
+                first_item_id = items_on_date[0]['id'] if items_on_date else item_id
+                _update_entry_in_redis('c_expense_entries', current_user.id, 
+                                     category_id, item_date, 
+                                     total_amount, bud_item_id=first_item_id)
 
 @app.route('/delete-bud-item', methods=['POST'])
 @login_required
@@ -10377,6 +10836,11 @@ def delete_bud_item():
     # Only run save_ca_daily_balance if account is not Blankee and bud is active
     if account.lower() != "blankee" and bud_active == 1:
         save_ca_daily_balance()
+    
+    # Check if all remaining bud items are in the past and hide category if so
+    if bud_active == 1:
+        check_and_hide_bud_category(bud_id)
+    
     return jsonify({'status': 'success'})
 
 @app.route('/delete-bud', methods=['POST'])
@@ -10639,75 +11103,74 @@ def toggle_bud_active():
             # Get list of bud_item_ids for this bud to check against auto adjustments
             bud_item_ids = [int(item['id']) for item in bud_items]
             
+            # Group items by date and account for processing
+            from collections import defaultdict
+            items_by_date_account = defaultdict(list)
             for item in bud_items:
-                item_id = item['id']
-                account = item['account']
-                value = item['value']
-                item_date = item['date']
+                key = (item['date'], item['account'])
+                items_by_date_account[key].append(item)
+            
+            # Process each date/account group
+            for (item_date, account), items_group in items_by_date_account.items():
                 if account and account.lower() == "blankee":
-                    # Transfer any auto adjustment entries for this item to bud category
-                    # Only transfer if bud_item_id matches one of this bud's items
+                    # Get all item IDs in this group
+                    group_item_ids = [int(item['id']) for item in items_group]
+                    
+                    # Track if we transferred an auto adjustment entry for this group
+                    auto_adj_transferred = False
+                    
+                    # Transfer any auto adjustment entries for items in this group
                     if auto_adj_id:
                         expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
                         if expense_entries:
-                            # Find auto adjustment entries to transfer
+                            # Find auto adjustment entries to transfer for ANY item in this group
                             auto_adj_entries_to_transfer = [e for e in expense_entries if (
                                 int(e.get('category_id', 0) or 0) == int(auto_adj_id) and 
-                                int(e.get('bud_item_id') or 0) == int(item_id) and
-                                int(e.get('bud_item_id') or 0) in bud_item_ids
+                                int(e.get('bud_item_id') or 0) in group_item_ids
                             )]
                             
-                            # Remove auto adjustment entries
-                            entries_to_keep = [e for e in expense_entries if not (
-                                int(e.get('category_id', 0) or 0) == int(auto_adj_id) and 
-                                int(e.get('bud_item_id') or 0) == int(item_id) and
-                                int(e.get('bud_item_id') or 0) in bud_item_ids
-                            )]
-                            _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
-                            
-                            # Transfer to bud category
-                            for auto_entry in auto_adj_entries_to_transfer:
-                                entry_date = auto_entry.get('date')
-                                if isinstance(entry_date, str):
-                                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
-                                _update_entry_in_redis('expense_entries', current_user.id, 
-                                                     bud_row['expense_category_id'], entry_date, 
-                                                     float(auto_entry.get('amount', 0)), bud_item_id=item_id)
+                            if auto_adj_entries_to_transfer:
+                                auto_adj_transferred = True
+                                
+                                # Remove auto adjustment entries
+                                entries_to_keep = [e for e in expense_entries if not (
+                                    int(e.get('category_id', 0) or 0) == int(auto_adj_id) and 
+                                    int(e.get('bud_item_id') or 0) in group_item_ids
+                                )]
+                                _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
+                                
+                                # Transfer all found entries to bud category (should be just one aggregated entry)
+                                for auto_entry in auto_adj_entries_to_transfer:
+                                    entry_date = auto_entry.get('date')
+                                    if isinstance(entry_date, str):
+                                        entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                                    # Use first item ID as reference
+                                    first_item_id = group_item_ids[0]
+                                    _update_entry_in_redis('expense_entries', current_user.id, 
+                                                         bud_row['expense_category_id'], entry_date, 
+                                                         float(auto_entry.get('amount', 0)), bud_item_id=first_item_id)
                     
-                    # Create expense entry for new items (with item_date)
-                    # Check if entry exists for this date and category, add to it if so
-                    expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
-                    existing_entry = None
-                    
-                    # Ensure item_date is a date object for comparison
-                    if isinstance(item_date, str):
-                        item_date_obj = datetime.strptime(item_date, '%Y-%m-%d').date()
-                    else:
-                        item_date_obj = item_date
-                    
-                    if expense_entries:
-                        for e in expense_entries:
-                            e_date = e.get('date')
-                            if isinstance(e_date, str):
-                                e_date = datetime.strptime(e_date, '%Y-%m-%d').date()
-                            if int(e.get('category_id', 0) or 0) == int(bud_row['expense_category_id']) and e_date == item_date_obj:
-                                existing_entry = e
-                                break
-                    
-                    if existing_entry:
-                        # Add to existing entry - preserve original bud_item_id
-                        new_amount = float(existing_entry.get('amount', 0)) + float(value)
-                        original_bud_item_id = existing_entry.get('bud_item_id')
+                    # Only create new entries if we didn't transfer from Auto Adjustments
+                    if not auto_adj_transferred:
+                        # Calculate total amount for all items in this group
+                        total_value = sum(float(item['value']) for item in items_group)
+                        first_item_id = group_item_ids[0]
+                        
+                        # Ensure item_date is a date object for comparison
+                        if isinstance(item_date, str):
+                            item_date_obj = datetime.strptime(item_date, '%Y-%m-%d').date()
+                        else:
+                            item_date_obj = item_date
+                        
+                        # Create single aggregated entry for this date/account group
                         _update_entry_in_redis('expense_entries', current_user.id, 
-                                             bud_row['expense_category_id'], item_date, 
-                                             new_amount, bud_item_id=original_bud_item_id)
-                    else:
-                        # Create new entry
-                        _update_entry_in_redis('expense_entries', current_user.id, 
-                                             bud_row['expense_category_id'], item_date, 
-                                             float(value), bud_item_id=item_id)
+                                             bud_row['expense_category_id'], item_date_obj, 
+                                             total_value, bud_item_id=first_item_id)
                     
                 elif account and account.lower() != "blankee":
+                    # Get all item IDs in this group
+                    group_item_ids = [int(item['id']) for item in items_group]
+                    
                     cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s", (current_user.id, account))
                     ca_row = cursor.fetchone()
                     if not ca_row:
@@ -10724,68 +11187,55 @@ def toggle_bud_active():
                     else:
                         bud_cat_id = cat_row['id']
                     
-                    # Transfer any auto adjustment entries for this item to bud category
-                    # Only transfer if bud_item_id matches one of this bud's items
+                    # Transfer any auto adjustment entries for items in this group
+                    ca_auto_adj_transferred = False
                     ca_auto_adj_id = ca_auto_adj_ids.get(ca_id)
                     if ca_auto_adj_id:
                         c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
                         if c_expense_entries:
-                            # Find auto adjustment entries to transfer
+                            # Find auto adjustment entries to transfer for ANY item in this group
                             ca_auto_adj_entries_to_transfer = [e for e in c_expense_entries if (
                                 int(e.get('category_id', 0) or 0) == int(ca_auto_adj_id) and 
-                                int(e.get('bud_item_id') or 0) == int(item_id) and
-                                int(e.get('bud_item_id') or 0) in bud_item_ids
+                                int(e.get('bud_item_id') or 0) in group_item_ids
                             )]
+                            
+                            if ca_auto_adj_entries_to_transfer:
+                                ca_auto_adj_transferred = True
                             
                             # Remove auto adjustment entries
                             entries_to_keep = [e for e in c_expense_entries if not (
                                 int(e.get('category_id', 0) or 0) == int(ca_auto_adj_id) and 
-                                int(e.get('bud_item_id') or 0) == int(item_id) and
-                                int(e.get('bud_item_id') or 0) in bud_item_ids
+                                int(e.get('bud_item_id') or 0) in group_item_ids
                             )]
                             _set_entries_to_redis('c_expense_entries', current_user.id, entries_to_keep)
                             
-                            # Transfer to bud category
+                            # Transfer all found entries to bud category (should be just one aggregated entry)
                             for ca_auto_entry in ca_auto_adj_entries_to_transfer:
                                 entry_date = ca_auto_entry.get('date')
                                 if isinstance(entry_date, str):
                                     entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
+                                # Use first item ID as reference
+                                first_item_id = group_item_ids[0]
                                 _update_entry_in_redis('c_expense_entries', current_user.id, 
                                                      bud_cat_id, entry_date, 
-                                                     float(ca_auto_entry.get('amount', 0)), bud_item_id=item_id)
+                                                     float(ca_auto_entry.get('amount', 0)), bud_item_id=first_item_id)
                     
-                    # Create c_expense entry for new items (with item_date)
-                    # Check if entry exists for this date and category, add to it if so
-                    c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
-                    existing_entry = None
-                    
-                    # Ensure item_date is a date object for comparison
-                    if isinstance(item_date, str):
-                        item_date_obj = datetime.strptime(item_date, '%Y-%m-%d').date()
-                    else:
-                        item_date_obj = item_date
-                    
-                    if c_expense_entries:
-                        for e in c_expense_entries:
-                            e_date = e.get('date')
-                            if isinstance(e_date, str):
-                                e_date = datetime.strptime(e_date, '%Y-%m-%d').date()
-                            if int(e.get('category_id', 0) or 0) == int(bud_cat_id) and e_date == item_date_obj:
-                                existing_entry = e
-                                break
-                    
-                    if existing_entry:
-                        # Add to existing entry - preserve original bud_item_id
-                        new_amount = float(existing_entry.get('amount', 0)) + float(value)
-                        original_bud_item_id = existing_entry.get('bud_item_id')
+                    # Create c_expense entry for new items - only if no auto adjustment was transferred
+                    if not ca_auto_adj_transferred:
+                        # Calculate total amount for all items in this group
+                        total_value = sum(float(item['value']) for item in items_group)
+                        first_item_id = group_item_ids[0]
+                        
+                        # Ensure item_date is a date object for comparison
+                        if isinstance(item_date, str):
+                            item_date_obj = datetime.strptime(item_date, '%Y-%m-%d').date()
+                        else:
+                            item_date_obj = item_date
+                        
+                        # Create single aggregated entry for this date/account group
                         _update_entry_in_redis('c_expense_entries', current_user.id, 
-                                             bud_cat_id, item_date, 
-                                             new_amount, bud_item_id=original_bud_item_id)
-                    else:
-                        # Create new entry
-                        _update_entry_in_redis('c_expense_entries', current_user.id, 
-                                             bud_cat_id, item_date, 
-                                             float(value), bud_item_id=item_id)
+                                             bud_cat_id, item_date_obj, 
+                                             total_value, bud_item_id=first_item_id)
 
         elif active == 0:
             if bud_row.get('expense_category_id'):
@@ -10881,6 +11331,7 @@ def toggle_bud_active():
                                                  ca_auto_adj_entry['amount'], 
                                                  processed=1, bud_item_id=ca_auto_adj_entry['bud_item_id'])
 
+            # Delete the regular expense category if it exists
             if bud_row.get('expense_category_id'):
                 cursor.execute("""
                     DELETE FROM expense_categories WHERE id = %s AND user_id = %s
@@ -10894,6 +11345,15 @@ def toggle_bud_active():
                 # Update bud active status in Redis
                 bud_row['active'] = active
                 _update_bud_in_redis(current_user.id, bud_row)
+            
+            # Delete all credit account expense categories with this bud name
+            cursor.execute("""
+                DELETE FROM c_expense_categories 
+                WHERE name = %s 
+                AND account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+                AND is_bud = 1
+            """, (bud_name, current_user.id))
+            
         else:
             # Update bud active status in Redis
             bud_row['active'] = active
@@ -10901,6 +11361,15 @@ def toggle_bud_active():
 
         conn.commit()
         cursor.close()
+    
+    # Check if all bud items are in the past and hide category if so (when activating)
+    if active == 1:
+        check_and_hide_bud_category(bud_id)
+        # Add notification for activation
+        add_notification(current_user.id, f"Bud '{bud_name}' has been activated.")
+    else:
+        # Add notification for deactivation
+        add_notification(current_user.id, f"Bud '{bud_name}' has been deactivated.")
         
     save_ca_daily_balance()
     return jsonify({'status': 'success'})

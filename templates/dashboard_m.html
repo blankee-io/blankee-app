@@ -611,6 +611,10 @@
                 async: false,  // Make the request synchronous
                 success: function(response) {
                     if (response.status === "success") {
+                        // Refresh notification badge in case new notifications were created
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
+                        }
                         generateCalendar(goofyWeekMode, selectedDate);
                         showDashboardSpinner(false);
                     } else {
