@@ -1772,14 +1772,6 @@ input#setup-profile-starting-savings {
     border-radius: 15px; /* or your desired value */
 }
 
-.dashboard-d-drag-handle {
-    display: flex;
-    align-items: center;
-    justify-content: left;
-    height: 100%;
-    cursor: grab;
-}
-
 .dashboard-d-credit-account {
     width: 100%;
     min-height: 20px;
@@ -1830,7 +1822,6 @@ input#setup-profile-starting-savings {
 
 .dashboard-d-move-btn {
   display: inline-block;
-  margin-left: 15px;
   cursor: pointer;
   vertical-align: middle;
 }
@@ -1894,7 +1885,7 @@ input#setup-profile-starting-savings {
 /* Modal content box */
 .dashboard-d-modal-content {
     background-color: #fff;
-    margin: 15% auto; /* 15% from the top and centered */
+    margin: calc(50vh - 100px) auto; /* Centered vertically */
     padding: 20px;
     border: 1px solid #575757;
     width: 80%; /* Could be more or less depending on screen size */
@@ -1921,7 +1912,7 @@ input#setup-profile-starting-savings {
 /* Modal header */
 .dashboard-d-modal-content h3 {
     margin-top: 0;
-    font-size: 1.5rem;
+    font-size: 16px;
     color: #575757;
 }
 
@@ -1983,9 +1974,6 @@ input#setup-profile-starting-savings {
     .dashboard-d-savings {
         height: 40px;
         font-size: 13px;
-    }
-    .dashboard-d-drag-handle {
-        font-size: 16px;
     }
 }
 /* Style for the top "Today" div */
