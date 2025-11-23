@@ -19,7 +19,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.utils import secure_filename
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
-from email_utils import send_verification_email, generate_verification_token, get_verification_token_expiry
+from email_utils import send_verification_email, generate_verification_token, get_verification_token_expiry, send_password_reset_email, generate_password_reset_token, get_password_reset_token_expiry
 import threading
 from collections import defaultdict
 from PIL import Image
@@ -1238,6 +1238,163 @@ def add_one_year_of_ca_months(user_id):
 def logout():
     logout_user()
     return redirect(url_for('login'))
+
+#################################################################################
+############################ FORGOT PASSWORD ####################################
+#################################################################################
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    """Handle forgot password requests"""
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        
+        if not email:
+            return render_template('forgot_password.html', error_message='Please enter your email address.')
+        
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check if user exists with this email
+            cursor.execute("SELECT id, username, email FROM users WHERE username = %s OR email = %s", (email, email))
+            user = cursor.fetchone()
+            
+            if user:
+                user_id = user[0]
+                username = user[1]
+                user_email = user[2] if user[2] else email
+                
+                # Generate reset token
+                reset_token = generate_password_reset_token()
+                expires_at = get_password_reset_token_expiry()
+                
+                # Store token in database
+                cursor.execute("""
+                    INSERT INTO password_resets (user_id, token, expires_at)
+                    VALUES (%s, %s, %s)
+                """, (user_id, reset_token, expires_at))
+                conn.commit()
+                
+                # Send password reset email
+                send_password_reset_email(user_email, username, reset_token)
+            
+            cursor.close()
+        
+        # Always show success message (security best practice - don't reveal if email exists)
+        return render_template('forgot_password.html', 
+                             success_message='If an account exists with that email, you will receive a password reset link shortly.')
+    
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    """Handle password reset with token"""
+    token = request.args.get('token')
+    
+    if not token:
+        return render_template('reset_password.html', error_message='Invalid or missing reset token.')
+    
+    if request.method == 'POST':
+        new_password = request.form.get('password', '').strip()
+        confirm_password = request.form.get('confirm_password', '').strip()
+        
+        # Validate passwords
+        if not new_password or not confirm_password:
+            return render_template('reset_password.html', token=token, 
+                                 error_message='Please fill in all fields.')
+        
+        if new_password != confirm_password:
+            return render_template('reset_password.html', token=token,
+                                 error_message='Passwords do not match.')
+        
+        if len(new_password) < 8:
+            return render_template('reset_password.html', token=token,
+                                 error_message='Password must be at least 8 characters long.')
+        
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Verify token is valid and not expired
+            cursor.execute("""
+                SELECT user_id, expires_at, used 
+                FROM password_resets 
+                WHERE token = %s
+            """, (token,))
+            reset_record = cursor.fetchone()
+            
+            if not reset_record:
+                cursor.close()
+                return render_template('reset_password.html', 
+                                     error_message='Invalid reset token.')
+            
+            user_id = reset_record[0]
+            expires_at = reset_record[1]
+            used = reset_record[2]
+            
+            # Check if token is expired or already used
+            if used:
+                cursor.close()
+                return render_template('reset_password.html',
+                                     error_message='This reset link has already been used.')
+            
+            if datetime.now() > expires_at:
+                cursor.close()
+                return render_template('reset_password.html',
+                                     error_message='This reset link has expired. Please request a new one.')
+            
+            # Hash the new password
+            hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+            
+            # Update user password
+            cursor.execute("""
+                UPDATE users 
+                SET password = %s 
+                WHERE id = %s
+            """, (hashed_password, user_id))
+            
+            # Mark token as used
+            cursor.execute("""
+                UPDATE password_resets 
+                SET used = 1 
+                WHERE token = %s
+            """, (token,))
+            
+            conn.commit()
+            cursor.close()
+        
+        # Redirect to login with success message
+        return render_template('login.html', 
+                             success_message='Your password has been reset successfully. Please log in with your new password.')
+    
+    # GET request - verify token is valid before showing form
+    with get_db_pool().get_cursor() as cursor:
+        cursor.execute("""
+            SELECT expires_at, used 
+            FROM password_resets 
+            WHERE token = %s
+        """, (token,))
+        reset_record = cursor.fetchone()
+        
+        if not reset_record:
+            return render_template('reset_password.html',
+                                 error_message='Invalid reset token.')
+        
+        expires_at = reset_record[0]
+        used = reset_record[1]
+        
+        if used:
+            return render_template('reset_password.html',
+                                 error_message='This reset link has already been used.')
+        
+        if datetime.now() > expires_at:
+            return render_template('reset_password.html',
+                                 error_message='This reset link has expired. Please request a new one.')
+    
+    return render_template('reset_password.html', token=token)
 
 #################################################################################
 ############################### DASHBOARD DAY ###################################
