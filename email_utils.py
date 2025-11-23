@@ -83,6 +83,26 @@ def get_verification_token_expiry():
     return datetime.now() + timedelta(hours=24)
 
 
+def generate_password_reset_token():
+    """
+    Generate a secure random token for password reset.
+    
+    Returns:
+        str: A secure random token
+    """
+    return secrets.token_urlsafe(32)
+
+
+def get_password_reset_token_expiry():
+    """
+    Get the expiration datetime for a password reset token (1 hour from now).
+    
+    Returns:
+        datetime: Expiration datetime
+    """
+    return datetime.now() + timedelta(hours=1)
+
+
 def send_verification_email(to_email, username, verification_token):
     """
     Send an email verification link to a new user.
