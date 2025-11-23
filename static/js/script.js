@@ -169,9 +169,7 @@ document.addEventListener("DOMContentLoaded", function() {
             });
 
             // Trigger the modal after a successful update
-            if (window.location.search.includes("success=email")) {
-                openModal("Your email has been updated successfully!");
-            } else if (window.location.search.includes("success=password")) {
+            if (window.location.search.includes("success=password")) {
                 openModal("Your password has been updated successfully!");
             }
         }

@@ -1241,6 +1241,37 @@ button#autobalance-submit:hover {
     height: 40px;
 }
 
+/* Align password change form with MFA form */
+#password-change-form {
+    margin: 0 auto;
+    max-width: 345px;
+    width: 100%;
+}
+
+#password-change-form .input-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    height: 40px;
+}
+
+#password-change-form .input-group label {
+    flex: 0 0 auto;
+    margin-right: 10px;
+}
+
+#password-change-form .input-group span {
+    flex: 1;
+}
+
+#password-change-form .input-group button {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 10px 20px;
+}
+
 #gwm-input-group {
     justify-content: center !important;
 }
@@ -4328,6 +4359,30 @@ input#setup-profile-starting-savings {
     text-align: right;
 }
 
+/* Pending email change banner */
+.pending-email-banner {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #fff3cd;
+    border-left: 4px solid #ffc107;
+    border-radius: 4px;
+    line-height: 1.5;
+}
+
+.pending-email-resend-link {
+    margin-top: 8px;
+}
+
+.pending-email-resend-link a {
+    color: #2aaaa8;
+    font-weight: bold;
+    text-decoration: underline;
+}
+
+.pending-email-resend-link a:hover {
+    color: #238583;
+}
+
 /* When the screen width is less than 75px, stack the header above the actions */
 @media (max-width: 740px) {
     .profile-content {
@@ -4417,6 +4472,14 @@ input#setup-profile-starting-savings {
 }
 
 #disable-mfa-btn {
+    width: 65px !important;
+    border-radius: 25px !important; /* Make the button circular */
+    top: auto !important;
+    margin-left: 0px !important;
+    padding: 0 10px;
+}
+
+#change-password-btn {
     width: 65px !important;
     border-radius: 25px !important; /* Make the button circular */
     top: auto !important;
@@ -4816,6 +4879,10 @@ input#setup-profile-starting-savings {
     width: 100vw;
     height: 100vh;
     background: rgba(0,0,0,0.45);
+}
+
+#mfa-qr-modal.modal {
+    display: flex;
     justify-content: center;
     align-items: center;
 }
@@ -4889,6 +4956,66 @@ input#setup-profile-starting-savings {
     margin-bottom: 1em;
     padding-left: 1.2em;
     font-size: 1em;
+}
+
+/* MFA Secret Key Styles */
+.mfa-instructions {
+    margin-bottom: 1em;
+    text-align: left;
+    font-size: 13px;
+    padding-left: 20px;
+}
+
+#mfa-qr-image {
+    text-align: center;
+    margin-bottom: 1em;
+}
+
+.mfa-secret-container {
+    text-align: center;
+    margin-bottom: 1em;
+}
+
+.mfa-secret-label {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.mfa-secret-box {
+    display: inline-flex;
+    align-items: center;
+    background: #f5f5f5;
+    padding: 6px 10px;
+    border-radius: 5px;
+    max-width: 90%;
+}
+
+#mfa-secret-key {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    margin-right: 8px;
+    word-break: break-all;
+    line-height: 1.4;
+}
+
+.mfa-copy-button {
+    padding: 5px 10px;
+    font-size: 12px;
+    background-color: #F15025;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.mfa-copy-button:hover {
+    background-color: #d43f1a;
+}
+
+.mfa-verify-form {
+    text-align: center;
 }
 
 #starting-balance-modal-content {
@@ -5177,7 +5304,7 @@ input#setup-profile-starting-savings {
 
 /* General Modal Content */
 .modal-content {
-    background-color: #f5fffe;
+    background-color: #ffffff;
     border-radius: 10px;
     padding: 20px 30px;
     width: 400px;

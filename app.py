@@ -394,7 +394,52 @@ def verify_email():
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
-        # Find user with this token
+        # First check if this is a pending email change verification
+        cursor.execute("""
+            SELECT id, username, email, pending_email, pending_email_expires 
+            FROM users 
+            WHERE pending_email_token = %s
+        """, (token,))
+        pending_user = cursor.fetchone()
+        
+        if pending_user:
+            # This is a pending email change verification
+            if pending_user['pending_email_expires'] and datetime.now() > pending_user['pending_email_expires']:
+                flash('Verification link has expired. Please request a new email change.')
+                cursor.close()
+                return redirect(url_for('login'))
+            
+            # Update to the new email
+            old_email = pending_user['username']
+            new_email = pending_user['pending_email']
+            
+            cursor.execute("""
+                UPDATE users 
+                SET username = %s,
+                    email = %s,
+                    email_verified = 1,
+                    pending_email = NULL,
+                    pending_email_token = NULL,
+                    pending_email_expires = NULL
+                WHERE id = %s
+            """, (new_email, new_email, pending_user['id']))
+            conn.commit()
+            
+            # Update in Redis
+            _update_user_setting_in_redis(pending_user['id'], 'username', new_email)
+            _update_user_setting_in_redis(pending_user['id'], 'email', new_email)
+            
+            # Create notification
+            add_notification(
+                user_id=pending_user['id'],
+                message=f'Your email address has been successfully changed from {old_email} to {new_email}.'
+            )
+            
+            cursor.close()
+            return render_template('login.html', 
+                                 success_message=f'Email verification complete! Your email has been changed to {new_email}. You can now log in with your new email address.')
+        
+        # Otherwise, check for regular email verification (new registration)
         cursor.execute("""
             SELECT id, username, email_verified, verification_token_expires 
             FROM users 
@@ -1365,6 +1410,12 @@ def reset_password():
             
             conn.commit()
             cursor.close()
+        
+        # Create notification for password reset
+        add_notification(
+            user_id=user_id,
+            message='Your password was successfully reset. If you did not make this change, please contact support immediately.'
+        )
         
         # Redirect to login with success message
         return render_template('login.html', 
@@ -7775,7 +7826,7 @@ def profile():
 
             # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, and mfa_secret
             cursor.execute("""
-                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret, pending_email
                 FROM users 
                 WHERE id = %s
             """, (current_user.id,))
@@ -7824,6 +7875,7 @@ def profile():
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
     starting_balance = int(starting_balance_data['amount']) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
+    pending_email = user_data.get('pending_email') if user_data else None
 
     # Pass all retrieved data to the template
     return render_template(
@@ -7837,7 +7889,8 @@ def profile():
         goofy_week_mode=goofy_week_mode,
         landing_page=landing_page,
         currency_type=currency_type,
-        mfa_enabled=mfa_enabled
+        mfa_enabled=mfa_enabled,
+        pending_email=pending_email
     )
 
 @app.route('/notifications', methods=['GET'])
@@ -8168,17 +8221,193 @@ def update_last_name():
 @login_required
 def update_username():
     new_username = request.form['username']
+    
+    # Check if the new email is different from current
+    with get_db_pool().get_cursor() as cursor:
+        cursor.execute("SELECT username, email FROM users WHERE id = %s", (current_user.id,))
+        user_data = cursor.fetchone()
+        current_email = user_data[0]
+    
+    if new_username == current_email:
+        flash('This is already your current email address.')
+        return redirect(url_for('profile', success='email'))
+    
+    # Generate verification token for the pending email
+    verification_token = generate_verification_token()
+    verification_expiry = get_verification_token_expiry()
+    
+    # Store the pending email change (don't change the active email yet)
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE users 
+            SET pending_email = %s,
+                pending_email_token = %s,
+                pending_email_expires = %s
+            WHERE id = %s
+        """, (new_username, verification_token, verification_expiry, current_user.id))
+        conn.commit()
+        cursor.close()
+    
+    # Invalidate Redis cache for user settings
+    redis_key = f"users:v1:{current_user.id}"
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(redis_key)
+            app.logger.info(f"Invalidated Redis cache for user {current_user.id} after pending email change")
+        except Exception as e:
+            app.logger.warning(f"[REDIS][user_settings] DELETE error: {e}")
+    
+    # Send verification email to NEW address
+    email_sent = send_verification_email(new_username, current_email, verification_token)
+    
+    # Create notification
+    add_notification(
+        user_id=current_user.id,
+        message=f'Email change requested to {new_username}. Please check that email address to verify the change. Your current email ({current_email}) will remain active until verified.'
+    )
+    
+    if email_sent:
+        return redirect(url_for('profile', success='email_pending'))
+    else:
+        app.logger.error(f"Failed to send verification email to {new_username}")
+        flash('Failed to send verification email. Please try again.')
+        return redirect(url_for('profile'))
 
-    # Update in Redis only - flush worker will persist to MySQL
-    _update_user_setting_in_redis(current_user.id, 'username', new_username)
+@app.route('/resend-pending-email-verification', methods=['GET'])
+@login_required
+def resend_pending_email_verification():
+    """Resend verification email for pending email change"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # Get pending email info
+        cursor.execute("""
+            SELECT username, pending_email, pending_email_token 
+            FROM users 
+            WHERE id = %s
+        """, (current_user.id,))
+        user = cursor.fetchone()
+        
+        if not user or not user['pending_email']:
+            cursor.close()
+            flash('No pending email change found.')
+            return redirect(url_for('profile'))
+        
+        current_email = user['username']
+        pending_email = user['pending_email']
+        
+        # Generate new token
+        verification_token = generate_verification_token()
+        verification_expiry = get_verification_token_expiry()
+        
+        cursor.execute("""
+            UPDATE users 
+            SET pending_email_token = %s,
+                pending_email_expires = %s
+            WHERE id = %s
+        """, (verification_token, verification_expiry, current_user.id))
+        conn.commit()
+        cursor.close()
+        
+        # Send new verification email
+        email_sent = send_verification_email(pending_email, current_email, verification_token)
+        
+        # Create notification
+        add_notification(
+            user_id=current_user.id,
+            message=f'Verification email resent to {pending_email}. Please check that inbox to complete your email change.'
+        )
+        
+        if email_sent:
+            return redirect(url_for('profile', resend='success'))
+        else:
+            app.logger.error(f"Failed to resend verification email to {pending_email}")
+            flash('Failed to resend verification email. Please try again later.')
+            return redirect(url_for('profile'))
 
-    flash('Username updated successfully.')
-    return redirect(url_for('profile', success='email'))
+@app.route('/cancel-pending-email-change', methods=['GET'])
+@login_required
+def cancel_pending_email_change():
+    """Cancel pending email change"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        try:
+            # Clear pending email fields
+            cursor.execute("""
+                UPDATE users
+                SET pending_email = NULL,
+                    pending_email_token = NULL,
+                    pending_email_expires = NULL
+                WHERE id = %s
+            """, (current_user.id,))
+            conn.commit()
+            
+            # Invalidate Redis cache for user settings
+            redis_key = f"users:v1:{current_user.id}"
+            if app.config.get('REDIS_OK'):
+                try:
+                    _redis_client.delete(redis_key)
+                    app.logger.info(f"Invalidated Redis cache for user {current_user.id} after cancelling email change")
+                except Exception as e:
+                    app.logger.warning(f"[REDIS][user_settings] DELETE error: {e}")
+            
+            flash('Email change cancelled. Your current email address remains active.')
+            app.logger.info(f"User {current_user.id} cancelled pending email change.")
+            
+        except Exception as e:
+            conn.rollback()
+            app.logger.error(f"Error cancelling pending email change for user {current_user.id}: {e}")
+            flash('Failed to cancel email change. Please try again.')
+        
+        finally:
+            cursor.close()
+        
+        return redirect(url_for('profile'))
+
+@app.route('/verify_current_password', methods=['POST'])
+@login_required
+def verify_current_password():
+    """Verify user's current password"""
+    current_password = request.form.get('current_password')
+    
+    if not current_password:
+        return jsonify({'status': 'invalid'}), 200
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT password FROM users WHERE id = %s", (current_user.id,))
+        user = cursor.fetchone()
+        cursor.close()
+    
+    if user and bcrypt.check_password_hash(user['password'], current_password):
+        return jsonify({'status': 'valid'}), 200
+    else:
+        return jsonify({'status': 'invalid'}), 200
 
 @app.route('/update_password', methods=['POST'])
 @login_required
 def update_password():
     new_password = request.form['password']
+    mfa_code = request.form.get('mfa_code')
+    
+    # Check if user has MFA enabled
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT mfa_secret FROM users WHERE id = %s", (current_user.id,))
+        user = cursor.fetchone()
+        cursor.close()
+    
+    # If user has MFA enabled, verify the code
+    if user and user['mfa_secret']:
+        if not mfa_code:
+            return jsonify({'status': 'mfa_required'}), 200
+        
+        # Verify MFA code
+        totp = pyotp.TOTP(user['mfa_secret'])
+        if not totp.verify(mfa_code, valid_window=1):
+            return jsonify({'status': 'invalid_mfa', 'message': 'Invalid MFA code. Please try again.'}), 200
 
     hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
 
@@ -8208,7 +8437,7 @@ def enable_mfa():
         qr_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
         qr_url = f"data:image/png;base64,{qr_b64}"
 
-        return jsonify({'status': 'success', 'qr_url': qr_url})
+        return jsonify({'status': 'success', 'qr_url': qr_url, 'secret': secret})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
