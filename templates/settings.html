@@ -95,10 +95,20 @@
                                     </button>
                                 </div>
                             </form>
-                            <form id="goofy-week-form" class="profile-form"></form>
+                            <form id="goofy-week-form" class="profile-form">
                                 <div class="input-group">
                                     <label for="goofy_week_mode">Goofy Week Mode:</label>
                                     <input class="submit-checkbox" type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %}>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="notification-section">
+                        <div class="section-liner">
+                            <form id="email-notifications-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="email_notifications">Email Notifications:</label>
+                                    <input class="submit-checkbox" type="checkbox" id="email_notifications" {% if email_notifications == 1 %}checked{% endif %}>
                                 </div>
                             </form>
                         </div>
@@ -239,6 +249,41 @@
                     });
                 });
             } else {
+            }
+
+            // Handle Email Notifications checkbox toggle
+            const emailNotificationsCheckbox = $('#email_notifications');
+            
+            if (emailNotificationsCheckbox.length) {
+                emailNotificationsCheckbox.on('change', function() {
+                    const emailNotifications = $(this).is(':checked') ? 1 : 0;
+
+                    // Send an AJAX request to update email_notifications in the database
+                    $.ajax({
+                        url: "{{ url_for('update_email_notifications') }}",
+                        method: "POST",
+                        data: { email_notifications: emailNotifications },
+                        success: function(response) {
+                            if (response.status === 'success') {
+                                // Show a brief success message
+                                const successMsg = $('<div style="position: fixed; top: 20px; right: 20px; background-color: #4CAF50; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">Email notifications ' + (emailNotifications ? 'enabled' : 'disabled') + '</div>');
+                                $('body').append(successMsg);
+                                setTimeout(function() {
+                                    successMsg.fadeOut(300, function() { $(this).remove(); });
+                                }, 2000);
+                            } else {
+                                alert('Error updating email notifications: ' + response.message);
+                                // Revert checkbox on error
+                                emailNotificationsCheckbox.prop('checked', !emailNotifications);
+                            }
+                        },
+                        error: function() {
+                            alert('An error occurred while updating email notifications.');
+                            // Revert checkbox on error
+                            emailNotificationsCheckbox.prop('checked', !emailNotifications);
+                        }
+                    });
+                });
             }
 
             let originalStartingBalance = $('#starting_balance').val();

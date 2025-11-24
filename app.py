@@ -8030,7 +8030,7 @@ def settings():
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, and mfa_secret
+        # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, mfa_secret, and email_notifications
         # Try Redis first
         user_data = None
         redis_key = f"users:v1:{current_user.id}"
@@ -8046,7 +8046,7 @@ def settings():
         # Fallback to MySQL
         if not user_data:
             cursor.execute("""
-                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret, email_notifications
                 FROM users 
                 WHERE id = %s
             """, (current_user.id,))
@@ -8076,6 +8076,7 @@ def settings():
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
     starting_balance = int(starting_balance_data['amount']) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
+    email_notifications = user_data.get('email_notifications', 0) if user_data else 0
 
     # Pass all retrieved data to the template
     return render_template(
@@ -8089,8 +8090,22 @@ def settings():
         goofy_week_mode=goofy_week_mode,
         landing_page=landing_page,
         currency_type=currency_type,
-        mfa_enabled=mfa_enabled
+        mfa_enabled=mfa_enabled,
+        email_notifications=email_notifications
     )
+
+@app.route('/update_email_notifications', methods=['POST'])
+@login_required
+def update_email_notifications():
+    email_notifications = request.form.get('email_notifications', type=int)
+    
+    try:
+        # Update in Redis only - flush worker will persist to MySQL
+        _update_user_setting_in_redis(current_user.id, 'email_notifications', email_notifications)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        app.logger.error(f"Error updating email notifications: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/update_goofy_week_mode', methods=['POST'])
 @login_required
@@ -10794,7 +10809,7 @@ def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
 
 def add_notification(user_id, message, notification_date=None):
     """
-    Create a new notification for a user.
+    Create a new notification for a user and optionally send via email.
     
     Args:
         user_id: The user ID to create the notification for
@@ -10808,14 +10823,32 @@ def add_notification(user_id, message, notification_date=None):
         notification_date = datetime.now()
     
     with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
             INSERT INTO notifications (user_id, date, message, is_read)
             VALUES (%s, %s, %s, 0)
         """, (user_id, notification_date, message))
         notification_id = cursor.lastrowid
+        
+        # Check if user has email notifications enabled
+        cursor.execute("""
+            SELECT email, email_notifications, first_name
+            FROM users
+            WHERE id = %s
+        """, (user_id,))
+        user = cursor.fetchone()
+        
         conn.commit()
         cursor.close()
+    
+    # Send email notification if enabled
+    if user and user.get('email_notifications') and user.get('email'):
+        try:
+            from email_utils import send_notification_email
+            user_name = user.get('first_name', 'User')
+            send_notification_email(user['email'], user_name, message, notification_date)
+        except Exception as e:
+            app.logger.error(f"Failed to send notification email to user {user_id}: {str(e)}")
     
     return notification_id
 

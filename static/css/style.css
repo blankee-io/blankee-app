@@ -1272,6 +1272,64 @@ button#autobalance-submit:hover {
     padding: 10px 20px;
 }
 
+#email-notifications-form {
+    margin: 0 auto;
+    max-width: 345px;
+    width: 100%;
+}
+
+#email-notifications-form .input-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between !important;
+    margin-bottom: 5px;
+    height: 40px;
+    width: 100% !important;
+}
+
+#email-notifications-form .input-group label {
+    flex: 0 0 auto;
+    margin-right: 10px;
+    width: auto !important;
+}
+
+#email-notifications-form .input-group .submit-checkbox {
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
+    top: 0;
+}
+
+#goofy-week-form {
+    margin: 0 auto;
+    max-width: 345px;
+    width: 100%;
+}
+
+#goofy-week-form .input-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between !important;
+    margin-bottom: 5px;
+    height: 40px;
+    width: 100% !important;
+}
+
+#goofy-week-form .input-group label {
+    flex: 0 0 auto;
+    margin-right: 10px;
+    width: auto !important;
+}
+
+#goofy-week-form .input-group .submit-checkbox {
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
+    top: 0;
+}
+
 #gwm-input-group {
     justify-content: center !important;
 }
@@ -4746,6 +4804,27 @@ input#setup-profile-starting-savings {
 /* Data label */
 .data-section::before {
     content: "Data";
+    position: absolute;
+    top: -10px;
+    left: 10px;
+    background-color: #f5fffe;
+    padding: 0 5px;
+    font-size: 12px;
+    color: #2AAAA8;
+}
+
+/* Notification section */
+.notification-section {
+    border: 1px solid #2AAAA8;
+    border-radius: 10px;
+    padding: 10px 0px;
+    margin: 10px 0 35px 0;
+    position: relative;
+}
+
+/* Notification label */
+.notification-section::before {
+    content: "Notifications";
     position: absolute;
     top: -10px;
     left: 10px;
