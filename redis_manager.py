@@ -1392,7 +1392,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             starting_savings = %s,
                             password = %s,
                             username = %s,
-                            mfa_secret = %s
+                            mfa_secret = %s,
+                            email_notifications = %s
                         WHERE id = %s
                     """, (
                         float(user_data.get('balance_threshold', 0)),
@@ -1400,6 +1401,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         user_data.get('password'),
                         user_data.get('username'),
                         user_data.get('mfa_secret'),
+                        int(user_data.get('email_notifications', 0)),
                         user_id
                     ))
                     

@@ -340,3 +340,138 @@ def send_password_reset_email(to_email, username, reset_token):
     """
     
     return send_email(to_email, subject, html_content, text_content)
+
+def send_notification_email(to_email, user_name, message, notification_date):
+    """
+    Send a notification email to the user.
+    
+    Args:
+        to_email (str): Recipient email address
+        user_name (str): User's first name
+        message (str): The notification message
+        notification_date (datetime): When the notification was created
+        
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
+    subject = "Blankee Notification"
+    
+    formatted_date = notification_date.strftime('%B %d, %Y at %I:%M %p')
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 20px;
+            }}
+            .container {{
+                background-color: #ffffff;
+                border-radius: 10px;
+                padding: 30px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            .header {{
+                text-align: center;
+                margin-bottom: 30px;
+            }}
+            .header h1 {{
+                color: #2aaaa8;
+                margin: 0;
+                font-size: 28px;
+            }}
+            .notification-box {{
+                background-color: #f8f9fa;
+                border-left: 4px solid #2aaaa8;
+                padding: 20px;
+                margin: 20px 0;
+                border-radius: 4px;
+            }}
+            .notification-date {{
+                color: #666;
+                font-size: 13px;
+                margin-bottom: 10px;
+            }}
+            .notification-message {{
+                color: #333;
+                font-size: 15px;
+                line-height: 1.6;
+            }}
+            .footer {{
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                text-align: center;
+                color: #666;
+                font-size: 12px;
+            }}
+            .button {{
+                display: inline-block;
+                padding: 12px 30px;
+                background-color: #2aaaa8;
+                color: white !important;
+                text-decoration: none;
+                border-radius: 5px;
+                margin: 20px 0;
+                font-weight: bold;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🔔 Blankee Notification</h1>
+            </div>
+            
+            <p>Hi {user_name},</p>
+            
+            <p>You have a new notification from your Blankee budget tracker:</p>
+            
+            <div class="notification-box">
+                <div class="notification-date">{formatted_date}</div>
+                <div class="notification-message">{message}</div>
+            </div>
+            
+            <center>
+                <a href="{APP_URL}/notifications" class="button">View All Notifications</a>
+            </center>
+            
+            <p>Best regards,<br>The Blankee Team</p>
+        </div>
+        <div class="footer">
+            <p>You're receiving this email because you have email notifications enabled.</p>
+            <p>To manage your notification preferences, visit Settings in your Blankee account.</p>
+            <p>This is an automated email. Please do not reply to this message.</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    text_content = f"""
+    Blankee Notification
+    
+    Hi {user_name},
+    
+    You have a new notification from your Blankee budget tracker:
+    
+    Date: {formatted_date}
+    
+    {message}
+    
+    View all notifications: {APP_URL}/notifications
+    
+    Best regards,
+    The Blankee Team
+    
+    ---
+    You're receiving this email because you have email notifications enabled.
+    To manage your notification preferences, visit Settings in your Blankee account.
+    """
+    
+    return send_email(to_email, subject, html_content, text_content)
