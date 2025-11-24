@@ -1389,11 +1389,17 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute("""
                         UPDATE users
                         SET balance_threshold = %s,
-                            starting_savings = %s
+                            starting_savings = %s,
+                            password = %s,
+                            username = %s,
+                            mfa_secret = %s
                         WHERE id = %s
                     """, (
                         float(user_data.get('balance_threshold', 0)),
                         float(user_data.get('starting_savings', 0)),
+                        user_data.get('password'),
+                        user_data.get('username'),
+                        user_data.get('mfa_secret'),
                         user_id
                     ))
                     

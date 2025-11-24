@@ -1139,7 +1139,7 @@
                     password: newPasswordInput.val()
                 };
                 
-                // First verify current password and check if MFA is required
+                // First verify current password
                 $.ajax({
                     url: '{{ url_for("verify_current_password") }}',
                     method: 'POST',
@@ -1148,8 +1148,8 @@
                         if (response.status === 'invalid') {
                             currentPasswordError.text('Current password is incorrect').show();
                         } else if (response.status === 'valid') {
-                            // Current password is correct, now check MFA
-                            checkMfaRequirement();
+                            // Current password is correct, now check if MFA is enabled
+                            checkMfaStatus();
                         }
                     },
                     error: function() {
@@ -1158,23 +1158,37 @@
                 });
             });
 
-            function checkMfaRequirement() {
+            function checkMfaStatus() {
+                // Check if user has MFA enabled
                 $.ajax({
-                    url: '{{ url_for("update_password") }}',
-                    method: 'POST',
-                    data: { password: pendingPasswordData.password },
+                    url: '{{ url_for("check_mfa_status") }}',
+                    method: 'GET',
                     success: function(response) {
-                        if (response.status === 'mfa_required') {
-                            // Show MFA modal
+                        if (response.mfa_enabled) {
+                            // MFA is enabled, show MFA modal
                             changePasswordModal.css('display', 'none');
                             passwordMfaModal.css('display', 'flex');
                             $('#password-mfa-code').val('').focus();
                             passwordMfaError.hide();
                         } else {
-                            // No MFA required, password updated
-                            changePasswordModal.css('display', 'none');
-                            window.location.href = '{{ url_for("profile", success="password") }}';
+                            // No MFA, proceed with password change
+                            updatePasswordDirectly();
                         }
+                    },
+                    error: function() {
+                        currentPasswordError.text('Error checking MFA status. Please try again.').show();
+                    }
+                });
+            }
+
+            function updatePasswordDirectly() {
+                $.ajax({
+                    url: '{{ url_for("update_password") }}',
+                    method: 'POST',
+                    data: { password: pendingPasswordData.password },
+                    success: function(response) {
+                        changePasswordModal.css('display', 'none');
+                        window.location.href = '{{ url_for("profile", success="password") }}';
                     },
                     error: function() {
                         currentPasswordError.text('Error updating password. Please try again.').show();
