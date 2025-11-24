@@ -6113,7 +6113,16 @@ def update_entry():
         cursor.close()
     
     # Write to Redis only - flush worker will persist to MySQL
-    _update_entry_in_redis(table_name, current_user.id, category_id, date, amount)
+    # If amount is 0, delete the entry instead of updating
+    app.logger.info(f"[UPDATE ENTRY] Checking amount: value={amount}, type={type(amount)}, float={float(amount)}, is_zero={float(amount) == 0}")
+    if float(amount) == 0:
+        app.logger.info(f"[UPDATE ENTRY] Amount is 0, deleting entry for category {category_id} on {date}")
+        _delete_entry_in_redis(table_name, current_user.id, category_id, date, date)
+        app.logger.info(f"[UPDATE ENTRY] Delete completed for category {category_id} on {date}")
+    else:
+        app.logger.info(f"[UPDATE ENTRY] Amount is non-zero, updating entry for category {category_id} on {date}")
+        _update_entry_in_redis(table_name, current_user.id, category_id, date, amount)
+        app.logger.info(f"[UPDATE ENTRY] Update completed for category {category_id} on {date}")
     
     # If this is an expense category and is_credit_account=1, update payment entry and trigger CA balance update
     app.logger.info(f"[UPDATE CA PAYMENT DEBUG] entry_type={entry_type}, cat_data={cat_data}")
@@ -6135,10 +6144,16 @@ def update_entry():
                 app.logger.info(f"[UPDATE CA PAYMENT] Credit account query result: {account_row}")
                 if account_row:
                     account_id = account_row['id']
-                    app.logger.info(f"[UPDATE CA PAYMENT] Found credit account_id={account_id}, updating payment entry for date={date}, amount={amount}")
-                    # Update payment entry in Redis
-                    _update_payment_entry_in_redis(current_user.id, account_id, date, float(amount))
-                    app.logger.info(f"[UPDATE CA PAYMENT] Payment entry update completed")
+                    app.logger.info(f"[UPDATE CA PAYMENT] Found credit account_id={account_id}, amount={amount}, checking if zero")
+                    # Update or delete payment entry in Redis based on amount
+                    if float(amount) == 0:
+                        app.logger.info(f"[UPDATE CA PAYMENT] Amount is 0, deleting payment entry for account {account_id} on {date}")
+                        _delete_payment_entry_in_redis(current_user.id, account_id, date, date)
+                        app.logger.info(f"[UPDATE CA PAYMENT] Payment entry deletion completed")
+                    else:
+                        app.logger.info(f"[UPDATE CA PAYMENT] Amount is non-zero, updating payment entry")
+                        _update_payment_entry_in_redis(current_user.id, account_id, date, float(amount))
+                        app.logger.info(f"[UPDATE CA PAYMENT] Payment entry update completed")
                 else:
                     app.logger.warning(f"[UPDATE CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
                 cursor.close()
@@ -6511,8 +6526,16 @@ def update_week_entry():
         cursor.close()
 
     # Delete old entries and add new entry to Redis only - flush worker will persist
+    app.logger.info(f"[UPDATE WEEK ENTRY] Deleting entries from {start_date} to {end_date} for category {category_id}")
     _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
-    _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, float(amount))
+    app.logger.info(f"[UPDATE WEEK ENTRY] Delete completed. Checking amount: value={amount}, type={type(amount)}, float={float(amount)}, is_zero={float(amount) == 0}")
+    # If amount is 0, don't create a new entry (just delete old ones)
+    if float(amount) != 0:
+        app.logger.info(f"[UPDATE WEEK ENTRY] Amount is non-zero, creating new entry for {friday_date}")
+        _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, float(amount))
+        app.logger.info(f"[UPDATE WEEK ENTRY] New entry created for {friday_date}")
+    else:
+        app.logger.info(f"[UPDATE WEEK ENTRY] Amount is 0, skipping entry creation (entries deleted only)")
 
     # If this is an expense category and is_credit_account=1, create/update payment entry and trigger CA balance update
     ca_triggered = False
@@ -6534,10 +6557,16 @@ def update_week_entry():
                 app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Credit account query result: {account_row}")
                 if account_row:
                     account_id = account_row['id']
-                    app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Found credit account_id={account_id}, updating payment entry for date={friday_date}, amount={amount}")
-                    # Update payment entry in Redis
-                    _update_payment_entry_in_redis(current_user.id, account_id, friday_date, float(amount))
-                    app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Payment entry update completed")
+                    app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Found credit account_id={account_id}, amount={amount}, checking if zero")
+                    # Update or delete payment entry in Redis based on amount
+                    if float(amount) == 0:
+                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Amount is 0, deleting payment entry for account {account_id} on {friday_date}")
+                        _delete_payment_entry_in_redis(current_user.id, account_id, friday_date, friday_date)
+                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Payment entry deletion completed")
+                    else:
+                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Amount is non-zero, updating payment entry")
+                        _update_payment_entry_in_redis(current_user.id, account_id, friday_date, float(amount))
+                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Payment entry update completed")
                 else:
                     app.logger.warning(f"[UPDATE WEEK ENTRY - CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
                 cursor.close()
@@ -10855,7 +10884,7 @@ def add_notification(user_id, message, notification_date=None):
 def check_negative_remainders(user_id):
     """
     Check for negative remainders in the future and create notifications.
-    Checks the next 90 days for potential overdrafts.
+    Checks the next 90 days for potential negative balances.
     """
     app.logger.info(f"[NOTIFICATIONS] Starting check_negative_remainders for user {user_id}")
     
@@ -10913,23 +10942,23 @@ def check_negative_remainders(user_id):
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
-        # Get existing notifications for overdraft warnings
+        # Get existing notifications for balance projection warnings
         cursor.execute("""
             SELECT message FROM notifications
             WHERE user_id = %s
             AND message LIKE %s
             AND is_read = 0
             AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        """, (user_id, 'On %you will overdraft%'))
+        """, (user_id, 'Projected balance on%'))
         existing_notifications = cursor.fetchall()
         
-        app.logger.info(f"[NOTIFICATIONS] Found {len(existing_notifications)} existing unread overdraft notifications")
+        app.logger.info(f"[NOTIFICATIONS] Found {len(existing_notifications)} existing unread balance projection notifications")
         
         # Check if we already have a notification for this specific date
         already_notified = False
         for notif in existing_notifications:
             try:
-                date_str = notif['message'].split('On ')[1].split(' you will')[0]
+                date_str = notif['message'].split('Projected balance on ')[1].split(':')[0]
                 notif_date = datetime.strptime(date_str, '%B %d, %Y').date()
                 if notif_date == first_negative_date:
                     already_notified = True
@@ -10944,7 +10973,7 @@ def check_negative_remainders(user_id):
     # Create notification if not already exists
     if not already_notified:
         formatted_date = first_negative_date.strftime('%B %d, %Y')
-        message = f'On {formatted_date} you will overdraft. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
+        message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
         app.logger.info(f"[NOTIFICATIONS] Creating notification for {first_negative_date}: {message}")
         try:
             notification_id = add_notification(user_id, message)

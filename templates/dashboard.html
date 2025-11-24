@@ -3543,7 +3543,7 @@
                     return;
                 }
                 const amount = parseFloat(newValue);
-                if (isNaN(amount) || amount === 0) {
+                if (isNaN(amount)) {
                     input.value = '';
                     return;
                 }
@@ -3564,15 +3564,23 @@
                     success: function(response) {
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
-                            // Format the value with currency symbol if not focused
-                            const rounded = Math.round(amount).toString();
-                            // Only add currency if input is not currently focused
-                            if (document.activeElement !== input) {
-                                input.value = currencySymbol + rounded;
+                            // If amount is 0, clear the input immediately (entry was deleted)
+                            if (amount === 0) {
+                                input.value = '';
+                                td.removeAttribute('data-processed');
+                                td.setAttribute('data-processed', '0');
+                                td.classList.remove('paid');
                             } else {
-                                input.value = rounded;
+                                // Format the value with currency symbol if not focused
+                                const rounded = Math.round(amount).toString();
+                                // Only add currency if input is not currently focused
+                                if (document.activeElement !== input) {
+                                    input.value = currencySymbol + rounded;
+                                } else {
+                                    input.value = rounded;
+                                }
                             }
-                            updateLocalState(type, categoryId, endDate, amount, false, endDate);
+                            updateLocalState(type, categoryId, endDate, amount, amount === 0, endDate);
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
