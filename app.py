@@ -8386,6 +8386,19 @@ def verify_current_password():
     else:
         return jsonify({'status': 'invalid'}), 200
 
+@app.route('/check_mfa_status', methods=['GET'])
+@login_required
+def check_mfa_status():
+    """Check if user has MFA enabled"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT mfa_secret FROM users WHERE id = %s", (current_user.id,))
+        user = cursor.fetchone()
+        cursor.close()
+    
+    mfa_enabled = bool(user and user.get('mfa_secret'))
+    return jsonify({'mfa_enabled': mfa_enabled}), 200
+
 @app.route('/update_password', methods=['POST'])
 @login_required
 def update_password():
@@ -8402,7 +8415,7 @@ def update_password():
     # If user has MFA enabled, verify the code
     if user and user['mfa_secret']:
         if not mfa_code:
-            return jsonify({'status': 'mfa_required'}), 200
+            return jsonify({'status': 'error', 'message': 'MFA code required'}), 400
         
         # Verify MFA code
         totp = pyotp.TOTP(user['mfa_secret'])
@@ -8414,8 +8427,7 @@ def update_password():
     # Update in Redis only - flush worker will persist to MySQL
     _update_user_setting_in_redis(current_user.id, 'password', hashed_password)
 
-    flash('Password updated successfully.')
-    return redirect(url_for('profile', success='password'))
+    return jsonify({'status': 'success'}), 200
 
 @app.route('/enable_mfa', methods=['POST'])
 @login_required
