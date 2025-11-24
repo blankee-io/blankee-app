@@ -5345,6 +5345,67 @@ input#setup-profile-starting-savings {
     gap: 10px;
 }
 
+/* Password MFA Modal Styling */
+#password-mfa-modal #password-mfa-form {
+    text-align: center;
+    margin-top: 20px;
+}
+
+#password-mfa-code {
+    width: 120px;
+    text-align: center;
+    padding: 10px;
+    font-size: 16px;
+}
+
+#password-mfa-error {
+    color: red;
+    margin-top: 10px;
+    display: none;
+}
+
+/* Change Password Modal Styling */
+.change-password-modal-content {
+    max-width: 450px;
+}
+
+#change-password-form {
+    margin-top: 20px;
+    position: relative;
+}
+
+.password-form-group {
+    margin-bottom: 20px;
+}
+
+.password-form-group label {
+    display: block;
+    margin-bottom: 5px;
+    text-align: left;
+}
+
+.password-form-group input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#current-password-error {
+    color: red;
+    margin-bottom: 10px;
+    display: none;
+}
+
+#change-password-requirements,
+#password-match-requirements {
+    display: none;
+    position: absolute;
+    z-index: 10;
+}
+
+#successMessage {
+    text-align: center;
+}
+
 /* Form Container Styling */
 .expense-form-container,
 .income-form-container,

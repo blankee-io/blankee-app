@@ -264,13 +264,13 @@
 
     <div id="password-mfa-modal" class="modal">
         <div class="modal-content">
-            <span id="close-password-mfa-modal" class="close-modal" style="position:absolute;top:10px;right:18px;font-size:24px;cursor:pointer;">&times;</span>
+            <span id="close-password-mfa-modal" class="close-modal">&times;</span>
             <h2>MFA Verification Required</h2>
             <p>Please enter your 6-digit MFA code to change your password.</p>
-            <form id="password-mfa-form" style="text-align:center; margin-top: 20px;">
-                <input type="text" id="password-mfa-code" maxlength="6" placeholder="Enter 6-digit code" required style="width:120px;text-align:center; padding: 10px; font-size: 16px;">
-                <div id="password-mfa-error" style="color: red; margin-top: 10px; display: none;"></div>
-                <div class="modal-buttons" style="margin-top: 20px;">
+            <form id="password-mfa-form">
+                <input type="text" id="password-mfa-code" maxlength="6" placeholder="Enter 6-digit code" required>
+                <div id="password-mfa-error"></div>
+                <div class="modal-buttons">
                     <button type="submit" class="confirm-delete-category-btn">Verify & Change Password</button>
                     <button type="button" id="cancel-password-mfa-btn" class="cancel-delete-category-btn">Cancel</button>
                 </div>
@@ -278,34 +278,52 @@
         </div>
     </div>
 
+    <div id="disable-mfa-modal" class="modal">
+        <div class="modal-content">
+            <span id="close-disable-mfa-modal" class="close-modal">&times;</span>
+            <h2>Disable Multi-Factor Authentication</h2>
+            <p>Are you sure you want to disable MFA? This will make your account less secure.</p>
+            <div class="modal-buttons">
+                <button id="confirm-disable-mfa-btn" class="confirm-delete-category-btn">Disable MFA</button>
+                <button id="cancel-disable-mfa-btn" class="cancel-delete-category-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div id="change-password-modal" class="modal">
-        <div class="modal-content" style="max-width: 450px;">
-            <span id="close-change-password-modal" class="close-modal" style="position:absolute;top:10px;right:18px;font-size:24px;cursor:pointer;">&times;</span>
+        <div class="modal-content change-password-modal-content">
+            <span id="close-change-password-modal" class="close-modal">&times;</span>
             <h2>Change Password</h2>
-            <form id="change-password-form" style="margin-top: 20px;">
-                <div style="margin-bottom: 20px;">
-                    <label for="current-password" style="display:block; margin-bottom: 5px; text-align: left;">Current Password:</label>
-                    <input type="password" id="current-password" class="login-input" required style="width: 100%; box-sizing: border-box;">
+            <form id="change-password-form">
+                <div class="password-form-group">
+                    <label for="current-password">Current Password:</label>
+                    <input type="password" id="current-password" class="login-input" required>
                 </div>
-                <div style="margin-bottom: 20px; position: relative;">
-                    <label for="new-password" style="display:block; margin-bottom: 5px; text-align: left;">New Password:</label>
-                    <input type="password" id="new-password" class="login-input" required style="width: 100%; box-sizing: border-box;">
-                    <div id="change-password-requirements" class="profile-password-requirements" style="display: none; position: relative; margin-top: 10px;">
-                        <p id="change-length-requirement"><span class="profile-requirement-icon">✗</span> At least 8 characters</p>
-                        <p id="change-symbol-requirement"><span class="profile-requirement-icon">✗</span> At least 1 symbol</p>
-                        <p id="change-capital-requirement"><span class="profile-requirement-icon">✗</span> At least 1 capital letter</p>
-                        <p id="change-number-requirement"><span class="profile-requirement-icon">✗</span> At least 1 number</p>
-                    </div>
+                <div class="password-form-group">
+                    <label for="new-password">New Password:</label>
+                    <input type="password" id="new-password" class="login-input" required>
                 </div>
-                <div style="margin-bottom: 20px;">
-                    <label for="confirm-password" style="display:block; margin-bottom: 5px; text-align: left;">Confirm New Password:</label>
-                    <input type="password" id="confirm-password" class="login-input" required style="width: 100%; box-sizing: border-box;">
-                    <div id="password-match-error" style="color: red; margin-top: 5px; display: none; text-align: left; font-size: 14px;">Passwords do not match</div>
+                <div class="password-form-group">
+                    <label for="confirm-password">Confirm New Password:</label>
+                    <input type="password" id="confirm-password" class="login-input" required>
                 </div>
-                <div id="current-password-error" style="color: red; margin-bottom: 10px; display: none;"></div>
+                <div id="current-password-error"></div>
                 <div class="modal-buttons">
                     <button type="submit" id="submit-password-change" class="confirm-delete-category-btn" disabled>Change Password</button>
                     <button type="button" id="cancel-password-change" class="cancel-delete-category-btn">Cancel</button>
+                </div>
+                
+                <!-- Password requirements overlay - positioned absolutely -->
+                <div id="change-password-requirements" class="password-requirements">
+                    <p id="change-length-requirement"><span class="requirement-icon">✗</span> At least 8 characters</p>
+                    <p id="change-symbol-requirement"><span class="requirement-icon">✗</span> At least 1 symbol</p>
+                    <p id="change-capital-requirement"><span class="requirement-icon">✗</span> At least 1 capital letter</p>
+                    <p id="change-number-requirement"><span class="requirement-icon">✗</span> At least 1 number</p>
+                </div>
+                
+                <!-- Password match error overlay - positioned absolutely -->
+                <div id="password-match-requirements" class="password-requirements">
+                    <p id="password-match-requirement"><span class="requirement-icon">✗</span> Passwords match</p>
                 </div>
             </form>
         </div>
@@ -354,18 +372,33 @@
             });
 
             $('#disable-mfa-btn').on('click', function() {
-                if (confirm('Are you sure you want to disable MFA?')) {
-                    $.post('/disable_mfa', function(data) {
-                        if (data.status === 'success') {
-                            $('#mfa-status-message').html('<span>Disabled</span>');
-                            $('#disable-mfa-btn').replaceWith(
-                                '<button type="button" id="enable-mfa-btn" class="submit-button">Enable</button>'
-                            );
-                        } else {
-                            $('#mfa-status-message').text('Error disabling MFA.');
-                        }
-                    });
+                $('#disable-mfa-modal').css('display', 'flex');
+            });
+
+            // Handle disable MFA modal
+            $('#close-disable-mfa-modal, #cancel-disable-mfa-btn').on('click', function() {
+                $('#disable-mfa-modal').css('display', 'none');
+            });
+
+            $('#disable-mfa-modal').on('click', function(e) {
+                if (e.target === this) {
+                    $('#disable-mfa-modal').css('display', 'none');
                 }
+            });
+
+            $('#confirm-disable-mfa-btn').on('click', function() {
+                $.post('/disable_mfa', function(data) {
+                    if (data.status === 'success') {
+                        $('#mfa-status-message').html('<span>Disabled</span>');
+                        $('#disable-mfa-btn').replaceWith(
+                            '<button type="button" id="enable-mfa-btn" class="submit-button">Enable</button>'
+                        );
+                        $('#disable-mfa-modal').css('display', 'none');
+                    } else {
+                        $('#mfa-status-message').text('Error disabling MFA.');
+                        $('#disable-mfa-modal').css('display', 'none');
+                    }
+                });
             });
 
             // Function to cancel MFA setup
@@ -409,19 +442,7 @@
                         );
                         // Attach the disable handler to the new button
                         $('#disable-mfa-btn').on('click', function() {
-                            if (confirm('Are you sure you want to disable MFA?')) {
-                                $.post('/disable_mfa', function(data) {
-                                    if (data.status === 'success') {
-                                        $('#mfa-status-message').html('<span>Disabled</span>');
-                                        $('#disable-mfa-btn').replaceWith(
-                                            '<button type="button" id="enable-mfa-btn" class="submit-button">Enable</button>'
-                                        );
-                                        // Re-attach enable handler if needed
-                                    } else {
-                                        $('#mfa-status-message').text('Error disabling MFA.');
-                                    }
-                                });
-                            }
+                            $('#disable-mfa-modal').css('display', 'flex');
                         });
                         setTimeout(function() { $('#mfa-qr-modal').hide(); }, 1500);
                     } else {
@@ -947,6 +968,8 @@
         $(document).ready(function() {
             const resendModal = $('#resend-verification-modal');
             const emailPendingModal = $('#email-pending-modal');
+            const successModal = $('#successModal');
+            const successMessage = $('#successMessage');
 
             // Check if we're returning from a resend action
             const urlParams = new URLSearchParams(window.location.search);
@@ -961,6 +984,18 @@
                 emailPendingModal.css('display', 'flex');
                 // Remove the query parameter from URL without reload
                 window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            
+            // Check if we're returning from a password change
+            if (urlParams.get('success') === 'password') {
+                successMessage.text('Password changed successfully!');
+                successModal.css('display', 'flex');
+                // Remove the query parameter from URL without reload
+                window.history.replaceState({}, document.title, window.location.pathname);
+                // Auto-hide after 3 seconds
+                setTimeout(function() {
+                    successModal.css('display', 'none');
+                }, 3000);
             }
 
             $('#close-resend-success-btn').on('click', function() {
@@ -1000,11 +1035,12 @@
             const currentPasswordInput = $('#current-password');
             
             const passwordRequirements = $('#change-password-requirements');
-            const lengthRequirement = $('#change-length-requirement .profile-requirement-icon');
-            const symbolRequirement = $('#change-symbol-requirement .profile-requirement-icon');
-            const capitalRequirement = $('#change-capital-requirement .profile-requirement-icon');
-            const numberRequirement = $('#change-number-requirement .profile-requirement-icon');
-            const passwordMatchError = $('#password-match-error');
+            const lengthRequirement = $('#change-length-requirement .requirement-icon');
+            const symbolRequirement = $('#change-symbol-requirement .requirement-icon');
+            const capitalRequirement = $('#change-capital-requirement .requirement-icon');
+            const numberRequirement = $('#change-number-requirement .requirement-icon');
+            const passwordMatchRequirements = $('#password-match-requirements');
+            const passwordMatchRequirement = $('#password-match-requirement .requirement-icon');
             const currentPasswordError = $('#current-password-error');
             
             let isPasswordValid = false;
@@ -1018,7 +1054,7 @@
                 newPasswordInput.val('');
                 confirmPasswordInput.val('');
                 passwordRequirements.hide();
-                passwordMatchError.hide();
+                passwordMatchRequirements.hide();
                 currentPasswordError.hide();
                 isPasswordValid = false;
                 passwordsMatch = false;
@@ -1058,7 +1094,17 @@
                 const password = newPasswordInput.val();
                 isPasswordValid = true;
 
-                passwordRequirements.show();
+                // Show requirements while typing
+                if (password.length > 0) {
+                    const offset = newPasswordInput.position();
+                    passwordRequirements.css({
+                        top: (offset.top - passwordRequirements.outerHeight() - 5) + 'px',
+                        left: offset.left + 'px',
+                        width: newPasswordInput.outerWidth() + 'px',
+                        borderRadius: newPasswordInput.css('border-radius')
+                    });
+                    passwordRequirements.css('display', 'block').css('opacity', '1');
+                }
 
                 // Validate password length
                 if (password.length >= 8) {
@@ -1096,6 +1142,16 @@
                 updateSubmitButton();
             });
 
+            // Show password requirements on blur like register.html
+            newPasswordInput.on('focusout', function() {
+                setTimeout(() => {
+                    passwordRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        passwordRequirements.css('display', 'none');
+                    }, 300);
+                }, 3000); // Hide 3s after blur
+            });
+
             // Check password match
             confirmPasswordInput.on('input', checkPasswordMatch);
             
@@ -1105,19 +1161,38 @@
                 
                 if (confirmPass.length > 0) {
                     if (newPass === confirmPass) {
-                        passwordMatchError.hide();
+                        passwordMatchRequirement.text('✓').addClass('valid');
                         passwordsMatch = true;
                     } else {
-                        passwordMatchError.show();
+                        passwordMatchRequirement.text('✗').removeClass('valid');
                         passwordsMatch = false;
                     }
                 } else {
-                    passwordMatchError.hide();
                     passwordsMatch = false;
                 }
                 
                 updateSubmitButton();
             }
+
+            // Show password match requirements on blur like register.html
+            confirmPasswordInput.on('focusout', function() {
+                // Position the match requirements overlay
+                const offset = confirmPasswordInput.position();
+                passwordMatchRequirements.css({
+                    top: (offset.top - passwordMatchRequirements.outerHeight() - 5) + 'px',
+                    left: offset.left + 'px',
+                    width: confirmPasswordInput.outerWidth() + 'px',
+                    borderRadius: confirmPasswordInput.css('border-radius')
+                });
+                
+                passwordMatchRequirements.css('display', 'block').css('opacity', '1');
+                setTimeout(() => {
+                    passwordMatchRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        passwordMatchRequirements.css('display', 'none');
+                    }, 300);
+                }, 3000); // Show for 3s after blur
+            });
 
             function updateSubmitButton() {
                 if (isPasswordValid && passwordsMatch && currentPasswordInput.val().length > 0) {
