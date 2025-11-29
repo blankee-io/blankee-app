@@ -1455,6 +1455,7 @@ button#autobalance-submit:active {
     font-size: 14px;
     transition: all 0.2s ease;
     box-sizing: border-box;
+    width:100%;
 }
 
 .login-input:focus {
