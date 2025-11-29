@@ -292,10 +292,16 @@
             if (amountInput) {
                 amountInput.addEventListener('input', function() {
                     let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
                     if (value.includes('.')) {
-                        let parts = value.split('.');
-                        if (parts[1] && parts[1].length > 2) {
-                            this.value = parts[0] + '.' + parts[1].substring(0, 2);
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
                         }
                     }
                 });
@@ -304,10 +310,16 @@
             if (expenseAmountInput) {
                 expenseAmountInput.addEventListener('input', function() {
                     let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
                     if (value.includes('.')) {
-                        let parts = value.split('.');
-                        if (parts[1] && parts[1].length > 2) {
-                            this.value = parts[0] + '.' + parts[1].substring(0, 2);
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
                         }
                     }
                 });
@@ -316,10 +328,16 @@
             if (caAmountInput) {
                 caAmountInput.addEventListener('input', function() {
                     let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
                     if (value.includes('.')) {
-                        let parts = value.split('.');
-                        if (parts[1] && parts[1].length > 2) {
-                            this.value = parts[0] + '.' + parts[1].substring(0, 2);
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
                         }
                     }
                 });
