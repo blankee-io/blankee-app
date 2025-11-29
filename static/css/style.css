@@ -1175,13 +1175,16 @@ button#autobalance-submit:active {
     margin: 0 auto; 
 }
 
-@media (width <=460px) {
+@media (width <=600px) {
+    .calendarnav {
+        padding: 6px 0px;     
+    }
+
     .calendarnavbuttonscontainer {
-        display: flex;
-        flex-direction: row;
-        justify-content: space-evenly;
+        justify-content: space-around;
     }
 }
+
 .calendarnavbuttons {
     display: flex;
 
@@ -1232,7 +1235,7 @@ button#autobalance-submit:active {
     padding: 0 10px;
     border-radius: 15px;
     color: #2AAAA8;
-    font-size: 20px;
+    font-size: clamp(1rem, 2vw + 0.75rem, 1.5rem);
     transition: all 0.2s ease;
     cursor: pointer;
     background-color: transparent;
@@ -1329,6 +1332,11 @@ button#autobalance-submit:active {
     transition-delay: 0s;
 }
 
+@media (width <=460px) {
+    .nav-tooltip {
+        display: none;
+    }
+}
 
 .dashboard-button {
     margin: 0 10px;
@@ -1839,8 +1847,14 @@ input#setup-profile-starting-savings {
         flex: 1 1 0; 
     }
 
-    .nav-button i{
-        font-size: 25px;
+    #previous-nav-btn.nav-button,
+    #next-month-btn.nav-button,
+    #next-nav-btn.nav-button,
+    #current-nav-btn.nav-button {
+        margin-top: 0px;
+        margin-bottom: 0px;
+        padding-top: 0px;
+        padding-bottom: 0px;
     }
 
     #previous-nav-btn.nav-button,
@@ -1851,11 +1865,6 @@ input#setup-profile-starting-savings {
         margin-bottom: 0 !important;
         padding-top: 0 !important;
         padding-bottom: 0 !important;
-        font-size: 8px;
-    }
-
-    #current-nav-btn.nav-button {
-        font-size: 20px;
     }
 
     #nav-dropdown-toggle {
@@ -1876,10 +1885,10 @@ input#setup-profile-starting-savings {
 
     .nav-button, 
     .nav-select {
-        position: flex;
-        margin: 7.5px;
-        padding: 2.5px;
-        font-size: 20px;
+        display: flex;
+        margin: 0px 0vw;
+        padding: 0px 1vw;
+        font-size: 1.8em;
     }
 
     #nav-dropdown-toggle {
@@ -1896,12 +1905,13 @@ input#setup-profile-starting-savings {
     }
 }
 
-@media (width <=460px) {
+@media (width <= 460px) {
     .nav-button, .nav-select {
-        margin: 0px
+        margin: 0px .6vw;
+        padding: 0px;
+        font-size: 1.5em;
     }
 }
-
 #next-indicator,
 #previous-indicator {
     position: relative;
