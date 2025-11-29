@@ -2642,6 +2642,14 @@
             input.addEventListener('input', function () {
                 // Allow numbers and decimal point
                 input.value = input.value.replace(/[^0-9.]/g, '');
+                
+                // Limit to 2 decimal places
+                if (input.value.includes('.')) {
+                    const parts = input.value.split('.');
+                    if (parts[1] && parts[1].length > 2) {
+                        input.value = parts[0] + '.' + parts[1].substring(0, 2);
+                    }
+                }
             });
 
             input.addEventListener('keypress', function (event) {

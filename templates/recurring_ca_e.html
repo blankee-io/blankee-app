@@ -351,6 +351,34 @@
             document.querySelectorAll('.r-currency-symbol').forEach(function(span) {
                 span.textContent = currencySymbol;
             });
+
+            // Limit decimal places for recurring amount inputs (2 decimals)
+            const amountInput = document.getElementById('amount');
+            const editAmountInput = document.getElementById('edit-amount');
+
+            if (amountInput) {
+                amountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    if (value.includes('.')) {
+                        let parts = value.split('.');
+                        if (parts[1] && parts[1].length > 2) {
+                            this.value = parts[0] + '.' + parts[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+
+            if (editAmountInput) {
+                editAmountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    if (value.includes('.')) {
+                        let parts = value.split('.');
+                        if (parts[1] && parts[1].length > 2) {
+                            this.value = parts[0] + '.' + parts[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
         });
 
         // Open Modal for Add ca

@@ -283,6 +283,49 @@
 
 <script>
 
+        // Limit decimal places for recurring amount inputs (2 decimals)
+        document.addEventListener('DOMContentLoaded', function() {
+            const amountInput = document.getElementById('amount');
+            const expenseAmountInput = document.getElementById('expense-amount');
+            const caAmountInput = document.getElementById('ca-amount');
+
+            if (amountInput) {
+                amountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    if (value.includes('.')) {
+                        let parts = value.split('.');
+                        if (parts[1] && parts[1].length > 2) {
+                            this.value = parts[0] + '.' + parts[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+
+            if (expenseAmountInput) {
+                expenseAmountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    if (value.includes('.')) {
+                        let parts = value.split('.');
+                        if (parts[1] && parts[1].length > 2) {
+                            this.value = parts[0] + '.' + parts[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+
+            if (caAmountInput) {
+                caAmountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    if (value.includes('.')) {
+                        let parts = value.split('.');
+                        if (parts[1] && parts[1].length > 2) {
+                            this.value = parts[0] + '.' + parts[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+        });
+
         // Add Recurring Income Modal
 
         const addIncomeModal = document.getElementById("add-income-modal");
