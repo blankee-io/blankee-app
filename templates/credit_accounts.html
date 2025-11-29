@@ -120,7 +120,7 @@
                 </div>
                 <div class="footer-form-group">
                     <label for="credit-account-interest">Interest Rate (%):</label>
-                    <input type="number" id="credit-account-interest" name="interest_rate" min="0" max="100" step="0.01" required placeholder="Interest Rate">
+                    <input type="number" id="credit-account-interest" name="interest_rate" min="0" max="100" step="0.001" required inputmode="decimal" placeholder="0.000">
                 </div>
                 <div class="footer-form-group">
                     <label for="credit-account-type">Account Type:</label>
@@ -131,7 +131,10 @@
                 </div>
                 <div class="footer-form-group">
                     <label for="credit-account-balance">Today's Balance:</label>
-                    <input type="number" id="credit-account-balance" name="starting_balance" min="0" step="0.01" required placeholder="Starting Balance">
+                    <div class="currency-input-container">
+                        <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                        <input type="number" id="credit-account-balance" name="starting_balance" min="0" step="0.01" required inputmode="decimal" placeholder="0.00">
+                    </div>
                 </div>
                 <div class="footer-form-group">
                     <button type="submit">Add Account</button>
@@ -165,6 +168,28 @@
             $('#add-cas-btn').on('click', function() {
                 $('#add-credit-account-modal').show();
                 $('#credit-account-name').focus();
+            });
+
+            // Limit decimal places for interest rate (3 decimals)
+            $('#credit-account-interest').on('input', function() {
+                let value = $(this).val();
+                if (value.includes('.')) {
+                    let parts = value.split('.');
+                    if (parts[1].length > 3) {
+                        $(this).val(parts[0] + '.' + parts[1].substring(0, 3));
+                    }
+                }
+            });
+
+            // Limit decimal places for balance (2 decimals)
+            $('#credit-account-balance').on('input', function() {
+                let value = $(this).val();
+                if (value.includes('.')) {
+                    let parts = value.split('.');
+                    if (parts[1].length > 2) {
+                        $(this).val(parts[0] + '.' + parts[1].substring(0, 2));
+                    }
+                }
             });
 
             // Close modal on X click or clicking outside modal content
