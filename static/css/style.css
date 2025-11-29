@@ -5111,6 +5111,7 @@ input#setup-profile-starting-savings {
     cursor: pointer;
     box-sizing: border-box;
     transition: all 0.2s ease;
+    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
 }
 
 .profile-form .submit-checkbox {
@@ -8568,6 +8569,7 @@ html.modal-open {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 15px;
+    padding-right: 16px;
 }
 
 .connection-header h3 {
@@ -8604,15 +8606,27 @@ html.modal-open {
 
 .disconnect-btn,
 .delete-connection-btn {
-    width: 32px !important;
-    height: 32px !important;
-    border-radius: 50% !important;
-    padding: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    position: relative !important;
-    box-sizing: border-box !important;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background-color: #f94449;
+    border: none;
+    border-radius: 50%;
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
+}
+
+.disconnect-btn:hover,
+.delete-connection-btn:hover {
+    background-color: #ee6b6e;
 }
 
 .disconnect-btn i,
