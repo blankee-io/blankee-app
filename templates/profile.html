@@ -127,8 +127,8 @@
                                     <a href="{{ url_for('resend_pending_email_verification') }}">
                                         <i class="fas fa-envelope"></i> Resend verification email
                                     </a>
-                                    <span class="pending-email-separator">|</span>
-                                    <a href="{{ url_for('cancel_pending_email_change') }}" class="cancel-pending-email">
+                                    <span style="margin: 0 8px;">|</span>
+                                    <a href="{{ url_for('cancel_pending_email_change') }}" style="color: #dc3545;">
                                         <i class="fas fa-times"></i> Cancel
                                     </a>
                                 </div>
@@ -140,18 +140,29 @@
                                     <label>Change Password:</label>
                                     <span></span>
                                     <button type="button" id="change-password-btn" class="submit-button">
-                                        <i class="fa-solid fa-pen"></i>
+                                        Change
                                     </button>
                                 </div>
                             </form>
                             <form id="mfa-enable-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="mfa-toggle">MFA:</label>
-                                    <span></span>
-                                    <input type="checkbox" id="mfa-toggle" {% if mfa_enabled %}checked{% endif %} style="display: none;">
-                                    <label class="toggle-switch" data-checkbox="mfa-toggle">
-                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if not mfa_enabled %}toggle-off{% endif %}"></i>
-                                    </label>
+                                    <label for="enable-mfa-btn">MFA:</label>
+                                    <span id="mfa-status-message">
+                                        {% if mfa_enabled %}
+                                            <span>Enabled</span>
+                                        {% else %}
+                                            <span>Disabled</span>
+                                        {% endif %}
+                                    </span>
+                                    {% if mfa_enabled %}
+                                        <button type="button" id="disable-mfa-btn" class="submit-button">
+                                            Disable
+                                        </button>
+                                    {% else %}
+                                        <button type="button" id="enable-mfa-btn" class="submit-button">
+                                            Enable
+                                        </button>
+                                    {% endif %}
                                 </div>
                             </form>
                             <form id="delete-account-form" class="profile-form">
@@ -161,79 +172,6 @@
                                     </button>
                                 </div>
                             </form>
-                        </div>
-                    </div>
-                    
-                    <!-- Bank Connections Section -->
-                    <div class="profile-section" id="bank-connections-section">
-                    <div class="section-liner profile-bank-connections">
-                            {% if connections and connections|length > 0 %}
-                                {% for connection in connections %}
-                                <div class="connection-card">
-                                    <div class="connection-header">
-                                        <div class="connection-info">
-                                            <h3>{{ connection.institution_name or 'Bank' }}</h3>
-                                            <span class="connection-status {% if connection.status == 'DISCONNECTED' %}disconnected{% else %}connected{% endif %}">
-                                                {{ connection.status or 'active' }}
-                                            </span>
-                                        </div>
-                                        <div class="connection-actions">
-                                            {% if connection.status == 'DISCONNECTED' %}
-                                                <button class="delete-connection-btn danger-button" data-connection-id="{{ connection.connection_id }}">
-                                                    <i class="fa-solid fa-trash"></i>
-                                                </button>
-                                            {% else %}
-                                                <button class="disconnect-btn danger-button" data-connection-id="{{ connection.connection_id }}">
-                                                    <i class="fa-solid fa-unlink"></i>
-                                                </button>
-                                            {% endif %}
-                                        </div>
-                                    </div>
-                                    
-                                    {% if connection.accounts %}
-                                    <div class="accounts-list">
-                                        {% for account in connection.accounts %}
-                                        <div class="account-item">
-                                            <div class="account-info">
-                                                <input type="checkbox" 
-                                                       id="account-{{ account.id }}"
-                                                       class="account-sync-toggle"
-                                                       data-account-id="{{ account.account_id }}"
-                                                       {% if account.sync_transactions %}checked{% endif %}
-                                                       style="width: 18px; height: 18px; cursor: pointer;">
-                                                <label for="account-{{ account.id }}">
-                                                    <strong>{{ account.account_name }}</strong>
-                                                    <span class="account-mask">...{{ account.mask }}</span>
-                                                </label>
-                                            </div>
-                                            <div class="account-balance">
-                                                {{ currency_symbol }}{{ "{:,.2f}".format(account.current_balance or 0) }}
-                                            </div>
-                                        </div>
-                                        {% endfor %}
-                                    </div>
-                                    {% endif %}
-                                    
-                                    {% if connection.last_synced_at %}
-                                    <div class="connection-footer">
-                                        <small>Last synced: {{ connection.last_synced_at.strftime('%b %d, %Y at %I:%M %p') }}</small>
-                                    </div>
-                                    {% endif %}
-                                </div>
-                                {% endfor %}
-                            {% else %}
-                                <div class="no-connections">
-                                    <i class="fa-solid fa-building-columns"></i>
-                                    <h3>No Bank Accounts Connected</h3>
-                                    <p>Connect your bank accounts to automatically import transactions and track your spending.</p>
-                                </div>
-                            {% endif %}
-                            
-                            <div class="connect-bank-container">
-                                <button id="connect-bank-btn" class="submit-button">
-                                    <i class="fa-solid fa-plus"></i> Connect Bank Account
-                                </button>
-                            </div>
                         </div>
                     </div>                  
                 </div>
@@ -254,8 +192,8 @@
     </div>
 
     <div id="delete-account-modal" class="modal">
-        <div id="delete-account-modal-content" class="modal-content center-modal">
-            <span id="close-delete-account-modal" class="close-modal">&times;</span>
+        <div id="delete-account-modal-content" class="modal-content">
+            <span id="close-delete-account-modal" class="close-modal" style="position:absolute;top:10px;right:18px;font-size:24px;cursor:pointer;">&times;</span>
             <h2>Delete Account</h2>
             <p>
                 Are you sure you want to delete your account? This action cannot be undone.
@@ -268,7 +206,7 @@
     </div>
 
     
-    <div id="mfa-qr-modal" class="modal">
+    <div id="mfa-qr-modal" class="modal" style="display:none;">
         <div class="modal-content">
             <span id="close-mfa-modal" class="close-modal">&times;</span>
             <h3>Enable Multi-Factor Authentication</h3>
@@ -290,38 +228,10 @@
                 </div>
             </div>
             <form id="mfa-verify-form" class="mfa-verify-form">
-                <input type="text" id="mfa-code" maxlength="6" placeholder="Enter 6-digit code" required>
+                <input type="text" id="mfa-code" maxlength="6" placeholder="Enter 6-digit code" required style="width:120px;text-align:center;">
                 <button type="submit" class="submit-button">Verify</button>
             </form>
             <div id="mfa-verify-message"></div>
-        </div>
-    </div>
-
-    <div id="disconnect-connection-modal" class="modal">
-        <div class="modal-content center-modal">
-            <span id="close-disconnect-connection-modal" class="close-modal">&times;</span>
-            <h2>Disconnect Bank Account</h2>
-            <p>
-                Are you sure you want to disconnect this bank account? You can reconnect it later if needed.
-            </p>
-            <div class="modal-buttons">
-                <button id="confirm-disconnect-connection-btn" class="confirm-delete-category-btn">Disconnect</button>
-                <button id="cancel-disconnect-connection-btn" class="cancel-delete-category-btn">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="delete-connection-modal" class="modal">
-        <div class="modal-content center-modal">
-            <span id="close-delete-connection-modal" class="close-modal">&times;</span>
-            <h2>Delete Bank Connection</h2>
-            <p>
-                Are you sure you want to delete this connection? This will remove all associated accounts and transaction data from your records.
-            </p>
-            <div class="modal-buttons">
-                <button id="confirm-delete-connection-btn" class="confirm-delete-category-btn">Delete</button>
-                <button id="cancel-delete-connection-btn" class="cancel-delete-category-btn">Cancel</button>
-            </div>
         </div>
     </div>
 
@@ -343,7 +253,7 @@
             <p>
                 A verification email has been sent to your new email address. Please check that inbox and click the verification link to complete your email change.
             </p>
-            <p class="profile-delete-info">
+            <p style="font-size: 13px; color: #666; margin-top: 10px;">
                 Your current email address will remain active until you verify the new one.
             </p>
             <div class="modal-buttons">
@@ -430,59 +340,20 @@
         $(document).ready(function() {
             let mfaVerified = false; // Track if MFA was successfully verified
 
-            // Handle MFA toggle switch
-            $('#mfa-toggle').on('change', function() {
-                const isChecked = $(this).is(':checked');
-                const icon = $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon');
-                
-                if (isChecked) {
-                    // Enabling MFA - show QR modal
-                    mfaVerified = false;
-                    $.post('/enable_mfa', function(data) {
-                        if (data.status === 'success' && data.qr_url) {
-                            $('#mfa-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code">');
-                            $('#mfa-secret-key').text(data.secret);
-                            $('#mfa-verify-message').text('');
-                            $('#mfa-code').val('');
-                            $('#mfa-qr-modal').css('display', 'flex');
-                        } else {
-                            // Error - revert toggle
-                            $('#mfa-toggle').prop('checked', false);
-                            icon.addClass('toggle-off');
-                        }
-                    });
-                } else {
-                    // Disabling MFA - show confirmation modal
-                    $('#disable-mfa-modal').css('display', 'flex');
-                }
-            });
-
-            // Initialize toggle icon based on checkbox state
-            const mfaToggle = $('#mfa-toggle');
-            const mfaIcon = $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon');
-            if (mfaToggle.prop('checked')) {
-                mfaIcon.removeClass('toggle-off');
-            } else {
-                mfaIcon.addClass('toggle-off');
-            }
-
-            // Handle toggle switch click
-            $('.toggle-switch[data-checkbox="mfa-toggle"]').on('click', function() {
-                const checkbox = $('#mfa-toggle');
-                const icon = $(this).find('.toggle-icon');
-                
-                // Toggle checkbox state
-                checkbox.prop('checked', !checkbox.prop('checked'));
-                
-                // Toggle icon state
-                if (checkbox.prop('checked')) {
-                    icon.removeClass('toggle-off');
-                } else {
-                    icon.addClass('toggle-off');
-                }
-                
-                // Trigger change event
-                checkbox.trigger('change');
+            $('#enable-mfa-btn').on('click', function() {
+                mfaVerified = false; // Reset flag
+                // Existing enable MFA logic...
+                $.post('/enable_mfa', function(data) {
+                    if (data.status === 'success' && data.qr_url) {
+                        $('#mfa-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code" style="width:200px;height:200px;">');
+                        $('#mfa-secret-key').text(data.secret);
+                        $('#mfa-verify-message').text('');
+                        $('#mfa-code').val(''); // Clear previous code
+                        $('#mfa-qr-modal').css('display', 'flex');
+                    } else {
+                        $('#mfa-status-message').text('Error enabling MFA.');
+                    }
+                });
             });
 
             // Copy MFA secret to clipboard
@@ -507,29 +378,25 @@
             // Handle disable MFA modal
             $('#close-disable-mfa-modal, #cancel-disable-mfa-btn').on('click', function() {
                 $('#disable-mfa-modal').css('display', 'none');
-                // Revert toggle back to on
-                $('#mfa-toggle').prop('checked', true);
-                $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
             });
 
             $('#disable-mfa-modal').on('click', function(e) {
                 if (e.target === this) {
                     $('#disable-mfa-modal').css('display', 'none');
-                    // Revert toggle back to on
-                    $('#mfa-toggle').prop('checked', true);
-                    $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
                 }
             });
 
             $('#confirm-disable-mfa-btn').on('click', function() {
                 $.post('/disable_mfa', function(data) {
                     if (data.status === 'success') {
+                        $('#mfa-status-message').html('<span>Disabled</span>');
+                        $('#disable-mfa-btn').replaceWith(
+                            '<button type="button" id="enable-mfa-btn" class="submit-button">Enable</button>'
+                        );
                         $('#disable-mfa-modal').css('display', 'none');
                     } else {
+                        $('#mfa-status-message').text('Error disabling MFA.');
                         $('#disable-mfa-modal').css('display', 'none');
-                        // Revert toggle
-                        $('#mfa-toggle').prop('checked', true);
-                        $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
                     }
                 });
             });
@@ -541,9 +408,6 @@
                         if (data.status === 'success') {
                             $('#mfa-code').val('');
                             $('#mfa-verify-message').text('');
-                            // Revert toggle to off
-                            $('#mfa-toggle').prop('checked', false);
-                            $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').addClass('toggle-off');
                         }
                     });
                 }
@@ -571,6 +435,15 @@
                     if (data.status === 'success') {
                         mfaVerified = true; // Mark as verified
                         $('#mfa-verify-message').css('color', 'green').text('MFA enabled successfully!');
+                        // Update status and button in the profile section
+                        $('#mfa-status-message').html('<span">Enabled</span>');
+                        $('#enable-mfa-btn').replaceWith(
+                            '<button type="button" id="disable-mfa-btn" class="submit-button">Disable</button>'
+                        );
+                        // Attach the disable handler to the new button
+                        $('#disable-mfa-btn').on('click', function() {
+                            $('#disable-mfa-modal').css('display', 'flex');
+                        });
                         setTimeout(function() { $('#mfa-qr-modal').hide(); }, 1500);
                     } else {
                         $('#mfa-verify-message').css('color', 'red').text('Invalid code. Please try again.');
@@ -1423,268 +1296,6 @@
                     error: function() {
                         passwordMfaError.text('Error verifying MFA. Please try again.').show();
                     }
-                });
-            });
-        });
-
-        // Bank Connections Management
-        $(document).ready(function() {
-            const connectBankBtn = $('#connect-bank-btn');
-
-            // Connect bank account - Load Quiltt Connector
-            connectBankBtn.on('click', function() {
-                const connectorId = '{{ connector_id if connector_id else "" }}';
-                
-                console.log('Connect Bank Account clicked');
-                console.log('Connector ID:', connectorId || 'MISSING');
-                
-                if (!connectorId || connectorId === '') {
-                    console.error('Connector ID is missing');
-                    alert('Quiltt Connector ID is missing.\n\nPlease:\n1. Go to https://dashboard.quiltt.dev/\n2. Create a new Connector\n3. Add QUILTT_CONNECTOR_ID to your .env file\n\nSee QUILTT_QUICK_START.md for details.');
-                    return;
-                }
-
-                console.log('Fetching fresh session token...');
-                
-                // Fetch a fresh session token from the server
-                $.ajax({
-                    url: '/quiltt/get-session-token',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    success: function(response) {
-                        if (response.status === 'success' && response.session_token) {
-                            console.log('Fresh session token received');
-                            loadQuilttConnector(response.session_token, connectorId);
-                        } else {
-                            console.error('Failed to get session token:', response);
-                            alert('Unable to connect bank. Please check server logs for details.');
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        console.error('Error fetching session token:', error);
-                        if (xhr.status === 500) {
-                            alert('Unable to connect bank. Quiltt API credentials may not be configured.\n\nPlease add QUILTT_API_KEY and QUILTT_ENVIRONMENT_ID to your server environment.\n\nSee QUILTT_QUICK_START.md for setup instructions.');
-                        } else {
-                            alert('Error connecting to bank service. Please try again.');
-                        }
-                    }
-                });
-            });
-
-            function loadQuilttConnector(sessionToken, connectorId) {
-                console.log('Loading Quiltt Connector SDK...');
-                
-                // Load Quiltt Connector SDK if not already loaded
-                if (typeof Quiltt === 'undefined') {
-                    const script = document.createElement('script');
-                    script.src = 'https://cdn.quiltt.io/v1/connector.js';
-                    script.onload = function() {
-                        console.log('Quiltt SDK loaded successfully');
-                        openQuilttConnector(sessionToken, connectorId);
-                    };
-                    script.onerror = function() {
-                        console.error('Failed to load Quiltt SDK');
-                        alert('Failed to load Quiltt Connector SDK. Please check your internet connection.');
-                    };
-                    document.head.appendChild(script);
-                } else {
-                    console.log('Quiltt SDK already loaded');
-                    openQuilttConnector(sessionToken, connectorId);
-                }
-            }
-
-            function openQuilttConnector(sessionToken, connectorId) {
-                console.log('openQuilttConnector called');
-                console.log('Authenticating with Quiltt...');
-                
-                try {
-                    // Authenticate with session token
-                    Quiltt.authenticate(sessionToken);
-                    
-                    console.log('Creating Quiltt Connector instance...');
-                    
-                    // Connect with the connector ID
-                    const connector = Quiltt.connect(connectorId, {
-                        onLoad: function(metadata) {
-                            console.log('Connector loaded:', metadata);
-                        },
-                        onExitSuccess: function(metadata) {
-                            console.log('Bank connected successfully:', metadata);
-                            // Reload page to show new connection
-                            window.location.reload();
-                        },
-                        onExitAbort: function(metadata) {
-                            console.log('User cancelled connection:', metadata);
-                        },
-                        onExitError: function(metadata) {
-                            console.log('Error connecting bank:', metadata);
-                            alert('Error connecting bank. Please try again.');
-                        },
-                        onEvent: function(eventType, metadata) {
-                            console.log('Connector event:', eventType, metadata);
-                        }
-                    });
-                    
-                    console.log('Opening Quiltt Connector modal...');
-                    connector.open();
-                } catch (error) {
-                    console.error('Error initializing Quiltt Connector:', error);
-                    alert('Error opening bank connection: ' + error.message);
-                }
-            }
-
-            // Disconnect bank
-            let pendingDisconnectConnectionId = null;
-            let pending$ConnectionCard = null;
-            
-            $(document).on('click', '.disconnect-btn', function() {
-                pendingDisconnectConnectionId = $(this).data('connection-id');
-                pending$ConnectionCard = $(this).closest('.connection-card');
-                $('#disconnect-connection-modal').fadeIn(200);
-                document.body.classList.add('modal-open');
-                document.documentElement.classList.add('modal-open');
-            });
-
-            // Close disconnect modal
-            $('#close-disconnect-connection-modal, #cancel-disconnect-connection-btn').on('click', function() {
-                $('#disconnect-connection-modal').fadeOut(200);
-                document.body.classList.remove('modal-open');
-                document.documentElement.classList.remove('modal-open');
-                pendingDisconnectConnectionId = null;
-                pending$ConnectionCard = null;
-            });
-
-            // Close disconnect modal on backdrop click
-            $('#disconnect-connection-modal').on('click', function(e) {
-                if (e.target.id === 'disconnect-connection-modal') {
-                    $(this).fadeOut(200);
-                    document.body.classList.remove('modal-open');
-                    document.documentElement.classList.remove('modal-open');
-                    pendingDisconnectConnectionId = null;
-                    pending$ConnectionCard = null;
-                }
-            });
-
-            // Confirm disconnect
-            $('#confirm-disconnect-connection-btn').on('click', function() {
-                if (!pendingDisconnectConnectionId) return;
-                
-                $.ajax({
-                    url: '/quiltt/disconnect',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ connection_id: pendingDisconnectConnectionId }),
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            // Update the UI immediately
-                            const $status = pending$ConnectionCard.find('.connection-status');
-                            const $actions = pending$ConnectionCard.find('.connection-actions');
-                            
-                            // Update status text and color
-                            $status.text('DISCONNECTED').css('color', '#dc3545');
-                            
-                            // Replace buttons with Delete button
-                            $actions.html(`
-                                <button class="delete-connection-btn danger-button" data-connection-id="${pendingDisconnectConnectionId}">
-                                    <i class="fa-solid fa-trash"></i> Delete
-                            </button>
-                        `);
-                    } else {
-                        alert('Failed to disconnect bank: ' + (response.message || 'Unknown error'));
-                    }
-                },
-                error: function() {
-                    alert('Error disconnecting bank. Please try again.');
-                },
-                complete: function() {
-                    $('#disconnect-connection-modal').fadeOut(200);
-                    document.body.classList.remove('modal-open');
-                    document.documentElement.classList.remove('modal-open');
-                    pendingDisconnectConnectionId = null;
-                    pending$ConnectionCard = null;
-                }
-            });
-        });            // Delete connection (for disconnected accounts)
-            let pendingDeleteConnectionId = null;
-            
-            $(document).on('click', '.delete-connection-btn', function() {
-                pendingDeleteConnectionId = $(this).data('connection-id');
-                $('#delete-connection-modal').fadeIn(200);
-                document.body.classList.add('modal-open');
-                document.documentElement.classList.add('modal-open');
-            });
-
-            // Close delete connection modal
-            $('#close-delete-connection-modal, #cancel-delete-connection-btn').on('click', function() {
-                $('#delete-connection-modal').fadeOut(200);
-                document.body.classList.remove('modal-open');
-                document.documentElement.classList.remove('modal-open');
-                pendingDeleteConnectionId = null;
-            });
-
-            // Close delete modal on backdrop click
-            $('#delete-connection-modal').on('click', function(e) {
-                if (e.target.id === 'delete-connection-modal') {
-                    $(this).fadeOut(200);
-                    document.body.classList.remove('modal-open');
-                    document.documentElement.classList.remove('modal-open');
-                    pendingDeleteConnectionId = null;
-                }
-            });
-
-            // Confirm delete connection
-            $('#confirm-delete-connection-btn').on('click', function() {
-                if (!pendingDeleteConnectionId) return;
-                
-                $.ajax({
-                    url: '/quiltt/delete',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ connection_id: pendingDeleteConnectionId }),
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            window.location.reload();
-                        } else {
-                            alert('Failed to delete connection: ' + (response.message || 'Unknown error'));
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        alert('Error deleting connection: ' + (xhr.responseJSON?.message || 'Please try again.'));
-                    },
-                    complete: function() {
-                        $('#delete-connection-modal').fadeOut(200);
-                        document.body.classList.remove('modal-open');
-                        document.documentElement.classList.remove('modal-open');
-                        pendingDeleteConnectionId = null;
-                    }
-                });
-            });
-
-            // Toggle account sync
-            $(document).on('change', '.account-sync-toggle', function() {
-                const accountId = $(this).data('account-id');
-                const syncEnabled = $(this).is(':checked');
-                
-                $.ajax({
-                    url: '/quiltt/toggle-sync',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ 
-                        account_id: accountId, 
-                        sync_enabled: syncEnabled 
-                    }),
-                    success: function(response) {
-                        if (response.status !== 'success') {
-                            alert('Failed to update sync setting');
-                            // Revert checkbox
-                            $(this).prop('checked', !syncEnabled);
-                        }
-                    }.bind(this),
-                    error: function() {
-                        alert('Error updating sync setting');
-                        // Revert checkbox
-                        $(this).prop('checked', !syncEnabled);
-                    }.bind(this)
                 });
             });
         });

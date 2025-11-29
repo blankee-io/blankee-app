@@ -115,7 +115,7 @@
                     <label for="dashboard-d-amount">Amount:</label>
                     <div class="currency-input-container">
                         <span class="d-d-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                        <input type="number" id="dashboard-d-amount" name="amount" step="0.01" min="0.01" required inputmode="decimal" placeholder="0.00">
+                        <input type="number" id="dashboard-d-amount" name="amount" step="1" min="1" required inputmode="numeric" placeholder="0">
                     </div>
                 </div>
 
@@ -952,7 +952,7 @@
                 savingsDiv.classList.add('dashboard-d-savings');
                 savingsDiv.innerHTML = `
                     <div class="dashboard-d-label-cell">Savings:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${savingsAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    <div class="dashboard-d-amount-cell">${currencySymbol}${savingsAmount.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
                 `;
                 container.appendChild(savingsDiv);
 
@@ -1457,16 +1457,12 @@
 
 function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
     let entriesArray;
-    let categoriesArray;
     if (entryType === 'income') {
         entriesArray = incomeEntries;
-        categoriesArray = incomeCategories;
     } else if (entryType === 'expense') {
         entriesArray = expenseEntries;
-        categoriesArray = expenseCategories;
     } else if (entryType === 'ca' || entryType.startsWith('ca')) {
         entriesArray = c_expense_entries;
-        categoriesArray = c_expense_categories;
     } else {
         return;
     }
@@ -1476,10 +1472,6 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
     entryDateObj.setUTCHours(0, 0, 0, 0);
     const normalizedDate = entryDateObj.toISOString().split('T')[0];
     const categoryId = String(formData.category);
-
-    // Get category name from categories array
-    const category = categoriesArray.find(c => String(c.id) === categoryId);
-    const categoryName = category ? category.name : 'Unknown';
 
     let entry = entriesArray.find(e => {
         const normalizedEntryDate = new Date(e.date).toISOString().split('T')[0];
@@ -1500,7 +1492,6 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
         } else {
             let newEntry = {
                 category_id: categoryId,
-                category_name: categoryName,
                 date: normalizedDate,
                 total_amount: Number(formData.amount).toFixed(2)
             };
@@ -1522,7 +1513,6 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
         } else {
             let newEntry = {
                 category_id: categoryId,
-                category_name: categoryName,
                 date: normalizedDate,
                 total_amount: Number(formData.amount).toFixed(2)
             };
@@ -1553,8 +1543,14 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
             const num = parseFloat(value);
             if (isNaN(num)) return currencySymbol + '0';
             
-            // Always format with 2 decimal places
-            return currencySymbol + num.toFixed(2);
+            // Check if the number has non-zero decimal part
+            if (Math.floor(num) === num) {
+                // No decimal part or .00
+                return currencySymbol + Math.floor(num);
+            } else {
+                // Has decimal part, format with 2 decimal places
+                return currencySymbol + num.toFixed(2);
+            }
         }
         
         // Function to dynamically create and add an entry row to the dashboard
