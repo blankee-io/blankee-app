@@ -1,0 +1,26 @@
+{
+  "extends": "stylelint-config-standard",
+  "plugins": ["stylelint-order"],
+  "rules": {
+    "order/properties-order": [
+      "position", "top", "right", "bottom", "left", "z-index",
+      "display", "flex", "flex-direction", "justify-content", "align-items",
+      "width", "height", "margin", "padding", "overflow",
+      "background", "border", "border-radius", "box-shadow",
+      "color", "font-size", "font-weight", "text-align",
+      "transition", "transform", "cursor"
+    ],
+    "block-no-empty": true,
+    "declaration-block-no-duplicate-properties": [true, {
+      "ignore": ["consecutive-duplicates-with-different-values"]
+    }],
+    "no-duplicate-selectors": true,
+    "color-no-invalid-hex": true,
+    "font-family-no-duplicate-names": true,
+    "function-calc-no-unspaced-operator": true,
+    "selector-pseudo-class-no-unknown": true,
+    "selector-pseudo-element-no-unknown": true,
+    "unit-no-unknown": true,
+    "property-no-unknown": true
+  }
+}

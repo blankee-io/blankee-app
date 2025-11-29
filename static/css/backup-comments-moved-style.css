@@ -47,67 +47,17 @@ html {
     overflow: hidden auto;
 }
 
-/* Custom Checkbox Styles */
 input[type="checkbox"] {
-    /* Reset native styles */
-    -webkit-appearance: none;
-    appearance: none;
-    background-color: #f9f9f9;
+    align-self: center;
+    /* Not removed via appearance */
     margin: 0;
-    
-    /* Match form field styling */
-    width: 20px;
-    height: 20px;
-    border: 1px solid #d1d1d6;
-    border-radius: 4px;
-    
-    /* Center the checkmark */
-    display: grid;
-    place-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-
-/* Create the checkmark using ::before pseudo element */
-input[type="checkbox"]::before {
-    content: "";
-    width: 12px;
-    height: 12px;
-    transform: scale(0);
-    transition: 120ms transform ease-in-out;
-    box-shadow: inset 1em 1em #e45f1c;
-    
-    /* Shape it as a checkmark */
-    transform-origin: bottom left;
-    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
-    
-    /* Support for Windows High Contrast Mode */
-    background-color: CanvasText;
-}
-
-/* Show checkmark when checked */
-input[type="checkbox"]:checked::before {
-    transform: scale(1);
-}
-
-/* Focus state - match form field focus */
-input[type="checkbox"]:focus {
+    /* For iOS < 15 to remove gradient background */
     background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
-}
-
-/* Disabled state */
-input[type="checkbox"]:disabled {
-    background-color: #e9ecef;
-    border-color: #ced4da;
-    cursor: not-allowed;
-}
-
-input[type="checkbox"]:disabled::before {
-    box-shadow: inset 1em 1em #959495;
+    /* Add if not using autoprefixer */
+    /* appearance: none; */
+    appearance: auto !important;
+    /* Optional: modern checkmark color styling */
+    accent-color: #2aaaa8; 
 }
 
 body {
@@ -333,7 +283,6 @@ body {
     background-color: transparent;
     border-radius: 15px;
     cursor: pointer;
-
     /* Ensure padding is included in the width */
     box-sizing: border-box; 
 }
@@ -343,14 +292,11 @@ body {
     flex-shrink: 0; 
     width: 30px;
     height: 30px;
-
     /* Space between picture and username */
     margin-left: 10px; 
     border-radius: 50%;
-
     /* Ensures the image covers the container without squashing */
     object-fit: cover; 
-
     /* Center the image within the container */
     object-position: center; 
 }
@@ -358,7 +304,6 @@ body {
 .sidenavprofileinfo {
     display: flex;
     flex-direction: column;
-
     /* Aligns content to the right */
     align-items: flex-end; 
     overflow: hidden;
@@ -366,7 +311,6 @@ body {
 
 .sidenav-username {
     display: flex;
-
     /* Aligns text to the right */
     justify-content: flex-end; 
     align-items: center;
@@ -392,7 +336,6 @@ body {
 
 .dropdown-profile-label {
     display: flex;
-
     /* Center vertically */
     align-items: center; 
     height: 40px;
@@ -406,13 +349,10 @@ body {
 .dropdown-profile-section {
     display: flex;
     flex-direction: row;
-
     /* Center horizontally */
     justify-content: left;
-
     /* Center vertically */
     align-items: center;
-
     padding: 10px;
     padding-left: 20px;
     cursor: default;
@@ -469,10 +409,8 @@ body {
 .dropdown-logout {
     /* Use flexbox for vertical centering */
     display: flex;
-
     /* Center text vertically */
     align-items: center;
-
     height: 40px;
     color: #fff;
     font-size: 13px;
@@ -510,13 +448,10 @@ body {
 
 .dropdown-link {
     display: flex;
-
     /* Center text vertically */
     align-items: center;
-
     /* Ensure a consistent height for vertical alignment */   
     height: 40px;
-
     padding: 0;
     padding-right: 20px;
     padding-left: 20px;
@@ -581,10 +516,8 @@ body {
     background: rgb(255 255 255 / 15%);
     border: 3px solid #575757;
     border-radius: 12px;
-
     /* Creates hole-effect */
     box-shadow: 0 0 0 9999px rgb(0 0 0 / 60%); 
-    
     pointer-events: none;
 }
 
@@ -773,7 +706,6 @@ body {
     left: calc(50% - 24.5px);
     width: 199px;
     /* width is longest now */ 
-
     /* width starts after transform */
     transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
     transform: translate(0, calc(-50% - 125px)) scaleX(1);
@@ -790,7 +722,6 @@ body {
     left: calc(50% - 24.5px);
     width: 190px;
     /* width is longest now */
-
     /* width starts after transform */
     transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
     transform: translate(0, calc(-50% - 65px)) scaleX(1);
@@ -807,7 +738,6 @@ body {
     left: calc(50% - 24.5px);
     width: 199px;
     /* width is longest now */
-
     /* width starts after transform */
     transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
     transform: translate(0, calc(-50% - 245px)) scaleX(1);
@@ -849,8 +779,6 @@ body {
     overflow: auto;
     background: rgb(0 0 0 / 30%);
     background-color: transparent;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
 }
 
 /* Modal content box */
@@ -887,18 +815,8 @@ body {
     font-size: 1.5rem;
 }
 
-#dashboard-d-category-input,
-#footer-category-input,
-#footer-ca-category-input {
-    width: 100%;
-    padding: 8px;
-    border: 1px solid #575757;
-    border-radius: 8px;
-    box-sizing: border-box;
-}
 /* Form group */
 .footer-form-group {
-    position: relative;
     margin-bottom: 15px;
 }
 
@@ -1079,10 +997,8 @@ button#autobalance-submit:active {
     position: sticky;
     top: 50px;
     z-index: 99;
-
     /* box model */
     padding: 10px;
-
     /* visual */
     background-color: #f5fffe;
     box-shadow: 0 2px 5px rgb(0 0 0 / 20%);
@@ -1096,25 +1012,19 @@ button#autobalance-submit:active {
 
 .calendarnavbuttonscontainer {
     display: flex;
-
     /* Make children horizontal */
     flex-direction: row; 
-
     /* Ensures the left and right containers are on opposite sides */
     justify-content: space-between; 
-
     /* Vertically centers the content */
     align-items: center; 
-    
     max-width: 875px;
-
     /* Centers the container horizontally */
     margin: 0 auto; 
 }
 
 .calendarnavbuttons {
     display: flex;
-
     /* Aligns the buttons to the right inside this container */
     justify-content: flex-end; 
 }
@@ -1471,15 +1381,23 @@ button.login-button:active {
     text-decoration: underline;
 }
 
-#gwm-input-group {
-    display: grid;
+.input-group {
+    display: flex;
     justify-content: center;
     align-items: center;
     width: 100%;
     height: 40px;
 }
 
+#gwm-input-group {
+    justify-content: center !important;
+}
+
 label[for="goofy_week_mode"] {
+    display: inline-flex;
+    /* Ensure vertical alignment of text */
+    align-items: center;
+    font-size: 13px;
     cursor: pointer;
 }
 
@@ -1507,16 +1425,13 @@ label[for="goofy_week_mode"] {
     top: 0;
     left: 0;
     z-index: 1000;
-
     /* Hidden by default */
     display: none; 
-
     justify-content: center;
     align-items: center;
     width: 100%;
     height: 100%;
     overflow: auto;
-
     /* Black with transparency */
     background-color: rgb(0 0 0 / 50%); 
     backdrop-filter: blur(8px);
@@ -1568,15 +1483,11 @@ label[for="goofy_week_mode"] {
     display: flex;
     flex-direction: row;
     justify-content: center;
-
     /* Align input and label in the middle vertically */
     align-items: center; 
-
     /* Take full width to center the inputs */
     width: 90%; 
-
     margin-bottom: 10px;
-
     /* Prevent label and input from wrapping */
     white-space: nowrap; 
 }
@@ -1585,7 +1496,6 @@ label[for="goofy_week_mode"] {
     /* Adjust this width as needed */
     width: 20%; 
     margin-right: 20px;
-
     /* Align text to the right of the label */
     text-align: right; 
 }
@@ -1639,10 +1549,8 @@ input#setup-profile-starting-savings {
 /* Button container for aligning buttons */
 .setup-profile-button-container {
     display: flex;
-
     /* Align buttons to opposite ends */
     justify-content: space-between; 
-
     width: 100%;
     margin-top: 15px;
 }
@@ -1655,21 +1563,12 @@ input#setup-profile-starting-savings {
     padding: 14px 24px;
     border: none;
     border-radius: 12px;
+    box-shadow: 0 2px 8px rgb(228 95 28 / 30%);
     color: white;
     font-size: 17px;
     font-weight: 600;
     transition: all 0.2s ease;
     cursor: pointer;
-}
-
-.setup-profile-next-button,
-.setup-profile-submit-button {
-    box-shadow: 0 2px 8px #2AAAA85c;
-    background-color: #2AAAA8;
-}
-
-.setup-profile-previous-button {
-    box-shadow: 0 2px 8px #E45F1C5c;
     background-color: #E45F1C;
 }
 
@@ -1681,23 +1580,15 @@ input#setup-profile-starting-savings {
 .setup-profile-previous-button:hover,
 .setup-profile-next-button:hover,
 .setup-profile-submit-button:hover {
+    box-shadow: 0 4px 12px rgb(228 95 28 / 40%);
     transform: translateY(-1px);
-}
-
-.setup-profile-next-button:hover,
-.setup-profile-submit-button:hover {
-    box-shadow: 0 2px 8px #2AAAA85c;
-    background-color: #2AAAA8;
-}
-
-.setup-profile-previous-button:hover {
-    box-shadow: 0 2px 8px #E45F1C5c;
     background-color: #EF9F77;
 }
 
 .setup-profile-previous-button:active,
 .setup-profile-next-button:active,
 .setup-profile-submit-button:active {
+    box-shadow: 0 1px 4px rgb(228 95 28 / 30%);
     transform: translateY(0);
 }
 
@@ -1736,10 +1627,8 @@ input#setup-profile-starting-savings {
     .calendarnavbuttonscontainer {
         /* Stack children vertically */
         flex-direction: column; 
-
         /* Align children to the top */
         justify-content: flex-start; 
-
         margin-bottom: 0;
     }
 
@@ -1764,8 +1653,10 @@ input#setup-profile-starting-savings {
     .setup-profile-previous-button,
     .setup-profile-next-button,
     .setup-profile-submit-button {
+        /* Buttons will stack on top of each other */
         width: 100%; 
-        margin-top: 1rem; 
+        /* Add space between stacked buttons */
+        margin-bottom: 10px; 
     }
 
     .nav-button, 
@@ -1812,7 +1703,6 @@ input#setup-profile-starting-savings {
     align-items: center;
     width: 15px;
     height: 15px;
-
     /* default yellow */
     background: #F7C948; 
     border: 2px solid #575757;
@@ -1886,10 +1776,8 @@ input#setup-profile-starting-savings {
     background-color: transparent;
     background-color:#676767;
     border: none;
-
     /* Make the button circular */
     border-radius: 50%; 
-
     color: white;
     cursor: pointer;
 }
@@ -2020,33 +1908,23 @@ input#setup-profile-starting-savings {
 }
 
 .dashboard-d-credit-divider {
-    display: flex;
-    align-items: center;
     position: relative;
     width: 80%;
     margin: 18px 0 8px;
+    border-top: 2px solid #2AAAA8;
     text-align: center;
 }
 
-.dashboard-d-credit-divider::before,
-.dashboard-d-credit-divider::after {
-    content: '';
-    flex: 1;
-    height: 2px;
-    background: #2AAAA8;
-}
-
-.dashboard-d-credit-divider::before {
-    margin-right: 1em;
-}
-.dashboard-d-credit-divider::after {
-    margin-left: 1em;
-}
-
 .dashboard-d-credit-divider-text {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    padding: 0 16px;
+    background: #f5fffe;
     color: #2AAAA8;
     font-size: 12px;
     font-weight: bold;
+    transform: translateX(-50%);
     letter-spacing: 1px;
 }
 
@@ -2066,6 +1944,7 @@ input#setup-profile-starting-savings {
 
 .dashboard-d-container.dashboard-d-container-highlight {
     z-index: 1000;
+    /* or your desired value */
     border-radius: 15px; 
     outline: 4px solid #E45F1C;
     box-sizing: border-box;
@@ -2188,22 +2067,16 @@ input#setup-profile-starting-savings {
     position: fixed; 
     top: 0;
     left: 0;
-
     /* Sit on top */
     z-index: 1000; 
-
     /* Hidden by default */
     display: none; 
-
     /* Full width */
     width: 100%; 
-
     /* Full height */
     height: 100%; 
-
     /* Enable scroll if needed */
     overflow: auto; 
-
     /* Black background with opacity */
     background-color: rgb(0 0 0 / 40%); 
 }
@@ -2212,10 +2085,9 @@ input#setup-profile-starting-savings {
 .dashboard-d-modal-content {
     /* Could be more or less depending on screen size */
     width: 80%; 
-
     /* Set a max width for larger screens */
     max-width: 350px; 
-
+    /* 15% from the top and centered */
     margin: 15% auto; 
     padding: 20px;
     background-color: #fff;
@@ -2248,7 +2120,6 @@ input#setup-profile-starting-savings {
 
 /* Form group */
 .dashboard-d-form-group {
-    position: relative;
     margin-bottom: 15px;
 }
 
@@ -2267,22 +2138,15 @@ input#setup-profile-starting-savings {
     width: 100%;
     margin-top: 5px;
     margin-bottom: 10px;
-    padding: 10px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 10px;
-    font-size: 14px;
-    transition: all 0.2s ease;
+    padding: 5px;
+    border: 1px solid #A9A9A9;
+    border-radius: 5px;
+    font-size: 12px;
     appearance: none;
-    box-sizing: border-box;
-}
-
-.dashboard-d-form-group input[type="number"]:focus,
-.dashboard-d-form-group select:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
+    appearance: none;
+    appearance: none;
+    /* Ensure proper sizing */
+    box-sizing: border-box; 
 }
 
 /* Submit button */
@@ -2327,14 +2191,12 @@ input#setup-profile-starting-savings {
     width: calc(100% - 40px);
     height: 10px;
     margin: 0 20px;
-    background-color: transparent;
-
+    /* Light gray background */
+    background-color: transparent; 
     /* Optional border for separation */
     border: 4px solid #2AAAA8; 
-
     /* Optional border for separation */
     border-bottom: 3px solid transparent; 
-
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
     color: #2AAAA8;
@@ -2346,18 +2208,13 @@ input#setup-profile-starting-savings {
 /* Style for the bottom empty div */
 .dashboard-d-date-bottom {
     width: calc(100% - 40px);
-
     /* Adjust the height if needed */
     height: 10px; 
-
     margin: 0 20px;
-
     /* Optional border for separation */
     border: 4px solid #2AAAA8; 
-
     /* Optional border for separation */
     border-top: 4px solid transparent; 
-
     border-bottom-left-radius: 10px;
     border-bottom-right-radius: 10px;
 }
@@ -2420,13 +2277,10 @@ input#setup-profile-starting-savings {
     display: flex;
     align-items: center;
     max-width: 875px;
-
     /* This will center the container horizontally */
     margin: 10px auto 0; 
-
     /* Prevents text from wrapping */
     white-space: nowrap; 
-
     /* Adds ellipsis (...) if the content is too long */
     text-overflow: ellipsis; 
 }
@@ -2440,9 +2294,11 @@ input#setup-profile-starting-savings {
 
 #categories-container {
     z-index: 10;
+    /* Adjust width as necessary */
     width: 30%; 
     margin-right: 5px;
     margin-bottom: 10px;
+    background-color: #f5fffe;
 }
 
 #income-categories-table,
@@ -2452,13 +2308,10 @@ input#setup-profile-starting-savings {
 .ca-categories-table {
     width: 100%;
     table-layout: fixed;
-
     /* Allows borders to be handled separately */
     border-collapse: collapse; 
-
     /* Space between the two categories tables */
     margin-bottom: 10px; 
-
     font-size: clamp(13px, calc(1.13vw + 4.65px), 14px);
 }
 
@@ -2505,14 +2358,15 @@ input#setup-profile-starting-savings {
     height: 10px;
     min-height: 10px;
     max-height: 10px;
+    /* Remove any margin */
     margin: 0; 
+    /* Remove any padding */
     padding: 0; 
     background-color: #E6FAF9 !important;
+    /* Disable borders */
     border: none; 
-
     /* Control the line-height to avoid extra space */
     line-height: 0; 
-
     box-sizing: border-box;
 }
 
@@ -2524,7 +2378,6 @@ input#setup-profile-starting-savings {
     color: #E6FAF9;
     font-size: 2px;
     --base-font-size: 3px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: .7vw; 
 }
@@ -2540,11 +2393,10 @@ input#setup-profile-starting-savings {
 
 .dashboard-this-week-bottom td {
     height: 10px;
+    /* Remove any padding inside the cells */
     padding: 0; 
-
     /* Optional, in case you want it to be transparent */
     background-color: transparent; 
-
     box-sizing: border-box;
 }
 
@@ -2591,7 +2443,6 @@ input#setup-profile-starting-savings {
     padding-left: calc(var(--base-padding) + var(--p-scaling-factor));
     text-align: left;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --p-scaling-factor: 0.9vw; 
 }
@@ -2668,12 +2519,11 @@ input#setup-profile-starting-savings {
 .search-btn-container {
     display: flex;
     flex-direction: row;
+    /* Align items to the right */
     justify-content: flex-end; 
     align-items: center;
-
     /* Adjust spacing between buttons as needed */
     gap: 5px; 
-
     margin-top: 10px;
 }
 
@@ -2684,10 +2534,8 @@ input#setup-profile-starting-savings {
     padding: 0 10px;
     background: #fff;
     border: 1px solid #ccc;
-
     /* Half of height for pill shape */
     border-radius: 12.5px; 
-
     outline: none;
     color: #575757;
     font-size: 12px;
@@ -2697,6 +2545,7 @@ input#setup-profile-starting-savings {
 
 .clear-filter-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: none; 
     justify-content: center;
     align-items: center;
@@ -2718,21 +2567,23 @@ input#setup-profile-starting-savings {
 }
 
 .clear-filter-btn:hover {
+    /* Darker shade on hover */
     color: #575757; 
 }
 
 .category-btn-container {
     display: flex;
     flex-direction: row;
+    /* Align items to the right */
     justify-content: flex-end; 
     align-items: center;
-
     /* Adjust spacing between buttons as needed */
     gap: 5px; 
 }
 
 .add-category-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: flex; 
     justify-content: center;
     align-items: center;
@@ -2741,6 +2592,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: transparent;
     border: none;
+    /* Make the button circular */
     border-radius: 50%;
     color: white;
     font-size: 18px;
@@ -2760,11 +2612,13 @@ input#setup-profile-starting-savings {
 }
 
 .add-category-btn:hover {
+    /* Darker shade on hover */
     color: #434343; 
 }
 
 .edit-category-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: flex; 
     justify-content: center;
     align-items: center;
@@ -2773,6 +2627,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: transparent;
     border: none;
+    /* Make the button circular */
     border-radius: 50%; 
     color: white;
     font-size: 16px;
@@ -2792,11 +2647,13 @@ input#setup-profile-starting-savings {
 }
 
 .edit-category-btn:hover {
+    /* Darker shade on hover */
     color: #434343; 
 }
 
 .add-recurring-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: flex; 
     justify-content: center;
     align-items: center;
@@ -2805,6 +2662,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: transparent;
     border: none;
+    /* Make the button circular */
     border-radius: 50%; 
     color: white;
     font-size: 16px;
@@ -2824,11 +2682,13 @@ input#setup-profile-starting-savings {
 }
 
 .add-recurring-btn:hover {
+    /* Darker shade on hover */
     color: #434343; 
 }
 
 .toggle-hidden-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: flex; 
     justify-content: center;
     align-items: center;
@@ -2837,6 +2697,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: transparent;
     border: none;
+    /* Make the button circular */
     border-radius: 50%; 
     color: white;
     font-size: 16px;
@@ -2856,6 +2717,7 @@ input#setup-profile-starting-savings {
 }
 
 .toggle-hidden-btn:hover {
+    /* Darker shade on hover */
     color: #434343; 
 }
 
@@ -2882,6 +2744,7 @@ input#setup-profile-starting-savings {
     top: 0;
     left: 0;
     z-index: 9998;
+    /* Shown when modal is open */
     display: none; 
     width: 100vw;
     height: 100vh;
@@ -2896,6 +2759,7 @@ input#setup-profile-starting-savings {
     top: 50%;
     left: 50%;
     z-index: 9999;
+    /* Set to flex when shown */
     display: none; 
     flex-direction: row;
     align-items: center;
@@ -2955,33 +2819,26 @@ input#setup-profile-starting-savings {
     flex-wrap: wrap;
     margin-left: 5px;
     padding: 2px;
-
     /* Remove the default focus outline */
     outline: none; 
-
     white-space: normal;
 }
 
 /* Ensure the input field is clickable */
 .edit-input {
     position: relative;
-
     /* Ensure it appears above other elements */
     z-index: 100; 
-
     /* Ensure no browser styles block focus */
     outline: none; 
-
     pointer-events: auto;
 }
 
 .delete-category-btn {
     position: absolute;
     top: 50%;
-
     /* Move the button 10px further to the right */
     right: 0; 
-    
     display: none;
     border: none;
     color: #f94449;
@@ -2994,10 +2851,8 @@ input#setup-profile-starting-savings {
 .rename-category-btn {
     position: absolute;
     top: 50%;
-
     /* Move the button 10px further to the right */
     right: 0; 
-
     display: none;
     border: none;
     color: #575757;
@@ -3018,6 +2873,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     padding-right: 10px;
     background: transparent;
+    /* Light gray border */
     border: none; 
     border-radius: 5px;
     outline: none;
@@ -3063,20 +2919,10 @@ input#setup-profile-starting-savings {
 #editCategoryInput {
     flex: 1;
     width: 150px;
-    padding: 10px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 10px;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     font-size: 12px;
-    transition: all 0.2s ease;
-    box-sizing: border-box;
-}
-
-#editCategoryInput:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
 }
 
 .confirm-edit-category-btn {
@@ -3125,6 +2971,7 @@ input#setup-profile-starting-savings {
     left: 0;
     z-index: 1000;
     display: none;
+    /* Centering the modal */
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -3306,7 +3153,6 @@ input#setup-profile-starting-savings {
     background: #fff;
     border-radius: 16px;
     box-shadow: 0 10px 40px rgb(0 0 0 / 20%);
-
     /* ensures padding is included within width */
     box-sizing: border-box; 
 }
@@ -3409,7 +3255,6 @@ input#setup-profile-starting-savings {
 /* Move the red exclamation circle up by the height of .dashboard-m-date */
 .dashboard-m-remainder.negative::before {
     left: -3px;
-
     /* Inherit the existing styles for the red circle */
     /* Move up by the height of .dashboard-m-date (assume 100% of parent for now) */
     transform: translateY(calc(-1 * var(--dashboard-m-date-height, 0px)) + 2.5vh);
@@ -3488,7 +3333,6 @@ input#setup-profile-starting-savings {
     text-align: left;
     vertical-align: bottom;
     --base-padding: .2px;
-    
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -3498,31 +3342,25 @@ input#setup-profile-starting-savings {
 .year-dropdown {
     /* Match the height of the header */
     height: 25px; 
-
     /* Add space between month and year dropdowns */
     margin-right: 0; 
-
     /* Optional: Make background transparent */
     background-color: transparent; 
-
     /* Explicitly remove the border */ /* Remove the outline */
     border: none; 
     outline: none;
-
     color: #2AAAA8;
-
     /* Use the same font size as the header */
     font-size: 25px; 
     font-weight: bold;
-
     /* Center the text vertically */
     line-height: 25px; 
-
     cursor: pointer;
-    
+    appearance: none;
     /* Remove default dropdown appearance for consistency */ /* For Safari */
     appearance: none; 
-
+    /* For Firefox */
+    appearance: none; 
     box-sizing: border-box;
 }
 
@@ -3591,10 +3429,8 @@ input#setup-profile-starting-savings {
     border-top-right-radius: 10px;
     color: white;
     font-size: 14px;
-
     /* Ensure columns stay aligned */
     table-layout: fixed; 
-
     /* Ensure borders are visible */
     border-collapse: collapse; 
 }
@@ -3624,10 +3460,8 @@ input#setup-profile-starting-savings {
 #savings-row-right {
     /* Ensure all tables take up the same width */
     width: 100%; 
-
     /* Ensure columns stay aligned */
     table-layout: fixed; 
-
     border-collapse: collapse;
     font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
 }
@@ -3637,10 +3471,8 @@ input#setup-profile-starting-savings {
     /* Set the height to 10px */
     height: 10px !important;
     padding: 0;
-
     /* Set the background to transparent */
     background-color: transparent;
-
     /* Remove any borders if needed */
     border: none !important;
 }
@@ -3681,7 +3513,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -3693,7 +3524,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -3705,7 +3535,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -3717,7 +3546,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -3729,7 +3557,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -3741,7 +3568,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -3862,7 +3688,6 @@ input#setup-profile-starting-savings {
 /* Move the red exclamation circle up by the height of .dashboard-m-date */
 .dashboard-m-remainder.below-threshold::before {
     left: -3px;
-
     /* Inherit the existing styles for the red circle */
     /* Move up by the height of .dashboard-m-date (assume 100% of parent for now) */
     transform: translateY(calc(-1 * var(--dashboard-m-date-height, 0px)) + 2.5vh);
@@ -3929,8 +3754,8 @@ input#setup-profile-starting-savings {
 
 /* Arrow for menu to the left of the mouse (arrow on right) */
 .context-menu-arrow-right {
-    /* triangle pointing up-right */
     right: 12px;
+    /* triangle pointing up-right */
 }
 
 .context-menu-arrow {
@@ -4018,9 +3843,11 @@ input#setup-profile-starting-savings {
 
 .dashboard-m-month-year-header {
     display: flex;
+    /* center children horizontally */
     justify-content: center;
+    /* optional: center vertically */
     align-items: center;
-    margin: 0 50%;
+    margin: 0 auto;
     font-size: 25px;
     font-weight: bold;
     text-align: center;
@@ -4041,24 +3868,21 @@ input#setup-profile-starting-savings {
 .dashboard-m-year-dropdown {
     /* Match the height of the header */
     height: 30px; 
+    /* Optional: Make background transparent */
     background-color: transparent; 
-
-
     /* Explicitly remove the border */ /* Remove the outline */
     border: none; 
     outline: none;
-
     color: #2AAAA8;
-
     /* Use the same font size as the header */
     font-size: inherit; 
-
     font-weight: bold;
     cursor: pointer;
-    
-    /* Remove default dropdown appearance for consistency */ /* For Safari */ /* For Firefox */
+    appearance: none;
+    /* Remove default dropdown appearance for consistency */
     appearance: none; 
-
+    /* For Safari */ /* For Firefox */
+    appearance: none; 
     box-sizing: border-box;
 }
 
@@ -4121,20 +3945,15 @@ input#setup-profile-starting-savings {
 /* Ensure each date div inside the td fits without extra space */
 .dashboard-m-date {
     display: flex;
-
     /* Stack child divs vertically */
     flex-direction: column; 
-
     /* Ensure even spacing between divs */
     justify-content: space-between; 
-
     /* Make the div fill the td */
     height: 100%; 
-
     box-sizing: border-box;
-    margin: 10px 1px;
+    margin-top: 20px;
     transition: opacity 0.2s ease;
-    font-size: 0.8em;
 }
 
 .dashboard-m-date:hover {
@@ -4143,10 +3962,8 @@ input#setup-profile-starting-savings {
 
 .dashboard-m-day-label {
     display: flex;
-
     /* Ensure this takes up 18% of the total height */
     flex: 1 0 18%; 
-
     justify-content: center;
     align-items: center;
     margin: 0;
@@ -4154,17 +3971,14 @@ input#setup-profile-starting-savings {
     background-color: #676767;
     color: white;
     font-size: clamp(7px, 2vw, 14px);
-
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
 
 .dashboard-m-date-number {
     display: flex;
-
     /* Adjust the height to 10% */
     flex: 2 0 10%; 
     justify-content: center;
@@ -4174,10 +3988,8 @@ input#setup-profile-starting-savings {
     background-color: #A9A9A9;
     color: white;
     font-size: clamp(7px, 2vw, 14px);
-
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
@@ -4191,15 +4003,11 @@ input#setup-profile-starting-savings {
     margin: 0;
     padding: 0;
     background-color: #2AAAA8;
-
     /* Adjust text color if needed */
     color: white; 
-
     font-size: clamp(7px, 2vw, 14px);
-
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
@@ -4213,15 +4021,11 @@ input#setup-profile-starting-savings {
     margin: 0;
     padding: 0;
     background-color: #E45F1C;
-
     /* Adjust text color if needed */
     color: white; 
-
     font-size: clamp(7px, 2vw, 14px);
-
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
@@ -4235,64 +4039,61 @@ input#setup-profile-starting-savings {
     margin: 0;
     padding: 0;
     background-color: #A9A9A9;
-
     /* Adjust text color if needed */
     color: white; 
-
     font-size: clamp(7px, 2vw, 14px);
-
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
 
-.dashboard-m-ca-divider,
-.dashboard-m-s-divider {
-    display: flex;
-    align-items: center;
+.dashboard-m-ca-divider {
     position: relative;
     width: 80%;
     margin: 12px auto 8px;
+    border-top: 2px solid #2AAAA8;
     text-align: center;
 }
 
-.dashboard-m-ca-divider::before,
-.dashboard-m-ca-divider::after,
-.dashboard-m-s-divider::before,
-.dashboard-m-s-divider::after {
-    content: '';
-    flex: 1;
-    height: 2px;
-    background: #2AAAA8;
-}
-
-.dashboard-m-ca-divider::before,
-.dashboard-m-s-divider::before {
-    margin-right: 0.5em;
-}
-
-.dashboard-m-ca-divider::after,
-.dashboard-m-s-divider::after {
-    margin-left: 0.5em;
-}
-
-.dashboard-m-ca-divider-text,
-.dashboard-m-s-divider-text {
-    /* No background-color needed! */
+.dashboard-m-ca-divider-text {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    padding: 0 8px;
+    background: #f5fffe;
     color: #2AAAA8;
     font-size: 10px;
     font-weight: bold;
+    transform: translateX(-50%);
+    letter-spacing: 1px;
+}
+
+.dashboard-m-s-divider {
+    position: relative;
+    width: 80%;
+    margin: 12px auto 8px;
+    border-top: 2px solid #2AAAA8;
+    text-align: center;
+}
+
+.dashboard-m-s-divider-text {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    padding: 0 8px;
+    background: #f5fffe;
+    color: #2AAAA8;
+    font-size: 10px;
+    font-weight: bold;
+    transform: translateX(-50%);
     letter-spacing: 1px;
 }
 
 .dashboard-m-ca-balance {
     display: flex;
-
     /* Ensure these divs take up 18% each */
     flex: 6 0 18%; 
-
     justify-content: space-between;
     align-items: center;
     margin: 0;
@@ -4300,25 +4101,19 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: #676767;
     border-radius: 10px;
-
     /* Adjust text color if needed */
     color: white; 
-
     font-size: clamp(7px, 2vw, 14px);
-
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
 
 .dashboard-m-savings {
     display: flex;
-
     /* Ensure these divs take up 18% each */
     flex: 6 0 18%; 
-
     justify-content: space-between;
     align-items: center;
     margin: 0;
@@ -4326,15 +4121,11 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: #2AAAA8;
     border-radius: 10px;
-
     /* Adjust text color if needed */
     color: white; 
-
     font-size: clamp(7px, 2vw, 14px);
-
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
@@ -4371,13 +4162,10 @@ input#setup-profile-starting-savings {
     position: absolute;
     inset: 0;
     z-index: 1;
-
     /* Adjust the darkness with the alpha value */
     background-color: rgb(157 157 157 / 70%); 
-
     /* Preserve the border radius */
     border-radius: inherit; 
-
     border-radius: 10px;
     content: '';
 }
@@ -4385,15 +4173,13 @@ input#setup-profile-starting-savings {
 .dashboard-m-today {
     /* Add a border to further emphasize today's date */
     border: 4px solid #E45F1C; 
-    border-radius: 1.4em 1.4em .5em .5em;
+    border-radius: 15px;
 }
 
 .dashboard-d-today-container {
     display: flex;
-
     /* Centers horizontally */
     justify-content: center;
-
     /* Aligns content to the bottom */
     align-items: flex-end;
     height: 15px;
@@ -4438,21 +4224,16 @@ input#setup-profile-starting-savings {
 #year-calendar {
     display: grid;
     gap: clamp(5px, 10px, 15px);
-
     /* Always 3 columns */
     grid-template-columns: repeat(3, 1fr); 
-
     width: 100%;
     max-width: 875px;
     margin: 0 auto;
     padding-bottom: 10px;
     background-color: transparent;
-
     /* Ensure equal row height for all months */
     grid-auto-rows: 1fr; 
-
     box-sizing: border-box;
-
     /* Center the month containers horizontally */
     justify-items: center; 
 }
@@ -4466,18 +4247,13 @@ input#setup-profile-starting-savings {
 /* Style for each month container */
 .dashboard-y-month-container {
     display: flex;
-
     /* Allow content to stack vertically */
     flex-direction: column; 
-
     /* Align content to the top */
     justify-content: flex-start; 
-
     width: 100%;
-
     /* Ensure height auto-adjusts */
     height: auto; 
-
     text-align: center;
     box-sizing: border-box;
 }
@@ -4498,10 +4274,8 @@ input#setup-profile-starting-savings {
 .dashboard-y-calendar-table td {
     /* Responsive width */
     width: clamp(15px, 3vw, 25px); 
-
     /* Responsive height */
     height: clamp(15px, 3vw, 25px); 
-
     padding: 2px 0;
     font-size: clamp(8px, 2vw, 12px);
     text-align: center;
@@ -4568,36 +4342,45 @@ input#setup-profile-starting-savings {
 
 /* Profile Page Styles */
 .profile-box {
-    display: grid;
-    grid-template-columns: 1fr;
-    min-width: fit-content;
-    max-width: 702px;
-    padding-top: 25px;
-    margin-top: 2em;
-    margin-left: auto;
-    margin-right: auto;    
+    justify-content: space-between;
+    /* Allow the width to adjust based on content */
+    width: 875px; 
+    /* Set a max-width to ensure it doesn't stretch too far */
+    max-width: 100%; 
+    margin: 0 auto;
     background-color: transparent;
-    box-sizing: border-box;
+    text-align: center;
 }
 
 .profile-content {
-    display: grid;
-    justify-items: center;
-    height: 100%;
-    align-items: center;
+    display: flex;
+    /* Distribute space between the two sections */
+    justify-content: center; 
+    /* Align content vertically */
+    align-items: center; 
+    /* Ensure the container takes up full width */
+    width: calc(100% - 20px); 
+    /* Set height for the container (adjust if needed) */
+    height: 100%; 
 }
 
 .profile-header, 
 .profile-actions {
+    /* Each container takes up 50% of the width */
+    width: 50%; 
     /* Ensure padding doesn't affect the width */
     box-sizing: border-box; 
 }
 
 .profile-header {
     display: flex;
+    /* Stack the content vertically */
     flex-direction: column; 
+    /* Vertically center the content */
     justify-content: center; 
+    /* Center items horizontally */
     align-items: center; 
+    /* Optional padding for spacing */
     padding: 10px; 
 }
 
@@ -4845,20 +4628,15 @@ input#setup-profile-starting-savings {
 
 .profile-info {
     /* Adjust margin to be closer to input fields */
-    margin-bottom: 20px;
-
+    margin-bottom: 20px; 
     /* Ensure the text color is prominent */
     background-color: #2aaaa8; 
-
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
-
     /* Ensure the text color is prominent */
     color: white; 
-
     /* Increased font size */
     font-size: 18px; 
-
     /* Make the text bold */
     font-weight: bold; 
 }
@@ -4869,59 +4647,66 @@ input#setup-profile-starting-savings {
 }
 
 .profile-actions {
-    display: grid;
+    display: flex;
+    /* Stack the forms vertically */
+    flex-direction: column; 
     text-align: right;
 }
 
-.profile-form {
-    padding: 0;
-    margin-bottom: 8px;
+/* When the screen width is less than 75px, stack the header above the actions */
+@media (width <= 740px) {
+    .profile-content {
+        /* Stack the elements vertically */
+        flex-direction: column; 
+        /* Center them horizontally */
+        align-items: center; 
+    }
+
+    .profile-header, 
+    .profile-actions {
+        /* Make each section take full width */
+        width: 100%; 
+        /* Center the content within each section */
+        text-align: center; 
+    }
+
+    .profile-header {
+        /* Add some space between the header and actions */
+        margin-bottom: 20px; 
+    }
 }
 
 .profile-form .input-group {
     display: flex;
+    justify-content: flex-start !important;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background-color: #f9f9f9;
-    border-radius: 10px;
-    margin-bottom: 8px;
+    /* Ensure the input group takes up the full width */
+    width: auto !important; 
+    margin-right: auto !important;
+    margin-bottom: 5px;
 }
 
 .profile-form label {
     flex-shrink: 0;
-    width: 200px;
-    margin: 0;
-    font-size: 14px;
-    font-weight: 500;
-    color: #000;
-    text-align: right;
+    /* Fixed width for labels */
+    width: 150px; 
+    /* Further reduce margin to bring the label closer to the input */
+    margin-right: -5px; 
+    font-size: 12px;
+    /* Align text to the left within the label */
+    text-align: left; 
 }
 
 .profile-form .login-input {
-    flex: 1;
-    min-width: 180px;
-    padding: 8px 12px;
-    background-color: #fff;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    font-size: 14px;
-    transition: all 0.2s ease;
-}
-
-.profile-form .login-input:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
-}
-
-.profile-form .currency-input-container {
-    flex: 1;
-    min-width: 180px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
+    /* Adjusted width to balance the layout */
+    width: 155px; 
+    /* Fixed height to align with button */
+    height: 25px; 
+    /* Slightly reduce padding for a more compact appearance */
+    padding: 0 6px; 
+    border-radius: 5px;
+    color: #575757;
+    font-size: 12px;
 }
 
 .login-input[type="number"] {
@@ -4929,21 +4714,23 @@ input#setup-profile-starting-savings {
 }
 
 .profile-form .submit-button {
+    position: relative;
+    top: -8px;
     display: flex;
     justify-content: center;
     align-items: center;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
+    width: 25px;
+    height: 25px;
+    margin-left: 20px;
     padding: 0;
     background-color: #E45F1C;
     border: none;
     border-radius: 50%;
     color: white;
-    font-size: 16px;
+    font-size: 14px;
     cursor: pointer;
-    box-sizing: border-box;
-    transition: all 0.2s ease;
+    /* Ensure padding doesn't affect width/height */
+    box-sizing: border-box; 
 }
 
 .profile-form .submit-checkbox {
@@ -4956,7 +4743,6 @@ input#setup-profile-starting-savings {
     padding: 0;
     font-size: 14px;
     cursor: pointer;
-
     /* Ensure padding doesn't affect width/height */
     box-sizing: border-box; 
 }
@@ -4966,7 +4752,6 @@ input#setup-profile-starting-savings {
     width: 65px !important;
     margin-left: 0 !important;
     padding: 0 10px;
-
     /* Make the button circular */
     border-radius: 25px !important; 
 }
@@ -4976,7 +4761,6 @@ input#setup-profile-starting-savings {
     width: 65px !important;
     margin-left: 0 !important;
     padding: 0 10px;
-
     /* Make the button circular */
     border-radius: 25px !important; 
 }
@@ -4999,21 +4783,17 @@ input#setup-profile-starting-savings {
 .input-status {
     position: absolute;
     top: 50%;
-
     /* Position the status icon inside the input field */
     right: 10px; 
+    /* Use flexbox to ensure proper alignment */
     display: flex; 
     align-items: center;
-
     /* Ensure the icon is aligned with the height of the input field */
     height: 100%; 
-
     /* Ensure the icon matches the text color */
     color: inherit; 
-
     font-size: 14px;
     transform: translateY(-50%);
-
     /* Prevent the icon from blocking clicks */
     pointer-events: none; 
 }
@@ -5027,10 +4807,8 @@ input#setup-profile-starting-savings {
     border: none;
     border-radius: 50%; 
     color: white;
-
     /* Show disabled cursor */
     cursor: not-allowed; 
-
     /* Prevent clicking */
     pointer-events: none; 
 }
@@ -5044,10 +4822,8 @@ input#setup-profile-starting-savings {
 .profile-form .submit-button.enabled {
     background-color: #E45F1C;
     color: white;
-
     /* Show clickable cursor */
     cursor: pointer; 
-
     /* Allow clicking */
     pointer-events: auto; 
 }
@@ -5068,34 +4844,27 @@ input#setup-profile-starting-savings {
     position: absolute;
     z-index: 1000;
     display: flex;
+    /* Horizontally center the text */
     justify-content: center;
+    /* Vertically center the text */
     align-items: center;
-
     /* Match the width of the input field */
     width: 100%;
-
     /* Ensure the height adjusts based on content */
     height: auto;
-
     /* Match the padding of the input field */
     padding: 15px;
-
     /* Match the rounded corners of the input field */
     border-radius: 25px;
-    
     box-shadow: 0 2px 10px rgb(0 0 0 / 20%);
-
     /* Start hidden */
     opacity: 0;
     color: white;
-
     /* Match the font size of the input field */
     font-size: 16px;
-
     /* Prevent interactions */
     pointer-events: none;
     transition: opacity 0.5s ease-in-out;
-
     /* Include padding in the width and height calculation */
     box-sizing: border-box;
 }
@@ -5108,34 +4877,24 @@ input#setup-profile-starting-savings {
 .password-requirements {
     position: absolute;
     z-index: 1000;
-
     /* Hidden by default */
     display: none; 
-
     /* Match the width of the input field */
     width: 100%; 
     padding: 10px;
-
     background-color: #E6FAF9;
-
     /* Match the rounded edges of the input field */
     border-radius: 25px; 
-
     box-shadow: 0 2px 10px rgb(0 0 0 / 10%);
-
     /* Start hidden */
     opacity: 0; 
     color: #575757;
-
     /* Smaller font size */
     font-size: 12px; 
-
     /* Align text to the left */
     text-align: left; 
-
     /* Smooth fade-in effect */
     transition: opacity 0.3s ease; 
-
     /* Ensure padding doesn't affect the width */
     box-sizing: border-box; 
 }
@@ -5143,35 +4902,24 @@ input#setup-profile-starting-savings {
 .email-requirements {
     position: absolute;
     z-index: 1000;
-
     /* Hidden by default */
     display: none; 
-
     /* Match the width of the input field */
     width: 100%; 
-
     padding: 10px;
     background-color: #E6FAF9;
-
     /* Match the rounded edges of the input field */
     border-radius: 25px; 
-
     box-shadow: 0 2px 10px rgb(0 0 0 / 10%);
-
     /* Start hidden */
     opacity: 0; 
-
     color: #575757;
-
     /* Smaller font size */
     font-size: 12px; 
-
     /* Align text to the left */
     text-align: left; 
-
     /* Smooth fade-in effect */
     transition: opacity 0.3s ease; 
-
     /* Ensure padding doesn't affect the width */
     box-sizing: border-box; 
 }
@@ -5271,22 +5019,16 @@ input#setup-profile-starting-savings {
 .delete-account-button {
     /* Ensure it behaves as a block-level element like the register button */
     display: block; 
-
     /* Same width as the register button */
     width: 150px; 
     height: 25px;
-
     /* Center the button and add some space above */
     margin: 10px auto; 
-
     background-color: #f94449;
     border: none;
-
     /* Rounded corners to match the register button */
     border-radius: 25px; 
-
     color: white;
-
     /* Font size to match */
     font-size: 14px; 
     text-align: center;
@@ -5301,79 +5043,56 @@ input#setup-profile-starting-savings {
 .profile-section {
     /* Needed for absolute ::before */
     position: relative; 
-
     /* top right bottom left */
-    margin: 30px 0 35px; 
-
+    margin: 10px 0 25px; 
     /* top right bottom left */
-    padding: 16px;
-    background-color: #fff;
-    border-radius: 12px;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    padding: 10px 0; 
+    border: 1px solid #2AAAA8;
+    border-radius: 10px;
 }
 
 .data-section {
     /* Needed for absolute ::before */
     position: relative; 
-
     /* top right bottom left */
-    margin: 30px 0 35px; 
-
+    margin: 10px 0 35px; 
     /* top right bottom left */
-    padding: 16px;
-    background-color: #fff;
-    border-radius: 12px;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    padding: 10px 0; 
+    border: 1px solid #2AAAA8;
+    border-radius: 10px;
 }
 
 /* Profile label */
 .profile-section::before {
     position: absolute;
-    top: -25px;
-    left: 20px;
-    padding: 4px 12px 6px;
-    background-color: #fff;
-    border-radius: 8px 8px 0 0;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    top: -10px;
+    left: 10px;
+    padding: 0 5px;
+    background-color: #f5fffe;
     color: #2AAAA8;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
+    font-size: 12px;
     content: "Profile";
 }
 
 /* Data label */
 .data-section::before {
     position: absolute;
-    top: -25px;
-    left: 20px;
-    padding: 4px 12px 6px;
-    background-color: #fff;
-    border-radius: 8px 8px 0 0;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    top: -10px;
+    left: 10px;
+    padding: 0 5px;
+    background-color: #f5fffe;
     color: #2AAAA8;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
+    font-size: 12px;
     content: "Data";
 }
 
 .section-liner {
     display: flex;
-
     /* or 'row' depending on layout */
     flex-direction: column; 
-
     justify-content: center !important;
     align-items: center;
-    width: 100%;
-    max-width: 100%;
+    min-width: 370px;
 }
 
 /* Notification Styles */
@@ -5381,13 +5100,10 @@ input#setup-profile-starting-savings {
 .notification-section {
     border: 1px solid #2AAAA8;
     border-radius: 10px;
-
     /* top right bottom left */
     padding: 10px 0px; 
-
     /* top right bottom left */
     margin: 10px 0 25px 0; 
-
     /* Needed for absolute ::before */
     position: relative; 
 }
@@ -5541,20 +5257,10 @@ input#setup-profile-starting-savings {
 
 #mfa-qr-modal #mfa-verify-form input[type="text"] {
     margin-bottom: 0.5em;
-    padding: 10px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 10px;
+    padding: 0.4em 0.6em;
+    border: 1px solid #ccc;
+    border-radius: 6px;
     font-size: 1.2em;
-    transition: all 0.2s ease;
-    box-sizing: border-box;
-}
-
-#mfa-qr-modal #mfa-verify-form input[type="text"]:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
 }
 
 #mfa-qr-modal #mfa-verify-form .submit-button {
@@ -5652,10 +5358,8 @@ input#setup-profile-starting-savings {
 
 .recurring-income-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
-
     justify-content: center;
     align-items: center;
     min-width: 350px;
@@ -5678,6 +5382,7 @@ input#setup-profile-starting-savings {
 
 .recurring-header span {
     position: relative;
+    /* Take up remaining space */
     flex: 1;  
     padding-left: 120px;
     color: #2AAAA8;
@@ -5699,10 +5404,8 @@ input#setup-profile-starting-savings {
     width: 100%; 
     border-collapse: collapse;
     --base-font-size: 7.5px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.5vw; 
-
     font-size: calc(var(--base-font-size) + var(--scaling-factor));
     text-align: left;
 }
@@ -5782,12 +5485,14 @@ input#setup-profile-starting-savings {
 .income-action-col {
     padding-right: 2px !important;
     padding-left: 2px !important;
+    /* Aligns content to the right */
     text-align: right !important; 
 }    
 
 .income-actions {
     padding-right: 2px !important;
     padding-left: 2px !important;
+    /* Aligns content to the right */
     text-align: right !important; 
 }   
 
@@ -5946,10 +5651,10 @@ input#setup-profile-starting-savings {
 
 /* General Label & Input Layout */
 form label {
-    /* display: block; */
+    display: block;
     margin: 10px 0 5px;
     font-size: 14px;
-    font-weight: bold;
+    font-weight: 600;
     text-align: left;
 }
 
@@ -5995,10 +5700,6 @@ form select:focus {
     position: relative;
     display: flex;
     align-items: center;
-}
-
-.currency-input-container .login-input {
-    width: 100%;
 }
 
 .currency-symbol {
@@ -6065,9 +5766,12 @@ form select:focus {
 }
 
 .p-currency-symbol {
-    color: #86868b;
-    font-size: 14px;
-    font-weight: 500;
+    position: absolute;
+    top: 5px;
+    color: #888;
+    font-size: 12px;
+    font-weight: bold;
+    transform: translateX(10px);
 }
 
 /* Cadence Inputs */
@@ -6192,20 +5896,8 @@ form select:focus {
 .date-input-row input[type="date"] {
     flex: 1;
     max-width: 120px;
-    padding: 8px 10px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
+    padding: 6px 8px;
     font-size: 12px;
-    transition: all 0.2s ease;
-    box-sizing: border-box;
-}
-
-.date-input-row input[type="date"]:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
 }
 
 #start_date,
@@ -6238,7 +5930,7 @@ form select:focus {
     font-size: 12px;
 }
 
-/* Submit Button 
+/* Submit Button */
 form button[type="submit"] {
     margin-top: 15px;
     padding: 10px 16px;
@@ -6248,7 +5940,7 @@ form button[type="submit"] {
     color: white;
     font-size: 10px;
     cursor: pointer;
-}*/
+}
 
 
 
@@ -6261,15 +5953,11 @@ form button[type="submit"] {
     gap: 16px;
     width: fit-content;
     max-width: 350px;
-
     /* Align to the right */
     margin: 20px 0 0 auto; 
-
     padding: 16px 24px;
-
     /* Example income color */
     background: #59D6D4; 
-
     border-radius: 8px;
     color: white;
     font-size: 16px;
@@ -6286,7 +5974,6 @@ form button[type="submit"] {
     width: 0;
     height: 0;
     border-right: 18px solid transparent;
-
     /* Same as background */
     border-bottom: 18px solid #59D6D4; 
     border-left: 18px solid transparent;
@@ -6328,10 +6015,8 @@ form button[type="submit"] {
 
 .recurring-expense-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
-
     justify-content: center;
     align-items: center;
     min-width: 350px;
@@ -6438,7 +6123,6 @@ form button[type="submit"] {
 .expense-action-col {
     padding-right: 2px !important;
     padding-left: 2px !important;
-
     /* Aligns content to the right */
     text-align: right !important; 
     white-space: nowrap !important;
@@ -6447,7 +6131,6 @@ form button[type="submit"] {
 .expense-actions {
     padding-right: 2px !important;
     padding-left: 2px !important;
-
     /* Aligns content to the right */
     text-align: right !important; 
 }    
@@ -6665,6 +6348,19 @@ form button[type="submit"] {
     filter: drop-shadow(-1.5px 0 0 #59D6D4);  
 }
 
+.recurring-hint-container {
+    display: flex;
+    justify-content: center;
+    margin: 0 auto;
+}
+
+.recurring-hint {
+    display: flex;
+    width: 100%;
+    min-width: 350px;
+    max-width: 650px;
+}
+
 /* Match the color of your table row (adjust as needed) */
 #recurring-expense-callout {
     position: relative;
@@ -6674,10 +6370,8 @@ form button[type="submit"] {
     gap: 16px;
     width: fit-content;
     max-width: 350px;
-
     /* Align to the right */
     margin: 20px 0 0 auto; 
-
     padding: 16px 24px;
     background: #EF9F77;
     border-radius: 8px;
@@ -6695,7 +6389,6 @@ form button[type="submit"] {
     right: 6px;
     width: 0; height: 0;
     border-right: 18px solid transparent;
-
     /* Same as background */
     border-bottom: 18px solid #EF9F77; 
     border-left: 18px solid transparent;
@@ -6754,10 +6447,8 @@ form button[type="submit"] {
 
 .recurring-ca-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
-
     justify-content: center;
     align-items: center;
     min-width: 350px;
@@ -6810,10 +6501,8 @@ form button[type="submit"] {
     display: inline-block;
     width: 100%;
     padding-right: 0;
-
     /* reserve space for the button */
     padding-left: 0; 
-
     font-weight: bold;
     box-sizing: border-box;
 }
@@ -6907,6 +6596,7 @@ form button[type="submit"] {
 .ca-action-col {
     padding-right: 2px !important;
     padding-left: 2px !important;
+    /* Aligns content to the right */
     text-align: right !important; 
     white-space: nowrap !important;
 }    
@@ -6914,6 +6604,7 @@ form button[type="submit"] {
 .ca-actions {
     padding-right: 2px !important;
     padding-left: 2px !important;
+    /* Aligns content to the right */
     text-align: right !important; 
 }    
 
@@ -7107,6 +6798,11 @@ form button[type="submit"] {
     filter: drop-shadow(-1.5px 0 0 #EF9F77);
 }
 
+.floating-hint#income-add-hint::after {
+    border-right: 14px solid #59D6D4;
+    filter: drop-shadow(-1.5px 0 0 #59D6D4);  
+}
+
 .recurring-hint-container {
     display: flex;
     justify-content: center;
@@ -7129,6 +6825,7 @@ form button[type="submit"] {
     gap: 16px;
     width: fit-content;
     max-width: 350px;
+    /* Align to the right */
     margin: 20px 0 0 auto; 
     padding: 16px 24px;
     background: #EF9F77;
@@ -7147,7 +6844,6 @@ form button[type="submit"] {
     right: 6px;
     width: 0; height: 0;
     border-right: 18px solid transparent;
-
     /* Same as background */
     border-bottom: 18px solid #EF9F77; 
     border-left: 18px solid transparent;
@@ -7233,7 +6929,6 @@ form button[type="submit"] {
 
 .buds-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
     justify-content: center;
@@ -7259,6 +6954,7 @@ form button[type="submit"] {
 
 .buds-title span {
     position: relative;
+    /* Take up remaining space */
     flex: 1;  
     padding-left: 120px;
     color: #2AAAA8;
@@ -7269,7 +6965,7 @@ form button[type="submit"] {
 
 .add-bud-btn {
     position: relative;
-    align-self: flex-end;
+    align-self: right;
     width: 120px;
     height: 35px;
     padding: 0;
@@ -7291,12 +6987,14 @@ form button[type="submit"] {
     width: 100%;
     background-color: #575757;
     border-top-left-radius: 10px;
+    /* Round bottom-left corner */
     border-top-right-radius: 10px; 
 }
 
 .bud-name {
     position: relative;
     right: 50px;
+    /* Take up remaining space */
     flex: 1;  
     color: white;
     text-align: center;
@@ -7345,7 +7043,9 @@ form button[type="submit"] {
 }
 
 .bud-table tfoot tr td {
+    /* Round bottom-left corner */
     border-bottom-left-radius: 10px; 
+    /* Round bottom-right corner */
     border-bottom-right-radius: 10px; 
 }
 
@@ -7477,19 +7177,17 @@ form button[type="submit"] {
 .bud-item-edit-input {
     width: 100%;
     height: 100%;
-    padding: 8px 10px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    transition: all 0.2s ease;
+    padding: 0;
+    background: transparent;
+    border: 2px solid #575757;
+    border-radius: 5px;
     outline: none;
     box-sizing: border-box;
 }
 
 .bud-item-edit-input:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
+    background: transparent;
+    border-color: #575757;
 }
 
 /* The Modal (background) */
@@ -7499,6 +7197,7 @@ form button[type="submit"] {
     left: 0;
     z-index: 1000;
     display: none;
+    /* Centering the modal */
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -7545,6 +7244,7 @@ form button[type="submit"] {
     left: 0;
     z-index: 1000;
     display: none;
+    /* Centering the modal */
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -7724,7 +7424,6 @@ form button[type="submit"] {
 
 .credit-accounts-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
     justify-content: center;
@@ -7750,6 +7449,7 @@ form button[type="submit"] {
 
 .credit-accounts-title span {
     position: relative;
+    /* Take up remaining space */
     flex: 1;  
     padding-left: 150px;
     color: #2AAAA8;
@@ -7784,6 +7484,7 @@ form button[type="submit"] {
 .credit-accounts-header span {
     position: relative;
     left: 18px;
+    /* Take up remaining space */
     flex: 1;  
     color: white;
     text-align: center;
@@ -7814,7 +7515,9 @@ form button[type="submit"] {
 }
 
 .credit-accounts-table tfoot tr td {
+    /* Round bottom-left corner */
     border-bottom-left-radius: 10px; 
+    /* Round bottom-right corner */
     border-bottom-right-radius: 10px; 
 }
 
@@ -7882,37 +7585,33 @@ form button[type="submit"] {
 .credit-account-input {
     width: 100%;
     height: 100%;
-    padding: 8px 10px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    transition: all 0.2s ease;
+    padding: 0;
+    background: transparent;
+    border: 2px solid #575757;
+    border-radius: 5px;
     outline: none;
     box-sizing: border-box;
 }
 
 .credit-account-input:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
+    background: transparent;
+    border-color: #575757;
 }
 
 .credit-account-edit-input {
     width: 100%;
     height: 100%;
-    padding: 8px 10px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    transition: all 0.2s ease;
+    padding: 0;
+    background: transparent;
+    border: 2px solid #575757;
+    border-radius: 5px;
     outline: none;
     box-sizing: border-box;
 }
 
 .credit-account-edit-input:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
+    background: transparent;
+    border-color: #575757;
 }
 
 /* The Modal (background) */
@@ -7922,6 +7621,7 @@ form button[type="submit"] {
     left: 0;
     z-index: 1000;
     display: none;
+    /* Centering the modal */
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -7960,7 +7660,6 @@ form button[type="submit"] {
     background-color: #A9A9A9;
     color: white;
 }
-
 /* Category Dropdown Autocomplete Styles */
 .category-dropdown {
     position: absolute;
@@ -8004,6 +7703,21 @@ form button[type="submit"] {
 
 .category-dropdown-item.create-new-category i {
     margin-right: 6px;
+}
+
+.dashboard-d-form-group,
+.footer-form-group {
+    position: relative;
+}
+
+#dashboard-d-category-input,
+#footer-category-input,
+#footer-ca-category-input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #575757;
+    border-radius: 8px;
+    box-sizing: border-box;
 }
 
 /* Prevent scrolling when modal is open */
