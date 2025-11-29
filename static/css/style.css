@@ -5692,7 +5692,9 @@ input#setup-profile-starting-savings {
     top: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0,0,0,0.45);
+    background: rgba(0,0,0,0.30);
+    background-color: transparent;
+    backdrop-filter: blur(8px);
 }
 
 #mfa-qr-modal.modal {
