@@ -937,6 +937,7 @@ body {
 }
 
 /* Inputs and selects */
+.footer-form-group input[type="text"],
 .footer-form-group input[type="number"],
 .footer-form-group select {
     width: 100%;
@@ -955,6 +956,7 @@ body {
     box-sizing: border-box;
 }
 
+.footer-form-group input[type="text"]:focus,
 .footer-form-group input[type="number"]:focus,
 .footer-form-group select:focus {
     background-color: #fff;
@@ -1021,6 +1023,37 @@ button#autobalance-submit:active {
         /* Make the modal slightly narrower on small screens */
         width: 350px; 
     }
+}
+
+/* Add Credit Account Modal Styles */
+.add-credit-account-modal-content {
+    width: 80%;
+    max-width: 350px;
+    margin: 15% auto;
+    padding: 20px;
+    background-color: #fff;
+    border: 1px solid #575757;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgb(0 0 0 / 20%);
+}
+
+.add-credit-account-close-modal {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.add-credit-account-close-modal:hover,
+.add-credit-account-close-modal:focus {
+    color: #575757;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.add-credit-account-modal-content h3 {
+    margin-top: 0;
+    color: #575757;
 }
 
 /* Auto Balance Modal Styles */
@@ -1715,7 +1748,9 @@ input#setup-profile-starting-savings {
 
 #autobalance-current-balance,
 #footer-amount,
-#footer-ca-amount {
+#footer-ca-amount,
+#credit-account-interest,
+#credit-account-balance {
     text-align: right;
 }
 
