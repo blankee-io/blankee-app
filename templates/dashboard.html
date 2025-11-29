@@ -1069,8 +1069,8 @@
             return new Intl.NumberFormat('en-US', {
                 style: 'currency',
                 currency: currencyType,
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
             }).format(value);
         }
 
@@ -1343,7 +1343,6 @@
                     input.className = 'income-cell-input';
                     input.setAttribute('data-date', friday.toISOString().split('T')[0]);
                     input.setAttribute('inputmode', 'decimal');
-                    input.setAttribute('pattern', '\\d*');
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
@@ -1401,7 +1400,6 @@
                     input.className = 'expense-cell-input';
                     input.setAttribute('data-date', friday.toISOString().split('T')[0]);
                     input.setAttribute('inputmode', 'decimal');
-                    input.setAttribute('pattern', '\\d*');
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
@@ -1471,7 +1469,6 @@
                         input.className = 'ca-cell-input';
                         input.setAttribute('data-date', friday.toISOString().split('T')[0]);
                         input.setAttribute('inputmode', 'decimal');
-                        input.setAttribute('pattern', '\\d*');
                         input.style.width = '100%';
                         input.style.textAlign = 'right';
 
@@ -2164,7 +2161,7 @@
                         const input = matchedCell.querySelector('input');
                         const amount = parseFloat(entry.total_amount);
                         if (input && !isNaN(amount)) {
-                            input.value = currencySymbol + Math.round(amount);
+                            input.value = currencySymbol + amount.toFixed(2);
                         }
                     }
                 }
@@ -2254,7 +2251,7 @@
                         const input = matchedCell.querySelector('input');
                         const amount = parseFloat(entry.total_amount);
                         if (input && !isNaN(amount)) {
-                            input.value = currencySymbol + Math.round(amount);
+                            input.value = currencySymbol + amount.toFixed(2);
                         }
                     }
                 }
@@ -2326,7 +2323,7 @@
                         const input = td.querySelector('input');
                         if (input) {
                             if (entry && entry.total_amount !== undefined) {
-                                input.value = currencySymbol + Math.round(entry.total_amount);
+                                input.value = currencySymbol + parseFloat(entry.total_amount).toFixed(2);
                             } else {
                                 input.value = '';
                                 // Clear processed status when no entry exists
@@ -2643,8 +2640,8 @@
             });
 
             input.addEventListener('input', function () {
-                // Allow only numbers, no decimals
-                input.value = input.value.replace(/[^0-9]/g, '');
+                // Allow numbers and decimal point
+                input.value = input.value.replace(/[^0-9.]/g, '');
             });
 
             input.addEventListener('keypress', function (event) {
@@ -2751,34 +2748,32 @@
                     }
                 }
                 
-                // ALWAYS format with currency when blur completes (unless refocused immediately)
-                // Use requestAnimationFrame for better timing than setTimeout
-                requestAnimationFrame(function () {
-                    // Only format if the input is not currently focused
-                    if (document.activeElement !== input) {
-                        const trimmedValue = input.value.trim();
-                        if (trimmedValue === '') {
-                            // If empty, keep it empty
-                            input.value = '';
-                        } else {
-                            // Remove any existing currency symbol first
-                            const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
-                            // Parse as int only if it's a number
-                            const numValue = parseInt(cleanValue, 10);
-                            if (!isNaN(numValue)) {
-                                input.value = currencySymbol + numValue;
-                            } else if (originalValue) {
-                                // Restore original value if not a number
-                                input.value = originalValue;
-                            }
+            // ALWAYS format with currency when blur completes (unless refocused immediately)
+            // Use requestAnimationFrame for better timing than setTimeout
+            requestAnimationFrame(function () {
+                // Only format if the input is not currently focused
+                if (document.activeElement !== input) {
+                    const trimmedValue = input.value.trim();
+                    if (trimmedValue === '') {
+                        // If empty, keep it empty
+                        input.value = '';
+                    } else {
+                        // Remove any existing currency symbol first
+                        const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
+                        // Parse as float to preserve decimals
+                        const numValue = parseFloat(cleanValue);
+                        if (!isNaN(numValue)) {
+                            input.value = currencySymbol + numValue.toFixed(2);
+                        } else if (originalValue) {
+                            // Restore original value if not a number
+                            input.value = originalValue;
                         }
                     }
-                });
+                }
             });
-
-            input.addEventListener('input', function () {
-                // Allow only numbers, no decimals
-                input.value = input.value.replace(/[^0-9]/g, '');
+        });            input.addEventListener('input', function () {
+                // Allow numbers and decimal point
+                input.value = input.value.replace(/[^0-9.]/g, '');
             });
         }
 
@@ -2919,9 +2914,9 @@
                     const trimmedValue = input.value.trim();
                     if (trimmedValue !== '') {
                         const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
-                        const numValue = parseInt(cleanValue, 10);
+                        const numValue = parseFloat(cleanValue);
                         if (!isNaN(numValue)) {
-                            input.value = currencySymbol + numValue;
+                            input.value = currencySymbol + numValue.toFixed(2);
                         }
                     }
                     nextInput.focus();
@@ -3543,7 +3538,7 @@
                     return;
                 }
                 const amount = parseFloat(newValue);
-                if (isNaN(amount) || amount === 0) {
+                if (isNaN(amount)) {
                     input.value = '';
                     return;
                 }
@@ -3564,15 +3559,23 @@
                     success: function(response) {
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
-                            // Format the value with currency symbol if not focused
-                            const rounded = Math.round(amount).toString();
-                            // Only add currency if input is not currently focused
-                            if (document.activeElement !== input) {
-                                input.value = currencySymbol + rounded;
+                            // If amount is 0, clear the input immediately (entry was deleted)
+                            if (amount === 0) {
+                                input.value = '';
+                                td.removeAttribute('data-processed');
+                                td.setAttribute('data-processed', '0');
+                                td.classList.remove('paid');
                             } else {
-                                input.value = rounded;
+                                // Format the value with currency symbol if not focused
+                                const rounded = amount.toFixed(2).toString();
+                                // Only add currency if input is not currently focused
+                                if (document.activeElement !== input) {
+                                    input.value = currencySymbol + rounded;
+                                } else {
+                                    input.value = rounded;
+                                }
                             }
-                            updateLocalState(type, categoryId, endDate, amount, false, endDate);
+                            updateLocalState(type, categoryId, endDate, amount, amount === 0, endDate);
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {

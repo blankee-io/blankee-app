@@ -75,7 +75,7 @@
                                 <td>
                                     {% set currency_symbol = '$' if currency_type == 'USD' else '€' if currency_type == 'EUR' else currency_type %}
                                     {% if ca_balances_today[account.id] is not none %}
-                                        {{ currency_symbol }}{{ ca_balances_today[account.id]|int }}
+                                        {{ currency_symbol }}{{ "%.2f"|format(ca_balances_today[account.id]) }}
                                     {% else %}
                                         &mdash;
                                     {% endif %}
@@ -110,8 +110,8 @@
 
     <!-- Add this modal just after your main-container div, before scripts -->
     <div id="add-credit-account-modal" class="footer-modal">
-        <div class="footer-modal-content">
-            <span class="footer-close-modal" id="add-credit-account-close">&times;</span>
+        <div class="add-credit-account-modal-content">
+            <span class="add-credit-account-close-modal" id="add-credit-account-close">&times;</span>
             <h3>Add Credit Account</h3>
             <form id="add-credit-account-form">
                 <div class="footer-form-group">

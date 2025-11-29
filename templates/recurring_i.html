@@ -58,7 +58,7 @@
                         {% for record in recurring_income_records %}
                         <tr data-recurring-id="{{ record.id }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{{ record.no_end_date }}">
                             <td class="editable income-category" data-column="category_name">{{ record.category_name }}</td>
-                            <td class="editable income-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ record.amount|int }}</td>
+                            <td class="editable income-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
                             <td class="editable income-cadence" data-column="cadence">{{ record.cadence_description }}</td>
                             <td class="editable income-start-date" data-column="start_date">{{ record.start_date }}</td>
                             <td class="editable income-end-date" data-column="end_date">
@@ -112,7 +112,7 @@
                 <label for="amount">Recurring Amount</label>
                 <div class="currency-input-container">
                     <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                    <input type="number" class="recurring-amount" id="amount" name="amount" placeholder="0" step="1" min="0" required inputmode="decimal" placeholder="0" pattern="\\d*">
+                    <input type="number" class="recurring-amount" id="amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
                 </div>
             
                 <!-- Cadence Interval (e.g., "Every X days/weeks/months/years") -->
@@ -219,7 +219,7 @@
                 <label for="edit-amount">Recurring Amount</label>
                 <div class="currency-input-container">
                     <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                    <input type="number" class="recurring-amount" id="edit-amount" name="amount" placeholder="0" step="1" min="0" required inputmode="decimal" pattern="\\d*">
+                    <input type="number" class="recurring-amount" id="edit-amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
                 </div>
             
                 <!-- Same structure for editing cadence -->

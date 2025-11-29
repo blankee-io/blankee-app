@@ -19,12 +19,14 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.utils import secure_filename
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
+from email_utils import send_verification_email, generate_verification_token, get_verification_token_expiry, send_password_reset_email, generate_password_reset_token, get_password_reset_token_expiry
 import threading
 from collections import defaultdict
 from PIL import Image
 from db_connections import init_db_pool, get_db_pool, dispose_db_pool
 from redis_manager import init_redis_manager, shutdown_redis_manager, DecimalEncoder
 from middleware import init_redis_middleware, init_redis_routes
+from quiltt_utils import QuilttClient, map_quiltt_transaction_to_entry, get_default_category_mapping
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
@@ -330,11 +332,17 @@ def register():
                 cursor.close()
                 return redirect(url_for('register'))
 
+            # Generate verification token
+            verification_token = generate_verification_token()
+            verification_expiry = get_verification_token_expiry()
+
             # Hash the password and insert the new user
             hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
             cursor.execute(
-                "INSERT INTO users (username, password, member_since) VALUES (%s, %s, %s)",
-                (username, hashed_password, member_since)
+                """INSERT INTO users (username, email, password, member_since, email_verified, 
+                   verification_token, verification_token_expires) 
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (username, username, hashed_password, member_since, 0, verification_token, verification_expiry)
             )
             new_user_id = cursor.lastrowid  # Get the ID of the newly created user
             conn.commit()
@@ -360,17 +368,198 @@ def register():
             cursor.close()
             conn.commit()
 
-        # Log the user in automatically after registration
-        user_obj = User(id=new_user_id, username=username, password=hashed_password)
-        login_user(user_obj)
-
-        # Create totals_remainders for every Friday for the new user
+        # Create totals_remainders for the new user right away
         create_totals_remainders_for_new_user(new_user_id)
 
-        # Redirect to the setup profile page after login
-        return redirect(url_for('setup_profile'))
+        # Send verification email
+        email_sent = send_verification_email(username, username, verification_token)
+        
+        if not email_sent:
+            app.logger.error(f"Failed to send verification email to {username}")
+
+        # Show registration success page
+        return render_template('registration_success.html', email=username, email_sent=email_sent)
 
     return render_template('register.html')
+
+
+@app.route('/verify-email', methods=['GET'])
+def verify_email():
+    """Handle email verification when user clicks the link in their email"""
+    token = request.args.get('token')
+    
+    if not token:
+        flash('Invalid verification link.')
+        return redirect(url_for('login'))
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # First check if this is a pending email change verification
+        cursor.execute("""
+            SELECT id, username, email, pending_email, pending_email_expires 
+            FROM users 
+            WHERE pending_email_token = %s
+        """, (token,))
+        pending_user = cursor.fetchone()
+        
+        if pending_user:
+            # This is a pending email change verification
+            if pending_user['pending_email_expires'] and datetime.now() > pending_user['pending_email_expires']:
+                flash('Verification link has expired. Please request a new email change.')
+                cursor.close()
+                return redirect(url_for('login'))
+            
+            # Update to the new email
+            old_email = pending_user['username']
+            new_email = pending_user['pending_email']
+            
+            cursor.execute("""
+                UPDATE users 
+                SET username = %s,
+                    email = %s,
+                    email_verified = 1,
+                    pending_email = NULL,
+                    pending_email_token = NULL,
+                    pending_email_expires = NULL
+                WHERE id = %s
+            """, (new_email, new_email, pending_user['id']))
+            conn.commit()
+            
+            # Update in Redis
+            _update_user_setting_in_redis(pending_user['id'], 'username', new_email)
+            _update_user_setting_in_redis(pending_user['id'], 'email', new_email)
+            
+            # Create notification
+            add_notification(
+                user_id=pending_user['id'],
+                message=f'Your email address has been successfully changed from {old_email} to {new_email}.'
+            )
+            
+            cursor.close()
+            return render_template('login.html', 
+                                 success_message=f'Email verification complete! Your email has been changed to {new_email}. You can now log in with your new email address.')
+        
+        # Otherwise, check for regular email verification (new registration)
+        cursor.execute("""
+            SELECT id, username, email_verified, verification_token_expires 
+            FROM users 
+            WHERE verification_token = %s
+        """, (token,))
+        user = cursor.fetchone()
+        
+        if not user:
+            flash('Invalid or expired verification link.')
+            cursor.close()
+            return redirect(url_for('login'))
+        
+        # Check if already verified
+        if user['email_verified']:
+            flash('Your email is already verified. You can log in now.')
+            cursor.close()
+            return redirect(url_for('login'))
+        
+        # Check if token is expired
+        if user['verification_token_expires'] and datetime.now() > user['verification_token_expires']:
+            flash('Verification link has expired. Please register again or request a new verification link.')
+            cursor.close()
+            return redirect(url_for('login'))
+        
+        # Verify the email
+        cursor.execute("""
+            UPDATE users 
+            SET email_verified = 1, 
+                verification_token = NULL, 
+                verification_token_expires = NULL 
+            WHERE id = %s
+        """, (user['id'],))
+        conn.commit()
+        
+        # Create default categories and initialize the account
+        user_id = user['id']
+        
+        # Check if categories already exist (in case of re-verification)
+        cursor.execute("SELECT COUNT(*) FROM income_categories WHERE user_id = %s", (user_id,))
+        if cursor.fetchone()['COUNT(*)'] == 0:
+            # Create default income and expense categories
+            cursor.execute("""
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, 'Auto Adjustments', 1, 0, 1))
+            cursor.execute("""
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, 'Auto Adjustments', 1, 0, 1))
+            cursor.execute("""
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, 'Savings', -1, 0, 1))
+            cursor.execute("""
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, 'Savings', -1, 0, 1))
+            conn.commit()
+        
+        cursor.close()
+        
+        # Redirect to login page with success message
+        flash('Email verified successfully! You can now log in.')
+        return redirect(url_for('login'))
+
+
+@app.route('/resend-verification', methods=['GET', 'POST'])
+def resend_verification():
+    """Resend verification email for users who didn't receive it or whose link expired"""
+    if request.method == 'GET':
+        return render_template('resend_verification.html')
+    
+    email = request.form.get('email')
+    
+    if not email:
+        return render_template('resend_verification.html', error_message='Please provide your email address.')
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        cursor.execute("""
+            SELECT id, username, email_verified 
+            FROM users 
+            WHERE email = %s OR username = %s
+        """, (email, email))
+        user = cursor.fetchone()
+        
+        if not user:
+            # Don't reveal if email exists or not for security
+            cursor.close()
+            return render_template('resend_verification.html', resend_success=True, user_email=email)
+        
+        if user['email_verified']:
+            cursor.close()
+            return render_template('resend_verification.html', error_message='Your email is already verified. You can log in now.')
+        
+        # Generate new token
+        verification_token = generate_verification_token()
+        verification_expiry = get_verification_token_expiry()
+        
+        cursor.execute("""
+            UPDATE users 
+            SET verification_token = %s, verification_token_expires = %s 
+            WHERE id = %s
+        """, (verification_token, verification_expiry, user['id']))
+        conn.commit()
+        cursor.close()
+        
+        # Send new verification email
+        email_sent = send_verification_email(user['username'], user['username'], verification_token)
+        
+        if email_sent:
+            return render_template('resend_verification.html', resend_success=True, user_email=email)
+        else:
+            app.logger.error(f"Failed to resend verification email to {user['username']}")
+            return render_template('resend_verification.html', error_message='Failed to send verification email. Please try again later or contact support.', user_email=email)
+    
+    # If we get here, something went wrong but don't reveal why
+    return render_template('login.html', resend_success=True, user_email=email)
 
 
 @app.route('/setup_profile', methods=['GET'])
@@ -383,6 +572,8 @@ def setup_profile():
 @app.route('/complete_profile_setup', methods=['POST'])
 @login_required
 def complete_profile_setup():
+    from datetime import date
+    
     if request.method == 'POST':
         starting_balance = request.json.get('starting_balance')
         starting_savings = request.json.get('starting_savings')  # <-- get the savings value
@@ -452,6 +643,31 @@ def complete_profile_setup():
 
             cursor.close()
             conn.commit()
+
+        # Ensure all base records exist (in case email verification didn't create them)
+        print(f"[complete_profile_setup] Checking if totals_remainders records exist for user {current_user.id}")
+        with get_db_pool().get_cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM totals_remainders WHERE user_id = %s", (current_user.id,))
+            tr_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM totals_remainders_d WHERE user_id = %s", (current_user.id,))
+            trd_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM totals_remainders_m WHERE user_id = %s", (current_user.id,))
+            trm_count = cursor.fetchone()[0]
+            
+            print(f"[complete_profile_setup] Record counts - weekly: {tr_count}, daily: {trd_count}, monthly: {trm_count}")
+            
+            # Only create if ALL tables are empty (first time setup)
+            if tr_count == 0 and trd_count == 0 and trm_count == 0:
+                print(f"[complete_profile_setup] Creating initial totals_remainders records...")
+                create_totals_remainders_for_new_user(current_user.id)
+                print(f"[complete_profile_setup] Initial records created")
+            else:
+                print(f"[complete_profile_setup] Records already exist, skipping creation")
+        
+        # Now recalculate all totals with the starting balance entry
+        print(f"[complete_profile_setup] Recalculating all totals...")
+        save_totals_remainders_d()
+        print(f"[complete_profile_setup] Completed all totals_remainders population")
 
         # Return success response
         return jsonify({'status': 'success'})
@@ -539,11 +755,16 @@ def login():
         # Establish database connection
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, username, password, landing_page FROM users WHERE username = %s", (username,))
+            cursor.execute("SELECT id, username, password, landing_page, email_verified FROM users WHERE username = %s", (username,))
             user = cursor.fetchone()
 
             # Check if the user exists and if the password is correct
             if user and bcrypt.check_password_hash(user[2], password):
+                # Check if email is verified
+                if not user[4]:  # email_verified field
+                    cursor.close()
+                    return render_template('login.html', show_resend=True, user_email=username, 
+                                         verification_modal=True)
                 # Check for MFA using the same connection
                 cursor.execute("SELECT mfa_secret FROM users WHERE id = %s", (user[0],))
                 mfa_row = cursor.fetchone()
@@ -738,10 +959,22 @@ def login():
                 if last_ca_monthly_date is None or last_ca_monthly_date < cutoff_date:
                     add_one_year_of_ca_months(user_obj.id)
 
+                # Check if user needs to complete profile setup (first time login)
+                # Check if they have any income entries (starting balance is created during profile setup)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM income_entries 
+                    WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
+                """, (user_obj.id,))
+                entry_count = cursor.fetchone()[0]
+                
                 # Redirect to user's preferred landing page if set, else dashboard
                 landing_page = user[3] if len(user) > 3 else None
                 cursor.close()
-                if landing_page:
+                
+                # If no income entries exist, user hasn't completed setup yet
+                if entry_count == 0:
+                    return redirect(url_for('setup_profile'))
+                elif landing_page:
                     return redirect(url_for(landing_page))
                 else:
                     return redirect(url_for('dashboard'))
@@ -749,8 +982,7 @@ def login():
             else:
                 cursor.close()
                 # Invalid username or password, redirect back to login with an error message
-                flash("Invalid username or password")
-                return render_template('login.html')
+                return render_template('login.html', error_message="Invalid username or password")
 
     # If it's a GET request, render the login page
     return render_template('login.html')
@@ -1052,6 +1284,169 @@ def add_one_year_of_ca_months(user_id):
 def logout():
     logout_user()
     return redirect(url_for('login'))
+
+#################################################################################
+############################ FORGOT PASSWORD ####################################
+#################################################################################
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    """Handle forgot password requests"""
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        
+        if not email:
+            return render_template('forgot_password.html', error_message='Please enter your email address.')
+        
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check if user exists with this email
+            cursor.execute("SELECT id, username, email FROM users WHERE username = %s OR email = %s", (email, email))
+            user = cursor.fetchone()
+            
+            if user:
+                user_id = user[0]
+                username = user[1]
+                user_email = user[2] if user[2] else email
+                
+                # Generate reset token
+                reset_token = generate_password_reset_token()
+                expires_at = get_password_reset_token_expiry()
+                
+                # Store token in database
+                cursor.execute("""
+                    INSERT INTO password_resets (user_id, token, expires_at)
+                    VALUES (%s, %s, %s)
+                """, (user_id, reset_token, expires_at))
+                conn.commit()
+                
+                # Send password reset email
+                send_password_reset_email(user_email, username, reset_token)
+            
+            cursor.close()
+        
+        # Always show success message (security best practice - don't reveal if email exists)
+        return render_template('forgot_password.html', 
+                             success_message='If an account exists with that email, you will receive a password reset link shortly.')
+    
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    """Handle password reset with token"""
+    token = request.args.get('token')
+    
+    if not token:
+        return render_template('reset_password.html', error_message='Invalid or missing reset token.')
+    
+    if request.method == 'POST':
+        new_password = request.form.get('password', '').strip()
+        confirm_password = request.form.get('confirm_password', '').strip()
+        
+        # Validate passwords
+        if not new_password or not confirm_password:
+            return render_template('reset_password.html', token=token, 
+                                 error_message='Please fill in all fields.')
+        
+        if new_password != confirm_password:
+            return render_template('reset_password.html', token=token,
+                                 error_message='Passwords do not match.')
+        
+        if len(new_password) < 8:
+            return render_template('reset_password.html', token=token,
+                                 error_message='Password must be at least 8 characters long.')
+        
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Verify token is valid and not expired
+            cursor.execute("""
+                SELECT user_id, expires_at, used 
+                FROM password_resets 
+                WHERE token = %s
+            """, (token,))
+            reset_record = cursor.fetchone()
+            
+            if not reset_record:
+                cursor.close()
+                return render_template('reset_password.html', 
+                                     error_message='Invalid reset token.')
+            
+            user_id = reset_record[0]
+            expires_at = reset_record[1]
+            used = reset_record[2]
+            
+            # Check if token is expired or already used
+            if used:
+                cursor.close()
+                return render_template('reset_password.html',
+                                     error_message='This reset link has already been used.')
+            
+            if datetime.now() > expires_at:
+                cursor.close()
+                return render_template('reset_password.html',
+                                     error_message='This reset link has expired. Please request a new one.')
+            
+            # Hash the new password
+            hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+            
+            # Update user password
+            cursor.execute("""
+                UPDATE users 
+                SET password = %s 
+                WHERE id = %s
+            """, (hashed_password, user_id))
+            
+            # Mark token as used
+            cursor.execute("""
+                UPDATE password_resets 
+                SET used = 1 
+                WHERE token = %s
+            """, (token,))
+            
+            conn.commit()
+            cursor.close()
+        
+        # Create notification for password reset
+        add_notification(
+            user_id=user_id,
+            message='Your password was successfully reset. If you did not make this change, please contact support immediately.'
+        )
+        
+        # Redirect to login with success message
+        return render_template('login.html', 
+                             success_message='Your password has been reset successfully. Please log in with your new password.')
+    
+    # GET request - verify token is valid before showing form
+    with get_db_pool().get_cursor() as cursor:
+        cursor.execute("""
+            SELECT expires_at, used 
+            FROM password_resets 
+            WHERE token = %s
+        """, (token,))
+        reset_record = cursor.fetchone()
+        
+        if not reset_record:
+            return render_template('reset_password.html',
+                                 error_message='Invalid reset token.')
+        
+        expires_at = reset_record[0]
+        used = reset_record[1]
+        
+        if used:
+            return render_template('reset_password.html',
+                                 error_message='This reset link has already been used.')
+        
+        if datetime.now() > expires_at:
+            return render_template('reset_password.html',
+                                 error_message='This reset link has expired. Please request a new one.')
+    
+    return render_template('reset_password.html', token=token)
 
 #################################################################################
 ############################### DASHBOARD DAY ###################################
@@ -5719,7 +6114,16 @@ def update_entry():
         cursor.close()
     
     # Write to Redis only - flush worker will persist to MySQL
-    _update_entry_in_redis(table_name, current_user.id, category_id, date, amount)
+    # If amount is 0, delete the entry instead of updating
+    app.logger.info(f"[UPDATE ENTRY] Checking amount: value={amount}, type={type(amount)}, float={float(amount)}, is_zero={float(amount) == 0}")
+    if float(amount) == 0:
+        app.logger.info(f"[UPDATE ENTRY] Amount is 0, deleting entry for category {category_id} on {date}")
+        _delete_entry_in_redis(table_name, current_user.id, category_id, date, date)
+        app.logger.info(f"[UPDATE ENTRY] Delete completed for category {category_id} on {date}")
+    else:
+        app.logger.info(f"[UPDATE ENTRY] Amount is non-zero, updating entry for category {category_id} on {date}")
+        _update_entry_in_redis(table_name, current_user.id, category_id, date, amount)
+        app.logger.info(f"[UPDATE ENTRY] Update completed for category {category_id} on {date}")
     
     # If this is an expense category and is_credit_account=1, update payment entry and trigger CA balance update
     app.logger.info(f"[UPDATE CA PAYMENT DEBUG] entry_type={entry_type}, cat_data={cat_data}")
@@ -5741,10 +6145,16 @@ def update_entry():
                 app.logger.info(f"[UPDATE CA PAYMENT] Credit account query result: {account_row}")
                 if account_row:
                     account_id = account_row['id']
-                    app.logger.info(f"[UPDATE CA PAYMENT] Found credit account_id={account_id}, updating payment entry for date={date}, amount={amount}")
-                    # Update payment entry in Redis
-                    _update_payment_entry_in_redis(current_user.id, account_id, date, float(amount))
-                    app.logger.info(f"[UPDATE CA PAYMENT] Payment entry update completed")
+                    app.logger.info(f"[UPDATE CA PAYMENT] Found credit account_id={account_id}, amount={amount}, checking if zero")
+                    # Update or delete payment entry in Redis based on amount
+                    if float(amount) == 0:
+                        app.logger.info(f"[UPDATE CA PAYMENT] Amount is 0, deleting payment entry for account {account_id} on {date}")
+                        _delete_payment_entry_in_redis(current_user.id, account_id, date, date)
+                        app.logger.info(f"[UPDATE CA PAYMENT] Payment entry deletion completed")
+                    else:
+                        app.logger.info(f"[UPDATE CA PAYMENT] Amount is non-zero, updating payment entry")
+                        _update_payment_entry_in_redis(current_user.id, account_id, date, float(amount))
+                        app.logger.info(f"[UPDATE CA PAYMENT] Payment entry update completed")
                 else:
                     app.logger.warning(f"[UPDATE CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
                 cursor.close()
@@ -6117,8 +6527,16 @@ def update_week_entry():
         cursor.close()
 
     # Delete old entries and add new entry to Redis only - flush worker will persist
+    app.logger.info(f"[UPDATE WEEK ENTRY] Deleting entries from {start_date} to {end_date} for category {category_id}")
     _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
-    _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, float(amount))
+    app.logger.info(f"[UPDATE WEEK ENTRY] Delete completed. Checking amount: value={amount}, type={type(amount)}, float={float(amount)}, is_zero={float(amount) == 0}")
+    # If amount is 0, don't create a new entry (just delete old ones)
+    if float(amount) != 0:
+        app.logger.info(f"[UPDATE WEEK ENTRY] Amount is non-zero, creating new entry for {friday_date}")
+        _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, float(amount))
+        app.logger.info(f"[UPDATE WEEK ENTRY] New entry created for {friday_date}")
+    else:
+        app.logger.info(f"[UPDATE WEEK ENTRY] Amount is 0, skipping entry creation (entries deleted only)")
 
     # If this is an expense category and is_credit_account=1, create/update payment entry and trigger CA balance update
     ca_triggered = False
@@ -6140,10 +6558,16 @@ def update_week_entry():
                 app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Credit account query result: {account_row}")
                 if account_row:
                     account_id = account_row['id']
-                    app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Found credit account_id={account_id}, updating payment entry for date={friday_date}, amount={amount}")
-                    # Update payment entry in Redis
-                    _update_payment_entry_in_redis(current_user.id, account_id, friday_date, float(amount))
-                    app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Payment entry update completed")
+                    app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Found credit account_id={account_id}, amount={amount}, checking if zero")
+                    # Update or delete payment entry in Redis based on amount
+                    if float(amount) == 0:
+                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Amount is 0, deleting payment entry for account {account_id} on {friday_date}")
+                        _delete_payment_entry_in_redis(current_user.id, account_id, friday_date, friday_date)
+                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Payment entry deletion completed")
+                    else:
+                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Amount is non-zero, updating payment entry")
+                        _update_payment_entry_in_redis(current_user.id, account_id, friday_date, float(amount))
+                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Payment entry update completed")
                 else:
                     app.logger.warning(f"[UPDATE WEEK ENTRY - CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
                 cursor.close()
@@ -7432,7 +7856,7 @@ def profile():
 
             # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, and mfa_secret
             cursor.execute("""
-                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret, pending_email
                 FROM users 
                 WHERE id = %s
             """, (current_user.id,))
@@ -7481,6 +7905,299 @@ def profile():
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
     starting_balance = int(starting_balance_data['amount']) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
+    pending_email = user_data.get('pending_email') if user_data else None
+
+    # Get Quiltt connections and session token
+    session_token = None
+    connections = []
+    currency_symbol = '$'
+    connector_id = os.getenv('QUILTT_CONNECTOR_ID', '')
+    
+    # Debug logging
+    app.logger.info(f"Quiltt Debug - API Key present: {bool(quiltt_client.api_key)}")
+    app.logger.info(f"Quiltt Debug - Connector ID: {connector_id}")
+    
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # Get or create session token
+            cursor.execute("""
+                SELECT profile_id, session_token, session_expires_at 
+                FROM quiltt_profiles 
+                WHERE user_id = %s
+            """, (current_user.id,))
+            profile = cursor.fetchone()
+            
+            # Debug logging
+            if profile:
+                app.logger.info(f"Quiltt profile found for user {current_user.id}")
+                app.logger.info(f"  - Has token: {bool(profile.get('session_token'))}")
+                app.logger.info(f"  - Expires at: {profile.get('session_expires_at')}")
+                app.logger.info(f"  - Current time: {datetime.now()}")
+                if profile.get('session_expires_at'):
+                    is_expired = profile['session_expires_at'] <= datetime.now()
+                    app.logger.info(f"  - Token expired: {is_expired}")
+            
+            # Check if session token needs refresh
+            needs_refresh = not profile or \
+                           not profile.get('session_token') or \
+                           not profile.get('session_expires_at') or \
+                           profile['session_expires_at'] <= datetime.now()
+            
+            app.logger.info(f"Token needs refresh: {needs_refresh}")
+            
+            if needs_refresh:
+                # Create or refresh session token
+                app.logger.info(f"Creating/refreshing Quiltt session token for user {current_user.id}")
+                
+                if profile and profile.get('profile_id'):
+                    # Existing Quiltt profile - refresh token
+                    result = quiltt_client.refresh_session_token(
+                        profile['profile_id'],
+                        metadata={'username': current_user.username}
+                    )
+                else:
+                    # New Quiltt profile - create one
+                    result = quiltt_client.create_session_token(
+                        current_user.id,
+                        metadata={'username': current_user.username}
+                    )
+                
+                app.logger.info(f"Quiltt session result: {result}")
+                if result and result.get('token'):
+                    session_token = result['token']
+                    
+                    # Convert ISO 8601 datetime to MySQL format
+                    expires_at_str = result.get('expiresAt')
+                    if expires_at_str:
+                        # Parse ISO 8601 and convert to MySQL datetime
+                        from dateutil import parser
+                        expires_at = parser.isoparse(expires_at_str)
+                        expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
+                    else:
+                        expires_at_mysql = None
+                    
+                    if profile:
+                        cursor.execute("""
+                            UPDATE quiltt_profiles 
+                            SET session_token = %s, session_expires_at = %s, profile_id = %s
+                            WHERE user_id = %s
+                        """, (result['token'], expires_at_mysql, result['profileId'], current_user.id))
+                    else:
+                        cursor.execute("""
+                            INSERT INTO quiltt_profiles (user_id, profile_id, session_token, session_expires_at)
+                            VALUES (%s, %s, %s, %s)
+                        """, (current_user.id, result['profileId'], result['token'], expires_at_mysql))
+                    conn.commit()
+                else:
+                    # Token refresh/creation failed
+                    app.logger.error(f"Failed to get Quiltt session token for user {current_user.id}")
+                    session_token = None
+            else:
+                # Use existing valid token
+                session_token = profile['session_token']
+                app.logger.info(f"Using existing Quiltt session token for user {current_user.id}")
+            
+            # Sync connections from Quiltt if we have a session token
+            if session_token:
+                retry_count = 0
+                max_retries = 1
+                
+                while retry_count <= max_retries:
+                    try:
+                        app.logger.info(f"Fetching Quiltt profile data for user {current_user.id} (attempt {retry_count + 1})")
+                        profile_data = quiltt_client.get_profile(session_token)
+                        
+                        # If we got data, break out of retry loop
+                        if profile_data:
+                            break
+                        
+                        # If profile_data is None and we haven't retried yet, force a token refresh
+                        if profile_data is None and retry_count == 0 and profile and profile.get('profile_id'):
+                            app.logger.warning(f"Token appears invalid (401 from Quiltt). Forcing refresh for user {current_user.id}")
+                            
+                            # Force token refresh
+                            result = quiltt_client.refresh_session_token(
+                                profile['profile_id'],
+                                metadata={'username': current_user.username}
+                            )
+                            
+                            if result and result.get('token'):
+                                session_token = result['token']
+                                
+                                # Update database with new token
+                                expires_at_str = result.get('expiresAt')
+                                if expires_at_str:
+                                    from dateutil import parser
+                                    expires_at = parser.isoparse(expires_at_str)
+                                    expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
+                                else:
+                                    expires_at_mysql = None
+                                
+                                cursor.execute("""
+                                    UPDATE quiltt_profiles 
+                                    SET session_token = %s, session_expires_at = %s
+                                    WHERE user_id = %s
+                                """, (session_token, expires_at_mysql, current_user.id))
+                                conn.commit()
+                                
+                                app.logger.info(f"Token refreshed successfully, retrying profile fetch for user {current_user.id}")
+                                retry_count += 1
+                                continue  # Retry with new token
+                            else:
+                                app.logger.error(f"Failed to refresh token for user {current_user.id}")
+                                break
+                        else:
+                            # No more retries or no profile_id to refresh
+                            break
+                            
+                    except Exception as fetch_error:
+                        app.logger.error(f"Exception during profile fetch: {fetch_error}")
+                        break
+                
+                # Process the profile data if we got it
+                if profile_data:
+                    app.logger.info(f"Got Quiltt profile data: {len(profile_data.get('connections', []))} connections")
+                    
+                    # Save/update connections and accounts
+                    for connection in profile_data.get('connections', []):
+                        if not connection:
+                            continue
+                            
+                        # Get institution info safely
+                        institution = connection.get('institution') or {}
+                        institution_name = institution.get('name', 'Unknown') if isinstance(institution, dict) else 'Unknown'
+                        institution_id = institution.get('id', '') if isinstance(institution, dict) else ''
+                        
+                        connection_id = connection.get('id', '')
+                        connection_status = connection.get('status', 'ACTIVE')
+                        
+                        # Check if this connection exists in our database
+                        cursor.execute("""
+                            SELECT id, status FROM quiltt_connections 
+                            WHERE user_id = %s AND connection_id = %s
+                        """, (current_user.id, connection_id))
+                        existing_connection = cursor.fetchone()
+                        
+                        # If connection doesn't exist and it's disconnected, skip it (user may have deleted it)
+                        if not existing_connection and connection_status.upper() == 'DISCONNECTED':
+                            app.logger.info(f"Skipping disconnected connection {connection_id} - not in database (user may have deleted it)")
+                            continue
+                        
+                        # Insert or update connection
+                        cursor.execute("""
+                            INSERT INTO quiltt_connections 
+                            (user_id, connection_id, institution_name, institution_id, status, last_synced_at)
+                            VALUES (%s, %s, %s, %s, %s, NOW())
+                            ON DUPLICATE KEY UPDATE
+                                institution_name = VALUES(institution_name),
+                                status = VALUES(status),
+                                last_synced_at = NOW()
+                        """, (
+                            current_user.id,
+                            connection_id,
+                            institution_name,
+                            institution_id,
+                            connection_status
+                        ))
+                        
+                        # Get the connection's database ID
+                        if cursor.lastrowid:
+                            connection_db_id = cursor.lastrowid
+                        else:
+                            cursor.execute(
+                                "SELECT id FROM quiltt_connections WHERE user_id = %s AND connection_id = %s",
+                                (current_user.id, connection.get('id', ''))
+                            )
+                            row = cursor.fetchone()
+                            connection_db_id = row['id'] if row else None
+                        
+                        if not connection_db_id:
+                            app.logger.error(f"Could not get connection_db_id for connection {connection.get('id')}")
+                            continue
+                        
+                        # Save accounts for this connection
+                        for account in connection.get('accounts', []):
+                            if not account:
+                                continue
+                                
+                            # Get balance info safely
+                            balance = account.get('balance') or {}
+                            current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
+                            available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
+                            
+                            cursor.execute("""
+                                    INSERT INTO quiltt_accounts
+                                    (user_id, connection_id, account_id, account_name, account_type, account_subtype, 
+                                     mask, current_balance, available_balance, is_active, sync_transactions)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, 1)
+                                    ON DUPLICATE KEY UPDATE
+                                        account_name = VALUES(account_name),
+                                        current_balance = VALUES(current_balance),
+                                        available_balance = VALUES(available_balance),
+                                        is_active = 1
+                                """, (
+                                    current_user.id,
+                                    connection_db_id,
+                                    account.get('id', ''),
+                                    account.get('name', 'Account'),
+                                    account.get('kind', ''),  # Use 'kind' instead of 'type'
+                                    '',  # subtype not available in Quiltt API
+                                    account.get('mask', ''),
+                                    current_balance,
+                                    available_balance
+                                ))
+                    
+                    conn.commit()
+                    app.logger.info(f"Saved Quiltt connections to database")
+                else:
+                    app.logger.warning(f"No profile data returned from Quiltt for user {current_user.id}")
+            
+            # Get connected institutions
+            cursor.execute("""
+                SELECT c.*, 
+                       GROUP_CONCAT(
+                           JSON_OBJECT(
+                               'id', a.id,
+                               'account_id', a.account_id,
+                               'account_name', a.account_name,
+                               'account_type', a.account_type,
+                               'mask', a.mask,
+                               'current_balance', a.current_balance,
+                               'sync_transactions', a.sync_transactions
+                           ) SEPARATOR '|||'
+                       ) as accounts
+                FROM quiltt_connections c
+                LEFT JOIN quiltt_accounts a ON c.id = a.connection_id AND a.is_active = 1
+                WHERE c.user_id = %s
+                GROUP BY c.id
+                ORDER BY c.last_synced_at DESC
+            """, (current_user.id,))
+            connections = cursor.fetchall()
+            
+            # Parse accounts JSON with safer parsing
+            for conn_row in connections:
+                if conn_row['accounts']:
+                    try:
+                        # Split by our custom separator and parse each JSON object
+                        account_jsons = conn_row['accounts'].split('|||')
+                        conn_row['accounts'] = [json.loads(acc) for acc in account_jsons if acc]
+                    except json.JSONDecodeError as json_err:
+                        app.logger.error(f"Error parsing accounts JSON: {json_err}")
+                        app.logger.error(f"Accounts string: {conn_row['accounts'][:500]}...")
+                        conn_row['accounts'] = []
+                else:
+                    conn_row['accounts'] = []
+            
+            cursor.close()
+            
+        # Set currency symbol
+        currency_symbols = {'USD': '$', 'EUR': '€'}
+        currency_symbol = currency_symbols.get(currency_type, currency_type)
+        
+    except Exception as e:
+        app.logger.error(f"Error loading Quiltt data for profile: {e}")
 
     # Pass all retrieved data to the template
     return render_template(
@@ -7494,7 +8211,12 @@ def profile():
         goofy_week_mode=goofy_week_mode,
         landing_page=landing_page,
         currency_type=currency_type,
-        mfa_enabled=mfa_enabled
+        mfa_enabled=mfa_enabled,
+        pending_email=pending_email,
+        session_token=session_token,
+        connections=connections,
+        currency_symbol=currency_symbol,
+        connector_id=connector_id
     )
 
 @app.route('/notifications', methods=['GET'])
@@ -7634,7 +8356,7 @@ def settings():
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, and mfa_secret
+        # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, mfa_secret, and email_notifications
         # Try Redis first
         user_data = None
         redis_key = f"users:v1:{current_user.id}"
@@ -7650,7 +8372,7 @@ def settings():
         # Fallback to MySQL
         if not user_data:
             cursor.execute("""
-                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret, email_notifications
                 FROM users 
                 WHERE id = %s
             """, (current_user.id,))
@@ -7680,6 +8402,7 @@ def settings():
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
     starting_balance = int(starting_balance_data['amount']) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
+    email_notifications = user_data.get('email_notifications', 0) if user_data else 0
 
     # Pass all retrieved data to the template
     return render_template(
@@ -7693,8 +8416,22 @@ def settings():
         goofy_week_mode=goofy_week_mode,
         landing_page=landing_page,
         currency_type=currency_type,
-        mfa_enabled=mfa_enabled
+        mfa_enabled=mfa_enabled,
+        email_notifications=email_notifications
     )
+
+@app.route('/update_email_notifications', methods=['POST'])
+@login_required
+def update_email_notifications():
+    email_notifications = request.form.get('email_notifications', type=int)
+    
+    try:
+        # Update in Redis only - flush worker will persist to MySQL
+        _update_user_setting_in_redis(current_user.id, 'email_notifications', email_notifications)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        app.logger.error(f"Error updating email notifications: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/update_goofy_week_mode', methods=['POST'])
 @login_required
@@ -7825,25 +8562,213 @@ def update_last_name():
 @login_required
 def update_username():
     new_username = request.form['username']
+    
+    # Check if the new email is different from current
+    with get_db_pool().get_cursor() as cursor:
+        cursor.execute("SELECT username, email FROM users WHERE id = %s", (current_user.id,))
+        user_data = cursor.fetchone()
+        current_email = user_data[0]
+    
+    if new_username == current_email:
+        flash('This is already your current email address.')
+        return redirect(url_for('profile', success='email'))
+    
+    # Generate verification token for the pending email
+    verification_token = generate_verification_token()
+    verification_expiry = get_verification_token_expiry()
+    
+    # Store the pending email change (don't change the active email yet)
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE users 
+            SET pending_email = %s,
+                pending_email_token = %s,
+                pending_email_expires = %s
+            WHERE id = %s
+        """, (new_username, verification_token, verification_expiry, current_user.id))
+        conn.commit()
+        cursor.close()
+    
+    # Invalidate Redis cache for user settings
+    redis_key = f"users:v1:{current_user.id}"
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(redis_key)
+            app.logger.info(f"Invalidated Redis cache for user {current_user.id} after pending email change")
+        except Exception as e:
+            app.logger.warning(f"[REDIS][user_settings] DELETE error: {e}")
+    
+    # Send verification email to NEW address
+    email_sent = send_verification_email(new_username, current_email, verification_token)
+    
+    # Create notification
+    add_notification(
+        user_id=current_user.id,
+        message=f'Email change requested to {new_username}. Please check that email address to verify the change. Your current email ({current_email}) will remain active until verified.'
+    )
+    
+    if email_sent:
+        return redirect(url_for('profile', success='email_pending'))
+    else:
+        app.logger.error(f"Failed to send verification email to {new_username}")
+        flash('Failed to send verification email. Please try again.')
+        return redirect(url_for('profile'))
 
-    # Update in Redis only - flush worker will persist to MySQL
-    _update_user_setting_in_redis(current_user.id, 'username', new_username)
+@app.route('/resend-pending-email-verification', methods=['GET'])
+@login_required
+def resend_pending_email_verification():
+    """Resend verification email for pending email change"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # Get pending email info
+        cursor.execute("""
+            SELECT username, pending_email, pending_email_token 
+            FROM users 
+            WHERE id = %s
+        """, (current_user.id,))
+        user = cursor.fetchone()
+        
+        if not user or not user['pending_email']:
+            cursor.close()
+            flash('No pending email change found.')
+            return redirect(url_for('profile'))
+        
+        current_email = user['username']
+        pending_email = user['pending_email']
+        
+        # Generate new token
+        verification_token = generate_verification_token()
+        verification_expiry = get_verification_token_expiry()
+        
+        cursor.execute("""
+            UPDATE users 
+            SET pending_email_token = %s,
+                pending_email_expires = %s
+            WHERE id = %s
+        """, (verification_token, verification_expiry, current_user.id))
+        conn.commit()
+        cursor.close()
+        
+        # Send new verification email
+        email_sent = send_verification_email(pending_email, current_email, verification_token)
+        
+        # Create notification
+        add_notification(
+            user_id=current_user.id,
+            message=f'Verification email resent to {pending_email}. Please check that inbox to complete your email change.'
+        )
+        
+        if email_sent:
+            return redirect(url_for('profile', resend='success'))
+        else:
+            app.logger.error(f"Failed to resend verification email to {pending_email}")
+            flash('Failed to resend verification email. Please try again later.')
+            return redirect(url_for('profile'))
 
-    flash('Username updated successfully.')
-    return redirect(url_for('profile', success='email'))
+@app.route('/cancel-pending-email-change', methods=['GET'])
+@login_required
+def cancel_pending_email_change():
+    """Cancel pending email change"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        try:
+            # Clear pending email fields
+            cursor.execute("""
+                UPDATE users
+                SET pending_email = NULL,
+                    pending_email_token = NULL,
+                    pending_email_expires = NULL
+                WHERE id = %s
+            """, (current_user.id,))
+            conn.commit()
+            
+            # Invalidate Redis cache for user settings
+            redis_key = f"users:v1:{current_user.id}"
+            if app.config.get('REDIS_OK'):
+                try:
+                    _redis_client.delete(redis_key)
+                    app.logger.info(f"Invalidated Redis cache for user {current_user.id} after cancelling email change")
+                except Exception as e:
+                    app.logger.warning(f"[REDIS][user_settings] DELETE error: {e}")
+            
+            flash('Email change cancelled. Your current email address remains active.')
+            app.logger.info(f"User {current_user.id} cancelled pending email change.")
+            
+        except Exception as e:
+            conn.rollback()
+            app.logger.error(f"Error cancelling pending email change for user {current_user.id}: {e}")
+            flash('Failed to cancel email change. Please try again.')
+        
+        finally:
+            cursor.close()
+        
+        return redirect(url_for('profile'))
+
+@app.route('/verify_current_password', methods=['POST'])
+@login_required
+def verify_current_password():
+    """Verify user's current password"""
+    current_password = request.form.get('current_password')
+    
+    if not current_password:
+        return jsonify({'status': 'invalid'}), 200
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT password FROM users WHERE id = %s", (current_user.id,))
+        user = cursor.fetchone()
+        cursor.close()
+    
+    if user and bcrypt.check_password_hash(user['password'], current_password):
+        return jsonify({'status': 'valid'}), 200
+    else:
+        return jsonify({'status': 'invalid'}), 200
+
+@app.route('/check_mfa_status', methods=['GET'])
+@login_required
+def check_mfa_status():
+    """Check if user has MFA enabled"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT mfa_secret FROM users WHERE id = %s", (current_user.id,))
+        user = cursor.fetchone()
+        cursor.close()
+    
+    mfa_enabled = bool(user and user.get('mfa_secret'))
+    return jsonify({'mfa_enabled': mfa_enabled}), 200
 
 @app.route('/update_password', methods=['POST'])
 @login_required
 def update_password():
     new_password = request.form['password']
+    mfa_code = request.form.get('mfa_code')
+    
+    # Check if user has MFA enabled
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT mfa_secret FROM users WHERE id = %s", (current_user.id,))
+        user = cursor.fetchone()
+        cursor.close()
+    
+    # If user has MFA enabled, verify the code
+    if user and user['mfa_secret']:
+        if not mfa_code:
+            return jsonify({'status': 'error', 'message': 'MFA code required'}), 400
+        
+        # Verify MFA code
+        totp = pyotp.TOTP(user['mfa_secret'])
+        if not totp.verify(mfa_code, valid_window=1):
+            return jsonify({'status': 'invalid_mfa', 'message': 'Invalid MFA code. Please try again.'}), 200
 
     hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
 
     # Update in Redis only - flush worker will persist to MySQL
     _update_user_setting_in_redis(current_user.id, 'password', hashed_password)
 
-    flash('Password updated successfully.')
-    return redirect(url_for('profile', success='password'))
+    return jsonify({'status': 'success'}), 200
 
 @app.route('/enable_mfa', methods=['POST'])
 @login_required
@@ -7865,7 +8790,7 @@ def enable_mfa():
         qr_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
         qr_url = f"data:image/png;base64,{qr_b64}"
 
-        return jsonify({'status': 'success', 'qr_url': qr_url})
+        return jsonify({'status': 'success', 'qr_url': qr_url, 'secret': secret})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
@@ -10210,7 +11135,7 @@ def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
 
 def add_notification(user_id, message, notification_date=None):
     """
-    Create a new notification for a user.
+    Create a new notification for a user and optionally send via email.
     
     Args:
         user_id: The user ID to create the notification for
@@ -10224,21 +11149,39 @@ def add_notification(user_id, message, notification_date=None):
         notification_date = datetime.now()
     
     with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
             INSERT INTO notifications (user_id, date, message, is_read)
             VALUES (%s, %s, %s, 0)
         """, (user_id, notification_date, message))
         notification_id = cursor.lastrowid
+        
+        # Check if user has email notifications enabled
+        cursor.execute("""
+            SELECT email, email_notifications, first_name
+            FROM users
+            WHERE id = %s
+        """, (user_id,))
+        user = cursor.fetchone()
+        
         conn.commit()
         cursor.close()
+    
+    # Send email notification if enabled
+    if user and user.get('email_notifications') and user.get('email'):
+        try:
+            from email_utils import send_notification_email
+            user_name = user.get('first_name', 'User')
+            send_notification_email(user['email'], user_name, message, notification_date)
+        except Exception as e:
+            app.logger.error(f"Failed to send notification email to user {user_id}: {str(e)}")
     
     return notification_id
 
 def check_negative_remainders(user_id):
     """
     Check for negative remainders in the future and create notifications.
-    Checks the next 90 days for potential overdrafts.
+    Checks the next 90 days for potential negative balances.
     """
     app.logger.info(f"[NOTIFICATIONS] Starting check_negative_remainders for user {user_id}")
     
@@ -10296,23 +11239,23 @@ def check_negative_remainders(user_id):
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
-        # Get existing notifications for overdraft warnings
+        # Get existing notifications for balance projection warnings
         cursor.execute("""
             SELECT message FROM notifications
             WHERE user_id = %s
             AND message LIKE %s
             AND is_read = 0
             AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        """, (user_id, 'On %you will overdraft%'))
+        """, (user_id, 'Projected balance on%'))
         existing_notifications = cursor.fetchall()
         
-        app.logger.info(f"[NOTIFICATIONS] Found {len(existing_notifications)} existing unread overdraft notifications")
+        app.logger.info(f"[NOTIFICATIONS] Found {len(existing_notifications)} existing unread balance projection notifications")
         
         # Check if we already have a notification for this specific date
         already_notified = False
         for notif in existing_notifications:
             try:
-                date_str = notif['message'].split('On ')[1].split(' you will')[0]
+                date_str = notif['message'].split('Projected balance on ')[1].split(':')[0]
                 notif_date = datetime.strptime(date_str, '%B %d, %Y').date()
                 if notif_date == first_negative_date:
                     already_notified = True
@@ -10327,7 +11270,7 @@ def check_negative_remainders(user_id):
     # Create notification if not already exists
     if not already_notified:
         formatted_date = first_negative_date.strftime('%B %d, %Y')
-        message = f'On {formatted_date} you will overdraft. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
+        message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
         app.logger.info(f"[NOTIFICATIONS] Creating notification for {first_negative_date}: {message}")
         try:
             notification_id = add_notification(user_id, message)
@@ -11714,6 +12657,725 @@ def cleanup_on_exit():
         app.logger.info("Cleanup complete")
     except Exception as e:
         app.logger.error(f"Error during cleanup: {e}")
+
+
+##############################################################################
+############################### QUILTT INTEGRATION ###########################
+##############################################################################
+
+# Initialize Quiltt client
+quiltt_client = QuilttClient()
+
+@app.route('/quiltt-settings')
+@login_required
+def quiltt_settings():
+    """Quiltt bank connections settings page"""
+    
+    # Get or create session token for this user
+    session_token = None
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # Check if user has a Quiltt profile
+        cursor.execute("""
+            SELECT session_token, session_expires_at 
+            FROM quiltt_profiles 
+            WHERE user_id = %s
+        """, (current_user.id,))
+        profile = cursor.fetchone()
+        
+        # Create or refresh session token if needed
+        if not profile or not profile['session_token'] or \
+           (profile['session_expires_at'] and profile['session_expires_at'] < datetime.now()):
+            
+            # Create new session token
+            result = quiltt_client.create_session_token(
+                current_user.id,
+                metadata={'username': current_user.username}
+            )
+            
+            if result:
+                session_token = result['token']
+                
+                # Save to database
+                if profile:
+                    cursor.execute("""
+                        UPDATE quiltt_profiles 
+                        SET session_token = %s, session_expires_at = %s, profile_id = %s
+                        WHERE user_id = %s
+                    """, (result['token'], result['expiresAt'], result['profileId'], current_user.id))
+                else:
+                    cursor.execute("""
+                        INSERT INTO quiltt_profiles (user_id, profile_id, session_token, session_expires_at)
+                        VALUES (%s, %s, %s, %s)
+                    """, (current_user.id, result['profileId'], result['token'], result['expiresAt']))
+                
+                conn.commit()
+            else:
+                # Failed to create session token - likely missing API credentials
+                app.logger.warning("Failed to create Quiltt session token - check API credentials")
+                session_token = None
+        else:
+            session_token = profile['session_token']
+        
+        # Get connected institutions
+        cursor.execute("""
+            SELECT c.*, 
+                   GROUP_CONCAT(
+                       JSON_OBJECT(
+                           'id', a.id,
+                           'account_id', a.account_id,
+                           'account_name', a.account_name,
+                           'account_type', a.account_type,
+                           'mask', a.mask,
+                           'current_balance', a.current_balance,
+                           'sync_transactions', a.sync_transactions
+                       )
+                   ) as accounts
+            FROM quiltt_connections c
+            LEFT JOIN quiltt_accounts a ON c.id = a.connection_id AND a.is_active = 1
+            WHERE c.user_id = %s
+            GROUP BY c.id
+            ORDER BY c.last_synced_at DESC
+        """, (current_user.id,))
+        connections = cursor.fetchall()
+        
+        # Parse accounts JSON
+        for conn_row in connections:
+            if conn_row['accounts']:
+                conn_row['accounts'] = json.loads('[' + conn_row['accounts'] + ']')
+            else:
+                conn_row['accounts'] = []
+        
+        # Get auto-import setting
+        cursor.execute("SELECT quiltt_auto_import FROM users WHERE id = %s", (current_user.id,))
+        user_settings = cursor.fetchone()
+        auto_import = user_settings['quiltt_auto_import'] if user_settings else True
+        
+        cursor.close()
+    
+    # Get user currency and other required template variables
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("""
+            SELECT currency_type, landing_page, profile_picture, 
+                   username, first_name, last_name 
+            FROM users WHERE id = %s
+        """, (current_user.id,))
+        user_data = cursor.fetchone()
+        currency_type = user_data['currency_type'] if user_data else 'USD'
+        landing_page = user_data['landing_page'] if user_data else 'dashboard_3m'
+        profile_picture = user_data['profile_picture']
+        
+        # Get unread notifications count
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM notifications 
+            WHERE user_id = %s AND is_read = 0
+        """, (current_user.id,))
+        notif_count = cursor.fetchone()
+        unread_notifications_count = notif_count['count'] if notif_count else 0
+        
+        cursor.close()
+    
+    currency_symbols = {'USD': '$', 'EUR': '€'}
+    currency_symbol = currency_symbols.get(currency_type, currency_type)
+    
+    return render_template(
+        'quiltt_settings.html',
+        session_token=session_token,
+        connections=connections,
+        auto_import=auto_import,
+        currency_symbol=currency_symbol,
+        today=date.today().isoformat(),
+        landing_page=landing_page,
+        profile_picture=profile_picture,
+        unread_notifications_count=unread_notifications_count
+    )
+
+
+@app.route('/quiltt/get-session-token', methods=['POST'])
+@login_required
+def get_quiltt_session_token():
+    """Get a fresh Quiltt session token for the current user"""
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # Get existing profile if any
+            cursor.execute("""
+                SELECT profile_id, session_token, session_expires_at 
+                FROM quiltt_profiles 
+                WHERE user_id = %s
+            """, (current_user.id,))
+            profile = cursor.fetchone()
+            
+            # Always generate a fresh token for opening the Connector
+            # This ensures we never use an expired token
+            app.logger.info(f"Generating fresh Quiltt session token for user {current_user.id}")
+            
+            if profile and profile['profile_id']:
+                # Existing profile - refresh token
+                result = quiltt_client.refresh_session_token(
+                    profile['profile_id'],
+                    metadata={'username': current_user.username}
+                )
+            else:
+                # New profile - create token
+                result = quiltt_client.create_session_token(
+                    current_user.id,
+                    metadata={'username': current_user.username}
+                )
+            
+            if not result or not result.get('token'):
+                app.logger.error("Failed to get Quiltt session token")
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Failed to generate session token'
+                }), 500
+            
+            session_token = result['token']
+            
+            # Parse and convert expiration time
+            expires_at_str = result.get('expiresAt')
+            if expires_at_str:
+                from dateutil import parser
+                expires_at = parser.isoparse(expires_at_str)
+                expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                expires_at_mysql = None
+            
+            # Save to database
+            if profile:
+                cursor.execute("""
+                    UPDATE quiltt_profiles 
+                    SET session_token = %s, session_expires_at = %s, profile_id = %s
+                    WHERE user_id = %s
+                """, (session_token, expires_at_mysql, result['profileId'], current_user.id))
+            else:
+                cursor.execute("""
+                    INSERT INTO quiltt_profiles (user_id, profile_id, session_token, session_expires_at)
+                    VALUES (%s, %s, %s, %s)
+                """, (current_user.id, result['profileId'], session_token, expires_at_mysql))
+            
+            conn.commit()
+            
+            app.logger.info(f"Successfully generated fresh session token for user {current_user.id}")
+            
+            return jsonify({
+                'status': 'success',
+                'session_token': session_token
+            })
+            
+    except Exception as e:
+        app.logger.error(f"Error generating Quiltt session token: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': 'Internal server error'
+        }), 500
+
+
+@app.route('/quiltt/disconnect', methods=['POST'])
+@login_required
+def quiltt_disconnect():
+    """Disconnect a Quiltt connection"""
+    data = request.get_json()
+    connection_id = data.get('connection_id')
+    
+    if not connection_id:
+        return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
+    
+    try:
+        # Get session token
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT session_token FROM quiltt_profiles WHERE user_id = %s
+            """, (current_user.id,))
+            profile = cursor.fetchone()
+            
+            if not profile or not profile['session_token']:
+                return jsonify({'status': 'error', 'message': 'No active session'}), 400
+            
+            # Disconnect via Quiltt API
+            success = quiltt_client.disconnect_connection(profile['session_token'], connection_id)
+            
+            if success:
+                # Deactivate connection and accounts in database
+                cursor.execute("""
+                    UPDATE quiltt_connections 
+                    SET status = 'DISCONNECTED'
+                    WHERE user_id = %s AND connection_id = %s
+                """, (current_user.id, connection_id))
+                
+                cursor.execute("""
+                    UPDATE quiltt_accounts 
+                    SET is_active = 0
+                    WHERE user_id = %s AND connection_id IN (
+                        SELECT id FROM quiltt_connections WHERE connection_id = %s
+                    )
+                """, (current_user.id, connection_id))
+                
+                conn.commit()
+                cursor.close()
+                
+                return jsonify({'status': 'success'})
+            else:
+                cursor.close()
+                return jsonify({'status': 'error', 'message': 'Failed to disconnect'}), 500
+                
+    except Exception as e:
+        app.logger.error(f"Error disconnecting Quiltt connection: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/delete', methods=['POST'])
+@login_required
+def quiltt_delete():
+    """Delete a disconnected Quiltt connection and all associated data"""
+    data = request.get_json()
+    connection_id = data.get('connection_id')
+    
+    app.logger.info(f"DELETE REQUEST - User: {current_user.id}, Connection ID: {connection_id}, Request data: {data}")
+    
+    if not connection_id:
+        app.logger.error("DELETE FAILED - Missing connection_id in request")
+        return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
+    
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # Verify the connection belongs to the current user and is disconnected
+            cursor.execute("""
+                SELECT id, status FROM quiltt_connections 
+                WHERE connection_id = %s AND user_id = %s
+            """, (connection_id, current_user.id))
+            
+            connection = cursor.fetchone()
+            
+            app.logger.info(f"DELETE CHECK - Found connection: {connection}")
+            
+            if not connection:
+                cursor.close()
+                app.logger.error(f"DELETE FAILED - Connection not found for connection_id={connection_id}, user_id={current_user.id}")
+                return jsonify({'status': 'error', 'message': 'Connection not found or access denied'}), 404
+            
+            # Safety check - only allow deletion of disconnected connections
+            app.logger.info(f"DELETE CHECK - Connection status: '{connection['status']}' (upper: '{connection['status'].upper()}')")
+            if connection['status'].upper() != 'DISCONNECTED':
+                cursor.close()
+                app.logger.error(f"DELETE FAILED - Connection status is '{connection['status']}', not DISCONNECTED")
+                return jsonify({'status': 'error', 'message': 'Can only delete disconnected connections'}), 400
+            
+            connection_db_id = connection['id']
+            
+            app.logger.info(f"DELETE PROCEEDING - Deleting connection_db_id={connection_db_id}")
+            
+            # Delete associated accounts (cascade should handle transactions)
+            cursor.execute("""
+                DELETE FROM quiltt_accounts 
+                WHERE connection_id = %s AND user_id = %s
+            """, (connection_db_id, current_user.id))
+            
+            accounts_deleted = cursor.rowcount
+            app.logger.info(f"DELETE PROGRESS - Deleted {accounts_deleted} accounts")
+            
+            # Delete the connection record
+            cursor.execute("""
+                DELETE FROM quiltt_connections 
+                WHERE id = %s AND user_id = %s
+            """, (connection_db_id, current_user.id))
+            
+            connections_deleted = cursor.rowcount
+            app.logger.info(f"DELETE PROGRESS - Deleted {connections_deleted} connection records")
+            
+            conn.commit()
+            cursor.close()
+            
+            app.logger.info(f"DELETE SUCCESS - Deleted Quiltt connection {connection_id} for user {current_user.id} ({accounts_deleted} accounts removed)")
+            
+            return jsonify({
+                'status': 'success', 
+                'message': f'Connection deleted successfully ({accounts_deleted} accounts removed)'
+            })
+                
+    except Exception as e:
+        app.logger.error(f"DELETE ERROR - Exception deleting Quiltt connection: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
+
+
+@app.route('/quiltt/sync', methods=['POST'])
+@login_required
+def quiltt_sync():
+    """Manually sync a Quiltt connection"""
+    data = request.get_json()
+    connection_id = data.get('connection_id')
+    
+    if not connection_id:
+        return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
+    
+    try:
+        # Get session token
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT session_token FROM quiltt_profiles WHERE user_id = %s
+            """, (current_user.id,))
+            profile = cursor.fetchone()
+            
+            if not profile or not profile['session_token']:
+                return jsonify({'status': 'error', 'message': 'No active session'}), 400
+            
+            # Get latest data from Quiltt
+            profile_data = quiltt_client.get_profile(profile['session_token'])
+            
+            if profile_data:
+                # Update connection info
+                cursor.execute("""
+                    UPDATE quiltt_connections 
+                    SET last_synced_at = NOW()
+                    WHERE user_id = %s AND connection_id = %s
+                """, (current_user.id, connection_id))
+                conn.commit()
+                
+                cursor.close()
+                return jsonify({'status': 'success'})
+            else:
+                cursor.close()
+                return jsonify({'status': 'error', 'message': 'Failed to sync'}), 500
+                
+    except Exception as e:
+        app.logger.error(f"Error syncing Quiltt connection: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None):
+    """
+    Internal function to sync transactions for a specific user
+    
+    Args:
+        user_id: The user ID to sync transactions for
+        start_date: Optional start date (YYYY-MM-DD) from webhook metadata
+        end_date: Optional end date (YYYY-MM-DD) from webhook metadata
+    
+    Returns tuple: (success: bool, synced_count: int, error_message: str)
+    """
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # Get session token
+            cursor.execute("""
+                SELECT session_token FROM quiltt_profiles WHERE user_id = %s
+            """, (user_id,))
+            profile = cursor.fetchone()
+            
+            if not profile or not profile['session_token']:
+                app.logger.warning(f"No active Quiltt session for user {user_id}")
+                return (False, 0, 'No active Quiltt session')
+            
+            session_token = profile['session_token']
+            
+            # Get accounts with sync enabled
+            cursor.execute("""
+                SELECT account_id, id as db_id 
+                FROM quiltt_accounts 
+                WHERE user_id = %s AND sync_transactions = 1 AND is_active = 1
+            """, (user_id,))
+            accounts = cursor.fetchall()
+            
+            if not accounts:
+                app.logger.info(f"No accounts enabled for sync for user {user_id}")
+                return (True, 0, 'No accounts enabled for sync')
+            
+            # Get the default "Auto Adjustments" category for unmapped transactions
+            cursor.execute("""
+                SELECT id FROM expense_categories 
+                WHERE user_id = %s AND is_auto_adjustment = 1
+                LIMIT 1
+            """, (user_id,))
+            auto_adj_category = cursor.fetchone()
+            default_expense_category_id = auto_adj_category['id'] if auto_adj_category else None
+            
+            if not default_expense_category_id:
+                app.logger.warning(f"No auto-adjustment category found for user {user_id}")
+                return (False, 0, 'Auto Adjustments category not found')
+            
+            total_synced = 0
+            
+            # Use provided dates from webhook metadata, or default to last 30 days
+            from datetime import datetime, timedelta
+            if not start_date or not end_date:
+                start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                app.logger.info(f"No date range provided, using default: {start_date} to {end_date}")
+            else:
+                app.logger.info(f"Using webhook date range: {start_date} to {end_date}")
+            
+            for account in accounts:
+                account_id = account['account_id']
+                
+                # Get transactions from Quiltt
+                transactions = quiltt_client.get_transactions(
+                    session_token=session_token,
+                    account_id=account_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    limit=100
+                )
+                
+                if not transactions:
+                    continue
+                
+                app.logger.info(f"Fetched {len(transactions)} transactions for account {account_id}")
+                
+                for txn in transactions:
+                    # Skip pending transactions
+                    if txn.get('pending', False):
+                        continue
+                    
+                    txn_id = txn.get('id')
+                    amount = abs(float(txn.get('amount', 0)))
+                    date = txn.get('date')
+                    is_expense = float(txn.get('amount', 0)) < 0
+                    
+                    # Check if transaction already exists
+                    cursor.execute("""
+                        SELECT id FROM quiltt_transactions 
+                        WHERE user_id = %s AND transaction_id = %s
+                    """, (user_id, txn_id))
+                    
+                    if cursor.fetchone():
+                        continue  # Skip already imported transactions
+                    
+                    # Insert into expense_entries (for now, all go to Auto Adjustments)
+                    if is_expense:
+                        cursor.execute("""
+                            INSERT INTO expense_entries (category_id, date, amount, processed)
+                            VALUES (%s, %s, %s, 1)
+                        """, (default_expense_category_id, date, amount))
+                        entry_id = cursor.lastrowid
+                    else:
+                        # Income transactions - skip for now or add logic later
+                        continue
+                    
+                    # Track this transaction as imported
+                    cursor.execute("""
+                        INSERT INTO quiltt_transactions 
+                        (user_id, transaction_id, account_id, entry_id, amount, date, description, merchant_name, category)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        user_id,
+                        txn_id,
+                        account['db_id'],
+                        entry_id,
+                        amount,
+                        date,
+                        txn.get('description', ''),
+                        txn.get('merchantName', ''),
+                        txn.get('category', '')
+                    ))
+                    
+                    total_synced += 1
+            
+            conn.commit()
+            cursor.close()
+            
+            app.logger.info(f"Successfully synced {total_synced} transactions for user {user_id}")
+            return (True, total_synced, f'Synced {total_synced} new transactions')
+            
+    except Exception as e:
+        app.logger.error(f"Error syncing Quiltt transactions for user {user_id}: {e}")
+        return (False, 0, str(e))
+
+
+@app.route('/quiltt/sync-transactions', methods=['POST'])
+@login_required
+def quiltt_sync_transactions():
+    """Manually sync transactions from Quiltt for accounts with sync enabled"""
+    success, count, message = _sync_quiltt_transactions_for_user(current_user.id)
+    
+    if success:
+        return jsonify({
+            'status': 'success',
+            'transactions_synced': count,
+            'message': message
+        })
+    else:
+        return jsonify({'status': 'error', 'message': message}), 400
+
+
+@app.route('/quiltt/toggle-sync', methods=['POST'])
+@login_required
+def quiltt_toggle_sync():
+    """Toggle transaction sync for a specific account"""
+    data = request.get_json()
+    account_id = data.get('account_id')
+    sync_enabled = data.get('sync_enabled', True)
+    
+    if not account_id:
+        return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
+    
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE quiltt_accounts 
+                SET sync_transactions = %s
+                WHERE user_id = %s AND account_id = %s
+            """, (1 if sync_enabled else 0, current_user.id, account_id))
+            conn.commit()
+            cursor.close()
+        
+        return jsonify({'status': 'success'})
+        
+    except Exception as e:
+        app.logger.error(f"Error toggling sync: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/toggle-auto-import', methods=['POST'])
+@login_required
+def quiltt_toggle_auto_import():
+    """Toggle automatic transaction import"""
+    data = request.get_json()
+    enabled = data.get('enabled', True)
+    
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE users 
+                SET quiltt_auto_import = %s
+                WHERE id = %s
+            """, (1 if enabled else 0, current_user.id))
+            conn.commit()
+            cursor.close()
+        
+        return jsonify({'status': 'success'})
+        
+    except Exception as e:
+        app.logger.error(f"Error toggling auto-import: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/webhook', methods=['POST'])
+def quiltt_webhook():
+    """Handle webhooks from Quiltt"""
+    try:
+        payload = request.get_json()
+        
+        if not payload:
+            app.logger.error("Received empty webhook payload")
+            return jsonify({'status': 'error', 'message': 'Empty payload'}), 400
+        
+        app.logger.info(f"Received Quiltt webhook payload: {json.dumps(payload)[:500]}...")
+        
+        event_types = payload.get('eventTypes', [])
+        events = payload.get('events', [])
+        
+        if not events:
+            app.logger.warning("Webhook has no events to process")
+            return jsonify({'status': 'success', 'message': 'No events'}), 200
+        
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            for event in events:
+                event_id = event.get('id')
+                event_type = event.get('type')
+                event_at = event.get('at')
+                profile_obj = event.get('profile', {})
+                record_obj = event.get('record', {})
+                metadata_obj = event.get('metadata', {})
+                
+                profile_id = profile_obj.get('id')
+                connection_id = record_obj.get('id')
+                
+                app.logger.info(f"Processing event: type={event_type}, profile={profile_id}, connection={connection_id}")
+                
+                # Store webhook event
+                cursor.execute("""
+                    INSERT INTO quiltt_webhook_events 
+                    (event_id, event_type, profile_id, connection_id, payload)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    event_id,
+                    event_type,
+                    profile_id,
+                    connection_id,
+                    json.dumps(event)
+                ))
+                event_db_id = cursor.lastrowid
+                
+                # Process connection.synced.successful events (including .initial and .historical)
+                if event_type and event_type.startswith('connection.synced.successful'):
+                    # Get user_id from profile_id
+                    cursor.execute("""
+                        SELECT user_id FROM quiltt_profiles WHERE profile_id = %s
+                    """, (profile_id,))
+                    profile = cursor.fetchone()
+                    
+                    if profile:
+                        user_id = profile['user_id']
+                        app.logger.info(f"Processing {event_type} event for user {user_id}")
+                        
+                        # Update connection status
+                        if connection_id:
+                            cursor.execute("""
+                                UPDATE quiltt_connections 
+                                SET status = 'SYNCED', last_synced_at = NOW()
+                                WHERE user_id = %s AND connection_id = %s
+                            """, (user_id, connection_id))
+                            app.logger.info(f"Updated connection status for {connection_id}")
+                        
+                        conn.commit()
+                        
+                        # Extract date range from metadata if available
+                        start_date = metadata_obj.get('startDate')
+                        end_date = metadata_obj.get('endDate')
+                        
+                        if start_date and end_date:
+                            app.logger.info(f"Webhook metadata indicates date range: {start_date} to {end_date}")
+                            # Trigger automatic transaction sync with date range
+                            success, count, message = _sync_quiltt_transactions_for_user(user_id, start_date, end_date)
+                        else:
+                            app.logger.info("No date range in metadata - connection is up to date")
+                            # No date range means no new transactions to sync
+                            success, count, message = True, 0, 'No new transactions (connection up to date)'
+                        
+                        if success:
+                            app.logger.info(f"Auto-synced {count} transactions for user {user_id}")
+                            # Mark webhook as processed
+                            cursor.execute("""
+                                UPDATE quiltt_webhook_events 
+                                SET processed = 1, processed_at = NOW()
+                                WHERE id = %s
+                            """, (event_db_id,))
+                            conn.commit()
+                        else:
+                            app.logger.error(f"Failed to auto-sync transactions for user {user_id}: {message}")
+                            cursor.execute("""
+                                UPDATE quiltt_webhook_events 
+                                SET error_message = %s
+                                WHERE id = %s
+                            """, (message, event_db_id))
+                            conn.commit()
+                    else:
+                        app.logger.warning(f"No user found for profile_id {profile_id}")
+                else:
+                    app.logger.info(f"Event type {event_type} does not require transaction sync")
+            
+            cursor.close()
+        
+        return jsonify({'status': 'success'}), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error processing Quiltt webhook: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+##############################################################################
 
 
 # Register cleanup handler
