@@ -9,7 +9,7 @@
             <label for="amount">Recurring Amount</label>
             <div class="currency-input-container">
                 <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                <input type="number" class="recurring-amount" id="amount" name="amount" placeholder="0" step="1" min="0" required inputmode="decimal" pattern="\d*">
+                <input type="number" class="recurring-amount" id="amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
             </div>
 
             <label for="cadence-interval">Repeat Every</label>
@@ -101,7 +101,7 @@
             <label for="amount">Recurring Amount</label>
             <div class="currency-input-container">
                 <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                <input type="number" class="recurring-amount" id="expense-amount" name="amount" placeholder="0" step="1" min="0" required inputmode="decimal" pattern="\\d*">
+                <input type="number" class="recurring-amount" id="expense-amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
             </div>
 
             <label for="cadence-interval">Repeat Every</label>
@@ -200,7 +200,7 @@
             <label for="ca-amount">Recurring Amount</label>
             <div class="currency-input-container">
                 <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                <input type="number" class="recurring-amount" id="ca-amount" name="amount" placeholder="0" step="1" min="0" required inputmode="decimal" pattern="\\d*">
+                <input type="number" class="recurring-amount" id="ca-amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
             </div>
 
             <label for="ca-cadence-interval">Repeat Every</label>

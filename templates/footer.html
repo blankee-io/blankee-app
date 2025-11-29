@@ -55,7 +55,7 @@
                 <label for="footer-amount">Amount:</label>
                 <div class="currency-input-container">
                     <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                    <input type="number" id="footer-amount" name="amount" step="1" min="1" required inputmode="numeric" placeholder="0">
+                    <input type="number" id="footer-amount" name="amount" step="0.01" min="0.01" required inputmode="decimal" placeholder="0.00">
                 </div>
             </div>
 
@@ -95,7 +95,7 @@
                 <label for="footer-ca-amount">Amount:</label>
                 <div class="currency-input-container">
                     <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                    <input type="number" id="footer-ca-amount" name="amount" step="1" min="1" required inputmode="numeric" placeholder="0">
+                    <input type="number" id="footer-ca-amount" name="amount" step="0.01" min="0.01" required inputmode="decimal" placeholder="0.00">
                 </div>
             </div>
             <!-- Date Input -->
@@ -118,7 +118,7 @@
                 <label for="autobalance-current-balance">Current Bank Balance:</label>
                 <div class="currency-input-container">
                     <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                    <input type="number" id="autobalance-current-balance" step="1" required autocomplete="off" inputmode="decimal" placeholder="0" min="0" pattern="\\d*">
+                    <input type="number" id="autobalance-current-balance" step="0.01" required autocomplete="off" inputmode="decimal" placeholder="0.00" min="0">
                 </div>
             </div>
             <div class="footer-form-group">
