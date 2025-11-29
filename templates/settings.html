@@ -45,12 +45,10 @@
                             <form id="currency-type-form" class="profile-form">
                                 <div class="input-group">
                                     <label for="currency_type">Currency:</label>
-                                    <div class="currency-input-container">
-                                        <select name="currency_type" id="currency_type" class="login-input" required>
-                                            <option value="USD" {% if currency_type == 'USD' %}selected{% endif %}>USD</option>
-                                            <option value="EUR" {% if currency_type == 'EUR' %}selected{% endif %}>EUR</option>
-                                        </select>
-                                    </div>
+                                    <select name="currency_type" id="currency_type" class="login-input" required>
+                                        <option value="USD" {% if currency_type == 'USD' %}selected{% endif %}>USD</option>
+                                        <option value="EUR" {% if currency_type == 'EUR' %}selected{% endif %}>EUR</option>
+                                    </select>
                                     <button type="submit" class="submit-button">
                                         <i id="currency-type-submit-icon" class="fas fa-check"></i>
                                     </button>
@@ -58,7 +56,7 @@
                             </form>
                             <form id="starting-balance-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="starting_balance">Change Start Balance:</label>
+                                    <label for="starting_balance">Start Balance:</label>
                                     <div class="currency-input-container">
                                         <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
                                         <input type="number" name="starting_balance" id="starting_balance" class="login-input" value="{{ starting_balance }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
@@ -72,7 +70,7 @@
                             <!-- Balance Threshold Form -->
                             <form id="balance-threshold-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="balance_threshold">Change Threshold:</label>
+                                    <label for="balance_threshold">Threshold:</label>
                                     <div class="currency-input-container">
                                         <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
                                         <input type="number" name="balance_threshold" id="balance_threshold" class="login-input" value="{{ balance_threshold }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
@@ -84,7 +82,7 @@
                             </form>
                             <form id="landing-page-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="landing_page">Preferred Landing Page:</label>
+                                    <label for="landing_page">Landing Page:</label>
                                     <select class="login-input" name="landing_page" id="landing_page">
                                         <option value="dashboard" {% if landing_page == 'dashboard' %}selected{% endif %}>Week View</option>
                                         <option value="dashboard_d" {% if landing_page == 'dashboard_d' %}selected{% endif %}>Day View</option>
@@ -98,10 +96,11 @@
                             <form id="goofy-week-form" class="profile-form">
                                 <div class="input-group">
                                     <label for="goofy_week_mode">Goofy Week Mode:</label>
-                                    <input class="submit-checkbox" type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %} style="display: none;">
-                                    <label class="toggle-switch" data-checkbox="goofy_week_mode">
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="goofy_week_mode">
                                         <i class="fa-solid fa-toggle-large-on toggle-icon {% if goofy_week_mode != 1 %}toggle-off{% endif %}"></i>
-                                    </label>
+                                    </button>
                                 </div>
                             </form>
                         </div>
@@ -111,10 +110,11 @@
                             <form id="email-notifications-form" class="profile-form">
                                 <div class="input-group">
                                     <label for="email_notifications">Email Notifications:</label>
-                                    <input class="submit-checkbox" type="checkbox" id="email_notifications" {% if email_notifications == 1 %}checked{% endif %} style="display: none;">
-                                    <label class="toggle-switch" data-checkbox="email_notifications">
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="email_notifications" {% if email_notifications == 1 %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="email_notifications">
                                         <i class="fa-solid fa-toggle-large-on toggle-icon {% if email_notifications != 1 %}toggle-off{% endif %}"></i>
-                                    </label>
+                                    </button>
                                 </div>
                             </form>
                         </div>
