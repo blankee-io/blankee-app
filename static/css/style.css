@@ -5215,10 +5215,8 @@ input#setup-profile-starting-savings {
     display: flex;
     justify-content: center;
     align-items: center;
-    justify-content: flex-start;
     cursor: pointer;
     margin-left: 20px;
-    margin-top: 15px;
     margin-right: 0;
     flex-shrink: 0;
     width: 32px;
@@ -5235,11 +5233,12 @@ input#setup-profile-starting-savings {
     height: 25px;
     width: auto;
     font-size: 30px;
-    line-height: 25px;
+    line-height: 1;
     color: #E45F1C;
     transition: color 0.3s ease;
-    display: block;
-    text-align: left;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     transform-origin: center center;
 }
 
