@@ -1049,7 +1049,7 @@
 
             deleteAccountButton.on('click', function(e) {
                 e.preventDefault();
-                deleteAccountModal.show();
+                deleteAccountModal.css('display', 'flex');
             });
 
             closeDeleteModal.on('click', function() {
@@ -1073,7 +1073,7 @@
                     method: 'POST',
                     success: function(response) {
                         if (response.status === 'success') {
-                            $('#deleteSuccessModal').show();
+                            $('#deleteSuccessModal').css('display', 'flex');
                             setTimeout(function() {
                                 window.location.href = "{{ url_for('login') }}";
                             }, 3000);
