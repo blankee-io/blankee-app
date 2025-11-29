@@ -1810,25 +1810,6 @@ input#setup-profile-starting-savings {
         font-size: 20px;
     }
 
-    .calendarnavbuttonscontainer {
-        /* Stack children vertically */
-        flex-direction: column; 
-
-        /* Align children to the top */
-        justify-content: flex-start; 
-
-        margin-bottom: 0;
-    }
-
-    .nav-dash-container {
-        justify-content: center;
-        width: 100% !important;
-    }
-
-    .calendarnavbuttons {
-        margin-top: 15px;
-    }
-
     #nav-dropdown-toggle {
         display: none;
     }
