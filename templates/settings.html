@@ -160,13 +160,67 @@
             // JS for form submissions and validation
             // For example, you can add similar logic to enable/disable buttons for balance fields
 
-            // Enable submit button on form input
+            // Format existing values to show .00 on page load
+            const startingBalance = $('#starting_balance');
+            const balanceThreshold = $('#balance_threshold');
+            
+            if (startingBalance.val() && !isNaN(startingBalance.val())) {
+                startingBalance.val(parseFloat(startingBalance.val()).toFixed(2));
+            }
+            
+            if (balanceThreshold.val() && !isNaN(balanceThreshold.val())) {
+                balanceThreshold.val(parseFloat(balanceThreshold.val()).toFixed(2));
+            }
+
+            // Enable submit button on form input and validate decimals
             $('#starting_balance').on('input', function() {
                 $('#starting-balance-submit-icon').removeClass('fa-times').addClass('fa-check');
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                // Limit to 2 decimal places
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+
+            // Format to show .00 on blur
+            $('#starting_balance').on('blur', function() {
+                if (this.value && !isNaN(this.value)) {
+                    this.value = parseFloat(this.value).toFixed(2);
+                }
             });
 
             $('#balance_threshold').on('input', function() {
                 $('#balance-threshold-submit-icon').removeClass('fa-times').addClass('fa-check');
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                // Limit to 2 decimal places
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+
+            // Format to show .00 on blur
+            $('#balance_threshold').on('blur', function() {
+                if (this.value && !isNaN(this.value)) {
+                    this.value = parseFloat(this.value).toFixed(2);
+                }
             });
 
             // Handle toggle switch clicks

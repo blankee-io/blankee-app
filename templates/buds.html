@@ -226,6 +226,26 @@
             const confirmAddBudBtn = document.getElementById('confirm-add-bud-btn');
             const newBudInput = document.getElementById('new-bud');
 
+            // Limit decimal places for bud-item-value input (2 decimals)
+            const budItemValueInput = document.getElementById('bud-item-value');
+            if (budItemValueInput) {
+                budItemValueInput.addEventListener('input', function() {
+                    let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+
             // Toggle overlay visibility
             addBudBtn.addEventListener('click', function() {
                 budInputOverlay.style.display = 'flex';
