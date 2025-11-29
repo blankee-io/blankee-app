@@ -143,7 +143,7 @@ body {
     padding-bottom: 100px;
     overflow-x: hidden;
     background-color: #f2f7f7;
-    color: #1c1c1e;
+    color: #575757;
     font-family: Nunito, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -1463,6 +1463,7 @@ button#autobalance-submit:active {
     font-size: 14px;
     transition: all 0.2s ease;
     box-sizing: border-box;
+    width:100%;
 }
 
 .login-input:focus {
@@ -1731,17 +1732,58 @@ button.login-button:active {
 
 /* Form Inputs */
 #setup-profile-name-form input,
+#setup-profile-currency-form select {
+    /* Keep input fields at 80% of the container */
+    width: 100%; 
+    height: 38px;
+    margin: 10px 0;
+    padding: 8px 12px;
+    background-color: #f9f9f9;
+    border: 1px solid #d1d1d6;
+    border-radius: 8px;
+    font-size: 14px;
+    text-align: right;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
 #setup-profile-balance-form input,
 #setup-profile-threshold-form input {
-    /* Keep input fields at 80% of the container */
-    width: 80%; 
+    width: 100%;
+    height: 38px;
     margin: 10px 0;
-    padding: 10px 0 10px 25px;
-    border: 1px solid #575757;
-    border-radius: 5px;
-    font-size: 16px;
+    padding: 8px 12px;
+    background-color: #f9f9f9;
+    border: 1px solid #d1d1d6;
+    border-radius: 8px;
+    font-size: 14px;
     text-align: right;
+    transition: all 0.2s ease;
     box-sizing: border-box;
+}
+
+#setup-profile-name-form input:focus,
+#setup-profile-balance-form input:focus,
+#setup-profile-threshold-form input:focus,
+#setup-profile-currency-form select:focus {
+    background-color: #fff;
+    border-color: #2aaaa8;
+    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
+    outline: none;
+}
+
+#setup-profile-threshold-form .currency-input-container,
+#setup-profile-currency-form .currency-input-container,
+#setup-profile-balance-form .currency-input-container {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    gap: 20px;
+}
+
+#setup-profile-balance-form .currency-input-container > div {
+    width: 100%;
+    flex: 1;
 }
 
 label[for="setup-profile-starting-balance"],
@@ -1759,6 +1801,7 @@ input#setup-profile-balance-threshold,
 input#setup-profile-starting-balance,
 input#setup-profile-starting-savings {
     padding-right: 10px;
+    padding-left: 25px;
 }
 
 #autobalance-current-balance,
@@ -5939,13 +5982,20 @@ input#setup-profile-starting-savings {
     flex-direction: column;
     align-items: center;
     width: 350px;
-    margin: 10% auto;
+    margin: auto;
     padding: 10px;
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 8px 32px rgb(0 0 0 / 18%);
     text-align: center;
     animation: modalFadeIn 0.2s;
+}
+
+#delete-account-modal,
+#deleteSuccessModal {
+    display: none;
+    justify-content: center;
+    align-items: center;
 }
 
 .delete-account-modal-buttons {
@@ -6248,8 +6298,7 @@ input#setup-profile-starting-savings {
 .income-form-container,
 .ca-form-container,
 .expense-form-container {
-    width: 80%;
-    max-width: 350px;
+    width: 350px;
     margin: 15% auto;
     padding: 20px;
     background-color: #fff;
@@ -6328,6 +6377,7 @@ input#setup-profile-starting-savings {
     transition: all 0.2s ease;
     cursor: pointer;
     background-color: #E45F1C;
+    width: 100%;
 }
 
 .income-form-container button[type="submit"]:hover,
@@ -6381,29 +6431,32 @@ input#setup-profile-starting-savings {
 
 .s-p-sb-currency-symbol {
     position: absolute;
-    top: 55px;
+    top: 42px;
+    left: 10%;
     color: #888;
     font-size: 14px;
     font-weight: bold;
-    transform: translateX(10px);
+    pointer-events: none;
 }
 
 .s-p-ss-currency-symbol {
     position: absolute;
-    top: 55px;
+    top: 42px;
+    left: 10%;
     color: #888;
     font-size: 14px;
     font-weight: bold;
-    transform: translateX(10px);
+    pointer-events: none;
 }
 
 .s-p-bt-currency-symbol {
     position: absolute;
-    top: 15px;
+    top: 20px;
+    left: 5%;
     color: #888;
     font-size: 14px;
     font-weight: bold;
-    transform: translateX(10px);
+    pointer-events: none;
 }
 
 .d-d-currency-symbol {
@@ -6426,7 +6479,7 @@ input#setup-profile-starting-savings {
 
 .r-currency-symbol {
     position: absolute;
-    top: 5px;
+    top: 15px;
     color: #888;
     font-size: 14px;
     font-weight: bold;
@@ -6467,12 +6520,36 @@ input#setup-profile-starting-savings {
 }
 
 /* Weekly Options */
-#weekly-options .weekday,
-#edit-weekly-options .weekday {
+#weekly-options,
+#edit-weekly-options,
+#expense-weekly-options,
+#ca-weekly-options {
     display: flex;
     align-items: center;
-    margin: 5px 0;
+    gap: 15px;
+}
+
+#weekly-options label,
+#edit-weekly-options label,
+#expense-weekly-options label,
+#ca-weekly-options label {
+    font-size: 14px;
+    margin: 0 0 8px 0;
+    white-space: nowrap;
+    width: 100%;
+}
+
+#weekly-options .weekday,
+#edit-weekly-options .weekday,
+#expense-weekly-options .weekday,
+#ca-weekly-options .weekday {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    margin: 0;
     font-size: 12px;
+    flex: 0 1 auto;
 }
 
 .weekday input {
@@ -6497,28 +6574,85 @@ input#setup-profile-starting-savings {
 }
 
 .add-day-btn {
-    width: 25px;
-    height: 25px;
-    margin-top: 8px;
-    padding: 6px 10px;
-    background-color: #e0e0e0;
+    padding: 12px 24px;
     border: none;
-    border-radius: 6px;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgb(42 170 168 / 30%);
+    color: white;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
     cursor: pointer;
+    background-color: #2AAAA8;
+    width: 100%;
+}
+
+.add-day-btn:hover {
+    box-shadow: 0 4px 12px rgb(42 170 168 / 40%);
+    transform: translateY(-1px);
+}
+
+.add-day-btn:active {
+    box-shadow: 0 1px 4px rgb(42 170 168 / 30%);
+    transform: translateY(0);
 }
 
 .remove-day-btn {
-    width: 25px;
-    height: 25px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
     margin-left: 8px;
-    padding: 6px 10px;
-    background-color: #e0e0e0;
+    padding: 0;
+    background-color: #E45F1C;
     border: none;
-    border-radius: 6px;
+    border-radius: 50%;
+    color: white;
+    font-size: 16px;
     cursor: pointer;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
+    margin-top: 5px;
+    margin-bottom: 10px;
+}
+
+.remove-day-btn:hover {
+    opacity: 0.85;
 }
 
 /* Yearly Options */
+#yearly-options,
+#edit-yearly-options,
+#weekly-options,
+#edit-weekly-options,
+#monthly-options,
+#edit-monthly-options,
+#expense-yearly-options,
+#expense-weekly-options,
+#expense-monthly-options,
+#ca-yearly-options,
+#ca-weekly-options,
+#ca-monthly-options {
+    margin-bottom: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    background-color: #E6FAF9;
+    border: 1px solid #59D6D4;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+#weekly-options,
+#edit-weekly-options,
+#expense-weekly-options,
+#ca-weekly-options {
+    justify-content: space-between;
+}
+
 #yearly-options,
 #edit-yearly-options {
     display: flex;
@@ -6542,7 +6676,22 @@ input#setup-profile-starting-savings {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
-    margin-top: 16px;
+}
+
+.cadence-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+}
+
+.cadence-row input[type="number"] {
+    flex: 0 0 20%;
+    min-width: 0;
+}
+
+.cadence-row select {
+    flex: 1;
+    min-width: 0;
 }
 
 .date-label-row {
@@ -6553,6 +6702,8 @@ input#setup-profile-starting-savings {
 }
 
 .date-label-row label {
+    flex: 1 1 0;
+    min-width: 0;
     font-size: 14px;
 }
 
@@ -6561,17 +6712,21 @@ input#setup-profile-starting-savings {
     justify-content: space-between;
     gap: 12px;
     width: 100%;
-    height: 30px;
+}
+
+.date-input-row input[type="date"],
+.date-label-row label {
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 .date-input-row input[type="date"] {
-    flex: 1;
-    max-width: 120px;
-    padding: 8px 10px;
+    height: 38px;
+    padding: 8px 12px;
     background-color: #f9f9f9;
     border: 1px solid #d1d1d6;
     border-radius: 8px;
-    font-size: 12px;
+    font-size: 14px;
     transition: all 0.2s ease;
     box-sizing: border-box;
 }
@@ -6583,14 +6738,9 @@ input#setup-profile-starting-savings {
     outline: none;
 }
 
-#start_date,
-#end_date {
-    width: 110px;
-}
-
 .date-checkbox-row {
     display: flex;
-    justify-content: right;
+    justify-content: flex-end;
     align-items: center;
     gap: 6px;
     width: 100%;
@@ -6874,18 +7024,6 @@ form button[type="submit"] {
     margin-left: 3px;
 }
 
-/* Expense Weekly Options */
-#expense-weekly-options .weekday {
-    display: flex;
-    align-items: center;
-    margin: 5px 0;
-    font-size: 12px;
-}
-
-#expense-weekly-options input {
-    width: 20px;
-}
-
 /* Expense Monthly Option Row */
 #expense-monthly-day-container div {
     display: flex;
@@ -6899,28 +7037,6 @@ form button[type="submit"] {
     appearance: none;
     appearance: none;
     appearance: none;
-}
-
-#expense-add-monthly-day-btn {
-    width: 25px;
-    height: 25px;
-    margin-top: 8px;
-    padding: 6px 10px;
-    background-color: #e0e0e0;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-}
-
-#expense-monthly-day-container .remove-day-btn {
-    width: 25px;
-    height: 25px;
-    margin-left: 8px;
-    padding: 6px 10px;
-    background-color: #e0e0e0;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
 }
 
 /* Expense Yearly Options */
@@ -7321,18 +7437,6 @@ form button[type="submit"] {
 #ca-cadence-unit {
     width: 215px;
     margin-left: 3px;
-}
-
-/* ca Weekly Options */
-#ca-weekly-options .weekday {
-    display: flex;
-    align-items: center;
-    margin: 5px 0;
-    font-size: 12px;
-}
-
-#ca-weekly-options input {
-    width: 20px;
 }
 
 /* ca Monthly Option Row */

@@ -71,12 +71,12 @@
             <form id="setup-profile-balance-form" class="setup-profile-form">
                 <label for="setup-profile-starting-balance">The starting balance is the amount currently in your bank account. It serves as the initial balance in the Blankee app and helps set the foundation for tracking your finances. By entering your starting balance, Blankee can accurately calculate your remaining funds as you log income and expenses moving forward.</label>
                 <div class="currency-input-container">
-                    <div>
+                    <div style="position: relative;">
                         <label for="setup-profile-starting-balance">Checking:</label>
                         <span class="s-p-sb-currency-symbol">$</span>
                         <input type="number" step="0.01" id="setup-profile-starting-balance" inputmode="decimal" name="starting_balance" placeholder="0.00" required min="0">
                     </div>
-                    <div>
+                    <div style="position: relative;">
                         <label for="setup-profile-starting-savings">Savings:</label>
                         <span class="s-p-ss-currency-symbol">$</span>
                         <input type="number" step="0.01" id="setup-profile-starting-savings" inputmode="decimal" name="starting_savings" placeholder="0.00" required min="0">
@@ -214,11 +214,28 @@
                 }, 10); // 10ms delay to allow DOM repaint
             });
 
-            // Prevent cents in starting balance and threshold fields
-            $('#setup-profile-starting-balance, #setup-profile-balance-threshold').on('input', function() {
-                let val = this.value;
-                if (val.includes('.')) {
-                    this.value = val.split('.')[0];
+            // Decimal validation for monetary inputs
+            $('#setup-profile-starting-balance, #setup-profile-starting-savings, #setup-profile-balance-threshold').on('input', function() {
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                // Limit to 2 decimal places
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+
+            // Format to show .00 on blur
+            $('#setup-profile-starting-balance, #setup-profile-starting-savings, #setup-profile-balance-threshold').on('blur', function() {
+                if (this.value && !isNaN(this.value)) {
+                    this.value = parseFloat(this.value).toFixed(2);
                 }
             });
         });

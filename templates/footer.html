@@ -147,6 +147,67 @@
         var newCategoryCreated = false;
     }
 
+    // Limit decimal places for footer amount inputs (2 decimals)
+    document.addEventListener('DOMContentLoaded', function() {
+        const footerAmountInput = document.getElementById('footer-amount');
+        const footerCaAmountInput = document.getElementById('footer-ca-amount');
+        const autobalanceInput = document.getElementById('autobalance-current-balance');
+
+        if (footerAmountInput) {
+            footerAmountInput.addEventListener('input', function() {
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+        }
+
+        if (footerCaAmountInput) {
+            footerCaAmountInput.addEventListener('input', function() {
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+        }
+
+        if (autobalanceInput) {
+            autobalanceInput.addEventListener('input', function() {
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+        }
+    });
+
     // Get references to DOM elements
     const addButton = document.getElementById('footer-add-button');
     const footerBar = document.getElementById('footer-bar');

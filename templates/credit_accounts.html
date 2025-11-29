@@ -173,10 +173,16 @@
             // Limit decimal places for interest rate (3 decimals)
             $('#credit-account-interest').on('input', function() {
                 let value = $(this).val();
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    $(this).val(parts[0] + '.' + parts.slice(1).join(''));
+                    value = $(this).val();
+                }
                 if (value.includes('.')) {
-                    let parts = value.split('.');
-                    if (parts[1].length > 3) {
-                        $(this).val(parts[0] + '.' + parts[1].substring(0, 3));
+                    const decimals = value.split('.');
+                    if (decimals[1].length > 3) {
+                        $(this).val(decimals[0] + '.' + decimals[1].substring(0, 3));
                     }
                 }
             });
@@ -184,10 +190,16 @@
             // Limit decimal places for balance (2 decimals)
             $('#credit-account-balance').on('input', function() {
                 let value = $(this).val();
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    $(this).val(parts[0] + '.' + parts.slice(1).join(''));
+                    value = $(this).val();
+                }
                 if (value.includes('.')) {
-                    let parts = value.split('.');
-                    if (parts[1].length > 2) {
-                        $(this).val(parts[0] + '.' + parts[1].substring(0, 2));
+                    const decimals = value.split('.');
+                    if (decimals[1].length > 2) {
+                        $(this).val(decimals[0] + '.' + decimals[1].substring(0, 2));
                     }
                 }
             });

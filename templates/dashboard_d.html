@@ -2337,6 +2337,25 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                         input.select();
                     });
 
+                    input.addEventListener('input', function () {
+                        // Allow numbers and decimal point
+                        input.value = input.value.replace(/[^0-9.]/g, '');
+                        
+                        // Allow only one decimal point
+                        const parts = input.value.split('.');
+                        if (parts.length > 2) {
+                            input.value = parts[0] + '.' + parts.slice(1).join('');
+                        }
+                        
+                        // Limit to 2 decimal places
+                        if (input.value.includes('.')) {
+                            const decimals = input.value.split('.');
+                            if (decimals[1] && decimals[1].length > 2) {
+                                input.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                            }
+                        }
+                    });
+
                     input.addEventListener('keydown', function (event) {
                         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                             event.preventDefault();
@@ -2565,6 +2584,26 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                     const todayContainer = document.querySelector('.dashboard-d-container.today-outline');
                     if (todayContainer) {
                         todayContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                });
+            }
+
+            // Limit decimal places for dashboard-d-amount input (2 decimals)
+            const dashboardDAmountInput = document.getElementById('dashboard-d-amount');
+            if (dashboardDAmountInput) {
+                dashboardDAmountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
                     }
                 });
             }
