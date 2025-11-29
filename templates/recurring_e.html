@@ -117,23 +117,25 @@
             
                 <!-- Cadence Interval (e.g., "Every X days/weeks/months/years") -->
                 <label for="cadence-interval">Repeat Every</label>
-                <input type="number" id="cadence-interval" name="cadence_interval" placeholder="0" step="1" min="1" required>
-                <select id="cadence-unit" name="cadence_unit" required>
-                    <option value="days">Day(s)</option>
-                    <option value="weeks">Week(s)</option>
-                    <option value="months">Month(s)</option>
-                    <option value="years">Year(s)</option>
-                </select>
+                <div class="cadence-row">
+                    <input type="number" id="cadence-interval" name="cadence_interval" placeholder="0" step="1" min="1" required>
+                    <select id="cadence-unit" name="cadence_unit" required>
+                        <option value="days">Day(s)</option>
+                        <option value="weeks">Week(s)</option>
+                        <option value="months">Month(s)</option>
+                        <option value="years">Year(s)</option>
+                    </select>
+                </div>
 
                 <div id="weekly-options" style="display:none;">
                     <label>Repeat on:</label>
-                    <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Monday</div>
-                    <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tuesday</div>
-                    <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> Wednesday</div>
-                    <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Thursday</div>
-                    <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Friday</div>
-                    <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Saturday</div>
-                    <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Sunday</div>
+                    <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Mo</div>
+                    <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tu</div>
+                    <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> We</div>
+                    <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Th</div>
+                    <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Fr</div>
+                    <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Sa</div>
+                    <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Su</div>
                 </div>
 
 
@@ -147,7 +149,7 @@
                     </div>
 
                     <!-- Plus button to add more select elements -->
-                    <button type="button" id="add-monthly-day-btn" class="add-day-btn"><i class="fa-solid fa-plus"></i></button>
+                    <button type="button" id="add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
                 </div>
 
                 <!-- Yearly Options (for selecting a specific day and month) -->
@@ -175,15 +177,11 @@
                 <div class="date-row">
                     <div class="date-label-row">
                         <label for="start_date">Start Date</label>
-                        <div class="end-date-container" id="end-date-label-container">
-                            <label for="end_date">End Date</label>
-                        </div>
+                        <label for="end_date">End Date</label>
                     </div>
                     <div class="date-input-row">
                         <input type="date" id="start_date" name="start_date" required>
-                        <div class="end-date-container" id="end-date-input-container">
-                            <input type="date" id="end_date" name="end_date" required>
-                        </div>
+                        <input type="date" id="end_date" name="end_date" required>
                     </div>
                     <div class="date-checkbox-row">
                         <span class="date-checkbox-label">Or</span>
@@ -234,13 +232,13 @@
                 <!-- Edit Weekly Options -->
                 <div id="edit-weekly-options" style="display:none;">
                     <label>Repeat on:</label>
-                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="monday"> Monday</div>
-                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="tuesday"> Tuesday</div>
-                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="wednesday"> Wednesday</div>
-                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="thursday"> Thursday</div>
-                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="friday"> Friday</div>
-                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="saturday"> Saturday</div>
-                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="sunday"> Sunday</div>
+                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="monday"> Mo</div>
+                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="tuesday"> Tu</div>
+                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="wednesday"> We</div>
+                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="thursday"> Th</div>
+                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="friday"> Fr</div>
+                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="saturday"> Sa</div>
+                    <div class="weekday"><input type="checkbox" name="edit_weekdays" value="sunday"> Su</div>
                 </div>
 
                 <!-- Edit Monthly Options -->
@@ -253,7 +251,7 @@
                     </div>
 
                     <!-- Plus button to add more select elements -->
-                    <button type="button" id="edit-add-monthly-day-btn" class="add-day-btn">+</button>
+                    <button type="button" id="edit-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
                 </div>
 
                 <!-- Edit Yearly Options -->
@@ -447,7 +445,7 @@
             document.getElementById('yearly-options').style.display = 'none';
 
             if (unit === 'weeks') {
-                document.getElementById('weekly-options').style.display = 'block';
+                document.getElementById('weekly-options').style.display = 'flex';
             } else if (unit === 'months') {
                 document.getElementById('monthly-options').style.display = 'block';
                 // Initialize the monthly-day-container with one select element
@@ -468,7 +466,7 @@
             document.getElementById('edit-yearly-options').style.display = 'none';
 
             if (unit === 'weeks') {
-                document.getElementById('edit-weekly-options').style.display = 'block';
+                document.getElementById('edit-weekly-options').style.display = 'flex';
             } else if (unit === 'months') {
                 document.getElementById('edit-monthly-options').style.display = 'block';
                 // Initialize the monthly-day-container with one select element

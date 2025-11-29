@@ -13,29 +13,31 @@
             </div>
 
             <label for="cadence-interval">Repeat Every</label>
-            <input type="number" id="cadence-interval" name="cadence_interval" min="1" required>
-            <select id="cadence-unit" name="cadence_unit" required>
-                <option value="days">Day(s)</option>
-                <option value="weeks">Week(s)</option>
-                <option value="months">Month(s)</option>
-                <option value="years">Year(s)</option>
-            </select>
+            <div class="cadence-row">
+                <input type="number" id="cadence-interval" name="cadence_interval" min="1" required>
+                <select id="cadence-unit" name="cadence_unit" required>
+                    <option value="days">Day(s)</option>
+                    <option value="weeks">Week(s)</option>
+                    <option value="months">Month(s)</option>
+                    <option value="years">Year(s)</option>
+                </select>
+            </div>
 
             <div id="weekly-options" style="display:none;">
                 <label>Repeat on:</label>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Monday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tuesday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> Wednesday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Thursday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Friday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Saturday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Sunday</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Mo</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tu</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> We</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Th</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Fr</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Sa</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Su</div>
             </div>
 
             <div id="monthly-options" style="display:none;">
                 <label for="monthly-days">Days of the month:</label>
                 <div id="monthly-day-container"></div>
-                <button type="button" id="add-monthly-day-btn" class="add-day-btn">+</button>
+                <button type="button" id="add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
             </div>
 
             <div id="yearly-options" style="display:none;">
@@ -61,15 +63,11 @@
             <div class="date-row">
                 <div class="date-label-row">
                     <label for="start_date">Start Date</label>
-                    <div class="end-date-container" id="end-date-label-container">
-                        <label for="end_date">End Date</label>
-                    </div>
+                    <label for="end_date">End Date</label>
                 </div>
                 <div class="date-input-row">
                     <input type="date" id="start_date" name="start_date" required>
-                    <div class="end-date-container" id="end-date-input-container">
-                        <input type="date" id="end_date" name="end_date" required>
-                    </div>
+                    <input type="date" id="end_date" name="end_date" required>
                 </div>
                 <div class="date-checkbox-row">
                     <span class="date-checkbox-label">Or</span>
@@ -105,29 +103,31 @@
             </div>
 
             <label for="cadence-interval">Repeat Every</label>
-            <input type="number" id="expense-cadence-interval" name="cadence-interval" placeholder="0" step="1" min="1" required>
-            <select id="expense-cadence-unit" name="cadence_unit" required>
-                <option value="days">Day(s)</option>
-                <option value="weeks">Week(s)</option>
-                <option value="months">Month(s)</option>
-                <option value="years">Year(s)</option>
-            </select>
+            <div class="cadence-row">
+                <input type="number" id="expense-cadence-interval" name="cadence-interval" placeholder="0" step="1" min="1" required>
+                <select id="expense-cadence-unit" name="cadence_unit" required>
+                    <option value="days">Day(s)</option>
+                    <option value="weeks">Week(s)</option>
+                    <option value="months">Month(s)</option>
+                    <option value="years">Year(s)</option>
+                </select>
+            </div>
 
             <div id="expense-weekly-options" style="display:none;">
                 <label>Repeat on:</label>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Monday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tuesday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> Wednesday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Thursday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Friday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Saturday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Sunday</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Mo</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tu</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> We</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Th</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Fr</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Sa</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Su</div>
             </div>
 
             <div id="expense-monthly-options" style="display:none;">
                 <label for="monthly-days">Days of the month:</label>
                 <div id="expense-monthly-day-container"></div>
-                <button type="button" id="expense-add-monthly-day-btn" class="add-day-btn"><i class="fa-solid fa-plus"></i></button>
+                <button type="button" id="expense-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
             </div>
 
             <div id="expense-yearly-options" style="display:none;">
@@ -153,15 +153,11 @@
             <div class="date-row">
                 <div class="date-label-row">
                     <label for="start_date">Start Date</label>
-                    <div class="end-date-container" id="end-date-label-container">
-                        <label for="end_date">End Date</label>
-                    </div>
+                    <label for="end_date">End Date</label>
                 </div>
                 <div class="date-input-row">
                     <input type="date" id="expense-start_date" name="start_date" required>
-                    <div class="end-date-container" id="end-date-input-container">
-                        <input type="date" id="expense-end_date" name="end_date" required>
-                    </div>
+                    <input type="date" id="expense-end_date" name="end_date" required>
                 </div>
                 <div class="date-checkbox-row">
                     <span class="date-checkbox-label">Or</span>
@@ -204,29 +200,31 @@
             </div>
 
             <label for="ca-cadence-interval">Repeat Every</label>
-            <input type="number" id="ca-cadence-interval" name="cadence_interval" min="1" required>
-            <select id="ca-cadence-unit" name="cadence_unit" required>
-                <option value="days">Day(s)</option>
-                <option value="weeks">Week(s)</option>
-                <option value="months">Month(s)</option>
-                <option value="years">Year(s)</option>
-            </select>
+            <div class="cadence-row">
+                <input type="number" id="ca-cadence-interval" name="cadence_interval" min="1" required>
+                <select id="ca-cadence-unit" name="cadence_unit" required>
+                    <option value="days">Day(s)</option>
+                    <option value="weeks">Week(s)</option>
+                    <option value="months">Month(s)</option>
+                    <option value="years">Year(s)</option>
+                </select>
+            </div>
 
             <div id="ca-weekly-options" style="display:none;">
                 <label>Repeat on:</label>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Monday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tuesday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> Wednesday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Thursday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Friday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Saturday</div>
-                <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Sunday</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Mo</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tu</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> We</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Th</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Fr</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Sa</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Su</div>
             </div>
 
             <div id="ca-monthly-options" style="display:none;">
                 <label for="ca-monthly-days">Days of the month:</label>
                 <div id="ca-monthly-day-container"></div>
-                <button type="button" id="ca-add-monthly-day-btn" class="add-day-btn"><i class="fa-solid fa-plus"></i></button>
+                <button type="button" id="ca-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
             </div>
 
             <div id="ca-yearly-options" style="display:none;">
@@ -252,15 +250,11 @@
             <div class="date-row">
                 <div class="date-label-row">
                     <label for="ca-start-date">Start Date</label>
-                    <div class="end-date-container" id="ca-end-date-label-container">
-                        <label for="ca-end-date">End Date</label>
-                    </div>
+                    <label for="ca-end-date">End Date</label>
                 </div>
                 <div class="date-input-row">
                     <input type="date" id="ca-start-date" name="start_date" required>
-                    <div class="end-date-container" id="ca-end-date-input-container">
-                        <input type="date" id="ca-end-date" name="end_date" required>
-                    </div>
+                    <input type="date" id="ca-end-date" name="end_date" required>
                 </div>
                 <div class="date-checkbox-row">
                     <span class="date-checkbox-label">Or</span>
@@ -380,7 +374,7 @@
             document.getElementById('yearly-options').style.display = 'none';
 
             if (unit === 'weeks') {
-                document.getElementById('weekly-options').style.display = 'block';
+                document.getElementById('weekly-options').style.display = 'flex';
             } else if (unit === 'months') {
                 document.getElementById('monthly-options').style.display = 'block';
                 const container = document.getElementById('monthly-day-container');
@@ -403,12 +397,10 @@
             if (this.checked) {
                 setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', true);
                 $('#use-occurrences-checkbox').prop('checked', false).trigger('change');
-                $('#end-date-label-container, #end-date-input-container').css('opacity', 0.5);
-                $('#end_date').prop('disabled', true);
+                $('#end_date').css('opacity', 0.5).prop('disabled', true);
             } else {
                 setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', false);
-                $('#end-date-label-container, #end-date-input-container').css('opacity', 1);
-                $('#end_date').prop('disabled', false);
+                $('#end_date').css('opacity', 1).prop('disabled', false);
             }
         });
         $('#use-occurrences-checkbox').on('change', function() {
@@ -416,13 +408,11 @@
                 setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', true);
                 $('#no-end-date-checkbox').prop('checked', false).trigger('change');
                 $('#occurrences-count').prop('disabled', false);
-                $('#end-date-label-container, #end-date-input-container').css('opacity', 0.5);
-                $('#end_date').prop('disabled', true);
+                $('#end_date').css('opacity', 0.5).prop('disabled', true);
             } else {
                 setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', false);
                 $('#occurrences-count').prop('disabled', true).val('');
-                $('#end-date-label-container, #end-date-input-container').css('opacity', 1);
-                $('#end_date').prop('disabled', false);
+                $('#end_date').css('opacity', 1).prop('disabled', false);
             }
         });
 
@@ -615,7 +605,7 @@
         document.getElementById('expense-yearly-options').style.display = 'none';
 
         if (unit === 'weeks') {
-            document.getElementById('expense-weekly-options').style.display = 'block';
+            document.getElementById('expense-weekly-options').style.display = 'flex';
         } else if (unit === 'months') {
             document.getElementById('expense-monthly-options').style.display = 'block';
             const container = document.getElementById('expense-monthly-day-container');
@@ -638,12 +628,10 @@
         if (this.checked) {
             setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', true);
             $('#expense-use-occurrences-checkbox').prop('checked', false).trigger('change');
-            $('#end-date-label-container, #end-date-input-container').css('opacity', 0.5);
-            $('#expense-end_date').prop('disabled', true);
+            $('#expense-end_date').css('opacity', 0.5).prop('disabled', true);
         } else {
             setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', false);
-            $('#end-date-label-container, #end-date-input-container').css('opacity', 1);
-            $('#expense-end_date').prop('disabled', false);
+            $('#expense-end_date').css('opacity', 1).prop('disabled', false);
         }
     });
     $('#expense-use-occurrences-checkbox').on('change', function() {
@@ -651,13 +639,11 @@
             setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', true);
             $('#expense-no-end-date-checkbox').prop('checked', false).trigger('change');
             $('#expense-occurrences-count').prop('disabled', false);
-            $('#end-date-label-container, #end-date-input-container').css('opacity', 0.5);
-            $('#expense-end_date').prop('disabled', true);
+            $('#expense-end_date').css('opacity', 0.5).prop('disabled', true);
         } else {
             setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', false);
             $('#expense-occurrences-count').prop('disabled', true).val('');
-            $('#end-date-label-container, #end-date-input-container').css('opacity', 1);
-            $('#expense-end_date').prop('disabled', false);
+            $('#expense-end_date').css('opacity', 1).prop('disabled', false);
         }
     });
 
@@ -993,23 +979,19 @@
     $('#ca-no-end-date-checkbox').on('change', function() {
         if (this.checked) {
             $('#ca-use-occurrences-checkbox').prop('checked', false).trigger('change');
-            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 0.5);
-            $('#ca-end-date').prop('disabled', true);
+            $('#ca-end-date').css('opacity', 0.5).prop('disabled', true);
         } else {
-            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 1);
-            $('#ca-end-date').prop('disabled', false);
+            $('#ca-end-date').css('opacity', 1).prop('disabled', false);
         }
     });
     $('#ca-use-occurrences-checkbox').on('change', function() {
         if (this.checked) {
             $('#ca-no-end-date-checkbox').prop('checked', false).trigger('change');
             $('#ca-occurrences-count').prop('disabled', false);
-            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 0.5);
-            $('#ca-end-date').prop('disabled', true);
+            $('#ca-end-date').css('opacity', 0.5).prop('disabled', true);
         } else {
             $('#ca-occurrences-count').prop('disabled', true).val('');
-            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 1);
-            $('#ca-end-date').prop('disabled', false);
+            $('#ca-end-date').css('opacity', 1).prop('disabled', false);
         }
     });
 
