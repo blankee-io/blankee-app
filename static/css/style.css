@@ -2737,21 +2737,24 @@ input#setup-profile-starting-savings {
 }
 
 .category-search-field {
-    /* Adjust as needed */
     width: 190px; 
-    height: 25px;
-    padding: 0 10px;
-    background: #fff;
-    border: 1px solid #ccc;
-
-    /* Half of height for pill shape */
-    border-radius: 12.5px; 
-
+    padding: 10px 12px;
+    background-color: #f9f9f9;
+    border: 1px solid #d1d1d6;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    appearance: none;
+    box-sizing: border-box;
     outline: none;
     color: #575757;
-    font-size: 12px;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    box-sizing: border-box;
+}
+
+.category-search-field:focus {
+    background-color: #fff;
+    border-color: #2aaaa8;
+    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
+    outline: none;
 }
 
 .clear-filter-btn {
@@ -2785,9 +2788,8 @@ input#setup-profile-starting-savings {
     flex-direction: row;
     justify-content: flex-end; 
     align-items: center;
-
-    /* Adjust spacing between buttons as needed */
-    gap: 5px; 
+    height: 38px;
+    gap: 5px;
 }
 
 .add-category-btn {
