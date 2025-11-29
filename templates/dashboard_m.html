@@ -365,12 +365,12 @@
                     const remainderDiv = document.createElement('div');
                     remainderDiv.classList.add('dashboard-m-remainder');
                     const remainderValue = parseFloat(getRemainderForDate(currentDay));
-                    remainderDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-remainder">R</span> <span class="dashboard-m-value">${currencySymbol}${remainderValue}</span>`;
+                    remainderDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-remainder">R</span> <span class="dashboard-m-value">${currencySymbol}${remainderValue.toFixed(2)}</span>`;
                     
                     const savingsDiv = document.createElement('div');
                     savingsDiv.classList.add('dashboard-m-savings');
                     const savingsValue = parseFloat(getSavingsForDate(currentDay));
-                    savingsDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-savings">S</span> <span class="dashboard-m-value">${currencySymbol}${savingsValue}</span>`;
+                    savingsDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-savings">S</span> <span class="dashboard-m-value">${currencySymbol}${savingsValue.toFixed(2)}</span>`;
 
                     let applyThresholdClass = true;
                     if (member_since) {
@@ -432,7 +432,7 @@
                             initials = 'CA';
                         }
 
-                        const balanceValue = caBalance ? Math.round(caBalance.balance) : 0;
+                        const balanceValue = caBalance ? parseFloat(caBalance.balance).toFixed(2) : '0.00';
 
                         const caBalanceDiv = document.createElement('div');
                         caBalanceDiv.classList.add('dashboard-m-ca-balance');
@@ -491,7 +491,7 @@
                 // Compare only the date part in UTC (ignore the time)
                 return itemDate.toISOString().split('T')[0] === date.toISOString().split('T')[0];
             });
-            return entry ? parseFloat(entry.total_income) : '0';
+            return entry ? parseFloat(entry.total_income).toFixed(2) : '0.00';
         }
 
         function getExpenseTotalForDate(date) {
@@ -499,7 +499,7 @@
                 const itemDate = new Date(item.date); // Parse the date in UTC
                 return itemDate.toISOString().split('T')[0] === date.toISOString().split('T')[0];
             });
-            return entry ? parseFloat(entry.total_expenses) : '0';
+            return entry ? parseFloat(entry.total_expenses).toFixed(2) : '0.00';
         }
 
         function getRemainderForDate(date) {
@@ -507,7 +507,7 @@
                 const itemDate = new Date(item.date); // Parse the date in UTC
                 return itemDate.toISOString().split('T')[0] === date.toISOString().split('T')[0];
             });
-            return entry ? parseFloat(entry.remainder) : '0';
+            return entry ? parseFloat(entry.remainder).toFixed(2) : '0.00';
         }
 
         function getCABalancesForDate(date) {
