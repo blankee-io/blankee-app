@@ -1934,32 +1934,33 @@ input#setup-profile-starting-savings {
 /* Button for adding new entry */
 .dashboard-d-add-entry-btn {
     position: absolute;
-    top: -30px;
+    top: -40px;
     right: 0;
+    display: flex;
     justify-content: center;
     align-items: center;
-    width: 25px;
-    height: 25px;
-    padding: auto;
-    background-color: transparent;
-    background-color:#676767;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background-color: #676767;
     border: none;
-
-    /* Make the button circular */
-    border-radius: 50%; 
-
+    border-radius: 50%;
     color: white;
+    font-size: 16px;
     cursor: pointer;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
 }
 
 .dashboard-d-add-entry-btn i {
     position: relative;
-    top: 1px;
-    right: 2px;
+    margin: auto;
 }
 
 .dashboard-d-add-entry-btn:hover {
-    background-color: #575757
+    background-color: #A9A9A9;
 }
 
 /* Container for rows */
