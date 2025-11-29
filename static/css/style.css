@@ -8680,6 +8680,7 @@ html.modal-open {
 .connect-bank-container {
     margin-top: 20px;
     text-align: center;
+    width: 100%;
 }
 
 .connect-bank-container button {
@@ -8715,6 +8716,90 @@ html.modal-open {
 /* Profile Pending Email Styles */
 .pending-email-separator {
     margin: 0 8px;
+}
+
+/* Pending Email Banner */
+.pending-email-banner {
+    background-color: #fff3e0;
+    border: 1px solid #ffb74d;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.pending-email-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.pending-email-header i {
+    color: #ff9800;
+    font-size: 16px;
+}
+
+.pending-email-header strong {
+    color: #333;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.pending-email-banner small {
+    display: block;
+    color: #555;
+    line-height: 1.5;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.pending-email-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.resend-verification-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1;
+    padding: 8px 16px;
+    background-color: #2aaaa8;
+    color: white;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
+}
+
+.resend-verification-btn:hover {
+    background-color: #258c8a;
+}
+
+.cancel-pending-email-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1;
+    padding: 8px 16px;
+    background-color: #f94449;
+    color: white;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
+}
+
+.cancel-pending-email-btn:hover {
+    background-color: #ee6b6e;
 }
 
 .cancel-pending-email {

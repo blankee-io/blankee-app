@@ -121,14 +121,16 @@
                             </form>
                             {% if pending_email %}
                             <div class="pending-email-banner">
-                                <strong>⏳ Pending Email Change:</strong>
+                                <div class="pending-email-header">
+                                    <i class="fas fa-hourglass-half"></i>
+                                    <strong>Pending Email Change:</strong>
+                                </div>
                                 <small>Verification email sent to <strong>{{ pending_email }}</strong>. Please check that inbox to complete the change. Your current email ({{ current_username }}) remains active until verified.</small>
-                                <div class="pending-email-resend-link">
-                                    <a href="{{ url_for('resend_pending_email_verification') }}">
+                                <div class="pending-email-actions">
+                                    <a href="{{ url_for('resend_pending_email_verification') }}" class="resend-verification-btn">
                                         <i class="fas fa-envelope"></i> Resend verification email
                                     </a>
-                                    <span class="pending-email-separator">|</span>
-                                    <a href="{{ url_for('cancel_pending_email_change') }}" class="cancel-pending-email">
+                                    <a href="{{ url_for('cancel_pending_email_change') }}" class="cancel-pending-email-btn">
                                         <i class="fas fa-times"></i> Cancel
                                     </a>
                                 </div>
