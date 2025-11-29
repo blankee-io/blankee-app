@@ -300,7 +300,7 @@
         function addEntry(date) {
             populateEntryTypeDropdown();
             document.getElementById('dashboard-d-entryDate').value = date;
-            document.getElementById('dashboard-d-addEntryModal').style.display = 'block';
+            document.getElementById('dashboard-d-addEntryModal').style.display = 'flex';
             document.body.classList.add('modal-open');
             document.documentElement.classList.add('modal-open');
         }
@@ -716,7 +716,7 @@
                     incomeRow.innerHTML = `
                         ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                             <span class="calendar-icon">
-                            <i class="fa-light fa-up-down-left-right"></i>
+                            <i class="fa-solid fa-up-down-left-right"></i>
                             </span>
                         </span>` : ''}
                         <div class="dashboard-d-label-cell">
@@ -777,7 +777,7 @@
                     expenseRow.innerHTML = `
                         ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                             <span class="calendar-icon">
-                            <i class="fa-light fa-up-down-left-right"></i>
+                            <i class="fa-solid fa-up-down-left-right"></i>
                             </span>
                         </span>` : ''}
                         <div class="dashboard-d-label-cell">
@@ -894,7 +894,7 @@
                         entryRow.innerHTML = `
                             ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                                 <span class="calendar-icon">
-                                    <i class="fa-light fa-up-down-left-right"></i>
+                                    <i class="fa-solid fa-up-down-left-right"></i>
                                 </span>
                             </span>` : ''}
                             <div class="dashboard-d-label-cell">
