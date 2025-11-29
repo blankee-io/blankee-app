@@ -736,8 +736,7 @@ body {
 }
 
 /* Modal content box */
-.footer-modal-content,
-.add-credit-account-modal-content {
+.footer-modal-content {
     background-color: #fff;
     margin: 15% auto;
     padding: 20px;
@@ -749,8 +748,7 @@ body {
 }
 
 /* Close button */
-.footer-close-modal,
-.add-credit-account-close-modal {
+.footer-close-modal {
     color: #aaa;
     float: right;
     font-size: 28px;
@@ -758,17 +756,14 @@ body {
 }
 
 .footer-close-modal:hover,
-.footer-close-modal:focus,
-.add-credit-account-close-modal:hover,
-.add-credit-account-close-modal:focus {
+.footer-close-modal:focus {
     color: #575757;
     text-decoration: none;
     cursor: pointer;
 }
 
 /* Modal header */
-.footer-modal-content h3,
-.add-credit-account-modal-content h3 {
+.footer-modal-content h3 {
     margin-top: 0;
     font-size: 1.5rem;
     color: #575757;
@@ -836,8 +831,7 @@ button#autobalance-submit:hover {
 
 /* Mobile responsiveness */
 @media screen and (max-width: 600px) {
-    .footer-modal-content,
-    .add-credit-account-modal-content {
+    .footer-modal-content {
         width: 350px; /* Make the modal slightly narrower on small screens */
     }
 }
@@ -1278,41 +1272,6 @@ button#autobalance-submit:hover {
     padding: 10px 20px;
 }
 
-#mfa-enable-form {
-    margin: 0 auto;
-    max-width: 345px;
-    width: 100%;
-}
-
-#mfa-enable-form .input-group {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 5px;
-    height: 40px;
-}
-
-#mfa-enable-form .input-group label {
-    flex: 0 0 auto;
-    margin-right: 0;
-}
-
-#mfa-enable-form .input-group span {
-    flex: 1;
-}
-
-#mfa-enable-form .toggle-switch {
-    flex: 0 0 auto;
-    margin-left: auto;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    justify-content: flex-end;
-    align-items: center;
-    align-self: center;
-    position: static;
-}
-
 #email-notifications-form {
     margin: 0 auto;
     max-width: 345px;
@@ -1331,14 +1290,13 @@ button#autobalance-submit:hover {
 
 #email-notifications-form .input-group label {
     flex: 0 0 auto;
-    margin-right: 0px;
+    margin-right: 10px;
     width: auto !important;
 }
 
 #email-notifications-form .input-group .submit-checkbox {
     flex: 0 0 auto;
-    width: 25px;
-    height: 25px;
+    width: auto;
     margin-left: auto;
     top: 0;
 }
@@ -1361,14 +1319,13 @@ button#autobalance-submit:hover {
 
 #goofy-week-form .input-group label {
     flex: 0 0 auto;
-    margin-right: 0;
+    margin-right: 10px;
     width: auto !important;
 }
 
 #goofy-week-form .input-group .submit-checkbox {
     flex: 0 0 auto;
-    width: 25px;
-    height: 25px;
+    width: auto;
     margin-left: auto;
     top: 0;
 }
@@ -4552,39 +4509,16 @@ input#setup-profile-starting-savings {
 }
 
 .profile-form .submit-checkbox {
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    -moz-appearance: none !important;
-}
-
-.profile-form .toggle-switch {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-start;
-    cursor: pointer;
+    padding: 0; /* Remove padding */
+    font-size: 14px;
+    top: -8px;
     margin-left: 20px;
-    margin-top: 15px;
-    margin-right: 0;
-    background: transparent;
-    height: 25px;
-}
-
-.profile-form .toggle-switch .toggle-icon {
-    height: 25px;
-    width: auto;
-    font-size: 30px;
-    line-height: 25px;
-    color: #E45F1C;
-    transition: color 0.3s ease;
-    display: block;
-    text-align: left;
-    transform-origin: center center;
-}
-
-.profile-form .toggle-switch .toggle-icon.toggle-off {
-    color: #A9A9A9;
-    transform: scaleX(-1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-sizing: border-box; /* Ensure padding doesn't affect width/height */
+    position: relative;
 }
 
 #enable-mfa-btn {
@@ -4604,22 +4538,11 @@ input#setup-profile-starting-savings {
 }
 
 #change-password-btn {
-    width: 25px !important;
-    height: 25px !important;
-    border-radius: 50% !important;
+    width: 65px !important;
+    border-radius: 25px !important; /* Make the button circular */
     top: auto !important;
     margin-left: 0px !important;
-    padding: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    position: relative !important;
-    box-sizing: border-box !important;
-}
-
-#change-password-btn i {
-    font-size: 10px;
-    position: relative;
+    padding: 0 10px;
 }
 
 #mfa-status-message {
@@ -4629,7 +4552,7 @@ input#setup-profile-starting-savings {
 }
 
 .profile-form .submit-button i {
-    font-size: 12px; /* Ensure the icon inside the button fits well */
+    font-size: 14px; /* Ensure the icon inside the button fits well */
 }
 
 .profile-form .submit-button:hover {
@@ -4836,27 +4759,17 @@ input#setup-profile-starting-savings {
     background-color: #f94449; /* Pink color for delete action */
     color: white;
     border: none;
-    border-radius: 6px;
-    padding: 12px 24px;
+    border-radius: 25px; /* Rounded corners to match the register button */
+    height: 25px;
     cursor: pointer;
-    font-size: 16px;
+    width: 150px; /* Same width as the register button */
+    font-size: 14px; /* Font size to match */
+    margin: 10px auto; /* Center the button and add some space above */
+    display: block; /* Ensure it behaves as a block-level element like the register button */
+    text-align: center;
 }
 
 .delete-account-button:hover {
-    background-color: #ee6b6e; /* Darker pink on hover */
-}
-
-.danger-button {
-    background-color: #f94449; /* Pink/red color for danger actions */
-    color: white;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: background-color 0.3s ease;
-}
-
-.danger-button:hover {
     background-color: #ee6b6e; /* Darker pink on hover */
 }
 
@@ -4886,11 +4799,6 @@ input#setup-profile-starting-savings {
     padding: 0 5px;
     font-size: 12px;
     color: #2AAAA8;
-}
-
-/* Bank Connections section label override */
-#bank-connections-section::before {
-    content: "Bank Connections";
 }
 
 /* Data label */
@@ -5053,12 +4961,9 @@ input#setup-profile-starting-savings {
 }
 
 #mfa-qr-modal.modal {
+    display: flex;
     justify-content: center;
     align-items: center;
-}
-
-#mfa-qr-modal.modal.show {
-    display: flex;
 }
 
 #mfa-qr-modal .modal-content {
@@ -5476,12 +5381,6 @@ input#setup-profile-starting-savings {
     align-items: center;
 }
 
-/* When modal is shown, ensure it uses flex display for centering */
-.modal[style*="display: block"],
-.modal[style*="display: flex"] {
-    display: flex !important;
-}
-
 /* General Modal Content */
 .modal-content {
     background-color: #ffffff;
@@ -5523,31 +5422,6 @@ input#setup-profile-starting-savings {
     display: flex;
     justify-content: center;
     gap: 10px;
-}
-
-/* Centered Modal for Confirmations */
-.center-modal {
-    background-color: #ffffff;
-    border-radius: 10px;
-    padding: 20px 30px;
-    width: 400px;
-    max-width: 90%;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
-    text-align: center;
-    position: relative;
-}
-
-.center-modal .close-modal {
-    position: absolute;
-    top: 10px;
-    right: 18px;
-    font-size: 24px;
-    cursor: pointer;
-    color: #999;
-}
-
-.center-modal .close-modal:hover {
-    color: #333;
 }
 
 /* Password MFA Modal Styling */
@@ -7843,199 +7717,4 @@ html.modal-open {
 
 .success-modal-message {
     margin-top: 15px;
-}
-
-/* Profile Bank Connections Styles */
-.profile-bank-connections h2 {
-    margin-bottom: 20px;
-}
-
-.connection-card {
-    margin: 20px 0px;
-    padding: 20px 0px;
-    width: 345px;
-    border-top: 1px solid #e0e0e0;
-    border-bottom: 1px solid #e0e0e0;
-}
-
-.connection-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 15px;
-}
-
-.connection-header h3 {
-    margin: 0 0 5px 0;
-}
-
-.connection-header span {
-    display: flex;
-    flex-direction: column;
-    justify-self: flex-start;
-}
-
-.connection-status {
-    font-size: 12px;
-}
-
-.connection-status.disconnected {
-    color: #dc3545;
-}
-
-.connection-status.connected {
-    color: #28a745;
-}
-
-.connection-actions {
-    display: flex;
-    gap: 10px;
-    align-self: flex-start;
-}
-
-.connection-actions button {
-    padding: 8px 16px;
-}
-
-.disconnect-btn,
-.delete-connection-btn {
-    width: 25px !important;
-    height: 25px !important;
-    border-radius: 50% !important;
-    padding: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    position: relative !important;
-    box-sizing: border-box !important;
-}
-
-.disconnect-btn i,
-.delete-connection-btn i {
-    font-size: 10px;
-    position: relative;
-    line-height: 1;
-    margin: 0;
-}
-
-.accounts-list {
-    margin-top: 15px;
-}
-
-.account-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    margin-bottom: 8px;
-}
-
-.account-info {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.account-sync-toggle {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-}
-
-.account-info label {
-    cursor: pointer;
-    margin: 0;
-}
-
-.account-mask {
-    color: #666;
-    margin-left: 8px;
-}
-
-.account-balance {
-    font-weight: bold;
-}
-
-.connection-footer {
-    margin-top: 12px;
-}
-
-.connection-footer small {
-    color: #666;
-}
-
-.no-connections {
-    text-align: center;
-    padding: 20px 0px;
-    background: #f8f9fa;
-    border-radius: 8px;
-    width: 345px;
-}
-
-.no-connections i {
-    font-size: 48px;
-    color: #ccc;
-    margin-bottom: 16px;
-    display: flex;
-    justify-self: center;
-}
-
-.no-connections h3 {
-    margin: 0 0 10px 0;
-}
-
-.no-connections p {
-    color: #666;
-    margin-bottom: 20px;
-}
-
-.connect-bank-container {
-    margin-top: 20px;
-    text-align: center;
-}
-
-.connect-bank-container button {
-    padding: 12px 24px;
-}
-
-#connect-bank-btn {
-    background-color: #2aaaa8;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    padding: 12px 24px;
-    cursor: pointer;
-    font-size: 16px;
-}
-
-/* Profile Pending Email Styles */
-.pending-email-separator {
-    margin: 0 8px;
-}
-
-.cancel-pending-email {
-    color: #dc3545;
-}
-
-/* MFA Modal Styles */
-#mfa-qr-modal {
-    display: none;
-}
-
-#mfa-code {
-    width: 120px;
-    text-align: center;
-}
-
-#mfa-qr-image img {
-    width: 200px;
-    height: 200px;
-}
-
-.profile-delete-info {
-    font-size: 13px;
-    color: #666;
-    margin-top: 10px;
 }

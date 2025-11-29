@@ -74,12 +74,12 @@
                     <div>
                         <label for="setup-profile-starting-balance">Checking:</label>
                         <span class="s-p-sb-currency-symbol">$</span>
-                        <input type="number" step="0.01" id="setup-profile-starting-balance" inputmode="decimal" name="starting_balance" placeholder="0.00" required min="0">
+                        <input type="number" step="1" id="setup-profile-starting-balance" inputmode="decimal" name="starting_balance" placeholder="0" required min="0" pattern="\\d*">
                     </div>
                     <div>
                         <label for="setup-profile-starting-savings">Savings:</label>
                         <span class="s-p-ss-currency-symbol">$</span>
-                        <input type="number" step="0.01" id="setup-profile-starting-savings" inputmode="decimal" name="starting_savings" placeholder="0.00" required min="0">
+                        <input type="number" step="1" id="setup-profile-starting-savings" inputmode="decimal" name="starting_savings" placeholder="0" required min="0" pattern="\\d*">
                     </div>
                 </div>
                 <!-- Button container -->
@@ -99,7 +99,7 @@
                 <label for="setup-profile-balance-threshold">The balance threshold is the minimum amount you'd like to keep in your account. If your projected balance falls below this number, Blankee will notify you with an alert. This helps you monitor your financial cushion and track your spending patterns.</label>
                 <div class="currency-input-container">
                     <span class="s-p-bt-currency-symbol">$</span>
-                    <input type="number" step="0.01" id="setup-profile-balance-threshold" inputmode="decimal" name="balance_threshold" placeholder="0.00" required min="0">
+                    <input type="number" step="1" id="setup-profile-balance-threshold" inputmode="decimal" name="balance_threshold" placeholder="0" required min="0" pattern="\\d*">
                 </div>
                 <!-- Button container -->
                 <div class="setup-profile-button-container">
