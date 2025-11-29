@@ -1389,10 +1389,6 @@ button#autobalance-submit:active {
     text-align: right;
 }
 
-.logincontainer form .login-row input[type="password"],
-.logincontainer form .login-row input[type="text"] {
-}
-
 .remember-me {
     margin-right: auto;
     margin-left: auto;
@@ -1526,22 +1522,21 @@ button.login-button:active {
 }
 
 #mfa-enable-form .input-group input[type="checkbox"] {
-    display: none;
+    flex: 1;
+    min-width: 180px;
+    position: absolute;
+    visibility: hidden;
 }
 
-#mfa-enable-form .input-group .toggle-switch {
-    display: flex;
-    justify-content: center;
+#mfa-enable-form .toggle-switch {
+    flex: 0 0 auto;
+    margin-left: 0;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    justify-content: flex-end;
     align-items: center;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: all 0.2s ease;
+    align-self: center;
+    position: static;
 }
 
 #delete-account-form .input-group {
@@ -5182,6 +5177,8 @@ input#setup-profile-starting-savings {
     align-items: center;
     justify-content: flex-start;
     cursor: pointer;
+    margin-left: 20px;
+    margin-top: 15px;
     margin-right: 0;
     background: transparent;
     height: 25px;
@@ -6229,55 +6226,103 @@ input#setup-profile-starting-savings {
 /* Form Container Styling */
 .expense-form-container,
 .income-form-container,
-.ca-form-container {
-    display: flex;
-    flex-direction: column;
-    width: 350px;
-    max-width: 90%;
-    padding: 24px 32px;
+.ca-form-container,
+.expense-form-container {
+    width: 80%;
+    max-width: 350px;
+    margin: 15% auto;
+    padding: 20px;
     background-color: #fff;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgb(0 0 0 / 25%);
+    border: 1px solid #575757;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgb(0 0 0 / 20%);
 }
 
 .expense-form-container h2,
 .income-form-container h2,
 .ca-form-container h2 {
-    margin: 0 0 10px;
-    font-size: 16px;
+    margin-top: 0;
+    color: #575757;
+    font-size: 1.5rem;
 }
 
-/* General Label & Input Layout */
-form label {
-    /* display: block; */
-    margin: 10px 0 5px;
+/* General Label & Input Layout for recurring forms */
+.income-form-container label,
+.ca-form-container label,
+.expense-form-container label {
+    display: block;
+    margin-bottom: 8px;
+    color: #555;
     font-size: 14px;
     font-weight: bold;
-    text-align: left;
 }
 
-form input,
-form select {
+.income-form-container input[type="number"],
+.income-form-container input[type="text"],
+.income-form-container input[type="date"],
+.income-form-container select,
+.ca-form-container input[type="number"],
+.ca-form-container input[type="text"],
+.ca-form-container input[type="date"],
+.ca-form-container select,
+.expense-form-container input[type="number"],
+.expense-form-container input[type="text"],
+.expense-form-container input[type="date"],
+.expense-form-container select {
     width: 100%;
-    height: 44px;
-    padding: 12px 14px;
+    margin-top: 5px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
     background-color: #f9f9f9;
     border: 1px solid #d1d1d6;
-    border-radius: 10px;
+    border-radius: 8px;
     font-size: 14px;
     transition: all 0.2s ease;
-    appearance: none;
-    appearance: none;
     appearance: none;
     box-sizing: border-box;
 }
 
-form input:focus,
-form select:focus {
+.income-form-container input:focus,
+.income-form-container select:focus,
+.ca-form-container input:focus,
+.ca-form-container select:focus,
+.expense-form-container input:focus,
+.expense-form-container select:focus {
     background-color: #fff;
     border-color: #2aaaa8;
     box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
     outline: none;
+}
+
+/* Submit buttons for recurring forms */
+.income-form-container button[type="submit"],
+.ca-form-container button[type="submit"],
+.expense-form-container button[type="submit"] {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgb(228 95 28 / 30%);
+    color: white;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    background-color: #E45F1C;
+}
+
+.income-form-container button[type="submit"]:hover,
+.ca-form-container button[type="submit"]:hover,
+.expense-form-container button[type="submit"]:hover {
+    box-shadow: 0 4px 12px rgb(228 95 28 / 40%);
+    transform: translateY(-1px);
+    background-color: #EF9F77;
+}
+
+.income-form-container button[type="submit"]:active,
+.ca-form-container button[type="submit"]:active,
+.expense-form-container button[type="submit"]:active {
+    box-shadow: 0 1px 4px rgb(228 95 28 / 30%);
+    transform: translateY(0);
 }
 
 /* Special Widths for Category and Amount */
