@@ -476,6 +476,19 @@ body {
     word-break: break-all;
 }
 
+/* User's full name in dropdown */
+.dropdown-name {
+    display: flex;
+    justify-content: left;
+    width: 100%;
+    padding-left: 10px;
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    text-align: left;
+    word-break: break-all;
+}
+
 /* Logout row in dropdown */
 .dropdown-logout-row {
     display: flex;
@@ -1756,7 +1769,21 @@ button.login-button:active {
 }
 
 /* Form Inputs */
-#setup-profile-name-form input,
+#setup-profile-name-form input {
+    /* Keep input fields at 80% of the container */
+    width: 100%; 
+    height: 38px;
+    margin: 10px 0;
+    padding: 8px 12px;
+    background-color: #f9f9f9;
+    border: 1px solid #d1d1d6;
+    border-radius: 8px;
+    font-size: 14px;
+    text-align: left;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
 #setup-profile-currency-form select {
     /* Keep input fields at 80% of the container */
     width: 100%; 
@@ -1799,7 +1826,8 @@ button.login-button:active {
 
 #setup-profile-threshold-form .currency-input-container,
 #setup-profile-currency-form .currency-input-container,
-#setup-profile-balance-form .currency-input-container {
+#setup-profile-balance-form .currency-input-container,
+#setup-profile-name-form .currency-input-container {
     width: 100%;
     display: flex;
     flex-direction: row;

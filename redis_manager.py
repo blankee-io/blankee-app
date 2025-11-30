@@ -1377,7 +1377,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 return len(rows)
                 
             elif table == 'users':
-                # Users table - for user settings like balance_threshold, starting_savings
+                # Users table - for user settings like balance_threshold, starting_savings, first_name, last_name
                 
                 if not rows:
                     return 0
@@ -1393,7 +1393,9 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             password = %s,
                             username = %s,
                             mfa_secret = %s,
-                            email_notifications = %s
+                            email_notifications = %s,
+                            first_name = %s,
+                            last_name = %s
                         WHERE id = %s
                     """, (
                         float(user_data.get('balance_threshold', 0)),
@@ -1402,6 +1404,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         user_data.get('username'),
                         user_data.get('mfa_secret'),
                         int(user_data.get('email_notifications', 0)),
+                        user_data.get('first_name'),
+                        user_data.get('last_name'),
                         user_id
                     ))
                     

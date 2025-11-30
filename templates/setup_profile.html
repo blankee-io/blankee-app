@@ -44,10 +44,30 @@
         </div>
     </div>
 
+    <!-- Name Input Modal -->
+    <div id="name-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Step 1: What's Your Name?</h2>
+            <form id="setup-profile-name-form" class="setup-profile-form" autocomplete="off" data-1p-ignore>
+                <input type="text" style="display:none;">
+                <input type="password" style="display:none;">
+                <label for="setup-profile-first-name">Enter your first and last name so we can personalize your experience.</label>
+                <div class="currency-input-container">
+                    <input type="text" id="setup-profile-first-name" name="first_name" placeholder="First Name" autocomplete="chrome-off" data-1p-ignore readonly required>
+                    <input type="text" id="setup-profile-last-name" name="last_name" placeholder="Last Name" autocomplete="chrome-off" data-1p-ignore readonly required>
+                </div>
+                <div class="setup-profile-button-container">
+                    <button type="button" class="setup-profile-previous-button">Previous</button>
+                    <button type="submit" class="setup-profile-next-button">Next</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Currency Selection Modal -->
     <div id="currency-modal-setup" class="modal-setup-profile">
         <div class="modal-content-setup-profile">
-            <h2>Step 1: Choose Your Currency</h2>
+            <h2>Step 2: Choose Your Currency</h2>h2>
             <form id="setup-profile-currency-form" class="setup-profile-form">
                 <label for="setup-profile-currency-type">Select your preferred currency. You can change this later in your profile.</label>
                 <div class="currency-input-container">
@@ -57,8 +77,8 @@
                     </select>
                 </div>
                 <div class="setup-profile-button-container">
-                    <button type="button" class="setup-profile-previous-button">Previous</button> <!-- Previous button -->
-                    <button type="submit" class="setup-profile-next-button">Next</button> <!-- Next button -->
+                    <button type="button" class="setup-profile-previous-button">Previous</button>
+                    <button type="submit" class="setup-profile-next-button">Next</button>
                 </div>
             </form>
         </div>
@@ -67,7 +87,7 @@
     <!-- Starting Balance Modal -->
     <div id="starting-balance-modal-setup" class="modal-setup-profile">
         <div class="modal-content-setup-profile">
-            <h2>Step 1: Enter Starting Balance</h2>
+            <h2>Step 3: Enter Starting Balance</h2>
             <form id="setup-profile-balance-form" class="setup-profile-form">
                 <label for="setup-profile-starting-balance">The starting balance is the amount currently in your bank account. It serves as the initial balance in the Blankee app and helps set the foundation for tracking your finances. By entering your starting balance, Blankee can accurately calculate your remaining funds as you log income and expenses moving forward.</label>
                 <div class="currency-input-container">
@@ -94,7 +114,7 @@
     <!-- Balance Threshold Modal -->
     <div id="balance-threshold-modal-setup" class="modal-setup-profile">
         <div class="modal-content-setup-profile">
-            <h2>Step 2: Set Your Minimum Threshold</h2>
+            <h2>Step 4: Set Your Minimum Threshold</h2>
             <form id="setup-profile-threshold-form" class="setup-profile-form">
                 <label for="setup-profile-balance-threshold">The balance threshold is the minimum amount you'd like to keep in your account. If your projected balance falls below this number, Blankee will notify you with an alert. This helps you monitor your financial cushion and track your spending patterns.</label>
                 <div class="currency-input-container">
@@ -120,8 +140,14 @@
         $(document).ready(function () {
             document.getElementById('loading-screen').style.display = 'none';
 
+            // Remove readonly from name fields after a short delay to prevent 1Password detection
+            setTimeout(function() {
+                $('#setup-profile-first-name, #setup-profile-last-name').removeAttr('readonly');
+            }, 100);
+
             // Show the welcome modal first
             $('#welcome-modal-setup').show();
+            $('#name-modal-setup').hide();
             $('#currency-modal-setup').hide();
             $('#starting-balance-modal-setup').hide();
             $('#balance-threshold-modal-setup').hide();
@@ -129,20 +155,57 @@
             // Handle welcome next button
             $('#welcome-next-button').on('click', function () {
                 $('#welcome-modal-setup').hide();
-                $('#currency-modal-setup').show();
-                $('#setup-profile-currency-type').focus();
+                $('#name-modal-setup').show();
+                $('#setup-profile-first-name').focus();
             });
             
-            // Handle previous button click on the starting balance modal
-            $('#setup-profile-currency-form .setup-profile-previous-button').on('click', function () {
+            // Handle name form submission
+            $('#setup-profile-name-form').on('submit', function (event) {
+                event.preventDefault();
+                const firstName = $('#setup-profile-first-name').val();
+                const lastName = $('#setup-profile-last-name').val();
+                
+                // Store name in Redis
+                $.ajax({
+                    url: "{{ url_for('save_setup_name') }}",
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        first_name: firstName,
+                        last_name: lastName
+                    }),
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            $('#name-modal-setup').hide();
+                            $('#currency-modal-setup').show();
+                            $('#setup-profile-currency-type').focus();
+                        } else {
+                            alert('Failed to save name: ' + response.message);
+                        }
+                    },
+                    error: function() {
+                        alert('An error occurred while saving your name.');
+                    }
+                });
+            });
+
+            // Handle previous button on name modal
+            $('#name-modal-setup .setup-profile-previous-button').on('click', function () {
+                $('#name-modal-setup').hide();
                 $('#welcome-modal-setup').show();
+            });
+
+            // Handle previous button click on the currency modal
+            $('#setup-profile-currency-form .setup-profile-previous-button').on('click', function () {
                 $('#currency-modal-setup').hide();
+                $('#name-modal-setup').show();
+                $('#setup-profile-first-name').focus();
             });
 
             $('#setup-profile-currency-form').on('submit', function (event) {
                 event.preventDefault();
                 const currencyType = $('#setup-profile-currency-type').val();
-                updateCurrencySymbols(currencyType); // <-- Add this line here
+                updateCurrencySymbols(currencyType);
                 $('#currency-modal-setup').hide();
                 $('#starting-balance-modal-setup').show();
                 $('#setup-profile-starting-balance').focus();
@@ -186,7 +249,7 @@
                     startingBalanceDate.setDate(startingBalanceDate.getDate() - 1);
                     const incomeEntryDate = startingBalanceDate.toISOString().split('T')[0]; // YYYY-MM-DD format
 
-                    // Submit the data via AJAX to the backend
+                    // Submit the data via AJAX to the backend (name already saved in Redis)
                     $.ajax({
                         url: "{{ url_for('complete_profile_setup') }}",  // Backend route
                         method: 'POST',
