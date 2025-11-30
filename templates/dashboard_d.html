@@ -679,6 +679,10 @@
                     remainderValue = parseFloat(totalsForDate.remainder ?? totalsForDate[5] ?? 0).toFixed(2);
                 }
 
+                // Calculate display income (income - last remainder)
+                const displayIncomeValue = (parseFloat(totalIncomeValue) - parseFloat(lastRemainderValue)).toFixed(2);
+                console.log('Dashboard_d income calculation:', {totalIncomeValue, lastRemainderValue, displayIncomeValue, date});
+
                 // Last remainder
                 const lastRemainder = document.createElement('div');
                 lastRemainder.classList.add('dashboard-d-lastremainder');
@@ -696,6 +700,9 @@
                     const entryDate = new Date(entry.date).toISOString().split('T')[0];
                     return entryDate === date && entry.category_name !== "Starting Balance";
                 });
+
+                // Calculate actual income for this day from entries
+                const actualDayIncome = filteredIncomeEntries.reduce((sum, entry) => sum + parseFloat(entry.amount || 0), 0);
 
                 filteredIncomeEntries.forEach(entry => {
                     const incomeRow = document.createElement('div');
@@ -744,7 +751,7 @@
                 incomeTotal.classList.add('dashboard-d-income-total');
                 incomeTotal.innerHTML = `
                     <div class="dashboard-d-label-cell">Total Income:</div>
-                    <div class="dashboard-d-amount-cell">${formatCurrency(totalIncomeValue)}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(actualDayIncome.toFixed(2))}</div>`;
                 container.appendChild(incomeTotal);
 
                 // Expense entries

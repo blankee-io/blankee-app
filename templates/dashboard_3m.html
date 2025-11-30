@@ -1873,22 +1873,30 @@
             const promises = [];
             for (let i = 0; i < numberOfColumns; i++) {
                 const tdElement = incomeBottomRow.children[i];
-                const date = lastRemainderRowRight.children[i] ? lastRemainderRowRight.children[i].getAttribute('data-date') : null;
+                const lastRemainderCell = lastRemainderRowRight.children[i];
+                const date = lastRemainderCell ? lastRemainderCell.getAttribute('data-date') : null;
 
                 if (!date) continue;
 
+                // Fetch both income and last remainder
+                const incomePromise = $.ajax({
+                    url: '/get_total_income_3m',
+                    method: 'GET',
+                    data: { date: date }
+                });
+
+                const lastRemainderPromise = $.ajax({
+                    url: '/get_last_remainder_3m',
+                    method: 'GET',
+                    data: { date: date }
+                });
+
                 promises.push(
-                    $.ajax({
-                        url: '/get_total_income_3m',
-                        method: 'GET',
-                        data: { date: date }
-                    }).then(function(response) {
-                        if (response && response.status === 'success') {
-                            const incomeTotal = parseFloat(response.total_income) || 0;
-                            tdElement.textContent = formatCurrency(incomeTotal);
-                        } else {
-                            tdElement.textContent = formatCurrency(0);
-                        }
+                    Promise.all([incomePromise, lastRemainderPromise]).then(function([incomeResponse, lastRemainderResponse]) {
+                        const incomeTotal = (incomeResponse && incomeResponse.status === 'success') ? parseFloat(incomeResponse.total_income) || 0 : 0;
+                        const lastRemainder = (lastRemainderResponse && lastRemainderResponse.status === 'success') ? parseFloat(lastRemainderResponse.last_remainder) || 0 : 0;
+                        const displayIncome = incomeTotal - lastRemainder;
+                        tdElement.textContent = formatCurrency(displayIncome);
                     }).catch(function(error) {
                         console.error('Error fetching income total for date:', date, error);
                         tdElement.textContent = formatCurrency(0);

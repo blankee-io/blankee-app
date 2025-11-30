@@ -1823,20 +1823,28 @@
             const promises = [];
             for (let i = 0; i < numberOfColumns; i++) {
                 const tdElement = incomeBottomRow.children[i];
-                const date = lastRemainderRowRight.children[i].getAttribute('data-date');
+                const lastRemainderCell = lastRemainderRowRight.children[i];
+                const date = lastRemainderCell.getAttribute('data-date');
+
+                // Fetch both income and last remainder
+                const incomePromise = $.ajax({
+                    url: '/get_total_income',
+                    method: 'GET',
+                    data: { date: date }
+                });
+
+                const lastRemainderPromise = $.ajax({
+                    url: '/get_last_remainder',
+                    method: 'GET',
+                    data: { date: date }
+                });
 
                 promises.push(
-                    $.ajax({
-                        url: '/get_total_income',
-                        method: 'GET',
-                        data: { date: date }
-                    }).then(function(response) {
-                        if (response.status === 'success') {
-                            const incomeTotal = parseFloat(response.total_income) || 0;
-                            tdElement.textContent = formatCurrency(incomeTotal);
-                        } else {
-                            tdElement.textContent = formatCurrency(0);
-                        }
+                    Promise.all([incomePromise, lastRemainderPromise]).then(function([incomeResponse, lastRemainderResponse]) {
+                        const incomeTotal = (incomeResponse.status === 'success') ? parseFloat(incomeResponse.total_income) || 0 : 0;
+                        const lastRemainder = (lastRemainderResponse.status === 'success') ? parseFloat(lastRemainderResponse.last_remainder) || 0 : 0;
+                        const displayIncome = incomeTotal - lastRemainder;
+                        tdElement.textContent = formatCurrency(displayIncome);
                     }).catch(function() {
                         tdElement.textContent = formatCurrency(0);
                     })
