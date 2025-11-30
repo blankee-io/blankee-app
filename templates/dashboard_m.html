@@ -356,11 +356,19 @@
 
                     const incomeTotalDiv = document.createElement('div');
                     incomeTotalDiv.classList.add('dashboard-m-income-total');
-                    incomeTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-income">I</span> <span class="dashboard-m-value">${currencySymbol}${getIncomeTotalForDate(currentDay)}</span>`;
+                    const incomeValue = getIncomeTotalForDate(currentDay);
+                    if (parseFloat(incomeValue) === 0) {
+                        incomeTotalDiv.classList.add('zero-value');
+                    }
+                    incomeTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-income">I</span> <span class="dashboard-m-value">${currencySymbol}${incomeValue}</span>`;
 
                     const expenseTotalDiv = document.createElement('div');
                     expenseTotalDiv.classList.add('dashboard-m-expense-total');
-                    expenseTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-expense">E</span> <span class="dashboard-m-value">${currencySymbol}${getExpenseTotalForDate(currentDay)}</span>`;
+                    const expenseValue = getExpenseTotalForDate(currentDay);
+                    if (parseFloat(expenseValue) === 0) {
+                        expenseTotalDiv.classList.add('zero-value');
+                    }
+                    expenseTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-expense">E</span> <span class="dashboard-m-value">${currencySymbol}${expenseValue}</span>`;
 
                     const remainderDiv = document.createElement('div');
                     remainderDiv.classList.add('dashboard-m-remainder');
@@ -491,7 +499,11 @@
                 // Compare only the date part in UTC (ignore the time)
                 return itemDate.toISOString().split('T')[0] === date.toISOString().split('T')[0];
             });
-            return entry ? parseFloat(entry.total_income).toFixed(2) : '0.00';
+            if (!entry) return '0.00';
+            const incomeTotal = parseFloat(entry.total_income) || 0;
+            const lastRemainder = parseFloat(entry.last_day_remainder) || 0;
+            const displayIncome = incomeTotal - lastRemainder;
+            return displayIncome.toFixed(2);
         }
 
         function getExpenseTotalForDate(date) {

@@ -1017,6 +1017,31 @@ button#autobalance-submit:active {
     transform: translateY(0);
 }
 
+/* Confirm starting balance change button */
+#confirm-starting-balance-change {
+    width: 100%;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgb(42 170 168 / 30%);
+    color: white;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    background-color: #2AAAA8;
+}
+
+#confirm-starting-balance-change:hover {
+    box-shadow: 0 4px 12px rgb(42 170 168 / 40%);
+    transform: translateY(-1px);
+}
+
+#confirm-starting-balance-change:active {
+    box-shadow: 0 1px 4px rgb(42 170 168 / 30%);
+    transform: translateY(0);
+}
+
 /* Mobile responsiveness */
 @media screen and (width <= 600px) {
     .footer-modal-content {
@@ -4366,11 +4391,11 @@ input#setup-profile-starting-savings {
     align-items: center;
     margin: 0;
     padding: 0;
-    background-color: #A9A9A9;
-    color: white;
+    background-color: #f2f7f7;
+    color: #575757;
     font-size: clamp(7px, 2vw, 14px);
-
-    /* Optionally make the text bold */
+    border-left: 2px solid #A9A9A9;
+    border-right: 2px solid #A9A9A9;
     font-weight: bold; 
 
     /* Horizontally center the text */
@@ -4386,6 +4411,8 @@ input#setup-profile-starting-savings {
     margin: 0;
     padding: 0;
     background-color: #2AAAA8;
+    border-left: 2px solid #A9A9A9;
+    border-right: 2px solid #A9A9A9;
 
     /* Adjust text color if needed */
     color: white; 
@@ -4399,6 +4426,15 @@ input#setup-profile-starting-savings {
     text-align: center; 
 }
 
+.dashboard-m-income-total.zero-value {
+    background-color: #f2f7f7;
+}
+
+.dashboard-m-income-total.zero-value .dashboard-m-label,
+.dashboard-m-income-total.zero-value .dashboard-m-value {
+    visibility: hidden;
+}
+
 .dashboard-m-expense-total {
     display: flex;
     /* Ensure these divs take up 18% each */
@@ -4408,6 +4444,8 @@ input#setup-profile-starting-savings {
     margin: 0;
     padding: 0;
     background-color: #E45F1C;
+    border-left: 2px solid #A9A9A9;
+    border-right: 2px solid #A9A9A9;
 
     /* Adjust text color if needed */
     color: white; 
@@ -4419,6 +4457,15 @@ input#setup-profile-starting-savings {
 
     /* Horizontally center the text */
     text-align: center; 
+}
+
+.dashboard-m-expense-total.zero-value {
+    background-color: #f2f7f7;
+}
+
+.dashboard-m-expense-total.zero-value .dashboard-m-label,
+.dashboard-m-expense-total.zero-value .dashboard-m-value {
+    visibility: hidden;
 }
 
 .dashboard-m-remainder {
@@ -5951,14 +5998,19 @@ input#setup-profile-starting-savings {
     text-align: center;
 }
 
+#starting-balance-modal {
+    display: none;
+    justify-content: center;
+    align-items: center;
+}
+
 #starting-balance-modal-content {
     position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
     width: 350px;
-    height: 300px;
-    margin: 10% auto;
+    margin: auto;
     padding: 10px;
     background: #fff;
     border-radius: 12px;
