@@ -1295,7 +1295,24 @@
                     return entryDate === targetDate;
                 });
                 const savingsValue = entry ? parseFloat(entry.amount) : 0;
-                savingsTd.textContent = currencySymbol + savingsValue;
+                savingsTd.textContent = currencySymbol + savingsValue.toFixed(2);
+                
+                // Apply threshold classes
+                let applyThresholdClass = true;
+                if (member_since) {
+                    const cellDate = new Date(targetDate);
+                    const memberSinceDate = new Date(member_since);
+                    if (cellDate < memberSinceDate) {
+                        applyThresholdClass = false;
+                    }
+                }
+                if (applyThresholdClass) {
+                    if (savingsValue < 0) {
+                        savingsTd.classList.add('negative');
+                    } else if (savingsValue < balance_threshold) {
+                        savingsTd.classList.add('below-threshold');
+                    }
+                }
 
                 savingsRowRight.appendChild(savingsTd);
             });

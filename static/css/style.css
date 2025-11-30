@@ -3784,12 +3784,10 @@ input#setup-profile-starting-savings {
 
 .negative {
     position: relative;
-    z-index: 6 !important;
 }
 
 .negative::before {
     position: absolute;
-    z-index: 7 !important;
 }
 
 .current-week-outline {
@@ -4410,12 +4408,12 @@ input#setup-profile-starting-savings {
     align-items: center;
     margin: 0;
     padding: 0;
-    background-color: #2AAAA8;
+    background-color: #59D6D4;
     border-left: 2px solid #A9A9A9;
     border-right: 2px solid #A9A9A9;
 
     /* Adjust text color if needed */
-    color: white; 
+    color: #575757; 
 
     font-size: clamp(7px, 2vw, 14px);
 
@@ -4443,12 +4441,12 @@ input#setup-profile-starting-savings {
     align-items: center;
     margin: 0;
     padding: 0;
-    background-color: #E45F1C;
+    background-color: #EF9F77;
     border-left: 2px solid #A9A9A9;
     border-right: 2px solid #A9A9A9;
 
     /* Adjust text color if needed */
-    color: white; 
+    color: #575757; 
 
     font-size: clamp(7px, 2vw, 14px);
 
@@ -4495,9 +4493,11 @@ input#setup-profile-starting-savings {
     display: flex;
     align-items: center;
     position: relative;
-    width: 80%;
-    margin: 12px auto 8px;
+    width: 100%;
+    padding: 12px auto 8px;
     text-align: center;
+    border-left: 2px solid #A9A9A9;
+    border-right: 2px solid #A9A9A9;
 }
 
 .dashboard-m-ca-divider::before,
@@ -4512,12 +4512,12 @@ input#setup-profile-starting-savings {
 
 .dashboard-m-ca-divider::before,
 .dashboard-m-s-divider::before {
-    margin-right: 0.5em;
+    margin: 0.8em;
 }
 
 .dashboard-m-ca-divider::after,
 .dashboard-m-s-divider::after {
-    margin-left: 0.5em;
+    margin: 0.8em;
 }
 
 .dashboard-m-ca-divider-text,
@@ -4538,10 +4538,8 @@ input#setup-profile-starting-savings {
     justify-content: space-between;
     align-items: center;
     margin: 0;
-    margin-top: 3px;
     padding: 0;
     background-color: #676767;
-    border-radius: 10px;
 
     /* Adjust text color if needed */
     color: white; 
@@ -4564,10 +4562,10 @@ input#setup-profile-starting-savings {
     justify-content: space-between;
     align-items: center;
     margin: 0;
-    margin-top: 3px;
     padding: 0;
     background-color: #2AAAA8;
-    border-radius: 10px;
+    border-bottom-right-radius: 10px;
+    border-bottom-left-radius: 10px;
 
     /* Adjust text color if needed */
     color: white; 
@@ -4593,11 +4591,6 @@ input#setup-profile-starting-savings {
     padding-right: 5px;
     text-align: right;
     justify-self: flex-end;
-}
-
-#dashboard-m-calendar .dashboard-m-remainder {
-    border-bottom-left-radius: 10px;
-    border-bottom-right-radius: 10px;
 }
 
 #dashboard-m-calendar .dashboard-m-day-label {
@@ -4626,8 +4619,26 @@ input#setup-profile-starting-savings {
 
 .dashboard-m-today {
     /* Add a border to further emphasize today's date */
-    border: 4px solid #E45F1C; 
-    border-radius: 1.4em 1.4em .5em .5em;
+    position: relative;
+    border-radius: .8em;
+}
+
+.dashboard-m-today::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border: 4px solid #E45F1C;
+    border-radius: .8em;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.dashboard-m-today .dashboard-m-date {
+    position: relative;
+    z-index: 1;
 }
 
 .dashboard-d-today-container {
