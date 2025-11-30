@@ -4310,12 +4310,37 @@ input#setup-profile-starting-savings {
     align-items: center;
     width: 100%;
     max-width: 875px;
+    min-width: 350px;
     margin: 0 auto;
     margin-bottom: 10px;
     background-color: transparent;
     text-align: center;
     border-collapse: separate;
     text-overflow: ellipsis;
+}
+
+@media (max-width: 875px) {
+    #dashboard-m-calendar {
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 350px) {
+    #dashboard-m-calendar {
+        min-width: 100%;
+    }
+    
+    .dashboard-m-day-label,
+    .dashboard-m-date-number,
+    .dashboard-m-income-total,
+    .dashboard-m-expense-total,
+    .dashboard-m-remainder,
+    .dashboard-m-ca-balance,
+    .dashboard-m-savings,
+    .dashboard-m-ca-divider-text,
+    .dashboard-m-s-divider-text {
+        font-size: 6px !important;
+    }
 }
 
 #dashboard-m-calendar td {
@@ -4325,15 +4350,21 @@ input#setup-profile-starting-savings {
     box-sizing: border-box;
 }
 
-.dashboard-m-other-month::before {
+.dashboard-m-other-month .dashboard-m-main-sections::before {
     position: absolute;
-    inset: 15px 0 0;
+    inset: 0;
     z-index: 1;
     /* Much darker overlay */
     background-color: rgb(57 57 57 / 70%); 
-    border-radius: inherit;
     border-radius: 10px;
     content: '';
+    pointer-events: none;
+}
+
+.dashboard-m-main-sections {
+    display: flex;
+    flex-direction: column;
+    position: relative;
 }
 
 /* Ensure each date div inside the td fits without extra space */
@@ -4350,7 +4381,7 @@ input#setup-profile-starting-savings {
     height: 100%; 
 
     box-sizing: border-box;
-    margin: 10px 1px;
+    margin: 10px 1px 0px;
     transition: opacity 0.2s ease;
     font-size: 0.8em;
 }
@@ -4371,7 +4402,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: #676767;
     color: white;
-    font-size: clamp(7px, 2vw, 14px);
+    font-size: clamp(3px, 2vw, 14px);
 
     /* Optionally make the text bold */
     font-weight: bold; 
@@ -4391,7 +4422,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: #f2f7f7;
     color: #575757;
-    font-size: clamp(7px, 2vw, 14px);
+    font-size: clamp(3px, 2vw, 14px);
     border-left: 2px solid #A9A9A9;
     border-right: 2px solid #A9A9A9;
     font-weight: bold; 
@@ -4415,7 +4446,7 @@ input#setup-profile-starting-savings {
     /* Adjust text color if needed */
     color: #575757; 
 
-    font-size: clamp(7px, 2vw, 14px);
+    font-size: clamp(3px, 2vw, 14px);
 
     /* Optionally make the text bold */
     font-weight: bold; 
@@ -4448,7 +4479,7 @@ input#setup-profile-starting-savings {
     /* Adjust text color if needed */
     color: #575757; 
 
-    font-size: clamp(7px, 2vw, 14px);
+    font-size: clamp(3px, 2vw, 14px);
 
     /* Optionally make the text bold */
     font-weight: bold; 
@@ -4479,7 +4510,7 @@ input#setup-profile-starting-savings {
     /* Adjust text color if needed */
     color: white; 
 
-    font-size: clamp(7px, 2vw, 14px);
+    font-size: clamp(3px, 2vw, 14px);
 
     /* Optionally make the text bold */
     font-weight: bold; 
@@ -4512,19 +4543,19 @@ input#setup-profile-starting-savings {
 
 .dashboard-m-ca-divider::before,
 .dashboard-m-s-divider::before {
-    margin: 0.8em;
+    margin: 0.3em;
 }
 
 .dashboard-m-ca-divider::after,
 .dashboard-m-s-divider::after {
-    margin: 0.8em;
+    margin: 0.3em;
 }
 
 .dashboard-m-ca-divider-text,
 .dashboard-m-s-divider-text {
     /* No background-color needed! */
     color: #2AAAA8;
-    font-size: 10px;
+    font-size: clamp(7px, 2vw, 12px);
     font-weight: bold;
     letter-spacing: 1px;
 }
@@ -4544,7 +4575,7 @@ input#setup-profile-starting-savings {
     /* Adjust text color if needed */
     color: white; 
 
-    font-size: clamp(7px, 2vw, 14px);
+    font-size: clamp(3px, 2vw, 14px);
 
     /* Optionally make the text bold */
     font-weight: bold; 
@@ -4570,7 +4601,7 @@ input#setup-profile-starting-savings {
     /* Adjust text color if needed */
     color: white; 
 
-    font-size: clamp(7px, 2vw, 14px);
+    font-size: clamp(3px, 2vw, 14px);
 
     /* Optionally make the text bold */
     font-weight: bold; 
@@ -4580,15 +4611,15 @@ input#setup-profile-starting-savings {
 }
 
 .dashboard-m-label {
-    flex: 1 1 auto;
-    padding-left: 5px;
+    flex: 0 0 10%;
+    padding-left: 2px;
     text-align: left;
     justify-self: flex-start;
 }
 
 .dashboard-m-value {
     flex: 1 1 auto;
-    padding-right: 5px;
+    padding-right: 2px;
     text-align: right;
     justify-self: flex-end;
 }
@@ -4605,7 +4636,7 @@ input#setup-profile-starting-savings {
 .dashboard-m_other-month::before {
     position: absolute;
     inset: 0;
-    z-index: 1;
+    z-index: 100;
 
     /* Adjust the darkness with the alpha value */
     background-color: rgb(157 157 157 / 70%); 
@@ -4638,7 +4669,6 @@ input#setup-profile-starting-savings {
 
 .dashboard-m-today .dashboard-m-date {
     position: relative;
-    z-index: 1;
 }
 
 .dashboard-d-today-container {
@@ -4654,6 +4684,7 @@ input#setup-profile-starting-savings {
     font-size: 14px;
     font-weight: bold;
     box-sizing: border-box;
+    z-index: 100;
 }
 
 /* Outline for today's dashboard-d-container */

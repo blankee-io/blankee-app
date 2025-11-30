@@ -345,6 +345,10 @@
                     todayContainerDiv.classList.add('dashboard-d-today-container');
                     dayDiv.appendChild(todayContainerDiv);
 
+                    // Create a wrapper for sections that should be covered by other-month overlay
+                    const mainSectionsWrapper = document.createElement('div');
+                    mainSectionsWrapper.classList.add('dashboard-m-main-sections');
+
                     const dayOfWeek = days[i % 7];
                     const dayOfWeekDiv = document.createElement('div');
                     dayOfWeekDiv.classList.add('dashboard-m-day-label');
@@ -406,17 +410,18 @@
                         todayContainerDiv.textContent = "Today";
                     }
 
-                    dayDiv.appendChild(dayOfWeekDiv);
-                    dayDiv.appendChild(dateNumberDiv);
-                    dayDiv.appendChild(incomeTotalDiv);
-                    dayDiv.appendChild(expenseTotalDiv);
-                    dayDiv.appendChild(remainderDiv);
+                    // Append main sections to the wrapper
+                    mainSectionsWrapper.appendChild(dayOfWeekDiv);
+                    mainSectionsWrapper.appendChild(dateNumberDiv);
+                    mainSectionsWrapper.appendChild(incomeTotalDiv);
+                    mainSectionsWrapper.appendChild(expenseTotalDiv);
+                    mainSectionsWrapper.appendChild(remainderDiv);
 
                     // Add teal divider for CA section
                     const caDivider = document.createElement('div');
                     caDivider.className = 'dashboard-m-ca-divider';
                     caDivider.innerHTML = `<span class="dashboard-m-ca-divider-text">CA</span>`;
-                    dayDiv.appendChild(caDivider);
+                    mainSectionsWrapper.appendChild(caDivider);
 
                     // dateStr already declared above
 
@@ -445,16 +450,19 @@
                         const caBalanceDiv = document.createElement('div');
                         caBalanceDiv.classList.add('dashboard-m-ca-balance');
                         caBalanceDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-ca">${initials}</span> <span class="dashboard-m-value">${currencySymbol}${balanceValue}</span>`;
-                        dayDiv.appendChild(caBalanceDiv);
+                        mainSectionsWrapper.appendChild(caBalanceDiv);
                     });
 
                     // Add teal divider for Savings section
                     const savingsDivider = document.createElement('div');
                     savingsDivider.className = 'dashboard-m-s-divider';
                     savingsDivider.innerHTML = `<span class="dashboard-m-s-divider-text">S</span>`;
-                    dayDiv.appendChild(savingsDivider);
+                    mainSectionsWrapper.appendChild(savingsDivider);
 
-                    dayDiv.appendChild(savingsDiv);
+                    mainSectionsWrapper.appendChild(savingsDiv);
+
+                    // Append the wrapper to dayDiv
+                    dayDiv.appendChild(mainSectionsWrapper);
 
                     if (currentDay.getMonth() !== selectedDate.getMonth()) {
                         dayCell.classList.add('dashboard-m-other-month');
