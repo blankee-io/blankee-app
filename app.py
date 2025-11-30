@@ -171,23 +171,61 @@ class User(UserMixin):
 
 @app.context_processor
 def inject_unread_notifications():
-    """Inject unread notification count into all templates for the nav badge"""
+    """Inject unread notification count and user info into all templates for the nav"""
     unread_count = 0
+    first_name = ''
+    last_name = ''
+    
     if current_user.is_authenticated:
         try:
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # Get unread notification count
                 cursor.execute("""
                     SELECT COUNT(*) FROM notifications
                     WHERE user_id = %s AND is_read = 0
                 """, (current_user.id,))
                 result = cursor.fetchone()
-                cursor.close()
                 if result:
                     unread_count = result[0]
+                
+                # Get user's first and last name (try Redis first)
+                user_data = None
+                redis_key = f"users:v1:{current_user.id}"
+                if app.config.get('REDIS_OK'):
+                    try:
+                        cached = _redis_client.get(redis_key)
+                        if cached:
+                            user_data = json.loads(cached)
+                    except Exception:
+                        pass
+                
+                # Fallback to MySQL if not in Redis
+                if not user_data:
+                    cursor.execute("""
+                        SELECT first_name, last_name
+                        FROM users
+                        WHERE id = %s
+                    """, (current_user.id,))
+                    user_result = cursor.fetchone()
+                    if user_result:
+                        first_name = user_result[0] or ''
+                        last_name = user_result[1] or ''
+                else:
+                    first_name = user_data.get('first_name', '') or ''
+                    last_name = user_data.get('last_name', '') or ''
+                
+                cursor.close()
+                
         except Exception as e:
-            app.logger.error(f"Error fetching unread notification count: {e}")
-    return dict(unread_notifications_count=unread_count)
+            app.logger.error(f"Error in context processor: {e}")
+    
+    return dict(
+        unread_notifications_count=unread_count,
+        nav_first_name=first_name,
+        nav_last_name=last_name
+    )
 
 #################################################################################
 ################################### HOME ########################################
@@ -569,6 +607,48 @@ def setup_profile():
     return render_template('setup_profile.html')
 
 
+@app.route('/save_setup_name', methods=['POST'])
+@login_required
+def save_setup_name():
+    """
+    Save user's first and last name to Redis during profile setup.
+    This will be flushed to MySQL during the regular flush schedule.
+    """
+    try:
+        first_name = request.json.get('first_name', '').strip()
+        last_name = request.json.get('last_name', '').strip()
+        
+        print(f"[save_setup_name] Received - first_name: '{first_name}', last_name: '{last_name}'")
+        
+        if not first_name or not last_name:
+            return jsonify({'status': 'error', 'message': 'First and last name are required'}), 400
+        
+        # Initialize Redis connection
+        r = init_redis()
+        
+        # Store in Redis with a temporary key for this user
+        redis_key = f"setup_name:v1:{current_user.id}"
+        r.hset(redis_key, mapping={
+            'first_name': first_name,
+            'last_name': last_name
+        })
+        
+        print(f"[save_setup_name] Stored in Redis with key: {redis_key}")
+        
+        # Set expiration to 1 hour in case setup is abandoned
+        r.expire(redis_key, 3600)
+        
+        # Verify it was saved
+        saved_data = r.hgetall(redis_key)
+        print(f"[save_setup_name] Verification - data in Redis: {saved_data}")
+        
+        return jsonify({'status': 'success'}), 200
+        
+    except Exception as e:
+        print(f"[save_setup_name] Error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/complete_profile_setup', methods=['POST'])
 @login_required
 def complete_profile_setup():
@@ -595,16 +675,34 @@ def complete_profile_setup():
         if not all([starting_balance, balance_threshold, income_entry_date]):
             return jsonify({'status': 'error', 'message': 'All fields are required'}), 400
 
-        # Update user details in the database
+        # Initialize Redis connection and retrieve name from Redis
+        r = init_redis()
+        redis_key = f"setup_name:v1:{current_user.id}"
+        name_data = r.hgetall(redis_key)
+        first_name = name_data.get('first_name', b'').decode('utf-8') if isinstance(name_data.get('first_name'), bytes) else name_data.get('first_name', '')
+        last_name = name_data.get('last_name', b'').decode('utf-8') if isinstance(name_data.get('last_name'), bytes) else name_data.get('last_name', '')
+        
+        print(f"[complete_profile_setup] Retrieved from Redis - first_name: '{first_name}', last_name: '{last_name}'")
+
+        # Update user settings in Redis (flush worker will persist to MySQL)
+        _update_user_setting_in_redis(current_user.id, 'balance_threshold', balance_threshold)
+        _update_user_setting_in_redis(current_user.id, 'starting_savings', starting_savings)
+        _update_user_setting_in_redis(current_user.id, 'currency_type', currency_type)
+        
+        # Update name fields if they exist
+        if first_name and last_name:
+            print(f"[complete_profile_setup] Updating names in Redis via _update_user_setting_in_redis")
+            _update_user_setting_in_redis(current_user.id, 'first_name', first_name)
+            _update_user_setting_in_redis(current_user.id, 'last_name', last_name)
+        else:
+            print(f"[complete_profile_setup] WARNING: Names are empty, not updating")
+        
+        # Delete the temporary Redis key after transferring to main user Redis
+        r.delete(redis_key)
+
+        # Update user details in the database for critical fields that need immediate persistence
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-
-            # Update user information (balance_threshold, starting_savings, and currency_type)
-            cursor.execute("""
-                UPDATE users 
-                SET balance_threshold = %s, starting_savings = %s, currency_type = %s
-                WHERE id = %s
-            """, (balance_threshold, starting_savings, currency_type, current_user.id))
 
             # Check if the 'Starting Balance' category already exists for this user
             cursor.execute("""
@@ -7846,6 +7944,7 @@ def profile():
             cached = _redis_client.get(redis_key)
             if cached:
                 user_data = json.loads(cached)
+                app.logger.info(f"[PROFILE] Loaded from Redis - first_name: '{user_data.get('first_name')}', last_name: '{user_data.get('last_name')}'")
         except Exception as e:
             app.logger.warning(f"[REDIS][user_settings] GET error: {e}")
     
@@ -7861,7 +7960,16 @@ def profile():
                 WHERE id = %s
             """, (current_user.id,))
             user_data = cursor.fetchone()
+            if user_data:
+                app.logger.info(f"[PROFILE] Loaded from MySQL - first_name: '{user_data.get('first_name')}', last_name: '{user_data.get('last_name')}'")
             cursor.close()
+            
+            # Cache the user data in Redis for future requests
+            if user_data and app.config.get('REDIS_OK'):
+                try:
+                    _redis_client.setex(redis_key, 300, json.dumps(user_data, default=str))  # 5 minute cache
+                except Exception as e:
+                    app.logger.warning(f"[REDIS][user_settings] SET error: {e}")
     
     # Fetch starting balance from income_entries (check Redis first)
     income_entries = _get_entries_from_redis('income_entries', current_user.id)
@@ -7897,13 +8005,20 @@ def profile():
 
     # Extract values from the query result
     profile_picture = user_data['profile_picture'] if user_data else None
-    first_name = user_data['first_name'] if user_data else ''
-    last_name = user_data['last_name'] if user_data else ''
-    balance_threshold = int(user_data['balance_threshold']) if user_data and user_data['balance_threshold'] is not None else 0
+    # Handle None values from database properly - use get() with default of empty string
+    first_name = user_data.get('first_name', '') if user_data else ''
+    if first_name is None:
+        first_name = ''
+    last_name = user_data.get('last_name', '') if user_data else ''
+    if last_name is None:
+        last_name = ''
+    # Convert balance_threshold to float first, then int to handle decimal strings
+    balance_threshold = int(float(user_data['balance_threshold'])) if user_data and user_data['balance_threshold'] is not None else 0
     goofy_week_mode = user_data['goofy_week_mode'] if user_data else 0
     landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
-    starting_balance = int(starting_balance_data['amount']) if starting_balance_data and starting_balance_data['amount'] is not None else 0
+    # Convert starting_balance to float first, then int to handle decimal values
+    starting_balance = int(float(starting_balance_data['amount'])) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
     pending_email = user_data.get('pending_email') if user_data else None
 
@@ -8394,13 +8509,15 @@ def settings():
 
     # Extract values from the query result
     profile_picture = user_data['profile_picture'] if user_data else None
-    first_name = user_data['first_name'] if user_data else ''
-    last_name = user_data['last_name'] if user_data else ''
-    balance_threshold = int(user_data['balance_threshold']) if user_data and user_data['balance_threshold'] is not None else 0
+    first_name = user_data.get('first_name') or '' if user_data else ''
+    last_name = user_data.get('last_name') or '' if user_data else ''
+    # Convert balance_threshold to float first, then int to handle decimal strings
+    balance_threshold = int(float(user_data['balance_threshold'])) if user_data and user_data['balance_threshold'] is not None else 0
     goofy_week_mode = user_data['goofy_week_mode'] if user_data else 0
     landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
-    starting_balance = int(starting_balance_data['amount']) if starting_balance_data and starting_balance_data['amount'] is not None else 0
+    # Convert starting_balance to float first, then int to handle decimal values
+    starting_balance = int(float(starting_balance_data['amount'])) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
     email_notifications = user_data.get('email_notifications', 0) if user_data else 0
 
