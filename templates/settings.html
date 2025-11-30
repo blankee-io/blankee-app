@@ -403,11 +403,11 @@
             $('#starting-balance-form').on('submit', function(event) {
                 event.preventDefault();
                 pendingStartingBalance = $('#starting_balance').val();
-                $('#starting-balance-modal').show();
+                $('#starting-balance-modal').css('display', 'flex');
             });
 
             $('#close-starting-balance-modal').on('click', function() {
-                $('#starting-balance-modal').hide();
+                $('#starting-balance-modal').css('display', 'none');
                 $('#starting_balance').val(originalStartingBalance); // Reset immediately
                 pendingStartingBalance = null;
             });
@@ -426,7 +426,7 @@
                             alert('An error occurred while updating the starting balance.');
                         },
                         complete: function() {
-                            $('#starting-balance-modal').hide();
+                            $('#starting-balance-modal').css('display', 'none');
                             pendingStartingBalance = null;
                             // Optionally update originalStartingBalance here if you want to reflect the new value without reload:
                             // originalStartingBalance = $('#starting_balance').val();
@@ -438,7 +438,7 @@
             $('#starting-balance-modal').on('click', function(event) {
                 // Only close if the click is directly on the modal background, not the content
                 if (event.target === this) {
-                    $(this).hide();
+                    $(this).css('display', 'none');
                     $('#starting_balance').val(originalStartingBalance); // Reset immediately
                     pendingStartingBalance = null;
                 }

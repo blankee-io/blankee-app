@@ -35,12 +35,12 @@
     </div>
 
     <div class="main-container" id="main-container">
-        <div class="profile-box">
+        <div class="profile-box" id="notifications-box">
             <div class="profile-content">
                 <div class="profile-actions">
                     {% if notifications %}
                         {% for notification in notifications %}
-                            <div class="notification-section notification-item {% if notification.is_read %}notification-read{% endif %}" data-notification-id="{{ notification.id }}">
+                            <div class="profile-section notification-section notification-item {% if notification.is_read %}notification-read{% endif %}" data-notification-id="{{ notification.id }}" id="notification-section">
                                 <div class="notification-header">
                                     <span class="notification-date">{{ notification.date.strftime('%b %d, %Y at %I:%M %p') }}</span>
                                     <div class="notification-buttons">
@@ -60,7 +60,7 @@
                             </div>
                         {% endfor %}
                     {% else %}
-                        <div class="profile-section">
+                        <div class="profile-section" id="notification-section">
                             <p style="text-align: center; color: #666;">No notifications.</p>
                         </div>
                     {% endif %}
