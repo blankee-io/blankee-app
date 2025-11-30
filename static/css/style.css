@@ -1888,7 +1888,7 @@ input#setup-profile-starting-savings {
 .setup-profile-next-button:hover,
 .setup-profile-submit-button:hover {
     box-shadow: 0 2px 8px #2AAAA85c;
-    background-color: #2AAAA8;
+    background-color: #59D6D4;
 }
 
 .setup-profile-previous-button:hover {
@@ -3365,6 +3365,14 @@ input#setup-profile-starting-savings {
     text-align: center;
 }
 
+#close-email-pending-btn {
+    background-color: #2AAAA8;
+}
+
+#close-email-pending-btn:hover {
+    background-color: #59D6D4;
+}
+
 /* Close Button */
 .close-delete-modal {
     color: #aaa;
@@ -3381,21 +3389,46 @@ input#setup-profile-starting-savings {
 
 /* Buttons */
 .confirm-delete-category-btn, .cancel-delete-category-btn {
+    width: 45%;
+    padding: 14px 24px;
     margin: 10px;
-    padding: 5px 10px;
     border: none;
-    border-radius: 15px;
+    border-radius: 12px;
+    color: white;
+    font-size: 17px;
+    font-weight: 600;
+    transition: all 0.2s ease;
     cursor: pointer;
 }
 
 .confirm-delete-category-btn {
-    background-color: #d73a3a;
-    color: white;
+    box-shadow: 0 2px 8px rgba(215, 58, 58, 0.36);
+    background-color: #f94449;
+}
+
+.confirm-delete-category-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(215, 58, 58, 0.36);
+    background-color: #ee6b6e;
+}
+
+.confirm-delete-category-btn:active {
+    transform: translateY(0);
 }
 
 .cancel-delete-category-btn {
+    box-shadow: 0 2px 8px rgba(169, 169, 169, 0.36);
     background-color: #A9A9A9;
-    color: white;
+}
+
+.cancel-delete-category-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(169, 169, 169, 0.36);
+    background-color: #c9c9c9;
+}
+
+.cancel-delete-category-btn:active {
+    transform: translateY(0);
 }
 
 /* General table styling to ensure all tables align */
@@ -5009,34 +5042,47 @@ input#setup-profile-starting-savings {
     margin-top: 10px;
 }
 
-.cancel-upload-button {
-    margin-top: 15px;
-    padding: 10px 16px;
-    background-color: #A9A9A9;
+.cancel-upload-button,
+.upload-button {
+    width: 45%;
+    padding: 14px 24px;
     border: none;
-    border-radius: 8px;
+    border-radius: 12px;
     color: white;
-    font-size: 10px;
+    font-size: 17px;
+    font-weight: 600;
+    transition: all 0.2s ease;
     cursor: pointer;
 }
 
 .upload-button {
+    box-shadow: 0 2px 8px #2AAAA85c;
     background-color: #2aaaa8;
-    color: white;
 }
 
 .upload-button:hover {
-    background-color: #575757;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px #2AAAA85c;
+    background-color: #2aaaa8;
+}
+
+.upload-button:active {
+    transform: translateY(0);
 }
 
 .cancel-upload-button {
-    background-color: #ccc;
-    color: #333;
+    box-shadow: 0 2px 8px rgba(169, 169, 169, 0.36);
+    background-color: #A9A9A9;
 }
 
 .cancel-upload-button:hover {
-    background-color: #999;
-    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(169, 169, 169, 0.36);
+    background-color: #A9A9A9;
+}
+
+.cancel-upload-button:active {
+    transform: translateY(0);
 }
 
 .center-modal-content form {
@@ -5724,6 +5770,11 @@ input#setup-profile-starting-savings {
     content: "Bank Connections";
 }
 
+/* Notifications section label override */
+#notification-section::before {
+    content: "Notifications";
+}
+
 /* Data label */
 .data-section::before {
     position: absolute;
@@ -5812,6 +5863,7 @@ input#setup-profile-starting-savings {
     font-size: 14px;
     color: #333;
     line-height: 1.5;
+    text-align: left;
 }
 
 .notification-message a {
@@ -6096,6 +6148,7 @@ input#setup-profile-starting-savings {
     flex-direction: row;
     justify-content: center;
     margin-top: 15px;
+    width: 100%;
 }
 
 @keyframes modalFadeIn {
@@ -8985,7 +9038,7 @@ html.modal-open {
 #connect-bank-btn:hover {
     box-shadow: 0 4px 12px rgba(249, 68, 73, 0.4);
     transform: translateY(-1px);
-    background-color: #2aaaa8;
+    background-color: #59D6D4;
 }
 
 #connect-bank-btn:active {
@@ -9058,7 +9111,7 @@ html.modal-open {
 }
 
 .resend-verification-btn:hover {
-    background-color: #258c8a;
+    background-color: #59D6D4;
 }
 
 .cancel-pending-email-btn {

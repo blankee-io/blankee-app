@@ -1008,10 +1008,21 @@
             const uploadForm = document.getElementById('profile-upload-form');
             if (uploadForm) {
                 uploadForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    // Check if an image has been selected
+                    if (!cropperState.image) {
+                        // Show error message using settings bubble pattern
+                        const errorMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: #dc3545; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">Please add image</div>');
+                        $('body').append(errorMsg);
+                        setTimeout(function() {
+                            errorMsg.fadeOut(300, function() { $(this).remove(); });
+                        }, 3000);
+                        return;
+                    }
+                    
                     // If an image has been cropped, use the canvas data
                     if (cropperState.image) {
-                        e.preventDefault();
-                        
                         const canvas = document.getElementById('crop-canvas');
                         canvas.toBlob(function(blob) {
                             const formData = new FormData();
@@ -1033,7 +1044,6 @@
                             });
                         }, 'image/png');
                     }
-                    // If no image was cropped, let the form submit normally
                 });
             }
         });
@@ -1538,14 +1548,14 @@
             $(document).on('click', '.disconnect-btn', function() {
                 pendingDisconnectConnectionId = $(this).data('connection-id');
                 pending$ConnectionCard = $(this).closest('.connection-card');
-                $('#disconnect-connection-modal').fadeIn(200);
+                $('#disconnect-connection-modal').css('display', 'flex');
                 document.body.classList.add('modal-open');
                 document.documentElement.classList.add('modal-open');
             });
 
             // Close disconnect modal
             $('#close-disconnect-connection-modal, #cancel-disconnect-connection-btn').on('click', function() {
-                $('#disconnect-connection-modal').fadeOut(200);
+                $('#disconnect-connection-modal').css('display', 'none');
                 document.body.classList.remove('modal-open');
                 document.documentElement.classList.remove('modal-open');
                 pendingDisconnectConnectionId = null;
@@ -1555,7 +1565,7 @@
             // Close disconnect modal on backdrop click
             $('#disconnect-connection-modal').on('click', function(e) {
                 if (e.target.id === 'disconnect-connection-modal') {
-                    $(this).fadeOut(200);
+                    $(this).css('display', 'none');
                     document.body.classList.remove('modal-open');
                     document.documentElement.classList.remove('modal-open');
                     pendingDisconnectConnectionId = null;
@@ -1584,7 +1594,7 @@
                             // Replace buttons with Delete button
                             $actions.html(`
                                 <button class="delete-connection-btn danger-button" data-connection-id="${pendingDisconnectConnectionId}">
-                                    <i class="fa-solid fa-trash"></i> Delete
+                                    <i class="fa-solid fa-trash"></i>
                             </button>
                         `);
                     } else {
@@ -1595,7 +1605,7 @@
                     alert('Error disconnecting bank. Please try again.');
                 },
                 complete: function() {
-                    $('#disconnect-connection-modal').fadeOut(200);
+                    $('#disconnect-connection-modal').css('display', 'none');
                     document.body.classList.remove('modal-open');
                     document.documentElement.classList.remove('modal-open');
                     pendingDisconnectConnectionId = null;
@@ -1607,14 +1617,14 @@
             
             $(document).on('click', '.delete-connection-btn', function() {
                 pendingDeleteConnectionId = $(this).data('connection-id');
-                $('#delete-connection-modal').fadeIn(200);
+                $('#delete-connection-modal').css('display', 'flex');
                 document.body.classList.add('modal-open');
                 document.documentElement.classList.add('modal-open');
             });
 
             // Close delete connection modal
             $('#close-delete-connection-modal, #cancel-delete-connection-btn').on('click', function() {
-                $('#delete-connection-modal').fadeOut(200);
+                $('#delete-connection-modal').css('display', 'none');
                 document.body.classList.remove('modal-open');
                 document.documentElement.classList.remove('modal-open');
                 pendingDeleteConnectionId = null;
@@ -1623,7 +1633,7 @@
             // Close delete modal on backdrop click
             $('#delete-connection-modal').on('click', function(e) {
                 if (e.target.id === 'delete-connection-modal') {
-                    $(this).fadeOut(200);
+                    $(this).css('display', 'none');
                     document.body.classList.remove('modal-open');
                     document.documentElement.classList.remove('modal-open');
                     pendingDeleteConnectionId = null;
