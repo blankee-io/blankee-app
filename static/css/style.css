@@ -2644,7 +2644,7 @@ input#setup-profile-starting-savings {
 
 #table-container {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     max-width: 875px;
 
     /* This will center the container horizontally */
@@ -2668,7 +2668,7 @@ input#setup-profile-starting-savings {
     z-index: 10;
     width: 30%; 
     margin-right: 5px;
-    margin-bottom: 10px;
+    /* margin-bottom: 10px; */
 }
 
 #income-categories-table,
@@ -2896,6 +2896,7 @@ input#setup-profile-starting-savings {
     flex-direction: row;
     justify-content: flex-end; 
     align-items: center;
+    height: 38px;
 
     /* Adjust spacing between buttons as needed */
     gap: 5px; 
@@ -3835,8 +3836,6 @@ input#setup-profile-starting-savings {
 }
 
 #month-table-container {
-    z-index: 5;
-    align-items: center;
     width: 70%;
     margin-bottom: 10px;
     margin-left: 5px;
