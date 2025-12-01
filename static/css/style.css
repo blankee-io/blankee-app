@@ -1195,6 +1195,25 @@ button#autobalance-submit:active {
     display: none !important;
 }
 
+/* Make calendarnav invisible (but keep back button) on back-button-only pages */
+#recurring-i-body .calendarnav,
+#credit-accounts-body .calendarnav,
+#notifications-body .calendarnav,
+#profile-body .calendarnav,
+#buds-body .calendarnav {
+    padding: 0;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+#recurring-i-body .calendarnavbuttonscontainer,
+#credit-accounts-body .calendarnavbuttonscontainer,
+#notifications-body .calendarnavbuttonscontainer,
+#profile-body .calendarnavbuttonscontainer,
+#buds-body .calendarnavbuttonscontainer {
+    justify-content: flex-start;
+}
+
 .calendarnavbuttonscontainer {
     display: flex;
 
