@@ -155,6 +155,39 @@ class QuilttClient:
                 logger.error(f"Response body: {e.response.text}")
             return None
     
+    def update_profile_email(self, session_token: str, email: str) -> bool:
+        """
+        Update the user's profile with their email address
+        This pre-fills the email in Quiltt Connector so users don't have to enter it
+        
+        Args:
+            session_token: User's session token
+            email: Email address to set
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        mutation = """
+        mutation UpdateProfile($email: String!) {
+            profileUpdate(input: {email: $email}) {
+                record {
+                    id
+                    email
+                }
+            }
+        }
+        """
+        
+        variables = {'email': email}
+        result = self.query_graphql(session_token, mutation, variables)
+        
+        if result and 'profileUpdate' in result:
+            logger.info(f"Successfully updated profile email")
+            return True
+        else:
+            logger.warning(f"Failed to update profile email")
+            return False
+    
     def revoke_session_token(self, session_token: str) -> bool:
         """Revoke a session token"""
         try:

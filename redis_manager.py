@@ -77,6 +77,12 @@ USER_TABLES = [
     'c_a_balances_m',
     'buds',
     'bud_items',
+    # Quiltt integration tables
+    'quiltt_profiles',
+    'quiltt_connections',
+    'quiltt_accounts',
+    'quiltt_transactions',
+    'quiltt_category_mappings',
 ]
 
 
@@ -582,7 +588,15 @@ def _flush_redis_to_mysql():
             'c_expense_entries',
             'buds',  # Must flush before bud_items to resolve temp IDs
             'bud_items',
-            'users'  # User settings (balance_threshold, starting_savings)
+            'users',  # User settings (balance_threshold, starting_savings)
+            'quiltt_profiles',  # Quiltt session tokens and profile info
+            'quiltt_connections',  # Quiltt bank connections
+            'quiltt_accounts',  # Quiltt bank accounts
+            'quiltt_transactions',  # Quiltt transactions
+            'quiltt_category_mappings',  # Quiltt category mappings
+            # Deletion handlers (must run after updates)
+            'quiltt_connections_deleted',
+            'quiltt_accounts_deleted',
         ]
         
         for user_id in users_to_flush:
@@ -591,7 +605,15 @@ def _flush_redis_to_mysql():
             
             # Get dirty tables for this user
             dirty_tables_key = f"dirty_tables:{user_id}"
-            dirty_tables = _redis_client.smembers(dirty_tables_key)
+            dirty_tables_raw = _redis_client.smembers(dirty_tables_key)
+            
+            # Decode bytes to strings
+            dirty_tables = set()
+            for dt in dirty_tables_raw:
+                if isinstance(dt, bytes):
+                    dirty_tables.add(dt.decode('utf-8'))
+                else:
+                    dirty_tables.add(dt)
             
             if not dirty_tables:
                 logger.debug(f"[FLUSH] No dirty tables for user {user_id}")
@@ -604,13 +626,28 @@ def _flush_redis_to_mysql():
                 # Skip if table is not dirty
                 if table not in dirty_tables:
                     continue
-                    
+                
+                logger.info(f"[FLUSH] Processing dirty table: {table} for user {user_id}")
                 logger.debug(f"[FLUSH] Attempting to flush {table} for user {user_id}")
                 flushed_count = _flush_table_to_mysql(table, user_id)
-                if flushed_count > 0:
-                    table_stats[table] = flushed_count
+                
+                # Remove dirty flag if:
+                # 1. It's a deletion table (always clear after processing)
+                # 2. Rows were actually flushed (flushed_count > 0)
+                # 3. For Quiltt tables, also clear if no data exists (empty array or None)
+                should_clear = (
+                    table.endswith('_deleted') or 
+                    flushed_count > 0 or
+                    (table.startswith('quiltt_') and flushed_count == 0)  # Clear Quiltt tables even if empty
+                )
+                
+                if should_clear:
+                    if flushed_count > 0:
+                        table_stats[table] = flushed_count
                     # Remove from dirty set after successful flush
                     _redis_client.srem(dirty_tables_key, table)
+                    logger.info(f"[FLUSH] Cleared dirty flag for {table} (flushed={flushed_count})")
+                    
                 user_flushed += flushed_count
             
             total_flushed += user_flushed
@@ -639,14 +676,73 @@ def _flush_table_to_mysql(table: str, user_id: int):
     Returns:
         Count of rows flushed
     """
+    logger.info(f"[FLUSH] _flush_table_to_mysql called for table={table}, user_id={user_id}")
+    
     try:
+        # Handle special deletion tables first (they don't have Redis data)
+        if table == 'quiltt_connections_deleted':
+            # Handle deletion of Quiltt connections
+            logger.info(f"[FLUSH] Processing quiltt_connections_deleted for user {user_id}")
+            
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                
+                delete_key = f"quiltt_connections_to_delete:{user_id}"
+                connection_ids = _redis_client.smembers(delete_key)
+                
+                logger.info(f"[FLUSH] Found {len(connection_ids) if connection_ids else 0} connections to delete")
+                
+                if not connection_ids:
+                    # No connections to delete, but clear the deletion set and return 0
+                    # This allows the dirty flag to be removed
+                    _redis_client.delete(delete_key)
+                    logger.info(f"[FLUSH] No connections to delete, cleared deletion set")
+                    return 0
+                
+                deleted_count = 0
+                for conn_id in connection_ids:
+                    conn_id_str = conn_id.decode('utf-8') if isinstance(conn_id, bytes) else conn_id
+                    
+                    # Delete accounts first (foreign key constraint)
+                    cursor.execute("""
+                        DELETE FROM quiltt_accounts 
+                        WHERE user_id = %s AND connection_id IN (
+                            SELECT id FROM quiltt_connections WHERE connection_id = %s
+                        )
+                    """, (user_id, conn_id_str))
+                    
+                    # Delete connection
+                    cursor.execute("""
+                        DELETE FROM quiltt_connections 
+                        WHERE user_id = %s AND connection_id = %s
+                    """, (user_id, conn_id_str))
+                    
+                    deleted_count += cursor.rowcount
+                    logger.info(f"[FLUSH] Deleted Quiltt connection {conn_id_str} for user {user_id}")
+                
+                conn.commit()
+                
+                # Clear the deletion set
+                _redis_client.delete(delete_key)
+                
+                cursor.close()
+                return deleted_count
+        
+        elif table == 'quiltt_accounts_deleted':
+            # This is handled by quiltt_connections_deleted (cascade delete)
+            # Just return 0
+            return 0
+        
+        # Regular table flush logic
         redis_key = _get_redis_key(table, user_id)
+        logger.info(f"[FLUSH] Looking for Redis key: {redis_key}")
         redis_data = _redis_client.get(redis_key)
         
         if not redis_data:
-            logger.debug(f"[FLUSH] No Redis data found for key: {redis_key}")
+            logger.info(f"[FLUSH] ⚠️ No Redis data found for key: {redis_key} - returning 0 (dirty flag will NOT be cleared)")
             return 0
         
+        logger.info(f"[FLUSH] Found Redis data for {table}, length: {len(redis_data)} bytes")
         rows = json.loads(redis_data)
         
         # Don't return early when rows is an empty list - we still need to
@@ -1415,6 +1511,298 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     return 1
                 
                 return 0
+                
+            elif table == 'quiltt_profiles':
+                # Quiltt profiles table
+                if not rows or len(rows) == 0:
+                    return 0
+                
+                profile = rows[0]  # Should only be one profile per user
+                cursor.execute("""
+                    INSERT INTO quiltt_profiles (user_id, profile_id, session_token, session_expires_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        profile_id = VALUES(profile_id),
+                        session_token = VALUES(session_token),
+                        session_expires_at = VALUES(session_expires_at)
+                """, (
+                    user_id,
+                    profile.get('profile_id'),
+                    profile.get('session_token'),
+                    profile.get('session_expires_at')
+                ))
+                
+                conn.commit()
+                cursor.close()
+                logger.debug(f"[FLUSH] → quiltt_profiles: Updated profile for user {user_id}")
+                return 1
+                
+            elif table == 'quiltt_connections':
+                # Quiltt connections table
+                if not rows:
+                    logger.info(f"[FLUSH] quiltt_connections: No rows in Redis for user {user_id}")
+                    return 0
+                
+                logger.info(f"[FLUSH] quiltt_connections: Found {len(rows)} rows in Redis for user {user_id}")
+                
+                batch_data = []
+                quiltt_id_to_row_idx = {}  # Map Quiltt connection_id to row index
+                temp_id_to_quiltt_id = {}  # Map temp ID to Quiltt connection_id
+                
+                for idx, row in enumerate(rows):
+                    batch_data.append((
+                        user_id,
+                        row.get('connection_id'),
+                        row.get('institution_name'),
+                        row.get('institution_id'),
+                        row.get('status', 'ACTIVE'),
+                        row.get('last_synced_at')
+                    ))
+                    quiltt_id_to_row_idx[row.get('connection_id')] = idx
+                    # Track temp ID if present
+                    temp_id = row.get('id')
+                    if temp_id and temp_id >= 100000:  # Looks like a temp ID
+                        temp_id_to_quiltt_id[temp_id] = row.get('connection_id')
+                
+                logger.info(f"[FLUSH] quiltt_connections: Executing batch insert of {len(batch_data)} rows")
+                
+                cursor.executemany("""
+                    INSERT INTO quiltt_connections 
+                    (user_id, connection_id, institution_name, institution_id, status, last_synced_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        institution_name = VALUES(institution_name),
+                        status = VALUES(status),
+                        last_synced_at = VALUES(last_synced_at)
+                """, batch_data)
+                
+                rows_affected = cursor.rowcount
+                logger.info(f"[FLUSH] quiltt_connections: MySQL rowcount = {rows_affected}")
+                
+                # Get the real MySQL IDs and update Redis cache
+                cursor.execute(
+                    "SELECT id, connection_id FROM quiltt_connections WHERE user_id = %s",
+                    (user_id,)
+                )
+                
+                temp_to_real_id = {}  # Map temp ID to real MySQL ID
+                for mysql_id, quiltt_conn_id in cursor.fetchall():
+                    if quiltt_conn_id in quiltt_id_to_row_idx:
+                        idx = quiltt_id_to_row_idx[quiltt_conn_id]
+                        old_id = rows[idx].get('id')
+                        rows[idx]['id'] = mysql_id  # Update Redis data with real MySQL ID
+                        
+                        # Track mapping from temp to real ID
+                        if old_id and old_id != mysql_id:
+                            temp_to_real_id[old_id] = mysql_id
+                
+                # Update Redis connections with corrected IDs
+                redis_key = _get_redis_key(table, user_id)
+                _redis_client.setex(
+                    redis_key,
+                    INACTIVITY_TIMEOUT + 60,
+                    json.dumps(rows, cls=DecimalEncoder)
+                )
+                
+                # Update accounts' connection_id fields if they have temp IDs
+                if temp_to_real_id:
+                    logger.info(f"[FLUSH] quiltt_connections: Found temp ID mappings: {temp_to_real_id}")
+                    accounts_key = _get_redis_key('quiltt_accounts', user_id)
+                    accounts_data = _redis_client.get(accounts_key)
+                    
+                    if accounts_data:
+                        accounts = json.loads(accounts_data)
+                        updated = False
+                        
+                        for account in accounts:
+                            old_conn_id = account.get('connection_id')
+                            if old_conn_id in temp_to_real_id:
+                                account['connection_id'] = temp_to_real_id[old_conn_id]
+                                updated = True
+                                logger.info(f"[FLUSH] Updated account {account.get('account_id')} connection_id: {old_conn_id} -> {temp_to_real_id[old_conn_id]}")
+                        
+                        if updated:
+                            _redis_client.setex(
+                                accounts_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(accounts, cls=DecimalEncoder)
+                            )
+                            # Mark accounts as dirty so they get flushed with correct connection_id
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'quiltt_accounts')
+                            logger.info(f"[FLUSH] Updated {len(accounts)} accounts with real connection IDs, marked quiltt_accounts dirty")
+                else:
+                    logger.info(f"[FLUSH] quiltt_connections: No temp ID mappings needed")
+                
+                conn.commit()
+                cursor.close()
+                logger.info(f"[FLUSH] → quiltt_connections: {len(batch_data)} rows flushed successfully")
+                return len(batch_data)
+                
+            elif table == 'quiltt_accounts':
+                # Quiltt accounts table
+                if not rows:
+                    logger.info(f"[FLUSH] quiltt_accounts: No rows in Redis for user {user_id}")
+                    return 0
+                
+                logger.info(f"[FLUSH] quiltt_accounts: Found {len(rows)} rows in Redis for user {user_id}")
+                
+                # Get connection mapping from Redis (should have real MySQL IDs after connection flush)
+                connections_key = _get_redis_key('quiltt_connections', user_id)
+                connections_data = _redis_client.get(connections_key)
+                
+                connection_map = {}  # Map from temp ID to real MySQL ID
+                if connections_data:
+                    connections = json.loads(connections_data)
+                    for conn_row in connections:
+                        # Map both temp ID (if exists) and real ID to real ID
+                        if conn_row.get('id'):
+                            connection_map[conn_row.get('id')] = conn_row.get('id')
+                
+                logger.info(f"[FLUSH] quiltt_accounts connection_map has {len(connection_map)} entries")
+                
+                batch_data = []
+                updated_rows = []
+                skipped_count = 0
+                
+                for row in rows:
+                    # Handle None values for balances
+                    current_bal = row.get('current_balance')
+                    available_bal = row.get('available_balance')
+                    
+                    # Resolve connection_id
+                    conn_id = row.get('connection_id')
+                    mysql_conn_id = connection_map.get(conn_id, conn_id)
+                    
+                    # Skip if connection doesn't exist yet
+                    if mysql_conn_id and mysql_conn_id >= 1000000:
+                        logger.warning(f"[FLUSH] Skipping account {row.get('account_id')} - connection not yet flushed (temp ID: {mysql_conn_id})")
+                        updated_rows.append(row)  # Keep in Redis unchanged
+                        skipped_count += 1
+                        continue
+                    
+                    batch_data.append((
+                        user_id,
+                        mysql_conn_id,
+                        row.get('account_id'),
+                        row.get('account_name', 'Account'),
+                        row.get('account_type', ''),
+                        row.get('account_subtype', ''),
+                        row.get('mask', ''),
+                        float(current_bal) if current_bal is not None else 0.0,
+                        float(available_bal) if available_bal is not None else 0.0,
+                        int(row.get('is_active', 1)),
+                        int(row.get('sync_transactions', 1))
+                    ))
+                    
+                    # Update row with real connection_id for Redis
+                    row_copy = row.copy()
+                    row_copy['connection_id'] = mysql_conn_id
+                    updated_rows.append(row_copy)
+                
+                if skipped_count > 0:
+                    logger.info(f"[FLUSH] quiltt_accounts: Skipped {skipped_count} accounts waiting for connection flush")
+                
+                if not batch_data:
+                    logger.info(f"[FLUSH] quiltt_accounts: No accounts ready to flush (all waiting for connections)")
+                    # Still return 0 so dirty flag stays (accounts need to wait for connections)
+                    return 0
+                
+                # Debug: log connection IDs being used
+                conn_ids_used = set(item[1] for item in batch_data)
+                logger.info(f"[FLUSH] quiltt_accounts: Flushing {len(batch_data)} accounts with connection_ids: {conn_ids_used}")
+                
+                cursor.executemany("""
+                    INSERT INTO quiltt_accounts
+                    (user_id, connection_id, account_id, account_name, account_type, account_subtype,
+                     mask, current_balance, available_balance, is_active, sync_transactions)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        account_name = VALUES(account_name),
+                        current_balance = VALUES(current_balance),
+                        available_balance = VALUES(available_balance),
+                        is_active = VALUES(is_active),
+                        sync_transactions = VALUES(sync_transactions)
+                """, batch_data)
+                
+                rows_affected = cursor.rowcount
+                logger.info(f"[FLUSH] quiltt_accounts: MySQL rowcount = {rows_affected}")
+                
+                # Update Redis with corrected connection_ids
+                redis_key = _get_redis_key(table, user_id)
+                _redis_client.setex(
+                    redis_key,
+                    INACTIVITY_TIMEOUT + 60,
+                    json.dumps(updated_rows, cls=DecimalEncoder)
+                )
+                
+                conn.commit()
+                cursor.close()
+                logger.info(f"[FLUSH] → quiltt_accounts: {len(batch_data)} rows flushed successfully")
+                return len(batch_data)
+                
+            elif table == 'quiltt_transactions':
+                # Quiltt transactions table
+                if not rows:
+                    return 0
+                
+                batch_data = []
+                for row in rows:
+                    batch_data.append((
+                        user_id,
+                        row.get('account_id'),
+                        row.get('transaction_id'),
+                        row.get('date'),
+                        row.get('description', ''),
+                        float(row.get('amount', 0)),
+                        row.get('category', ''),
+                        row.get('pending', 0),
+                        row.get('merchant_name')
+                    ))
+                
+                cursor.executemany("""
+                    INSERT INTO quiltt_transactions
+                    (user_id, account_id, transaction_id, date, description, amount, category, pending, merchant_name)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        description = VALUES(description),
+                        amount = VALUES(amount),
+                        category = VALUES(category),
+                        pending = VALUES(pending),
+                        merchant_name = VALUES(merchant_name)
+                """, batch_data)
+                
+                conn.commit()
+                cursor.close()
+                logger.debug(f"[FLUSH] → quiltt_transactions: {len(batch_data)} rows")
+                return len(batch_data)
+                
+            elif table == 'quiltt_category_mappings':
+                # Quiltt category mappings table
+                if not rows:
+                    return 0
+                
+                batch_data = []
+                for row in rows:
+                    batch_data.append((
+                        user_id,
+                        row.get('quiltt_category'),
+                        row.get('local_category_id'),
+                        row.get('category_type', 'expense')
+                    ))
+                
+                cursor.executemany("""
+                    INSERT INTO quiltt_category_mappings
+                    (user_id, quiltt_category, local_category_id, category_type)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        local_category_id = VALUES(local_category_id),
+                        category_type = VALUES(category_type)
+                """, batch_data)
+                
+                conn.commit()
+                cursor.close()
+                logger.debug(f"[FLUSH] → quiltt_category_mappings: {len(batch_data)} rows")
+                return len(batch_data)
                 
             else:
                 # Table not configured for flushing

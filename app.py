@@ -27,6 +27,11 @@ from db_connections import init_db_pool, get_db_pool, dispose_db_pool
 from redis_manager import init_redis_manager, shutdown_redis_manager, DecimalEncoder
 from middleware import init_redis_middleware, init_redis_routes
 from quiltt_utils import QuilttClient, map_quiltt_transaction_to_entry, get_default_category_mapping
+from quiltt_redis import (
+    get_quiltt_profile, update_quiltt_profile, get_quiltt_connections, get_quiltt_accounts,
+    upsert_quiltt_connection, upsert_quiltt_account, update_quiltt_account_field, 
+    delete_quiltt_connection
+)
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
@@ -8022,290 +8027,19 @@ def profile():
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
     pending_email = user_data.get('pending_email') if user_data else None
 
-    # Get Quiltt connections and session token
-    session_token = None
+    # Get Quiltt connections (from Redis or MySQL)
     connections = []
     currency_symbol = '$'
     connector_id = os.getenv('QUILTT_CONNECTOR_ID', '')
     
-    # Debug logging
-    app.logger.info(f"Quiltt Debug - API Key present: {bool(quiltt_client.api_key)}")
-    app.logger.info(f"Quiltt Debug - Connector ID: {connector_id}")
-    
     try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # Get or create session token
-            cursor.execute("""
-                SELECT profile_id, session_token, session_expires_at 
-                FROM quiltt_profiles 
-                WHERE user_id = %s
-            """, (current_user.id,))
-            profile = cursor.fetchone()
-            
-            # Debug logging
-            if profile:
-                app.logger.info(f"Quiltt profile found for user {current_user.id}")
-                app.logger.info(f"  - Has token: {bool(profile.get('session_token'))}")
-                app.logger.info(f"  - Expires at: {profile.get('session_expires_at')}")
-                app.logger.info(f"  - Current time: {datetime.now()}")
-                if profile.get('session_expires_at'):
-                    is_expired = profile['session_expires_at'] <= datetime.now()
-                    app.logger.info(f"  - Token expired: {is_expired}")
-            
-            # Check if session token needs refresh
-            needs_refresh = not profile or \
-                           not profile.get('session_token') or \
-                           not profile.get('session_expires_at') or \
-                           profile['session_expires_at'] <= datetime.now()
-            
-            app.logger.info(f"Token needs refresh: {needs_refresh}")
-            
-            if needs_refresh:
-                # Create or refresh session token
-                app.logger.info(f"Creating/refreshing Quiltt session token for user {current_user.id}")
-                
-                if profile and profile.get('profile_id'):
-                    # Existing Quiltt profile - refresh token
-                    result = quiltt_client.refresh_session_token(
-                        profile['profile_id'],
-                        metadata={'username': current_user.username}
-                    )
-                else:
-                    # New Quiltt profile - create one
-                    result = quiltt_client.create_session_token(
-                        current_user.id,
-                        metadata={'username': current_user.username}
-                    )
-                
-                app.logger.info(f"Quiltt session result: {result}")
-                if result and result.get('token'):
-                    session_token = result['token']
-                    
-                    # Convert ISO 8601 datetime to MySQL format
-                    expires_at_str = result.get('expiresAt')
-                    if expires_at_str:
-                        # Parse ISO 8601 and convert to MySQL datetime
-                        from dateutil import parser
-                        expires_at = parser.isoparse(expires_at_str)
-                        expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
-                    else:
-                        expires_at_mysql = None
-                    
-                    if profile:
-                        cursor.execute("""
-                            UPDATE quiltt_profiles 
-                            SET session_token = %s, session_expires_at = %s, profile_id = %s
-                            WHERE user_id = %s
-                        """, (result['token'], expires_at_mysql, result['profileId'], current_user.id))
-                    else:
-                        cursor.execute("""
-                            INSERT INTO quiltt_profiles (user_id, profile_id, session_token, session_expires_at)
-                            VALUES (%s, %s, %s, %s)
-                        """, (current_user.id, result['profileId'], result['token'], expires_at_mysql))
-                    conn.commit()
-                else:
-                    # Token refresh/creation failed
-                    app.logger.error(f"Failed to get Quiltt session token for user {current_user.id}")
-                    session_token = None
-            else:
-                # Use existing valid token
-                session_token = profile['session_token']
-                app.logger.info(f"Using existing Quiltt session token for user {current_user.id}")
-            
-            # Sync connections from Quiltt if we have a session token
-            if session_token:
-                retry_count = 0
-                max_retries = 1
-                
-                while retry_count <= max_retries:
-                    try:
-                        app.logger.info(f"Fetching Quiltt profile data for user {current_user.id} (attempt {retry_count + 1})")
-                        profile_data = quiltt_client.get_profile(session_token)
-                        
-                        # If we got data, break out of retry loop
-                        if profile_data:
-                            break
-                        
-                        # If profile_data is None and we haven't retried yet, force a token refresh
-                        if profile_data is None and retry_count == 0 and profile and profile.get('profile_id'):
-                            app.logger.warning(f"Token appears invalid (401 from Quiltt). Forcing refresh for user {current_user.id}")
-                            
-                            # Force token refresh
-                            result = quiltt_client.refresh_session_token(
-                                profile['profile_id'],
-                                metadata={'username': current_user.username}
-                            )
-                            
-                            if result and result.get('token'):
-                                session_token = result['token']
-                                
-                                # Update database with new token
-                                expires_at_str = result.get('expiresAt')
-                                if expires_at_str:
-                                    from dateutil import parser
-                                    expires_at = parser.isoparse(expires_at_str)
-                                    expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
-                                else:
-                                    expires_at_mysql = None
-                                
-                                cursor.execute("""
-                                    UPDATE quiltt_profiles 
-                                    SET session_token = %s, session_expires_at = %s
-                                    WHERE user_id = %s
-                                """, (session_token, expires_at_mysql, current_user.id))
-                                conn.commit()
-                                
-                                app.logger.info(f"Token refreshed successfully, retrying profile fetch for user {current_user.id}")
-                                retry_count += 1
-                                continue  # Retry with new token
-                            else:
-                                app.logger.error(f"Failed to refresh token for user {current_user.id}")
-                                break
-                        else:
-                            # No more retries or no profile_id to refresh
-                            break
-                            
-                    except Exception as fetch_error:
-                        app.logger.error(f"Exception during profile fetch: {fetch_error}")
-                        break
-                
-                # Process the profile data if we got it
-                if profile_data:
-                    app.logger.info(f"Got Quiltt profile data: {len(profile_data.get('connections', []))} connections")
-                    
-                    # Save/update connections and accounts
-                    for connection in profile_data.get('connections', []):
-                        if not connection:
-                            continue
-                            
-                        # Get institution info safely
-                        institution = connection.get('institution') or {}
-                        institution_name = institution.get('name', 'Unknown') if isinstance(institution, dict) else 'Unknown'
-                        institution_id = institution.get('id', '') if isinstance(institution, dict) else ''
-                        
-                        connection_id = connection.get('id', '')
-                        connection_status = connection.get('status', 'ACTIVE')
-                        
-                        # Check if this connection exists in our database
-                        cursor.execute("""
-                            SELECT id, status FROM quiltt_connections 
-                            WHERE user_id = %s AND connection_id = %s
-                        """, (current_user.id, connection_id))
-                        existing_connection = cursor.fetchone()
-                        
-                        # If connection doesn't exist and it's disconnected, skip it (user may have deleted it)
-                        if not existing_connection and connection_status.upper() == 'DISCONNECTED':
-                            app.logger.info(f"Skipping disconnected connection {connection_id} - not in database (user may have deleted it)")
-                            continue
-                        
-                        # Insert or update connection
-                        cursor.execute("""
-                            INSERT INTO quiltt_connections 
-                            (user_id, connection_id, institution_name, institution_id, status, last_synced_at)
-                            VALUES (%s, %s, %s, %s, %s, NOW())
-                            ON DUPLICATE KEY UPDATE
-                                institution_name = VALUES(institution_name),
-                                status = VALUES(status),
-                                last_synced_at = NOW()
-                        """, (
-                            current_user.id,
-                            connection_id,
-                            institution_name,
-                            institution_id,
-                            connection_status
-                        ))
-                        
-                        # Get the connection's database ID
-                        if cursor.lastrowid:
-                            connection_db_id = cursor.lastrowid
-                        else:
-                            cursor.execute(
-                                "SELECT id FROM quiltt_connections WHERE user_id = %s AND connection_id = %s",
-                                (current_user.id, connection.get('id', ''))
-                            )
-                            row = cursor.fetchone()
-                            connection_db_id = row['id'] if row else None
-                        
-                        if not connection_db_id:
-                            app.logger.error(f"Could not get connection_db_id for connection {connection.get('id')}")
-                            continue
-                        
-                        # Save accounts for this connection
-                        for account in connection.get('accounts', []):
-                            if not account:
-                                continue
-                                
-                            # Get balance info safely
-                            balance = account.get('balance') or {}
-                            current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
-                            available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
-                            
-                            cursor.execute("""
-                                    INSERT INTO quiltt_accounts
-                                    (user_id, connection_id, account_id, account_name, account_type, account_subtype, 
-                                     mask, current_balance, available_balance, is_active, sync_transactions)
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, 1)
-                                    ON DUPLICATE KEY UPDATE
-                                        account_name = VALUES(account_name),
-                                        current_balance = VALUES(current_balance),
-                                        available_balance = VALUES(available_balance),
-                                        is_active = 1
-                                """, (
-                                    current_user.id,
-                                    connection_db_id,
-                                    account.get('id', ''),
-                                    account.get('name', 'Account'),
-                                    account.get('kind', ''),  # Use 'kind' instead of 'type'
-                                    '',  # subtype not available in Quiltt API
-                                    account.get('mask', ''),
-                                    current_balance,
-                                    available_balance
-                                ))
-                    
-                    conn.commit()
-                    app.logger.info(f"Saved Quiltt connections to database")
-                else:
-                    app.logger.warning(f"No profile data returned from Quiltt for user {current_user.id}")
-            
-            # Get connected institutions
-            cursor.execute("""
-                SELECT c.*, 
-                       GROUP_CONCAT(
-                           JSON_OBJECT(
-                               'id', a.id,
-                               'account_id', a.account_id,
-                               'account_name', a.account_name,
-                               'account_type', a.account_type,
-                               'mask', a.mask,
-                               'current_balance', a.current_balance,
-                               'sync_transactions', a.sync_transactions
-                           ) SEPARATOR '|||'
-                       ) as accounts
-                FROM quiltt_connections c
-                LEFT JOIN quiltt_accounts a ON c.id = a.connection_id AND a.is_active = 1
-                WHERE c.user_id = %s
-                GROUP BY c.id
-                ORDER BY c.last_synced_at DESC
-            """, (current_user.id,))
-            connections = cursor.fetchall()
-            
-            # Parse accounts JSON with safer parsing
-            for conn_row in connections:
-                if conn_row['accounts']:
-                    try:
-                        # Split by our custom separator and parse each JSON object
-                        account_jsons = conn_row['accounts'].split('|||')
-                        conn_row['accounts'] = [json.loads(acc) for acc in account_jsons if acc]
-                    except json.JSONDecodeError as json_err:
-                        app.logger.error(f"Error parsing accounts JSON: {json_err}")
-                        app.logger.error(f"Accounts string: {conn_row['accounts'][:500]}...")
-                        conn_row['accounts'] = []
-                else:
-                    conn_row['accounts'] = []
-            
-            cursor.close()
+        # Get connections and accounts from Redis or MySQL
+        connections = get_quiltt_connections(current_user.id)
+        
+        # Get accounts for each connection
+        for conn_row in connections:
+            accounts = get_quiltt_accounts(current_user.id, conn_row.get('id'))
+            conn_row['accounts'] = accounts
             
         # Set currency symbol
         currency_symbols = {'USD': '$', 'EUR': '€'}
@@ -8328,7 +8062,6 @@ def profile():
         currency_type=currency_type,
         mfa_enabled=mfa_enabled,
         pending_email=pending_email,
-        session_token=session_token,
         connections=connections,
         currency_symbol=currency_symbol,
         connector_id=connector_id
@@ -12808,7 +12541,10 @@ def quiltt_settings():
             # Create new session token
             result = quiltt_client.create_session_token(
                 current_user.id,
-                metadata={'username': current_user.username}
+                metadata={
+                    'username': current_user.username,
+                    'email': current_user.username  # Username is the email
+                }
             )
             
             if result:
@@ -12915,73 +12651,72 @@ def quiltt_settings():
 def get_quiltt_session_token():
     """Get a fresh Quiltt session token for the current user"""
     try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # Get existing profile if any
-            cursor.execute("""
-                SELECT profile_id, session_token, session_expires_at 
-                FROM quiltt_profiles 
-                WHERE user_id = %s
-            """, (current_user.id,))
-            profile = cursor.fetchone()
-            
-            # Always generate a fresh token for opening the Connector
-            # This ensures we never use an expired token
-            app.logger.info(f"Generating fresh Quiltt session token for user {current_user.id}")
-            
-            if profile and profile['profile_id']:
-                # Existing profile - refresh token
-                result = quiltt_client.refresh_session_token(
-                    profile['profile_id'],
-                    metadata={'username': current_user.username}
-                )
-            else:
-                # New profile - create token
-                result = quiltt_client.create_session_token(
-                    current_user.id,
-                    metadata={'username': current_user.username}
-                )
-            
-            if not result or not result.get('token'):
-                app.logger.error("Failed to get Quiltt session token")
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Failed to generate session token'
-                }), 500
-            
-            session_token = result['token']
-            
-            # Parse and convert expiration time
-            expires_at_str = result.get('expiresAt')
-            if expires_at_str:
-                from dateutil import parser
-                expires_at = parser.isoparse(expires_at_str)
-                expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                expires_at_mysql = None
-            
-            # Save to database
-            if profile:
-                cursor.execute("""
-                    UPDATE quiltt_profiles 
-                    SET session_token = %s, session_expires_at = %s, profile_id = %s
-                    WHERE user_id = %s
-                """, (session_token, expires_at_mysql, result['profileId'], current_user.id))
-            else:
-                cursor.execute("""
-                    INSERT INTO quiltt_profiles (user_id, profile_id, session_token, session_expires_at)
-                    VALUES (%s, %s, %s, %s)
-                """, (current_user.id, result['profileId'], session_token, expires_at_mysql))
-            
-            conn.commit()
-            
-            app.logger.info(f"Successfully generated fresh session token for user {current_user.id}")
-            
+        # Get existing profile from Redis or MySQL
+        profile = get_quiltt_profile(current_user.id)
+        
+        # Always generate a fresh token for opening the Connector
+        # This ensures we never use an expired token
+        app.logger.info(f"Generating fresh Quiltt session token for user {current_user.id}")
+        
+        if profile and profile.get('profile_id'):
+            # Existing profile - refresh token
+            result = quiltt_client.refresh_session_token(
+                profile['profile_id'],
+                metadata={
+                    'username': current_user.username,
+                    'email': current_user.username  # Username is the email
+                }
+            )
+        else:
+            # New profile - create token
+            result = quiltt_client.create_session_token(
+                current_user.id,
+                metadata={
+                    'username': current_user.username,
+                    'email': current_user.username  # Username is the email
+                }
+            )
+        
+        if not result or not result.get('token'):
+            app.logger.error("Failed to get Quiltt session token")
             return jsonify({
-                'status': 'success',
-                'session_token': session_token
-            })
+                'status': 'error',
+                'message': 'Failed to generate session token'
+            }), 500
+        
+        session_token = result['token']
+        
+        # Parse and convert expiration time
+        expires_at_str = result.get('expiresAt')
+        if expires_at_str:
+            from dateutil import parser
+            expires_at = parser.isoparse(expires_at_str)
+            expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            expires_at_mysql = None
+        
+        # Save to Redis + MySQL
+        profile_data = {
+            'profile_id': result['profileId'],
+            'session_token': session_token,
+            'session_expires_at': expires_at_mysql
+        }
+        update_quiltt_profile(profile_data, current_user.id)
+        
+        # Update the profile with the user's email so Quiltt doesn't ask for it
+        app.logger.info(f"Updating Quiltt profile with email for user {current_user.id}")
+        email_updated = quiltt_client.update_profile_email(session_token, current_user.username)
+        if email_updated:
+            app.logger.info(f"Successfully set email in Quiltt profile for user {current_user.id}")
+        else:
+            app.logger.warning(f"Could not update email in Quiltt profile for user {current_user.id}")
+        
+        app.logger.info(f"Successfully generated fresh session token for user {current_user.id}")
+        
+        return jsonify({
+            'status': 'success',
+            'session_token': session_token
+        })
             
     except Exception as e:
         app.logger.error(f"Error generating Quiltt session token: {e}", exc_info=True)
@@ -12991,10 +12726,10 @@ def get_quiltt_session_token():
         }), 500
 
 
-@app.route('/quiltt/disconnect', methods=['POST'])
+@app.route('/quiltt/reconnect', methods=['POST'])
 @login_required
-def quiltt_disconnect():
-    """Disconnect a Quiltt connection"""
+def quiltt_reconnect():
+    """Reconnect a disconnected Quiltt connection (update status and trigger sync)"""
     data = request.get_json()
     connection_id = data.get('connection_id')
     
@@ -13002,44 +12737,141 @@ def quiltt_disconnect():
         return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
     
     try:
-        # Get session token
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT session_token FROM quiltt_profiles WHERE user_id = %s
-            """, (current_user.id,))
-            profile = cursor.fetchone()
+        from quiltt_redis import _set_to_redis
+        
+        # Get the connection details
+        connections = get_quiltt_connections(current_user.id)
+        connection = None
+        conn_db_id = None
+        
+        for conn in connections:
+            if conn.get('connection_id') == connection_id:
+                connection = conn
+                conn_db_id = conn.get('id')
+                break
+        
+        if not connection:
+            return jsonify({'status': 'error', 'message': 'Connection not found'}), 404
+        
+        # Update connection status to SYNCING (will become SYNCED after sync completes)
+        connection['status'] = 'SYNCING'
+        _set_to_redis('quiltt_connections', current_user.id, connections)
+        
+        # Reactivate associated accounts
+        if conn_db_id:
+            accounts = get_quiltt_accounts(current_user.id)
+            for account in accounts:
+                if account.get('connection_id') == conn_db_id:
+                    account['is_active'] = 1
+            _set_to_redis('quiltt_accounts', current_user.id, accounts)
+        
+        # Trigger a full sync from Quiltt to refresh all data
+        # This will fetch the latest connection status, accounts, and balances
+        profile = get_quiltt_profile(current_user.id)
+        
+        if profile and profile.get('session_token'):
+            app.logger.info(f"Triggering sync for reconnected connection {connection_id}")
+            profile_data = quiltt_client.get_profile(profile['session_token'])
             
-            if not profile or not profile['session_token']:
-                return jsonify({'status': 'error', 'message': 'No active session'}), 400
+            if profile_data:
+                # Update this specific connection with latest data from Quiltt
+                for quiltt_conn in profile_data.get('connections', []):
+                    if quiltt_conn.get('id') == connection_id:
+                        institution = quiltt_conn.get('institution') or {}
+                        institution_name = institution.get('name', 'Unknown') if isinstance(institution, dict) else 'Unknown'
+                        institution_id = institution.get('id', '') if isinstance(institution, dict) else ''
+                        
+                        # Update connection with current status from Quiltt
+                        upsert_quiltt_connection({
+                            'connection_id': connection_id,
+                            'institution_name': institution_name,
+                            'institution_id': institution_id,
+                            'status': quiltt_conn.get('status', 'SYNCED')
+                        }, current_user.id)
+                        
+                        # Update all accounts for this connection
+                        for account in quiltt_conn.get('accounts', []):
+                            if not account:
+                                continue
+                            
+                            balance = account.get('balance') or {}
+                            current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
+                            available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
+                            
+                            upsert_quiltt_account({
+                                'connection_id': conn_db_id,
+                                'account_id': account.get('id', ''),
+                                'account_name': account.get('name', 'Account'),
+                                'account_type': account.get('kind', ''),
+                                'account_subtype': '',
+                                'mask': account.get('mask', ''),
+                                'current_balance': current_balance,
+                                'available_balance': available_balance,
+                                'is_active': 1,
+                                'sync_transactions': 1
+                            }, current_user.id)
+                        break
+        
+        app.logger.info(f"Reconnected and synced Quiltt connection {connection_id} for user {current_user.id}")
+        return jsonify({'status': 'success'})
+        
+    except Exception as e:
+        app.logger.error(f"Error reconnecting Quiltt connection: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/disconnect', methods=['POST'])
+@login_required
+def quiltt_disconnect():
+    """Disconnect a Quiltt connection (Redis-first)"""
+    data = request.get_json()
+    connection_id = data.get('connection_id')
+    
+    if not connection_id:
+        return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
+    
+    try:
+        # Get session token from Redis
+        profile = get_quiltt_profile(current_user.id)
+        
+        if not profile or not profile.get('session_token'):
+            return jsonify({'status': 'error', 'message': 'No active session'}), 400
+        
+        # Disconnect via Quiltt API
+        success = quiltt_client.disconnect_connection(profile['session_token'], connection_id)
+        
+        if success:
+            # Update connection status in Redis
+            connections = get_quiltt_connections(current_user.id)
+            for conn in connections:
+                if conn.get('connection_id') == connection_id:
+                    conn['status'] = 'DISCONNECTED'
+                    break
             
-            # Disconnect via Quiltt API
-            success = quiltt_client.disconnect_connection(profile['session_token'], connection_id)
+            # Update in Redis and mark dirty
+            from quiltt_redis import _set_to_redis
+            _set_to_redis('quiltt_connections', current_user.id, connections)
             
-            if success:
-                # Deactivate connection and accounts in database
-                cursor.execute("""
-                    UPDATE quiltt_connections 
-                    SET status = 'DISCONNECTED'
-                    WHERE user_id = %s AND connection_id = %s
-                """, (current_user.id, connection_id))
+            # Deactivate associated accounts in Redis
+            accounts = get_quiltt_accounts(current_user.id)
+            conn_db_id = None
+            for conn in connections:
+                if conn.get('connection_id') == connection_id:
+                    conn_db_id = conn.get('id')
+                    break
+            
+            if conn_db_id:
+                for account in accounts:
+                    if account.get('connection_id') == conn_db_id:
+                        account['is_active'] = 0
                 
-                cursor.execute("""
-                    UPDATE quiltt_accounts 
-                    SET is_active = 0
-                    WHERE user_id = %s AND connection_id IN (
-                        SELECT id FROM quiltt_connections WHERE connection_id = %s
-                    )
-                """, (current_user.id, connection_id))
-                
-                conn.commit()
-                cursor.close()
-                
-                return jsonify({'status': 'success'})
-            else:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Failed to disconnect'}), 500
-                
+                _set_to_redis('quiltt_accounts', current_user.id, accounts)
+            
+            app.logger.info(f"Disconnected Quiltt connection {connection_id} for user {current_user.id} (Redis-first)")
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to disconnect'}), 500
+            
     except Exception as e:
         app.logger.error(f"Error disconnecting Quiltt connection: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -13048,77 +12880,124 @@ def quiltt_disconnect():
 @app.route('/quiltt/delete', methods=['POST'])
 @login_required
 def quiltt_delete():
-    """Delete a disconnected Quiltt connection and all associated data"""
+    """Delete a disconnected Quiltt connection and all associated data (Redis-first)"""
     data = request.get_json()
     connection_id = data.get('connection_id')
     
-    app.logger.info(f"DELETE REQUEST - User: {current_user.id}, Connection ID: {connection_id}, Request data: {data}")
+    app.logger.info(f"DELETE REQUEST - User: {current_user.id}, Connection ID: {connection_id}")
     
     if not connection_id:
         app.logger.error("DELETE FAILED - Missing connection_id in request")
         return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
     
     try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # Verify the connection belongs to the current user and is disconnected
-            cursor.execute("""
-                SELECT id, status FROM quiltt_connections 
-                WHERE connection_id = %s AND user_id = %s
-            """, (connection_id, current_user.id))
-            
-            connection = cursor.fetchone()
-            
-            app.logger.info(f"DELETE CHECK - Found connection: {connection}")
-            
-            if not connection:
-                cursor.close()
-                app.logger.error(f"DELETE FAILED - Connection not found for connection_id={connection_id}, user_id={current_user.id}")
-                return jsonify({'status': 'error', 'message': 'Connection not found or access denied'}), 404
-            
-            # Safety check - only allow deletion of disconnected connections
-            app.logger.info(f"DELETE CHECK - Connection status: '{connection['status']}' (upper: '{connection['status'].upper()}')")
-            if connection['status'].upper() != 'DISCONNECTED':
-                cursor.close()
-                app.logger.error(f"DELETE FAILED - Connection status is '{connection['status']}', not DISCONNECTED")
-                return jsonify({'status': 'error', 'message': 'Can only delete disconnected connections'}), 400
-            
-            connection_db_id = connection['id']
-            
-            app.logger.info(f"DELETE PROCEEDING - Deleting connection_db_id={connection_db_id}")
-            
-            # Delete associated accounts (cascade should handle transactions)
-            cursor.execute("""
-                DELETE FROM quiltt_accounts 
-                WHERE connection_id = %s AND user_id = %s
-            """, (connection_db_id, current_user.id))
-            
-            accounts_deleted = cursor.rowcount
-            app.logger.info(f"DELETE PROGRESS - Deleted {accounts_deleted} accounts")
-            
-            # Delete the connection record
-            cursor.execute("""
-                DELETE FROM quiltt_connections 
-                WHERE id = %s AND user_id = %s
-            """, (connection_db_id, current_user.id))
-            
-            connections_deleted = cursor.rowcount
-            app.logger.info(f"DELETE PROGRESS - Deleted {connections_deleted} connection records")
-            
-            conn.commit()
-            cursor.close()
-            
-            app.logger.info(f"DELETE SUCCESS - Deleted Quiltt connection {connection_id} for user {current_user.id} ({accounts_deleted} accounts removed)")
-            
+        # Get connection from Redis or MySQL
+        connections = get_quiltt_connections(current_user.id)
+        connection = None
+        for conn in connections:
+            if conn.get('connection_id') == connection_id:
+                connection = conn
+                break
+        
+        if not connection:
+            app.logger.error(f"DELETE FAILED - Connection not found for connection_id={connection_id}")
+            return jsonify({'status': 'error', 'message': 'Connection not found or access denied'}), 404
+        
+        # Safety check - only allow deletion of disconnected connections
+        if connection.get('status', '').upper() != 'DISCONNECTED':
+            app.logger.error(f"DELETE FAILED - Connection status is '{connection.get('status')}', not DISCONNECTED")
+            return jsonify({'status': 'error', 'message': 'Can only delete disconnected connections'}), 400
+        
+        # Delete using Redis-first operation
+        success = delete_quiltt_connection(connection_id, current_user.id)
+        
+        if success:
+            app.logger.info(f"DELETE SUCCESS - Deleted Quiltt connection {connection_id} for user {current_user.id}")
             return jsonify({
                 'status': 'success', 
-                'message': f'Connection deleted successfully ({accounts_deleted} accounts removed)'
+                'message': 'Connection deleted successfully'
             })
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
                 
     except Exception as e:
         app.logger.error(f"DELETE ERROR - Exception deleting Quiltt connection: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
+
+
+@app.route('/quiltt/sync-profile', methods=['POST'])
+@login_required
+def quiltt_sync_profile():
+    """Sync all connections and accounts from Quiltt to local database (Redis-first)"""
+    try:
+        # Get session token from Redis or MySQL
+        profile = get_quiltt_profile(current_user.id)
+        
+        if not profile or not profile.get('session_token'):
+            return jsonify({'status': 'error', 'message': 'No active session'}), 400
+            
+        # Fetch profile data from Quiltt
+        app.logger.info(f"Syncing Quiltt profile data for user {current_user.id}")
+        profile_data = quiltt_client.get_profile(profile['session_token'])
+        
+        if not profile_data:
+            return jsonify({'status': 'error', 'message': 'Failed to fetch profile from Quiltt'}), 500
+        
+        # Save/update connections and accounts using Redis-first operations
+        for connection in profile_data.get('connections', []):
+            if not connection:
+                continue
+                
+            # Get institution info safely
+            institution = connection.get('institution') or {}
+            institution_name = institution.get('name', 'Unknown') if isinstance(institution, dict) else 'Unknown'
+            institution_id = institution.get('id', '') if isinstance(institution, dict) else ''
+            
+            connection_id = connection.get('id', '')
+            connection_status = connection.get('status', 'ACTIVE')
+            
+            # Upsert connection to Redis + MySQL
+            connection_db_id = upsert_quiltt_connection({
+                'connection_id': connection_id,
+                'institution_name': institution_name,
+                'institution_id': institution_id,
+                'status': connection_status
+            }, current_user.id)
+            
+            if not connection_db_id:
+                app.logger.error(f"Could not upsert connection {connection_id}")
+                continue
+            
+            # Save accounts for this connection
+            for account in connection.get('accounts', []):
+                if not account:
+                    continue
+                    
+                # Get balance info safely
+                balance = account.get('balance') or {}
+                current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
+                available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
+                
+                # Upsert account to Redis + MySQL
+                upsert_quiltt_account({
+                    'connection_id': connection_db_id,
+                    'account_id': account.get('id', ''),
+                    'account_name': account.get('name', 'Account'),
+                    'account_type': account.get('kind', ''),
+                    'account_subtype': '',
+                    'mask': account.get('mask', ''),
+                    'current_balance': current_balance,
+                    'available_balance': available_balance,
+                    'is_active': 1,
+                    'sync_transactions': 1
+                }, current_user.id)
+        
+        app.logger.info(f"Successfully synced Quiltt profile for user {current_user.id}")
+        return jsonify({'status': 'success'})
+            
+    except Exception as e:
+        app.logger.error(f"Error syncing Quiltt profile: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @app.route('/quiltt/sync', methods=['POST'])
@@ -13163,6 +13042,150 @@ def quiltt_sync():
                 
     except Exception as e:
         app.logger.error(f"Error syncing Quiltt connection: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/check-sync-status', methods=['GET'])
+@login_required
+def quiltt_check_sync_status():
+    """Check the sync status of all user's Quiltt connections by fetching from Quiltt API"""
+    try:
+        from quiltt_redis import get_quiltt_connections, get_quiltt_accounts, upsert_quiltt_connection, upsert_quiltt_account
+        
+        # Get current connections from Redis/MySQL to compare
+        current_connections = get_quiltt_connections(current_user.id)
+        current_conn_map = {conn.get('connection_id'): conn for conn in current_connections}
+        
+        # Get session token to fetch fresh data from Quiltt
+        profile = get_quiltt_profile(current_user.id)
+        
+        if profile and profile.get('session_token'):
+            # Fetch latest data from Quiltt API
+            profile_data = quiltt_client.get_profile(profile['session_token'])
+            
+            if profile_data and profile_data.get('connections'):
+                # Update connections and accounts ONLY if status changed
+                for quiltt_conn in profile_data.get('connections', []):
+                    if not quiltt_conn:
+                        continue
+                    
+                    institution = quiltt_conn.get('institution') or {}
+                    institution_name = institution.get('name', 'Unknown') if isinstance(institution, dict) else 'Unknown'
+                    institution_id = institution.get('id', '') if isinstance(institution, dict) else ''
+                    connection_id = quiltt_conn.get('id', '')
+                    connection_status = quiltt_conn.get('status', 'ACTIVE')
+                    
+                    # Check if status actually changed
+                    current_conn = current_conn_map.get(connection_id)
+                    status_changed = not current_conn or current_conn.get('status') != connection_status
+                    
+                    # Only upsert if status changed
+                    if status_changed:
+                        app.logger.info(f"[QUILTT_POLL] Status changed for {connection_id}: {current_conn.get('status') if current_conn else 'NEW'} -> {connection_status}")
+                        connection_db_id = upsert_quiltt_connection({
+                            'connection_id': connection_id,
+                            'institution_name': institution_name,
+                            'institution_id': institution_id,
+                            'status': connection_status
+                        }, current_user.id)
+                        
+                        if connection_db_id:
+                            # Only update accounts if connection status changed
+                            for account in quiltt_conn.get('accounts', []):
+                                if not account:
+                                    continue
+                                
+                                balance = account.get('balance') or {}
+                                current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
+                                available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
+                                
+                                upsert_quiltt_account({
+                                    'connection_id': connection_db_id,
+                                    'account_id': account.get('id', ''),
+                                    'account_name': account.get('name', 'Account'),
+                                    'account_type': account.get('kind', ''),
+                                    'account_subtype': '',
+                                    'mask': account.get('mask', ''),
+                                    'current_balance': current_balance,
+                                    'available_balance': available_balance,
+                                    'is_active': 1,
+                                    'sync_transactions': 1
+                                }, current_user.id)
+        
+        # Now get the updated data from Redis
+        connections = get_quiltt_connections(current_user.id)
+        
+        response_data = []
+        all_synced = True
+        
+        for conn in connections:
+            conn_data = {
+                'connection_id': conn.get('connection_id'),
+                'institution_name': conn.get('institution_name'),
+                'status': conn.get('status', 'ACTIVE'),
+                'last_synced_at': str(conn.get('last_synced_at')) if conn.get('last_synced_at') else None
+            }
+            
+            # Check if status indicates still syncing
+            if conn_data['status'] in ['SYNCING', 'INITIALIZING', 'PENDING']:
+                all_synced = False
+            
+            # Get account count for this connection
+            accounts = get_quiltt_accounts(current_user.id, conn.get('id'))
+            conn_data['account_count'] = len(accounts)
+            
+            response_data.append(conn_data)
+        
+        return jsonify({
+            'status': 'success',
+            'connections': response_data,
+            'all_synced': all_synced
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error checking sync status: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/get-accounts', methods=['GET'])
+@login_required
+def quiltt_get_accounts():
+    """Get accounts for a specific connection"""
+    try:
+        from quiltt_redis import get_quiltt_connections, get_quiltt_accounts
+        
+        connection_id = request.args.get('connection_id')
+        if not connection_id:
+            return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
+        
+        # Find the connection to get its DB ID
+        connections = get_quiltt_connections(current_user.id)
+        connection = None
+        for conn in connections:
+            if conn.get('connection_id') == connection_id:
+                connection = conn
+                break
+        
+        if not connection:
+            return jsonify({'status': 'error', 'message': 'Connection not found'}), 404
+        
+        # Get accounts for this connection
+        accounts = get_quiltt_accounts(current_user.id, connection.get('id'))
+        
+        # Convert Decimal to float for JSON serialization
+        for account in accounts:
+            if 'current_balance' in account:
+                account['current_balance'] = float(account['current_balance']) if account['current_balance'] is not None else 0
+            if 'available_balance' in account:
+                account['available_balance'] = float(account['available_balance']) if account['available_balance'] is not None else 0
+        
+        return jsonify({
+            'status': 'success',
+            'accounts': accounts
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting accounts: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -13325,7 +13348,7 @@ def quiltt_sync_transactions():
 @app.route('/quiltt/toggle-sync', methods=['POST'])
 @login_required
 def quiltt_toggle_sync():
-    """Toggle transaction sync for a specific account"""
+    """Toggle transaction sync for a specific account (Redis-first)"""
     data = request.get_json()
     account_id = data.get('account_id')
     sync_enabled = data.get('sync_enabled', True)
@@ -13334,17 +13357,18 @@ def quiltt_toggle_sync():
         return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
     
     try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE quiltt_accounts 
-                SET sync_transactions = %s
-                WHERE user_id = %s AND account_id = %s
-            """, (1 if sync_enabled else 0, current_user.id, account_id))
-            conn.commit()
-            cursor.close()
+        # Update sync_transactions field using Redis-first operation
+        success = update_quiltt_account_field(
+            account_id, 
+            'sync_transactions', 
+            1 if sync_enabled else 0,
+            current_user.id
+        )
         
-        return jsonify({'status': 'success'})
+        if success:
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to update account'}), 500
         
     except Exception as e:
         app.logger.error(f"Error toggling sync: {e}")

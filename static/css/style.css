@@ -8900,25 +8900,76 @@ html.modal-open {
     padding-right: 16px;
 }
 
+.connection-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
 .connection-header h3 {
-    margin: 0 0 5px 0;
+    margin: 0;
 }
 
 .connection-header span {
     display: flex;
-    flex-direction: column;
     justify-self: flex-start;
 }
 
 .connection-status {
     font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.connection-status i {
+    font-size: 12px;
+    line-height: 1;
+}
+
+.connection-status.status-synced {
+    color: #28a745;
+    background-color: rgba(40, 167, 69, 0.1);
+}
+
+.connection-status.status-syncing,
+.connection-status.status-initializing {
+    color: #ffc107;
+    background-color: rgba(255, 193, 7, 0.1);
+}
+
+.connection-status.status-error,
+.connection-status.status-error_repairable {
+    color: #dc3545;
+    background-color: rgba(220, 53, 69, 0.1);
+}
+
+.connection-status.status-disconnected {
+    color: #6c757d;
+    background-color: rgba(108, 117, 125, 0.1);
 }
 
 .connection-status.disconnected {
     color: #dc3545;
 }
 
+.connection-status.syncing {
+    color: #ffc107;
+}
+
 .connection-status.connected {
+    color: #28a745;
+}
+
+.connection-status i {
+    margin-right: 6px;
+}
+
+.connection-status .fa-circle-check {
     color: #28a745;
 }
 
@@ -8952,13 +9003,38 @@ html.modal-open {
     box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
 }
 
+.reconnect-btn {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background-color: #2aaaa8;
+    border: none;
+    border-radius: 50%;
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
+    margin-right: 8px;
+}
+
+.reconnect-btn:hover {
+    background-color: #239795;
+}
+
 .disconnect-btn:hover,
 .delete-connection-btn:hover {
     background-color: #ee6b6e;
 }
 
 .disconnect-btn i,
-.delete-connection-btn i {
+.delete-connection-btn i,
+.reconnect-btn i {
     font-size: 10px;
     position: relative;
     line-height: 1;
@@ -8969,6 +9045,21 @@ html.modal-open {
     margin-top: 15px;
 }
 
+.account-type-divider {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #495057;
+    padding: 8px 0;
+    margin-top: 12px;
+    margin-bottom: 8px;
+    border-bottom: 2px solid #dee2e6;
+    text-align: left;
+}
+
+.account-type-divider:first-child {
+    margin-top: 0;
+}
+
 .account-item {
     display: flex;
     justify-content: space-between;
@@ -8977,6 +9068,20 @@ html.modal-open {
     background: #f8f9fa;
     border-radius: 6px;
     margin-bottom: 8px;
+}
+
+.account-type-divider {
+    font-weight: bold;
+    font-size: 14px;
+    color: #2aaaa8;
+    padding: 12px 8px 8px 8px;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    border-bottom: 2px solid #2aaaa8;
+}
+
+.account-type-divider:first-child {
+    margin-top: 0;
 }
 
 .account-info {
@@ -9003,6 +9108,25 @@ html.modal-open {
 
 .account-balance {
     font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.account-balance.balance-updated {
+    color: #2aaaa8;
+    animation: balancePulse 0.6s ease;
+}
+
+@keyframes balancePulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+        color: #2aaaa8;
+    }
+    100% {
+        transform: scale(1);
+    }
 }
 
 .connection-footer {
@@ -9186,4 +9310,160 @@ html.modal-open {
     font-size: 13px;
     color: #666;
     margin-top: 10px;
+}
+
+/* Quiltt-style Account Selection Modal */
+.quiltt-style-modal {
+    max-width: 400px;
+    width: 400px;
+    max-height: 90vh;
+    height: auto;
+    border-radius: 16px;
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.quiltt-modal-header {
+    padding: 24px 24px 16px 24px;
+    border-bottom: 1px solid #e5e5e5;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.quiltt-modal-header h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+.quiltt-modal-header .close-modal {
+    position: static;
+    color: #666;
+    font-size: 24px;
+    font-weight: 400;
+    line-height: 1;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.quiltt-modal-header .close-modal:hover {
+    color: #1a1a1a;
+}
+
+.quiltt-modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    max-height: calc(90vh - 180px);
+    flex: 1;
+}
+
+.account-selection-description {
+    margin: 0 0 20px 0;
+    font-size: 14px;
+    color: #666;
+}
+
+.account-selection-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.account-group-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 16px;
+    margin-bottom: 8px;
+}
+
+.account-group-title:first-child {
+    margin-top: 0;
+}
+
+.account-selection-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: white;
+}
+
+.account-selection-item:hover {
+    border-color: #2aaaa8;
+    background: rgba(42, 170, 168, 0.02);
+}
+
+.account-selection-check {
+    flex-shrink: 0;
+}
+
+.account-selection-checkbox {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.account-selection-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.account-selection-name {
+    font-size: 15px;
+    font-weight: 500;
+    color: #1a1a1a;
+}
+
+.account-selection-details {
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    color: #666;
+}
+
+.account-selection-mask {
+    font-family: monospace;
+}
+
+.quiltt-modal-footer {
+    padding: 16px 24px;
+    border-top: 1px solid #e5e5e5;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.quiltt-save-btn {
+    background: #2aaaa8;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 32px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.quiltt-save-btn:hover {
+    background: #258a88;
+}
+
+.quiltt-save-btn:active {
+    transform: scale(0.98);
 }
