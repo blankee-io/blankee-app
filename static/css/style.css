@@ -1195,6 +1195,25 @@ button#autobalance-submit:active {
     display: none !important;
 }
 
+/* Make calendarnav invisible (but keep back button) on back-button-only pages */
+#recurring-i-body .calendarnav,
+#credit-accounts-body .calendarnav,
+#notifications-body .calendarnav,
+#profile-body .calendarnav,
+#buds-body .calendarnav {
+    padding: 0;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+#recurring-i-body .calendarnavbuttonscontainer,
+#credit-accounts-body .calendarnavbuttonscontainer,
+#notifications-body .calendarnavbuttonscontainer,
+#profile-body .calendarnavbuttonscontainer,
+#buds-body .calendarnavbuttonscontainer {
+    justify-content: flex-start;
+}
+
 .calendarnavbuttonscontainer {
     display: flex;
 
@@ -2612,6 +2631,12 @@ input#setup-profile-starting-savings {
     animation: slideRight 0.4s ease-out;
 }
 
+@media (max-width: 400px) {
+    .main-container {
+        padding: 5px;
+    }
+}
+
 @keyframes slideLeft {
     from {
         transform: translateX(100%);
@@ -2638,7 +2663,7 @@ input#setup-profile-starting-savings {
 
 #table-container {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     max-width: 875px;
 
     /* This will center the container horizontally */
@@ -2662,7 +2687,7 @@ input#setup-profile-starting-savings {
     z-index: 10;
     width: 30%; 
     margin-right: 5px;
-    margin-bottom: 10px;
+    /* margin-bottom: 10px; */
 }
 
 #income-categories-table,
@@ -2890,6 +2915,7 @@ input#setup-profile-starting-savings {
     flex-direction: row;
     justify-content: flex-end; 
     align-items: center;
+    height: 38px;
 
     /* Adjust spacing between buttons as needed */
     gap: 5px; 
@@ -3259,6 +3285,7 @@ input#setup-profile-starting-savings {
 .expense-cell-input,
 .ca-cell-input {
     width: 100%;
+    height: 100%;
     padding: 0;
     padding-right: 10px;
     background: transparent;
@@ -3829,8 +3856,6 @@ input#setup-profile-starting-savings {
 }
 
 #month-table-container {
-    z-index: 5;
-    align-items: center;
     width: 70%;
     margin-bottom: 10px;
     margin-left: 5px;
@@ -3860,6 +3885,16 @@ input#setup-profile-starting-savings {
     pointer-events: none;
     transition: all 0.15s cubic-bezier(.4,0,.2,1);
     box-sizing: border-box;
+}
+
+@media (width <= 400px) {
+    .current-week-outline {
+        border: 3px solid #E45F1C;
+        border-radius: 5px;
+    }
+    #month-table-container {
+        margin-left: 0px;
+    }
 }
 
 #fridays-table {
@@ -4093,6 +4128,28 @@ input#setup-profile-starting-savings {
     .month-dropdown,
     .year-dropdown {
         font-size: 19px;
+    }
+}
+
+@media (width <= 400px) {
+    #income-table td, 
+    #expenses-table td, 
+    .cas-table td, 
+    #remainder-row-right td, 
+    #savings-row-right td {
+        padding-right: 10px;
+    }
+
+    #last-remainder-row td,
+    #income-total-row td
+    #expense-total-row td,
+    #savings-row td,
+    #remainder-row td,
+    .income-categories-title,
+    .expense-categories-title,
+    .ca-categories-title,
+    .ca-total-row td {
+        text-align: center;
     }
 }
 
@@ -4833,6 +4890,93 @@ input#setup-profile-starting-savings {
 
 .category-row-hidden {
     display: none !important;
+}
+
+@media (max-width: 400px) {
+    .dashboard-m-today::after {
+        top: 4px;
+        left: 0px;
+        right: 0px;
+        bottom: -2px;
+        border: 2px solid #E45F1C;
+        border-radius: .6em;
+    }
+
+    .dashboard-m-date {
+        margin: 8px 0px -2px;
+    }
+
+    .dashboard-d-today-container {
+        height: 14px;
+        font-size: .85em;
+        font-weight: 900;
+        text-transform: uppercase;
+    }
+
+    .dashboard-m-income-total {
+        padding: 2px;
+    }
+
+    .dashboard-m-label {
+        display: none;
+    }
+
+    .dashboard-m-value {
+        text-align: center;
+        padding: 0px;
+    }
+
+    .dashboard-m-expense-total {
+        padding: 2px;
+    }
+
+    .dashboard-m-remainder {
+        padding: 2px;
+    }
+
+    .dashboard-m-ca-divider::before,
+    .dashboard-m-ca-divider::after,
+    .dashboard-m-s-divider::before,
+    .dashboard-m-s-divider::after {
+        height: 1px;
+    }
+
+    .dashboard-m-ca-divider::before,
+    .dashboard-m-s-divider::before {
+        margin: 0.25em;
+    }
+
+    .dashboard-m-ca-divider::after,
+    .dashboard-m-s-divider::after {
+        margin: 0.25em;
+    }
+
+    .dashboard-m-ca-divider-text,
+    .dashboard-m-s-divider-text {
+        letter-spacing: .1em;
+        padding-top: 2px;
+    }
+
+    .dashboard-m-ca-balance {
+        padding: 2px;
+        padding-top: 0;
+        padding-bottom: 0;
+        background-color: #f2f7f7;
+        color: #676767;
+        border-left: 2px solid #a9a9a9;
+        border-right: 2px solid #a9a9a9;
+    }
+
+    .dashboard-m-savings {
+        padding: 2px;
+        padding-top: 0;
+        padding-bottom: 3px;
+        border-bottom: 2px solid #A9A9A9;
+        border-left: 2px solid #a9a9a9;
+        border-right: 2px solid #a9a9a9;
+        color: #2aaaa8;
+        background-color: #f2f7f7
+    }
 }
 
 /* /////////////////////////// Dashboard Year //////////////////////////////////// */
@@ -9310,6 +9454,7 @@ html.modal-open {
     font-size: 13px;
     color: #666;
     margin-top: 10px;
+}
 }
 
 /* Quiltt-style Account Selection Modal */
