@@ -7,6 +7,8 @@ Data is written to Redis immediately and flushed to MySQL periodically by the Re
 
 import logging
 import json
+import time
+import pymysql.cursors
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
@@ -438,6 +440,10 @@ def update_quiltt_account_field(account_id: str, field: str, value: Any, user_id
             if cached_data is None:
                 return False
         
+        # Ensure cached_data is a list, not a tuple
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
         # Find and update the account
         found = False
         for i, acc in enumerate(cached_data):
@@ -447,15 +453,96 @@ def update_quiltt_account_field(account_id: str, field: str, value: Any, user_id
                 break
         
         if not found:
+            logger.warning(f"Account {account_id} not found in cached data for user {user_id}")
             return False
         
         # Save to Redis and mark as dirty
         _set_to_redis('quiltt_accounts', user_id, cached_data)
         
+        logger.info(f"Successfully updated {field}={value} for account {account_id}")
         return True
         
     except Exception as e:
         logger.error(f"Error updating Quiltt account field: {e}", exc_info=True)
+        return False
+
+
+def update_quiltt_account_fields(account_id: str, fields: dict, user_id: Optional[int] = None) -> bool:
+    """
+    Update multiple fields in a Quiltt account atomically (Redis-only, MySQL flush happens periodically).
+    This prevents race conditions when multiple fields need to be updated together.
+    
+    Args:
+        account_id: Quiltt account ID
+        fields: Dictionary of field names and values to update (e.g. {'is_active': 1, 'sync_transactions': 1})
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        True if successful
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return False
+        user_id = current_user.id
+    
+    try:
+        redis_client = _get_redis_client()
+        
+        # Get Redis lock key for this user's accounts
+        lock_key = f"lock:quiltt_accounts:{user_id}"
+        
+        # Try to acquire lock for up to 5 seconds
+        lock_acquired = False
+        for attempt in range(50):  # 50 attempts x 100ms = 5 seconds max
+            if redis_client.set(lock_key, '1', nx=True, ex=10):  # Lock expires in 10 seconds
+                lock_acquired = True
+                break
+            time.sleep(0.1)  # Wait 100ms between attempts
+        
+        if not lock_acquired:
+            logger.error(f"Failed to acquire lock for user {user_id} accounts")
+            return False
+        
+        try:
+            # Update in Redis only
+            cached_data = _get_from_redis('quiltt_accounts', user_id)
+            
+            if cached_data is None:
+                # Load from MySQL if not in Redis
+                cached_data = get_quiltt_accounts(user_id)
+                if cached_data is None:
+                    return False
+            
+            # Ensure cached_data is a list, not a tuple
+            if not isinstance(cached_data, list):
+                cached_data = list(cached_data) if cached_data else []
+            
+            # Find and update the account
+            found = False
+            for i, acc in enumerate(cached_data):
+                if acc.get('account_id') == account_id:
+                    # Update all fields atomically
+                    for field, value in fields.items():
+                        cached_data[i][field] = value
+                    found = True
+                    break
+            
+            if not found:
+                logger.warning(f"Account {account_id} not found in cached data for user {user_id}")
+                return False
+            
+            # Save to Redis and mark as dirty
+            _set_to_redis('quiltt_accounts', user_id, cached_data)
+            
+            logger.info(f"Successfully updated {len(fields)} fields for account {account_id}: {fields}")
+            return True
+            
+        finally:
+            # Always release the lock
+            redis_client.delete(lock_key)
+        
+    except Exception as e:
+        logger.error(f"Error updating Quiltt account fields: {e}", exc_info=True)
         return False
 
 
@@ -515,20 +602,42 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
         cached_connections = [c for c in cached_connections if c.get('connection_id') != connection_id]
         _set_to_redis('quiltt_connections', user_id, cached_connections)
         
-        # Remove associated accounts from Redis
+        # Get account_ids to delete their transactions
+        account_ids_to_delete = []
         if conn_db_id:
             cached_accounts = _get_from_redis('quiltt_accounts', user_id)
             if cached_accounts is None:
                 cached_accounts = get_quiltt_accounts(user_id)
             
             if cached_accounts:
+                # Collect account_ids before removing accounts
+                account_ids_to_delete = [
+                    a.get('account_id') for a in cached_accounts 
+                    if a.get('connection_id') == conn_db_id and a.get('account_id')
+                ]
+                # Remove accounts
                 cached_accounts = [a for a in cached_accounts if a.get('connection_id') != conn_db_id]
                 _set_to_redis('quiltt_accounts', user_id, cached_accounts)
         
-        # Mark both tables as dirty for deletion flush
+        # Remove associated transactions from Redis (cascade delete)
+        if account_ids_to_delete:
+            cached_transactions = _get_from_redis('quiltt_transactions', user_id)
+            if cached_transactions is None:
+                cached_transactions = get_quiltt_transactions(user_id)
+            
+            if cached_transactions:
+                # Filter out transactions for deleted accounts
+                cached_transactions = [
+                    t for t in cached_transactions 
+                    if t.get('account_id') not in account_ids_to_delete
+                ]
+                _set_to_redis('quiltt_transactions', user_id, cached_transactions)
+        
+        # Mark tables as dirty for deletion flush
         dirty_key = f"dirty_tables:{user_id}"
         redis_client.sadd(dirty_key, 'quiltt_connections_deleted')
         redis_client.sadd(dirty_key, 'quiltt_accounts_deleted')
+        redis_client.sadd(dirty_key, 'quiltt_transactions_deleted')
         
         # Store the connection_id to delete
         delete_key = f"quiltt_connections_to_delete:{user_id}"
@@ -540,4 +649,194 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
         
     except Exception as e:
         logger.error(f"Error deleting Quiltt connection: {e}", exc_info=True)
+        return False
+
+
+def get_quiltt_transactions(user_id: Optional[int] = None, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Get Quiltt transactions from Redis (or MySQL if not cached).
+    
+    Args:
+        user_id: User ID (defaults to current_user.id)
+        account_id: Optional Quiltt account_id to filter by
+        
+    Returns:
+        List of transaction dicts
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return []
+        user_id = current_user.id
+    
+    try:
+        # Try Redis first
+        cached_data = _get_from_redis('quiltt_transactions', user_id)
+        
+        if cached_data is None:
+            # Fallback to MySQL
+            from db_connections import get_db_pool
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT * FROM quiltt_transactions 
+                    WHERE user_id = %s
+                    ORDER BY date DESC, created_at DESC
+                """, (user_id,))
+                cached_data = cursor.fetchall()
+                cursor.close()
+            
+            # Cache in Redis
+            if cached_data:
+                _set_to_redis('quiltt_transactions', user_id, list(cached_data))
+        
+        # Filter by account_id if provided
+        if account_id and cached_data:
+            cached_data = [t for t in cached_data if t.get('account_id') == account_id]
+        
+        return cached_data or []
+        
+    except Exception as e:
+        logger.error(f"Error getting Quiltt transactions: {e}", exc_info=True)
+        return []
+
+
+def upsert_quiltt_transaction(transaction_data: Dict[str, Any], user_id: Optional[int] = None) -> Optional[int]:
+    """
+    Insert or update a Quiltt transaction in Redis (MySQL flush happens periodically).
+    
+    Args:
+        transaction_data: Dict with transaction fields (transaction_id, account_id, amount, date, etc.)
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        Transaction database ID or None
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return None
+        user_id = current_user.id
+    
+    transaction_id = transaction_data.get('transaction_id')
+    if not transaction_id:
+        logger.error("transaction_id is required")
+        return None
+    
+    try:
+        # Get current data from Redis or MySQL
+        cached_data = _get_from_redis('quiltt_transactions', user_id)
+        
+        if cached_data is None:
+            # Load from MySQL if not in Redis
+            cached_data = get_quiltt_transactions(user_id)
+            if cached_data is None:
+                cached_data = []
+        
+        # Ensure cached_data is a list
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
+        # Find existing or generate new ID
+        db_id = None
+        found = False
+        for i, txn in enumerate(cached_data):
+            if txn.get('transaction_id') == transaction_id:
+                # Update existing transaction
+                cached_data[i].update(transaction_data)
+                db_id = cached_data[i].get('id')
+                found = True
+                break
+        
+        if not found:
+            # Generate temporary ID for new transaction
+            import time
+            temp_id = int(time.time() * 1000) % 1000000
+            db_id = temp_id
+            new_txn = {
+                'id': db_id,
+                'user_id': user_id,
+                **transaction_data
+            }
+            cached_data.append(new_txn)
+        
+        # Save to Redis and mark as dirty
+        _set_to_redis('quiltt_transactions', user_id, cached_data)
+        
+        return db_id
+        
+    except Exception as e:
+        logger.error(f"Error upserting Quiltt transaction: {e}", exc_info=True)
+        return None
+
+
+def delete_quiltt_transactions_for_account(account_id: str, user_id: Optional[int] = None) -> bool:
+    """
+    Delete all transactions for a specific account from Redis and MySQL.
+    
+    Args:
+        account_id: The Quiltt account_id (string like 'acct_xxx')
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return False
+        user_id = current_user.id
+    
+    try:
+        # Get current transactions from Redis or MySQL
+        cached_data = _get_from_redis('quiltt_transactions', user_id)
+        
+        if cached_data is None:
+            # Load from MySQL if not in Redis
+            cached_data = get_quiltt_transactions(user_id)
+            if cached_data is None:
+                cached_data = []
+        
+        # Ensure cached_data is a list
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
+        # Filter out transactions for this account
+        original_count = len(cached_data)
+        cached_data = [txn for txn in cached_data if txn.get('account_id') != account_id]
+        deleted_count = original_count - len(cached_data)
+        
+        if deleted_count > 0:
+            logger.info(f"Deleted {deleted_count} transactions for account {account_id}")
+            
+            # Save filtered data back to Redis
+            _set_to_redis('quiltt_transactions', user_id, cached_data)
+            
+            # Also delete from MySQL directly
+            try:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    # Delete from expense_entries first (if imported)
+                    cursor.execute("""
+                        DELETE ee FROM expense_entries ee
+                        INNER JOIN quiltt_transactions qt ON ee.id = qt.imported_to_entry_id
+                        WHERE qt.user_id = %s AND qt.account_id = %s
+                    """, (user_id, account_id))
+                    
+                    # Delete from quiltt_transactions
+                    cursor.execute("""
+                        DELETE FROM quiltt_transactions 
+                        WHERE user_id = %s AND account_id = %s
+                    """, (user_id, account_id))
+                    
+                    conn.commit()
+                    cursor.close()
+                    
+                    logger.info(f"Deleted transactions from MySQL for account {account_id}")
+            except Exception as db_error:
+                logger.error(f"Error deleting from MySQL: {db_error}")
+                # Continue anyway - Redis update is primary
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error deleting transactions for account: {e}", exc_info=True)
         return False

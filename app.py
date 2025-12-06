@@ -30,7 +30,7 @@ from quiltt_utils import QuilttClient, map_quiltt_transaction_to_entry, get_defa
 from quiltt_redis import (
     get_quiltt_profile, update_quiltt_profile, get_quiltt_connections, get_quiltt_accounts,
     upsert_quiltt_connection, upsert_quiltt_account, update_quiltt_account_field, 
-    delete_quiltt_connection
+    delete_quiltt_connection, get_quiltt_transactions, upsert_quiltt_transaction
 )
 
 app = Flask(__name__)
@@ -608,8 +608,11 @@ def resend_verification():
 @app.route('/setup_profile', methods=['GET'])
 @login_required
 def setup_profile():
-    # Simply render the setup profile page
-    return render_template('setup_profile.html')
+    # Get Quiltt connector ID from environment
+    connector_id = os.getenv('QUILTT_CONNECTOR_ID', '')
+    
+    # Render the setup profile page with connector ID
+    return render_template('setup_profile.html', connector_id=connector_id)
 
 
 @app.route('/save_setup_name', methods=['POST'])
@@ -705,7 +708,7 @@ def complete_profile_setup():
         # Delete the temporary Redis key after transferring to main user Redis
         r.delete(redis_key)
 
-        # Update user details in the database for critical fields that need immediate persistence
+        # Get or create the 'Starting Balance' income category
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
 
@@ -726,26 +729,96 @@ def complete_profile_setup():
             else:
                 starting_balance_category_id = category[0]
 
-            # Insert the starting balance into income_entries linked to the 'Starting Balance' category
-            cursor.execute("""
-                INSERT INTO income_entries (category_id, date, amount) 
-                VALUES (%s, %s, %s)
-            """, (starting_balance_category_id, income_entry_date, starting_balance))
-
-            # --- Insert starting savings into savings_entries on the current date ---
-            today_str = date.today().strftime('%Y-%m-%d')
-            cursor.execute("SELECT amount FROM savings_entries WHERE user_id = %s AND date = %s", (current_user.id, today_str))
-            print("Before update:", cursor.fetchone())
-
-            cursor.execute("""
-                UPDATE savings_entries SET amount = %s WHERE user_id = %s AND date = %s
-            """, (starting_savings, current_user.id, today_str))
-
-            cursor.execute("SELECT amount FROM savings_entries WHERE user_id = %s AND date = %s", (current_user.id, today_str))
-            print("After update:", cursor.fetchone())
-
             cursor.close()
             conn.commit()
+        
+        print(f"[complete_profile_setup] Starting Balance category ID: {starting_balance_category_id}")
+
+        # Insert starting balance into Redis (Redis-first)
+        income_entries = _get_entries_from_redis('income_entries', current_user.id)
+        
+        if income_entries is None:
+            # Load from MySQL if not in Redis
+            print(f"[complete_profile_setup] Loading income_entries from MySQL for user {current_user.id}")
+            with get_db_pool().get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT ie.* FROM income_entries ie
+                    JOIN income_categories ic ON ie.category_id = ic.id
+                    WHERE ic.user_id = %s
+                    ORDER BY ie.date
+                """, (current_user.id,))
+                income_entries = [dict(row) for row in cursor.fetchall()]
+        
+        # Check if a starting balance entry already exists for this date
+        existing_entry = next(
+            (e for e in income_entries 
+             if e['category_id'] == starting_balance_category_id 
+             and (e['date'] == income_entry_date or 
+                  (hasattr(e['date'], 'isoformat') and e['date'].isoformat() == income_entry_date))),
+            None
+        )
+        
+        if existing_entry:
+            # Update existing entry amount
+            existing_entry['amount'] = float(starting_balance)
+            existing_entry['processed'] = 0  # Mark for re-processing
+            print(f"[complete_profile_setup] Updated existing starting balance entry for {income_entry_date}: {starting_balance}")
+        else:
+            # Add new starting balance entry
+            income_entries.append({
+                'category_id': starting_balance_category_id,
+                'date': income_entry_date,
+                'amount': float(starting_balance),
+                'recurring_id': None,
+                'processed': 0  # Will be flushed by flush worker
+            })
+            print(f"[complete_profile_setup] Added new starting balance entry for {income_entry_date}: {starting_balance}")
+        
+        # Sort by date
+        income_entries.sort(key=lambda x: x['date'] if isinstance(x['date'], str) else x['date'].isoformat())
+        
+        # Save to Redis
+        _set_entries_to_redis('income_entries', current_user.id, income_entries)
+        print(f"[complete_profile_setup] Starting balance saved to Redis: {starting_balance}")
+        
+        # Insert starting savings into Redis (Redis-first)
+        savings_entries = _get_savings_entries_from_redis(current_user.id)
+        
+        if savings_entries is None:
+            # Load from MySQL if not in Redis
+            print(f"[complete_profile_setup] Loading savings_entries from MySQL for user {current_user.id}")
+            with get_db_pool().get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT date, amount FROM savings_entries
+                    WHERE user_id = %s
+                    ORDER BY date
+                """, (current_user.id,))
+                savings_entries = [
+                    {'date': row[0].isoformat() if isinstance(row[0], date) else row[0], 
+                     'amount': float(row[1])}
+                    for row in cursor.fetchall()
+                ]
+        
+        # Add/update the starting savings entry
+        existing_entry = next((e for e in savings_entries if e['date'] == income_entry_date), None)
+        
+        if existing_entry:
+            existing_entry['amount'] = float(starting_savings)
+            print(f"[complete_profile_setup] Updated existing savings entry for {income_entry_date}: {starting_savings}")
+        else:
+            savings_entries.append({'date': income_entry_date, 'amount': float(starting_savings)})
+            # Keep sorted by date
+            savings_entries.sort(key=lambda x: x['date'])
+            print(f"[complete_profile_setup] Added new savings entry for {income_entry_date}: {starting_savings}")
+        
+        # Save to Redis
+        _set_savings_entries_to_redis(current_user.id, savings_entries)
+        print(f"[complete_profile_setup] Starting savings saved to Redis: {starting_savings}")
+        
+        # Trigger immediate flush to MySQL before totals calculation
+        from redis_manager import _flush_redis_to_mysql
+        _flush_redis_to_mysql()
+        print(f"[complete_profile_setup] Flushed Redis data to MySQL")
 
         # Ensure all base records exist (in case email verification didn't create them)
         print(f"[complete_profile_setup] Checking if totals_remainders records exist for user {current_user.id}")
@@ -12925,6 +12998,14 @@ def quiltt_delete():
         return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
 
 
+def _is_compatible_account_type(account_type):
+    """Check if account type is compatible (depository or credit only)"""
+    if not account_type:
+        return False
+    account_type_lower = account_type.lower()
+    return account_type_lower in ['depository', 'credit']
+
+
 @app.route('/quiltt/sync-profile', methods=['POST'])
 @login_required
 def quiltt_sync_profile():
@@ -12943,6 +13024,8 @@ def quiltt_sync_profile():
         if not profile_data:
             return jsonify({'status': 'error', 'message': 'Failed to fetch profile from Quiltt'}), 500
         
+        app.logger.info(f"Quiltt profile data received: {len(profile_data.get('connections', []))} connections")
+        
         # Save/update connections and accounts using Redis-first operations
         for connection in profile_data.get('connections', []):
             if not connection:
@@ -12955,6 +13038,8 @@ def quiltt_sync_profile():
             
             connection_id = connection.get('id', '')
             connection_status = connection.get('status', 'ACTIVE')
+            
+            app.logger.info(f"Processing connection {connection_id}: {institution_name} (status: {connection_status})")
             
             # Upsert connection to Redis + MySQL
             connection_db_id = upsert_quiltt_connection({
@@ -12969,8 +13054,17 @@ def quiltt_sync_profile():
                 continue
             
             # Save accounts for this connection
-            for account in connection.get('accounts', []):
+            accounts = connection.get('accounts', [])
+            app.logger.info(f"Connection {connection_id} has {len(accounts)} accounts")
+            
+            for account in accounts:
                 if not account:
+                    continue
+                
+                # Only process compatible account types (depository and credit)
+                account_type = account.get('kind', '')
+                if not _is_compatible_account_type(account_type):
+                    app.logger.info(f"Skipping incompatible account type: {account_type} for account {account.get('id', '')}")
                     continue
                     
                 # Get balance info safely
@@ -12978,21 +13072,30 @@ def quiltt_sync_profile():
                 current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
                 available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
                 
+                account_id = account.get('id', '')
+                account_name = account.get('name', 'Account')
+                
+                app.logger.info(f"Syncing account {account_id} ({account_name}): balance={current_balance}, available={available_balance}")
+                
                 # Upsert account to Redis + MySQL
                 upsert_quiltt_account({
                     'connection_id': connection_db_id,
-                    'account_id': account.get('id', ''),
-                    'account_name': account.get('name', 'Account'),
+                    'account_id': account_id,
+                    'account_name': account_name,
                     'account_type': account.get('kind', ''),
                     'account_subtype': '',
                     'mask': account.get('mask', ''),
                     'current_balance': current_balance,
                     'available_balance': available_balance,
-                    'is_active': 1,
-                    'sync_transactions': 1
+                    'is_active': None,
+                    'sync_transactions': None
                 }, current_user.id)
         
         app.logger.info(f"Successfully synced Quiltt profile for user {current_user.id}")
+        
+        # Note: Transactions will not be synced automatically during initial setup
+        # User must select accounts first, then transactions will be synced for selected accounts
+        
         return jsonify({'status': 'success'})
             
     except Exception as e:
@@ -13095,6 +13198,12 @@ def quiltt_check_sync_status():
                                 if not account:
                                     continue
                                 
+                                # Only process compatible account types (depository and credit)
+                                account_type = account.get('kind', '')
+                                if not _is_compatible_account_type(account_type):
+                                    app.logger.info(f"Skipping incompatible account type: {account_type} for account {account.get('id', '')}")
+                                    continue
+                                
                                 balance = account.get('balance') or {}
                                 current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
                                 available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
@@ -13189,7 +13298,84 @@ def quiltt_get_accounts():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None):
+@app.route('/quiltt/connections', methods=['GET'])
+@login_required
+def quiltt_get_connections():
+    """Get all connections with their accounts for the current user"""
+    try:
+        from quiltt_redis import get_quiltt_connections, get_quiltt_accounts, upsert_quiltt_connection, get_quiltt_profile
+        
+        app.logger.info(f"Fetching connections for user {current_user.id}")
+        
+        # Get all connections from Redis
+        connections = get_quiltt_connections(current_user.id)
+        
+        if not connections:
+            app.logger.info(f"No connections found for user {current_user.id}")
+            return jsonify({
+                'status': 'success',
+                'connections': []
+            })
+        
+        app.logger.info(f"Found {len(connections)} connections for user {current_user.id}")
+        
+        # Check if any connections are still syncing and fetch latest status from Quiltt API
+        profile = get_quiltt_profile(current_user.id)
+        if profile and profile.get('session_token'):
+            for connection in connections:
+                if connection.get('status') in ['INITIALIZING', 'PENDING', 'SYNCING']:
+                    # Fetch latest status from Quiltt API
+                    try:
+                        from quiltt_utils import QuilttClient
+                        quiltt_client = QuilttClient()
+                        conn_data = quiltt_client.get_connection(
+                            profile['session_token'],
+                            connection['connection_id']
+                        )
+                        if conn_data and conn_data.get('status'):
+                            # Update status in Redis
+                            upsert_quiltt_connection({
+                                'connection_id': connection['connection_id'],
+                                'status': conn_data['status']
+                            }, current_user.id)
+                            connection['status'] = conn_data['status']
+                            app.logger.info(f"Updated connection {connection['connection_id']} status from Quiltt API: {conn_data['status']}")
+                    except Exception as e:
+                        app.logger.warning(f"Could not fetch connection status from Quiltt API: {e}")
+        
+        # Get all accounts
+        all_accounts = get_quiltt_accounts(current_user.id)
+        app.logger.info(f"Found {len(all_accounts) if all_accounts else 0} accounts for user {current_user.id}")
+        
+        # Attach accounts to their connections
+        for connection in connections:
+            conn_db_id = connection.get('id')
+            # Filter accounts for this connection
+            connection['accounts'] = [
+                acc for acc in all_accounts 
+                if acc.get('connection_id') == conn_db_id
+            ] if all_accounts else []
+            
+            # Convert Decimal to float for JSON serialization
+            for account in connection['accounts']:
+                if 'current_balance' in account:
+                    account['current_balance'] = float(account['current_balance']) if account['current_balance'] is not None else 0
+                if 'available_balance' in account:
+                    account['available_balance'] = float(account['available_balance']) if account['available_balance'] is not None else 0
+        
+        app.logger.info(f"Returning {len(connections)} connections with accounts for user {current_user.id}")
+        
+        return jsonify({
+            'status': 'success',
+            'connections': connections
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting connections for user {current_user.id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, specific_account_id=None):
     """
     Internal function to sync transactions for a specific user
     
@@ -13197,38 +13383,58 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None):
         user_id: The user ID to sync transactions for
         start_date: Optional start date (YYYY-MM-DD) from webhook metadata
         end_date: Optional end date (YYYY-MM-DD) from webhook metadata
+        specific_account_id: Optional Quiltt account_id to sync only that account (e.g., "acct_xxx")
     
     Returns tuple: (success: bool, synced_count: int, error_message: str)
     """
+    app.logger.info(f"=== Starting transaction sync for user {user_id} ===")
+    if specific_account_id:
+        app.logger.info(f"Syncing specific account only: {specific_account_id}")
     try:
+        # Get session token from Quiltt profile
+        profile = get_quiltt_profile(user_id)
+        
+        if not profile or not profile.get('session_token'):
+            app.logger.warning(f"No active Quiltt session for user {user_id}")
+            return (False, 0, 'No active Quiltt session')
+        
+        session_token = profile['session_token']
+        app.logger.info(f"Found session token for user {user_id}")
+        
+        # Get accounts with sync enabled from Redis
+        app.logger.info(f"Fetching accounts with sync_transactions=1 from Redis for user {user_id}")
+        accounts = get_quiltt_accounts(user_id)
+        
+        if not accounts:
+            app.logger.info(f"No accounts found for user {user_id}")
+            return (True, 0, 'No accounts found')
+        
+        # Filter for accounts with sync enabled
+        sync_enabled_accounts = [
+            acc for acc in accounts 
+            if acc.get('sync_transactions') == 1 and acc.get('is_active') == 1
+        ]
+        
+        # If specific_account_id is provided, filter to only that account
+        if specific_account_id:
+            sync_enabled_accounts = [
+                acc for acc in sync_enabled_accounts
+                if acc.get('account_id') == specific_account_id
+            ]
+            if not sync_enabled_accounts:
+                app.logger.warning(f"Specific account {specific_account_id} not found or not enabled for sync")
+                return (False, 0, f'Account {specific_account_id} not found or not enabled')
+        
+        app.logger.info(f"Found {len(sync_enabled_accounts)} accounts with sync enabled: {[acc['account_id'] for acc in sync_enabled_accounts]}")
+        
+        if not sync_enabled_accounts:
+            app.logger.info(f"No accounts enabled for sync for user {user_id}")
+            return (True, 0, 'No accounts enabled for sync')
+        
+        # Get the default "Auto Adjustments" category for unmapped transactions
+        app.logger.info(f"Fetching Auto Adjustments category for user {user_id}")
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # Get session token
-            cursor.execute("""
-                SELECT session_token FROM quiltt_profiles WHERE user_id = %s
-            """, (user_id,))
-            profile = cursor.fetchone()
-            
-            if not profile or not profile['session_token']:
-                app.logger.warning(f"No active Quiltt session for user {user_id}")
-                return (False, 0, 'No active Quiltt session')
-            
-            session_token = profile['session_token']
-            
-            # Get accounts with sync enabled
-            cursor.execute("""
-                SELECT account_id, id as db_id 
-                FROM quiltt_accounts 
-                WHERE user_id = %s AND sync_transactions = 1 AND is_active = 1
-            """, (user_id,))
-            accounts = cursor.fetchall()
-            
-            if not accounts:
-                app.logger.info(f"No accounts enabled for sync for user {user_id}")
-                return (True, 0, 'No accounts enabled for sync')
-            
-            # Get the default "Auto Adjustments" category for unmapped transactions
             cursor.execute("""
                 SELECT id FROM expense_categories 
                 WHERE user_id = %s AND is_auto_adjustment = 1
@@ -13236,94 +13442,104 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None):
             """, (user_id,))
             auto_adj_category = cursor.fetchone()
             default_expense_category_id = auto_adj_category['id'] if auto_adj_category else None
+            cursor.close()
+        
+        app.logger.info(f"Auto Adjustments category_id: {default_expense_category_id}")
+        
+        if not default_expense_category_id:
+            app.logger.warning(f"No auto-adjustment category found for user {user_id}")
+            return (False, 0, 'Auto Adjustments category not found')
+        
+        total_synced = 0
+        
+        # Use provided dates from webhook metadata, or default to last 30 days
+        from datetime import datetime, timedelta
+        if not start_date or not end_date:
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            app.logger.info(f"No date range provided, using default: {start_date} to {end_date}")
+        else:
+            app.logger.info(f"Using webhook date range: {start_date} to {end_date}")
+        
+        # Get existing transactions from Redis to check for duplicates
+        existing_transactions = get_quiltt_transactions(user_id)
+        existing_txn_ids = {txn.get('transaction_id') for txn in existing_transactions}
+        app.logger.info(f"Found {len(existing_txn_ids)} existing transactions in Redis")
+        
+        for account in sync_enabled_accounts:
+            account_id = account['account_id']  # Quiltt account_id string (e.g., "acct_xxx")
+            app.logger.info(f"Fetching transactions for account {account_id}")
             
-            if not default_expense_category_id:
-                app.logger.warning(f"No auto-adjustment category found for user {user_id}")
-                return (False, 0, 'Auto Adjustments category not found')
+            # Get transactions from Quiltt
+            transactions = quiltt_client.get_transactions(
+                session_token=session_token,
+                account_id=account_id,
+                start_date=start_date,
+                end_date=end_date,
+                limit=100
+            )
             
-            total_synced = 0
+            if not transactions:
+                app.logger.info(f"No transactions returned for account {account_id}")
+                continue
             
-            # Use provided dates from webhook metadata, or default to last 30 days
-            from datetime import datetime, timedelta
-            if not start_date or not end_date:
-                start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-                end_date = datetime.now().strftime('%Y-%m-%d')
-                app.logger.info(f"No date range provided, using default: {start_date} to {end_date}")
-            else:
-                app.logger.info(f"Using webhook date range: {start_date} to {end_date}")
+            app.logger.info(f"Fetched {len(transactions)} transactions for account {account_id}")
             
-            for account in accounts:
-                account_id = account['account_id']
+            for txn in transactions:
+                app.logger.debug(f"Processing transaction: {txn.get('id')} - {txn.get('description')} - ${txn.get('amount')}")
                 
-                # Get transactions from Quiltt
-                transactions = quiltt_client.get_transactions(
-                    session_token=session_token,
-                    account_id=account_id,
-                    start_date=start_date,
-                    end_date=end_date,
-                    limit=100
-                )
-                
-                if not transactions:
+                # Skip pending transactions (status is PENDING vs POSTED)
+                if txn.get('status') == 'PENDING':
+                    app.logger.debug(f"Skipping pending transaction: {txn.get('id')}")
                     continue
                 
-                app.logger.info(f"Fetched {len(transactions)} transactions for account {account_id}")
+                txn_id = txn.get('id')
+                amount = abs(float(txn.get('amount', 0)))
+                date = txn.get('date')
+                # entryType is DEBIT or CREDIT; amount is negative for debits (outflows), positive for credits (inflows)
+                # For expenses, we want DEBIT (money going out, amount < 0)
+                is_expense = float(txn.get('amount', 0)) < 0
                 
-                for txn in transactions:
-                    # Skip pending transactions
-                    if txn.get('pending', False):
-                        continue
-                    
-                    txn_id = txn.get('id')
-                    amount = abs(float(txn.get('amount', 0)))
-                    date = txn.get('date')
-                    is_expense = float(txn.get('amount', 0)) < 0
-                    
-                    # Check if transaction already exists
-                    cursor.execute("""
-                        SELECT id FROM quiltt_transactions 
-                        WHERE user_id = %s AND transaction_id = %s
-                    """, (user_id, txn_id))
-                    
-                    if cursor.fetchone():
-                        continue  # Skip already imported transactions
-                    
-                    # Insert into expense_entries (for now, all go to Auto Adjustments)
-                    if is_expense:
-                        cursor.execute("""
-                            INSERT INTO expense_entries (category_id, date, amount, processed)
-                            VALUES (%s, %s, %s, 1)
-                        """, (default_expense_category_id, date, amount))
-                        entry_id = cursor.lastrowid
-                    else:
-                        # Income transactions - skip for now or add logic later
-                        continue
-                    
-                    # Track this transaction as imported
-                    cursor.execute("""
-                        INSERT INTO quiltt_transactions 
-                        (user_id, transaction_id, account_id, entry_id, amount, date, description, merchant_name, category)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        user_id,
-                        txn_id,
-                        account['db_id'],
-                        entry_id,
-                        amount,
-                        date,
-                        txn.get('description', ''),
-                        txn.get('merchantName', ''),
-                        txn.get('category', '')
-                    ))
-                    
+                app.logger.debug(f"Transaction {txn_id}: amount={amount}, date={date}, is_expense={is_expense}, status={txn.get('status')}")
+                
+                # Check if transaction already exists in Redis
+                if txn_id in existing_txn_ids:
+                    app.logger.debug(f"Skipping already imported transaction: {txn_id}")
+                    continue
+                
+                # Only process expense transactions for now
+                if not is_expense:
+                    app.logger.debug(f"Skipping income transaction: {txn_id}")
+                    continue
+                
+                # Store transaction in Redis with reference to expense category
+                app.logger.info(f"Storing transaction {txn_id} in Redis: ${amount} on {date}")
+                transaction_data = {
+                    'transaction_id': txn_id,
+                    'account_id': account_id,  # Quiltt account_id string
+                    'amount': amount,
+                    'date': date,
+                    'description': txn.get('description', ''),
+                    'merchant_name': '',  # merchantName not in simplified query
+                    'category': txn.get('kind', ''),
+                    'pending': 0,  # Already filtered out pending
+                    'transaction_type': 'expense' if is_expense else 'income',
+                    'imported_to_entry_id': None,  # Will be set during flush
+                    'expense_category_id': default_expense_category_id,  # Store for flush
+                    'imported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                txn_db_id = upsert_quiltt_transaction(transaction_data, user_id)
+                if txn_db_id:
+                    app.logger.info(f"Successfully stored transaction {txn_id} in Redis with ID {txn_db_id}")
                     total_synced += 1
-            
-            conn.commit()
-            cursor.close()
-            
-            app.logger.info(f"Successfully synced {total_synced} transactions for user {user_id}")
-            return (True, total_synced, f'Synced {total_synced} new transactions')
-            
+                    existing_txn_ids.add(txn_id)  # Add to set to avoid re-processing
+                else:
+                    app.logger.error(f"Failed to store transaction {txn_id} in Redis")
+        
+        app.logger.info(f"Successfully synced {total_synced} transactions to Redis for user {user_id}")
+        return (True, total_synced, f'Synced {total_synced} new transactions')
+        
     except Exception as e:
         app.logger.error(f"Error syncing Quiltt transactions for user {user_id}: {e}")
         return (False, 0, str(e))
@@ -13345,6 +13561,140 @@ def quiltt_sync_transactions():
         return jsonify({'status': 'error', 'message': message}), 400
 
 
+def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name_lower=''):
+    """
+    Create an auto-adjustment entry to match Blankee remainder with bank balance.
+    Called when a checking account is connected or enabled.
+    
+    Returns: (success: bool, message: str)
+    """
+    try:
+        from datetime import date as date_class
+        today = date_class.today()
+        today_str = today.strftime('%Y-%m-%d')
+        
+        # Get today's remainder from Redis or MySQL
+        today_remainder = None
+        
+        # Try Redis first
+        cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
+        if cached_daily:
+            for row in cached_daily:
+                row_date = datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']
+                if row_date == today:
+                    today_remainder = float(row.get('remainder', 0))
+                    app.logger.info(f"[AUTO-ADJUSTMENT] Found remainder in Redis: {today_remainder}")
+                    break
+        
+        # Fallback to MySQL if not in Redis
+        if today_remainder is None:
+            app.logger.info(f"[AUTO-ADJUSTMENT] Remainder not in Redis, checking MySQL")
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT remainder FROM totals_remainders_d
+                    WHERE user_id = %s AND date = %s
+                    LIMIT 1
+                """, (user_id, today_str))
+                result = cursor.fetchone()
+                cursor.close()
+                
+                if result:
+                    today_remainder = float(result['remainder'])
+                    app.logger.info(f"[AUTO-ADJUSTMENT] Found remainder in MySQL: {today_remainder}")
+                else:
+                    app.logger.warning(f"[AUTO-ADJUSTMENT] No remainder found for user {user_id} on {today_str}")
+                    return False, "No remainder data found for today"
+        
+        bank_balance_float = float(bank_balance)
+        
+        # Calculate difference
+        diff = bank_balance_float - today_remainder
+        
+        # Skip if difference is negligible (less than 1 cent)
+        if abs(diff) < 0.01:
+            app.logger.info(f"[AUTO-ADJUSTMENT] User {user_id}: No adjustment needed (diff={diff:.2f})")
+            return True, f"No adjustment needed - balance already matches (${bank_balance_float:.2f})"
+        
+        # Determine if we need income or expense adjustment
+        entry_type = 'income' if diff > 0 else 'expense'
+        table_name = 'income_entries' if diff > 0 else 'expense_entries'
+        
+        # Find Auto Adjustments category
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            if entry_type == 'income':
+                cursor.execute("""
+                    SELECT id, name FROM income_categories 
+                    WHERE user_id = %s AND is_auto_adjustment = 1 
+                    LIMIT 1
+                """, (user_id,))
+            else:
+                cursor.execute("""
+                    SELECT id, name FROM expense_categories 
+                    WHERE user_id = %s AND is_auto_adjustment = 1 
+                    LIMIT 1
+                """, (user_id,))
+            
+            auto_cat = cursor.fetchone()
+            cursor.close()
+        
+        if not auto_cat:
+            app.logger.error(f"[AUTO-ADJUSTMENT] User {user_id}: No Auto Adjustments category found for {entry_type}")
+            return False, f"No Auto Adjustments category found for {entry_type}"
+        
+        category_id = auto_cat['id']
+        adjustment_amount = abs(diff)
+        
+        # Add adjustment entry to Redis (will be flushed to MySQL)
+        existing_data = _get_entries_from_redis(table_name, user_id)
+        
+        # If not in Redis, load from MySQL first
+        if existing_data is None:
+            existing_data = []
+            with get_db_pool().get_connection() as conn:
+                cursor2 = conn.cursor(pymysql.cursors.DictCursor)
+                if entry_type == 'income':
+                    cursor2.execute("""
+                        SELECT ie.* FROM income_entries ie
+                        JOIN income_categories ic ON ie.category_id = ic.id
+                        WHERE ic.user_id = %s
+                    """, (user_id,))
+                else:
+                    cursor2.execute("""
+                        SELECT ee.* FROM expense_entries ee
+                        JOIN expense_categories ec ON ee.category_id = ec.id
+                        WHERE ec.user_id = %s
+                    """, (user_id,))
+                existing_data = list(cursor2.fetchall())
+                cursor2.close()
+            existing_data = _filter_pending_deletions(table_name, user_id, existing_data)
+        
+        # Check if auto-adjustment entry already exists for today
+        existing_entry = None
+        if existing_data:
+            for entry in existing_data:
+                if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == today_str:
+                    existing_entry = entry
+                    break
+        
+        if existing_entry:
+            # Update existing entry
+            new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(adjustment_amount)
+            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(new_amount))
+            app.logger.info(f"[AUTO-ADJUSTMENT] User {user_id}: Updated {entry_type} auto-adjustment to ${new_amount:.2f}")
+        else:
+            # Create new entry
+            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(adjustment_amount))
+            app.logger.info(f"[AUTO-ADJUSTMENT] User {user_id}: Created {entry_type} auto-adjustment for ${adjustment_amount:.2f}")
+        
+        return True, f"Auto-adjustment created: {entry_type} of ${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
+        
+    except Exception as e:
+        app.logger.error(f"[AUTO-ADJUSTMENT] Error for user {user_id}: {e}", exc_info=True)
+        return False, f"Error creating auto-adjustment: {str(e)}"
+
+
 @app.route('/quiltt/toggle-sync', methods=['POST'])
 @login_required
 def quiltt_toggle_sync():
@@ -13357,21 +13707,243 @@ def quiltt_toggle_sync():
         return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
     
     try:
-        # Update sync_transactions field using Redis-first operation
-        success = update_quiltt_account_field(
-            account_id, 
-            'sync_transactions', 
-            1 if sync_enabled else 0,
-            current_user.id
-        )
+        from quiltt_redis import get_quiltt_transactions, delete_quiltt_transactions_for_account
         
-        if success:
-            return jsonify({'status': 'success'})
+        if sync_enabled:
+            # Enable: Set both sync_transactions and is_active to 1
+            success_sync = update_quiltt_account_field(
+                account_id, 
+                'sync_transactions', 
+                1,
+                current_user.id
+            )
+            success_active = update_quiltt_account_field(
+                account_id, 
+                'is_active', 
+                1,
+                current_user.id
+            )
+            
+            if success_sync and success_active:
+                # Get account details AFTER enabling to check if it's a checking account
+                accounts = get_quiltt_accounts(current_user.id)
+                target_account = None
+                for acc in accounts:
+                    if acc.get('account_id') == account_id:
+                        target_account = acc
+                        break
+                
+                app.logger.info(f"[TOGGLE-SYNC] Found account: {target_account}")
+                
+                # Resync transactions for this specific account only
+                try:
+                    app.logger.info(f"Re-syncing transactions for account {account_id}")
+                    success, count, message = _sync_quiltt_transactions_for_user(
+                        current_user.id, 
+                        specific_account_id=account_id
+                    )
+                    
+                    # Check if this is a checking account and create auto-adjustment
+                    auto_adjustment_msg = ""
+                    if target_account:
+                        account_name = target_account.get('account_name', '').lower()
+                        account_type = target_account.get('account_type', '').lower()
+                        current_balance = target_account.get('current_balance', 0)
+                        
+                        app.logger.info(f"[TOGGLE-SYNC] Account details - name: {account_name}, type: {account_type}, balance: {current_balance}")
+                        
+                        # Check if it's a checking account (depository type with "checking" in name)
+                        if account_type == 'depository' and 'checking' in account_name and current_balance:
+                            app.logger.info(f"[TOGGLE-SYNC] Detected checking account: {account_name}, balance: {current_balance}")
+                            auto_success, auto_msg = _create_auto_adjustment_for_bank_balance(
+                                current_user.id, 
+                                current_balance,
+                                account_name
+                            )
+                            if auto_success:
+                                auto_adjustment_msg = f" | {auto_msg}"
+                                app.logger.info(f"[TOGGLE-SYNC] Auto-adjustment created: {auto_msg}")
+                            else:
+                                app.logger.warning(f"[TOGGLE-SYNC] Auto-adjustment failed: {auto_msg}")
+                        else:
+                            app.logger.info(f"[TOGGLE-SYNC] Not a checking account or no balance - skipping auto-adjustment")
+                    
+                    if success:
+                        return jsonify({
+                            'status': 'success', 
+                            'message': f'Account enabled and {count} transactions synced{auto_adjustment_msg}'
+                        })
+                    else:
+                        return jsonify({
+                            'status': 'warning', 
+                            'message': f'Account enabled but sync had issues: {message}{auto_adjustment_msg}'
+                        })
+                except Exception as tx_error:
+                    app.logger.error(f"Error re-syncing transactions: {tx_error}")
+                    return jsonify({
+                        'status': 'warning',
+                        'message': 'Account enabled but transaction sync failed'
+                    })
+            else:
+                return jsonify({'status': 'error', 'message': 'Failed to enable account'}), 500
         else:
-            return jsonify({'status': 'error', 'message': 'Failed to update account'}), 500
+            # Disable: Set both sync_transactions and is_active to 0
+            success_sync = update_quiltt_account_field(
+                account_id, 
+                'sync_transactions', 
+                0,
+                current_user.id
+            )
+            success_active = update_quiltt_account_field(
+                account_id, 
+                'is_active', 
+                0,
+                current_user.id
+            )
+            
+            if success_sync and success_active:
+                # Delete all transactions for this account from Redis and MySQL
+                try:
+                    app.logger.info(f"Deleting transactions for account {account_id}")
+                    delete_quiltt_transactions_for_account(account_id, current_user.id)
+                except Exception as del_error:
+                    app.logger.error(f"Error deleting transactions: {del_error}")
+                
+                return jsonify({'status': 'success', 'message': 'Account disabled and transactions removed'})
+            else:
+                return jsonify({'status': 'error', 'message': 'Failed to disable account'}), 500
         
     except Exception as e:
         app.logger.error(f"Error toggling sync: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/update-account', methods=['POST'])
+@login_required
+def quiltt_update_account():
+    """Update account settings (is_active, sync_transactions) during setup"""
+    data = request.get_json()
+    account_id = data.get('account_id')
+    is_active = data.get('is_active')
+    sync_transactions = data.get('sync_transactions')
+    
+    if not account_id:
+        return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
+    
+    try:
+        app.logger.info(f"Updating account {account_id}: is_active={is_active}, sync_transactions={sync_transactions}")
+        
+        # Update both fields together to avoid race conditions
+        from quiltt_redis import update_quiltt_account_fields
+        success = update_quiltt_account_fields(
+            account_id,
+            {
+                'is_active': is_active,
+                'sync_transactions': sync_transactions
+            },
+            current_user.id
+        )
+        
+        if not success:
+            app.logger.error(f"Failed to update account {account_id}")
+            return jsonify({'status': 'error', 'message': 'Failed to update account'}), 500
+        
+        app.logger.info(f"Successfully updated account {account_id}")
+        return jsonify({'status': 'success'})
+        
+    except Exception as e:
+        app.logger.error(f"Error updating account {account_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/sync-transactions-setup', methods=['POST'])
+@login_required
+def quiltt_sync_transactions_setup():
+    """Sync transactions for specific accounts during setup"""
+    data = request.get_json()
+    account_ids = data.get('account_ids', [])
+    
+    if not account_ids:
+        return jsonify({'status': 'success', 'message': 'No accounts to sync', 'transactions_synced': 0})
+    
+    try:
+        total_synced = 0
+        
+        for account_id in account_ids:
+            success, count, message = _sync_quiltt_transactions_for_user(
+                current_user.id,
+                specific_account_id=account_id
+            )
+            if success:
+                total_synced += count
+        
+        return jsonify({
+            'status': 'success',
+            'transactions_synced': total_synced,
+            'message': f'Synced {total_synced} transactions'
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error syncing transactions during setup: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/auto-adjust-checking', methods=['POST'])
+@login_required
+def quiltt_auto_adjust_checking():
+    """
+    Create auto-adjustment entries for all active checking accounts.
+    Called after initial setup or when user enables checking accounts.
+    """
+    try:
+        # Get all active accounts for this user
+        accounts = get_quiltt_accounts(current_user.id)
+        
+        if not accounts:
+            return jsonify({'status': 'success', 'message': 'No accounts found'})
+        
+        adjustments_made = []
+        
+        for account in accounts:
+            # Only process active checking accounts (depository type with "checking" in name)
+            is_active = account.get('is_active', 0)
+            account_type = account.get('account_type', '').lower()
+            account_name = account.get('account_name', '').lower()
+            current_balance = account.get('current_balance', 0)
+            
+            if is_active and account_type == 'depository' and 'checking' in account_name and current_balance:
+                app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing checking account: {account_name}, balance: {current_balance}")
+                
+                success, message = _create_auto_adjustment_for_bank_balance(
+                    current_user.id,
+                    current_balance,
+                    account_name
+                )
+                
+                if success:
+                    adjustments_made.append({
+                        'account_name': account.get('account_name'),
+                        'balance': float(current_balance),
+                        'message': message
+                    })
+                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Success: {message}")
+                else:
+                    app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed for {account_name}: {message}")
+        
+        if adjustments_made:
+            return jsonify({
+                'status': 'success',
+                'adjustments': adjustments_made,
+                'message': f'Created {len(adjustments_made)} auto-adjustment(s)'
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'message': 'No checking accounts needed adjustment'
+            })
+    
+    except Exception as e:
+        app.logger.error(f"[AUTO-ADJUST-CHECKING] Error: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -13461,14 +14033,34 @@ def quiltt_webhook():
                         user_id = profile['user_id']
                         app.logger.info(f"Processing {event_type} event for user {user_id}")
                         
-                        # Update connection status
+                        # Update connection status in MySQL
                         if connection_id:
                             cursor.execute("""
                                 UPDATE quiltt_connections 
                                 SET status = 'SYNCED', last_synced_at = NOW()
                                 WHERE user_id = %s AND connection_id = %s
                             """, (user_id, connection_id))
-                            app.logger.info(f"Updated connection status for {connection_id}")
+                            app.logger.info(f"Updated connection status in MySQL for {connection_id}")
+                            
+                            # Also update Redis using upsert
+                            from quiltt_redis import upsert_quiltt_connection, get_quiltt_connections
+                            
+                            # Log before update
+                            connections_before = get_quiltt_connections(user_id)
+                            conn_before = next((c for c in connections_before if c.get('connection_id') == connection_id), None)
+                            app.logger.info(f"Before Redis update - Connection {connection_id} status: {conn_before.get('status') if conn_before else 'NOT FOUND'}")
+                            
+                            # Update in Redis
+                            result = upsert_quiltt_connection({
+                                'connection_id': connection_id,
+                                'status': 'SYNCED'
+                            }, user_id)
+                            app.logger.info(f"Upsert result: {result}")
+                            
+                            # Log after update
+                            connections_after = get_quiltt_connections(user_id)
+                            conn_after = next((c for c in connections_after if c.get('connection_id') == connection_id), None)
+                            app.logger.info(f"After Redis update - Connection {connection_id} status: {conn_after.get('status') if conn_after else 'NOT FOUND'}")
                         
                         conn.commit()
                         
