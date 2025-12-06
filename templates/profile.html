@@ -167,7 +167,7 @@
                     <div class="section-liner profile-bank-connections">
                             {% if connections and connections|length > 0 %}
                                 {% for connection in connections %}
-                                <div class="connection-card">
+                                <div class="connection-card" data-connection-id="{{ connection.connection_id }}">
                                     <div class="connection-header">
                                         <div class="connection-info">
                                             <h3>{{ connection.institution_name or 'Bank' }}</h3>
@@ -1093,7 +1093,6 @@
                                 window.location.reload();
                             })
                             .catch(error => {
-                                console.error('Error uploading:', error);
                                 alert('Error uploading profile picture');
                             });
                         }, 'image/png');
@@ -1518,7 +1517,6 @@
                         const formatted = `${month}/${day}/${year} ${hours}:${minutes} ${ampm} ${tzAbbr}`;
                         $element.text(formatted);
                     } catch (e) {
-                        console.error('Error formatting timestamp:', e);
                         $element.text(timestamp);
                     }
                 }
@@ -1533,21 +1531,249 @@
             // Format on page load
             formatLastSyncedTimes();
 
+            // Poll for balance updates while syncing
+            let balancePollingInterval = null;
+            
+            function startBalancePolling() {
+                // Clear any existing interval
+                if (balancePollingInterval) {
+                    clearInterval(balancePollingInterval);
+                }
+                
+                // First, fetch and render connections immediately
+                updateConnectionsUI();
+                
+                // Poll every 2 seconds
+                balancePollingInterval = setInterval(function() {
+                    updateConnectionsUI();
+                }, 2000); // Poll every 2 seconds
+                
+                // Stop polling after 60 seconds max
+                setTimeout(function() {
+                    if (balancePollingInterval) {
+                        stopBalancePolling();
+                    }
+                }, 60000);
+            }
+            
+            function updateConnectionsUI() {
+                $.ajax({
+                    url: '/quiltt/connections',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.status === 'success' && response.connections) {
+                            
+                            // Check if we have new connections
+                            const currentConnectionIds = $('.connection-card').map(function() {
+                                return $(this).data('connection-id');
+                            }).get();
+                            
+                            try {
+                                response.connections.forEach(function(connection) {
+                                    const connectionExists = currentConnectionIds.includes(connection.connection_id);
+                                    
+                                    if (!connectionExists) {
+                                        // Add new connection card
+                                        renderConnectionCard(connection);
+                                    } else {
+                                        // Update existing connection
+                                        updateConnectionCard(connection);
+                                    }
+                                });
+                                
+                                // Check if all connections are synced
+                                const allSynced = response.connections.every(conn => conn.status === 'SYNCED');
+                                
+                                if (allSynced && response.connections.length > 0) {
+                                    stopBalancePolling();
+                                }
+                            } catch (error) {
+                                // Error during connection processing
+                            }
+                        } else {
+                            // Unexpected response format
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        // Don't stop on error, keep trying
+                    }
+                });
+            }
+            
+            function renderConnectionCard(connection) {
+                const currencySymbol = '{{ currency_symbol }}';
+                
+                // Group accounts by type
+                const checkingAccounts = (connection.accounts || []).filter(acc => 
+                    acc.account_type === 'DEPOSITORY' && acc.account_name.toLowerCase().includes('checking')
+                );
+                const savingsAccounts = (connection.accounts || []).filter(acc => 
+                    acc.account_type === 'DEPOSITORY' && acc.account_name.toLowerCase().includes('savings')
+                );
+                const creditAccounts = (connection.accounts || []).filter(acc => 
+                    acc.account_type === 'CREDIT'
+                );
+                
+                // Build accounts HTML
+                let accountsHtml = '';
+                
+                if (checkingAccounts.length > 0) {
+                    accountsHtml += '<div class="account-type-divider">Checking Accounts</div>';
+                    checkingAccounts.forEach(account => {
+                        accountsHtml += renderAccountItem(account, currencySymbol);
+                    });
+                }
+                
+                if (savingsAccounts.length > 0) {
+                    accountsHtml += '<div class="account-type-divider">Savings Accounts</div>';
+                    savingsAccounts.forEach(account => {
+                        accountsHtml += renderAccountItem(account, currencySymbol);
+                    });
+                }
+                
+                if (creditAccounts.length > 0) {
+                    accountsHtml += '<div class="account-type-divider">Credit Accounts</div>';
+                    creditAccounts.forEach(account => {
+                        accountsHtml += renderAccountItem(account, currencySymbol);
+                    });
+                }
+                
+                // Build connection card HTML
+                const statusClass = connection.status === 'DISCONNECTED' ? 'disconnected' : 
+                                  (['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 'syncing' : 'connected');
+                
+                const statusIcon = ['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 
+                                 '<i class="fa-solid fa-arrows-rotate fa-spin"></i>' :
+                                 (connection.status === 'SYNCED' ? '<i class="fa-solid fa-circle-check"></i>' : '');
+                
+                const reconnectBtn = connection.status === 'DISCONNECTED' ? 
+                    `<button class="reconnect-btn" data-connection-id="${connection.connection_id}" title="Reconnect">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>` : '';
+                
+                const cardHtml = `
+                    <div class="connection-card" data-connection-id="${connection.connection_id}">
+                        <div class="connection-header">
+                            <div class="connection-info">
+                                <h3>${connection.institution_name || 'Bank'}</h3>
+                                <span class="connection-status ${statusClass}">
+                                    ${statusIcon}
+                                    ${connection.status || 'active'}
+                                </span>
+                            </div>
+                            <div class="connection-actions">
+                                ${reconnectBtn}
+                                <button class="delete-connection-btn danger-button" data-connection-id="${connection.connection_id}" title="Delete Connection">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        ${accountsHtml ? '<div class="accounts-list">' + accountsHtml + '</div>' : ''}
+                        ${connection.last_synced_at ? 
+                            `<div class="connection-footer">
+                                <small>Last synced: <span class="last-synced-time" data-timestamp="${connection.last_synced_at}"></span></small>
+                            </div>` : ''}
+                    </div>
+                `;
+                
+                // Remove "no connections" message if it exists
+                $('.no-connections').remove();
+                
+                // Add card to the page
+                $('.connect-bank-container').before(cardHtml);
+                
+                // Format the timestamp
+                formatLastSyncedTimes();
+            }
+            
+            function renderAccountItem(account, currencySymbol) {
+                const balance = parseFloat(account.current_balance || 0).toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                });
+                
+                return `
+                    <div class="account-item">
+                        <div class="account-info">
+                            <input type="checkbox" 
+                                   id="account-${account.id}"
+                                   class="account-sync-toggle"
+                                   data-account-id="${account.account_id}"
+                                   ${account.sync_transactions ? 'checked' : ''}
+                                   style="width: 18px; height: 18px; cursor: pointer;">
+                            <label for="account-${account.id}">
+                                <strong>${account.account_name}</strong>
+                                <span class="account-mask">...${account.mask}</span>
+                            </label>
+                        </div>
+                        <div class="account-balance">
+                            ${currencySymbol}${balance}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            function updateConnectionCard(connection) {
+                const $card = $(`.connection-card[data-connection-id="${connection.connection_id}"]`);
+                if (!$card.length) {
+                    return;
+                }
+                
+                // Update status
+                const statusClass = connection.status === 'DISCONNECTED' ? 'disconnected' : 
+                                  (['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 'syncing' : 'connected');
+                
+                const statusIcon = ['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 
+                                 '<i class="fa-solid fa-arrows-rotate fa-spin"></i>' :
+                                 (connection.status === 'SYNCED' ? '<i class="fa-solid fa-circle-check"></i>' : '');
+                
+                const $status = $card.find('.connection-status');
+                const oldStatus = $status.text().trim();
+                const newStatus = connection.status || 'active';
+                
+                if (oldStatus !== newStatus) {
+                    $status.attr('class', 'connection-status ' + statusClass)
+                           .html(statusIcon + ' ' + newStatus);
+                } else {
+                }
+                
+                // Update account balances
+                (connection.accounts || []).forEach(function(account) {
+                    const $accountItem = $card.find(`.account-sync-toggle[data-account-id="${account.account_id}"]`).closest('.account-item');
+                    if ($accountItem.length) {
+                        const $balanceDiv = $accountItem.find('.account-balance');
+                        const currencySymbol = '{{ currency_symbol }}';
+                        const formattedBalance = currencySymbol + parseFloat(account.current_balance || 0).toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                        });
+                        
+                        // Update with fade effect
+                        if ($balanceDiv.text() !== formattedBalance) {
+                            $balanceDiv.fadeOut(200, function() {
+                                $(this).text(formattedBalance).fadeIn(200);
+                            });
+                        }
+                    }
+                });
+            }
+            
+            function stopBalancePolling() {
+                if (balancePollingInterval) {
+                    clearInterval(balancePollingInterval);
+                    balancePollingInterval = null;
+                }
+            }
+
             // Connect bank account - Load Quiltt Connector
             connectBankBtn.on('click', function() {
                 const connectorId = '{{ connector_id if connector_id else "" }}';
                 
-                console.log('Connect Bank Account clicked');
-                console.log('Connector ID:', connectorId || 'MISSING');
-                
                 if (!connectorId || connectorId === '') {
-                    console.error('Connector ID is missing');
                     alert('Quiltt Connector ID is missing.\n\nPlease:\n1. Go to https://dashboard.quiltt.dev/\n2. Create a new Connector\n3. Add QUILTT_CONNECTOR_ID to your .env file\n\nSee QUILTT_QUICK_START.md for details.');
                     return;
                 }
 
-                console.log('Fetching fresh session token...');
-                
                 // Fetch a fresh session token from the server
                 $.ajax({
                     url: '/quiltt/get-session-token',
@@ -1555,15 +1781,12 @@
                     contentType: 'application/json',
                     success: function(response) {
                         if (response.status === 'success' && response.session_token) {
-                            console.log('Fresh session token received');
                             loadQuilttConnector(response.session_token, connectorId);
                         } else {
-                            console.error('Failed to get session token:', response);
                             alert('Unable to connect bank. Please check server logs for details.');
                         }
                     },
                     error: function(xhr, status, error) {
-                        console.error('Error fetching session token:', error);
                         if (xhr.status === 500) {
                             alert('Unable to connect bank. Quiltt API credentials may not be configured.\n\nPlease add QUILTT_API_KEY and QUILTT_ENVIRONMENT_ID to your server environment.\n\nSee QUILTT_QUICK_START.md for setup instructions.');
                         } else {
@@ -1574,44 +1797,33 @@
             });
 
             function loadQuilttConnector(sessionToken, connectorId) {
-                console.log('Loading Quiltt Connector SDK...');
-                
                 // Load Quiltt Connector SDK if not already loaded
                 if (typeof Quiltt === 'undefined') {
                     const script = document.createElement('script');
                     script.src = 'https://cdn.quiltt.io/v1/connector.js';
                     script.onload = function() {
-                        console.log('Quiltt SDK loaded successfully');
                         openQuilttConnector(sessionToken, connectorId);
                     };
                     script.onerror = function() {
-                        console.error('Failed to load Quiltt SDK');
                         alert('Failed to load Quiltt Connector SDK. Please check your internet connection.');
                     };
                     document.head.appendChild(script);
                 } else {
-                    console.log('Quiltt SDK already loaded');
                     openQuilttConnector(sessionToken, connectorId);
                 }
             }
 
             function openQuilttConnector(sessionToken, connectorId) {
-                console.log('openQuilttConnector called');
-                console.log('Authenticating with Quiltt...');
-                
                 try {
                     // Authenticate with session token
                     Quiltt.authenticate(sessionToken);
                     
-                    console.log('Creating Quiltt Connector instance...');
-                    
                     // Connect with the connector ID
                     const connector = Quiltt.connect(connectorId, {
                         onLoad: function(metadata) {
-                            console.log('Connector loaded:', metadata);
+                            // Connector loaded
                         },
                         onExitSuccess: function(metadata) {
-                            console.log('Bank connected successfully:', metadata);
                             
                             // Check if this was a reconnect operation
                             if (window.reconnectingConnectionId) {
@@ -1624,8 +1836,6 @@
                                     contentType: 'application/json',
                                     data: JSON.stringify({ connection_id: oldConnectionId }),
                                     success: function() {
-                                        console.log('Deleted old connection, syncing new one');
-                                        
                                         // Clear reconnect state
                                         delete window.reconnectingConnectionId;
                                         delete window.reconnectingInstitution;
@@ -1635,17 +1845,14 @@
                                             url: '/quiltt/sync-profile',
                                             method: 'POST',
                                             success: function() {
-                                                console.log('Reconnection complete, reloading...');
                                                 window.location.reload();
                                             },
                                             error: function(xhr) {
-                                                console.error('Sync failed:', xhr);
                                                 alert('Connection successful but sync failed. Please refresh the page.');
                                             }
                                         });
                                     },
                                     error: function(xhr) {
-                                        console.error('Failed to delete old connection:', xhr);
                                         // Still try to reload - new connection should appear
                                         window.location.reload();
                                     }
@@ -1657,12 +1864,10 @@
                                     method: 'POST',
                                     contentType: 'application/json',
                                     success: function(response) {
-                                        console.log('Profile synced successfully');
-                                        // Reload page to show new connection
-                                        window.location.reload();
+                                        // Start polling for balance updates instead of immediate reload
+                                        startBalancePolling();
                                     },
                                     error: function(xhr, status, error) {
-                                        console.error('Error syncing profile:', error);
                                         // Reload anyway - connections may still be visible
                                         window.location.reload();
                                     }
@@ -1670,21 +1875,18 @@
                             }
                         },
                         onExitAbort: function(metadata) {
-                            console.log('User cancelled connection:', metadata);
+                            // User cancelled connection
                         },
                         onExitError: function(metadata) {
-                            console.log('Error connecting bank:', metadata);
                             alert('Error connecting bank. Please try again.');
                         },
                         onEvent: function(eventType, metadata) {
-                            console.log('Connector event:', eventType, metadata);
+                            // Connector event
                         }
                     });
                     
-                    console.log('Opening Quiltt Connector modal...');
                     connector.open();
                 } catch (error) {
-                    console.error('Error initializing Quiltt Connector:', error);
                     alert('Error opening bank connection: ' + error.message);
                 }
             }
@@ -1694,8 +1896,6 @@
                 const connectionId = $(this).data('connection-id');
                 const $card = $(this).closest('.connection-card');
                 const institutionName = $card.find('h3').first().text().trim();
-                
-                console.log('Reconnecting bank:', institutionName, connectionId);
                 
                 // Show loading state
                 const $status = $card.find('.connection-status');
@@ -1712,13 +1912,11 @@
                     method: 'POST',
                     success: function(response) {
                         const freshToken = response.session_token;
-                        console.log('Got fresh token, opening Quiltt Connector...');
                         
                         // Open Quiltt Connector for re-authentication
                         openQuilttConnector(freshToken, 'quiltt-profile-connector');
                     },
                     error: function(xhr) {
-                        console.error('Failed to get session token:', xhr);
                         alert('Failed to start reconnection. Please try again.');
                         $status.text(originalStatus).removeClass('connected').addClass('disconnected');
                         
@@ -1798,7 +1996,6 @@
                             deleteConnectionData(connectionId, $card);
                         },
                         error: function(xhr) {
-                            console.log('Disconnect failed, attempting delete anyway:', xhr);
                             // Even if disconnect fails, try to delete
                             deleteConnectionData(connectionId, $card);
                         }
@@ -1924,7 +2121,6 @@
                             
                             // If all connections are synced, stop polling
                             if (response.all_synced) {
-                                console.log('All connections synced');
                                 if (syncPollInterval) {
                                     clearInterval(syncPollInterval);
                                     syncPollInterval = null;
@@ -1933,7 +2129,6 @@
                         }
                     },
                     error: function(xhr, status, error) {
-                        console.error('Error checking sync status:', error);
                         // Stop polling on error
                         if (syncPollInterval) {
                             clearInterval(syncPollInterval);
@@ -1997,7 +2192,7 @@
                         }
                     },
                     error: function(xhr, status, error) {
-                        console.error('Error fetching accounts:', error);
+                        // Error fetching accounts
                     }
                 });
             }
@@ -2037,7 +2232,6 @@
                 });
                 
                 if ($syncingConnections.length > 0) {
-                    console.log('Found ' + $syncingConnections.length + ' connection(s) syncing, starting poll...');
                     // Poll every 3 seconds
                     syncPollInterval = setInterval(checkSyncStatus, 3000);
                 }

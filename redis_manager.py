@@ -597,6 +597,7 @@ def _flush_redis_to_mysql():
             # Deletion handlers (must run after updates)
             'quiltt_connections_deleted',
             'quiltt_accounts_deleted',
+            'quiltt_transactions_deleted',
         ]
         
         for user_id in users_to_flush:
@@ -730,6 +731,11 @@ def _flush_table_to_mysql(table: str, user_id: int):
         
         elif table == 'quiltt_accounts_deleted':
             # This is handled by quiltt_connections_deleted (cascade delete)
+            # Just return 0
+            return 0
+        
+        elif table == 'quiltt_transactions_deleted':
+            # This is handled by quiltt_accounts_deleted (cascade delete via FK)
             # Just return 0
             return 0
         
@@ -1690,8 +1696,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         row.get('mask', ''),
                         float(current_bal) if current_bal is not None else 0.0,
                         float(available_bal) if available_bal is not None else 0.0,
-                        int(row.get('is_active', 1)),
-                        int(row.get('sync_transactions', 1))
+                        int(row.get('is_active')) if row.get('is_active') is not None else None,
+                        int(row.get('sync_transactions')) if row.get('sync_transactions') is not None else None
                     ))
                     
                     # Update row with real connection_id for Redis

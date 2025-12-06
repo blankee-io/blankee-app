@@ -256,6 +256,35 @@ class QuilttClient:
                 logger.error(f"Response body: {e.response.text[:1000]}")
             return None
     
+    def get_connection(self, session_token: str, connection_id: str) -> Optional[Dict]:
+        """
+        Get a specific connection's details including its current status
+        
+        Args:
+            session_token: User's session token
+            connection_id: The connection ID to fetch
+            
+        Returns:
+            Connection dict with status or None on error
+        """
+        query = """
+        query GetConnection($id: ID!) {
+            connection(id: $id) {
+                id
+                status
+                institution {
+                    id
+                    name
+                }
+                at
+            }
+        }
+        """
+        
+        variables = {'id': connection_id}
+        result = self.query_graphql(session_token, query, variables)
+        return result.get('connection') if result else None
+    
     def get_profile(self, session_token: str) -> Optional[Dict]:
         """Get user's Quiltt connections and accounts"""
         query = """
@@ -303,41 +332,50 @@ class QuilttClient:
         Returns:
             List of transaction dicts or None on error
         """
-        query = """
-        query GetTransactions($accountId: ID, $startDate: ISO8601Date, $endDate: ISO8601Date, $first: Int) {
-            profile {
-                transactions(accountId: $accountId, startDate: $startDate, endDate: $endDate, first: $first) {
-                    nodes {
+        logger.info(f"Fetching transactions: account_id={account_id}, start={start_date}, end={end_date}, limit={limit}")
+        
+        # Build filter for account and date range
+        filter_parts = []
+        if account_id:
+            filter_parts.append(f'accountIds: ["{account_id}"]')
+        if start_date:
+            filter_parts.append(f'date_gte: "{start_date}"')
+        if end_date:
+            filter_parts.append(f'date_lte: "{end_date}"')
+        
+        filter_str = ', '.join(filter_parts) if filter_parts else ''
+        filter_arg = f'filter: {{ {filter_str} }}' if filter_str else ''
+        
+        query = f"""
+        query GetTransactions {{
+            transactions({filter_arg}, first: {limit}, sort: DATE_DESC) {{
+                nodes {{
+                    id
+                    account {{
                         id
-                        accountId
-                        amount
-                        date
-                        description
-                        pending
-                        category
-                        merchantName
-                        transactionType
-                    }
-                }
-            }
-        }
+                    }}
+                    amount
+                    date
+                    description
+                    status
+                    entryType
+                    kind
+                }}
+            }}
+        }}
         """
         
-        variables = {
-            'first': limit
-        }
+        logger.info(f"GraphQL query: {query}")
+        result = self.query_graphql(session_token, query, None)
         
-        if account_id:
-            variables['accountId'] = account_id
-        if start_date:
-            variables['startDate'] = start_date
-        if end_date:
-            variables['endDate'] = end_date
-        
-        result = self.query_graphql(session_token, query, variables)
-        
-        if result and 'profile' in result and 'transactions' in result['profile']:
-            return result['profile']['transactions']['nodes']
+        if result and 'transactions' in result and 'nodes' in result['transactions']:
+            transactions = result['transactions']['nodes']
+            logger.info(f"Retrieved {len(transactions)} transactions from Quiltt API")
+            if transactions:
+                logger.info(f"First transaction sample: {transactions[0]}")
+            return transactions
+        else:
+            logger.warning(f"No transactions found in response. Result structure: {result}")
         
         return None
     
