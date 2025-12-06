@@ -1845,7 +1845,20 @@
                                             url: '/quiltt/sync-profile',
                                             method: 'POST',
                                             success: function() {
-                                                window.location.reload();
+                                                // Trigger auto-adjustment for checking accounts after reconnect
+                                                $.ajax({
+                                                    url: '/quiltt/auto-adjust-checking',
+                                                    method: 'POST',
+                                                    contentType: 'application/json',
+                                                    success: function(autoAdjustResponse) {
+                                                        console.log('[AUTO-ADJUST] Reconnect response:', autoAdjustResponse);
+                                                        window.location.reload();
+                                                    },
+                                                    error: function(xhr, status, error) {
+                                                        console.warn('[AUTO-ADJUST] Failed on reconnect but continuing:', error);
+                                                        window.location.reload();
+                                                    }
+                                                });
                                             },
                                             error: function(xhr) {
                                                 alert('Connection successful but sync failed. Please refresh the page.');
@@ -1864,8 +1877,22 @@
                                     method: 'POST',
                                     contentType: 'application/json',
                                     success: function(response) {
-                                        // Start polling for balance updates instead of immediate reload
-                                        startBalancePolling();
+                                        // Trigger auto-adjustment for checking accounts after sync
+                                        $.ajax({
+                                            url: '/quiltt/auto-adjust-checking',
+                                            method: 'POST',
+                                            contentType: 'application/json',
+                                            success: function(autoAdjustResponse) {
+                                                console.log('[AUTO-ADJUST] Response:', autoAdjustResponse);
+                                                // Start polling for balance updates
+                                                startBalancePolling();
+                                            },
+                                            error: function(xhr, status, error) {
+                                                console.warn('[AUTO-ADJUST] Failed but continuing:', error);
+                                                // Start polling anyway
+                                                startBalancePolling();
+                                            }
+                                        });
                                     },
                                     error: function(xhr, status, error) {
                                         // Reload anyway - connections may still be visible
@@ -2244,6 +2271,7 @@
             $(document).on('change', '.account-sync-toggle', function() {
                 const accountId = $(this).data('account-id');
                 const syncEnabled = $(this).is(':checked');
+                const $checkbox = $(this);
                 
                 $.ajax({
                     url: '/quiltt/toggle-sync',
@@ -2254,17 +2282,28 @@
                         sync_enabled: syncEnabled 
                     }),
                     success: function(response) {
-                        if (response.status !== 'success') {
+                        if (response.status === 'success' || response.status === 'warning') {
+                            // Log the response message (includes auto-adjustment info if applicable)
+                            console.log('[TOGGLE-SYNC] ' + response.message);
+                            
+                            // If enabling account, refresh connections to show updated balances
+                            if (syncEnabled) {
+                                // Brief delay to allow backend to process, then refresh
+                                setTimeout(function() {
+                                    updateConnectionsUI();
+                                }, 1000);
+                            }
+                        } else {
                             alert('Failed to update sync setting');
                             // Revert checkbox
-                            $(this).prop('checked', !syncEnabled);
+                            $checkbox.prop('checked', !syncEnabled);
                         }
-                    }.bind(this),
+                    },
                     error: function() {
                         alert('Error updating sync setting');
                         // Revert checkbox
-                        $(this).prop('checked', !syncEnabled);
-                    }.bind(this)
+                        $checkbox.prop('checked', !syncEnabled);
+                    }
                 });
             });
         });

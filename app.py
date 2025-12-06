@@ -13561,6 +13561,140 @@ def quiltt_sync_transactions():
         return jsonify({'status': 'error', 'message': message}), 400
 
 
+def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name_lower=''):
+    """
+    Create an auto-adjustment entry to match Blankee remainder with bank balance.
+    Called when a checking account is connected or enabled.
+    
+    Returns: (success: bool, message: str)
+    """
+    try:
+        from datetime import date as date_class
+        today = date_class.today()
+        today_str = today.strftime('%Y-%m-%d')
+        
+        # Get today's remainder from Redis or MySQL
+        today_remainder = None
+        
+        # Try Redis first
+        cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
+        if cached_daily:
+            for row in cached_daily:
+                row_date = datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']
+                if row_date == today:
+                    today_remainder = float(row.get('remainder', 0))
+                    app.logger.info(f"[AUTO-ADJUSTMENT] Found remainder in Redis: {today_remainder}")
+                    break
+        
+        # Fallback to MySQL if not in Redis
+        if today_remainder is None:
+            app.logger.info(f"[AUTO-ADJUSTMENT] Remainder not in Redis, checking MySQL")
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT remainder FROM totals_remainders_d
+                    WHERE user_id = %s AND date = %s
+                    LIMIT 1
+                """, (user_id, today_str))
+                result = cursor.fetchone()
+                cursor.close()
+                
+                if result:
+                    today_remainder = float(result['remainder'])
+                    app.logger.info(f"[AUTO-ADJUSTMENT] Found remainder in MySQL: {today_remainder}")
+                else:
+                    app.logger.warning(f"[AUTO-ADJUSTMENT] No remainder found for user {user_id} on {today_str}")
+                    return False, "No remainder data found for today"
+        
+        bank_balance_float = float(bank_balance)
+        
+        # Calculate difference
+        diff = bank_balance_float - today_remainder
+        
+        # Skip if difference is negligible (less than 1 cent)
+        if abs(diff) < 0.01:
+            app.logger.info(f"[AUTO-ADJUSTMENT] User {user_id}: No adjustment needed (diff={diff:.2f})")
+            return True, f"No adjustment needed - balance already matches (${bank_balance_float:.2f})"
+        
+        # Determine if we need income or expense adjustment
+        entry_type = 'income' if diff > 0 else 'expense'
+        table_name = 'income_entries' if diff > 0 else 'expense_entries'
+        
+        # Find Auto Adjustments category
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            if entry_type == 'income':
+                cursor.execute("""
+                    SELECT id, name FROM income_categories 
+                    WHERE user_id = %s AND is_auto_adjustment = 1 
+                    LIMIT 1
+                """, (user_id,))
+            else:
+                cursor.execute("""
+                    SELECT id, name FROM expense_categories 
+                    WHERE user_id = %s AND is_auto_adjustment = 1 
+                    LIMIT 1
+                """, (user_id,))
+            
+            auto_cat = cursor.fetchone()
+            cursor.close()
+        
+        if not auto_cat:
+            app.logger.error(f"[AUTO-ADJUSTMENT] User {user_id}: No Auto Adjustments category found for {entry_type}")
+            return False, f"No Auto Adjustments category found for {entry_type}"
+        
+        category_id = auto_cat['id']
+        adjustment_amount = abs(diff)
+        
+        # Add adjustment entry to Redis (will be flushed to MySQL)
+        existing_data = _get_entries_from_redis(table_name, user_id)
+        
+        # If not in Redis, load from MySQL first
+        if existing_data is None:
+            existing_data = []
+            with get_db_pool().get_connection() as conn:
+                cursor2 = conn.cursor(pymysql.cursors.DictCursor)
+                if entry_type == 'income':
+                    cursor2.execute("""
+                        SELECT ie.* FROM income_entries ie
+                        JOIN income_categories ic ON ie.category_id = ic.id
+                        WHERE ic.user_id = %s
+                    """, (user_id,))
+                else:
+                    cursor2.execute("""
+                        SELECT ee.* FROM expense_entries ee
+                        JOIN expense_categories ec ON ee.category_id = ec.id
+                        WHERE ec.user_id = %s
+                    """, (user_id,))
+                existing_data = list(cursor2.fetchall())
+                cursor2.close()
+            existing_data = _filter_pending_deletions(table_name, user_id, existing_data)
+        
+        # Check if auto-adjustment entry already exists for today
+        existing_entry = None
+        if existing_data:
+            for entry in existing_data:
+                if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == today_str:
+                    existing_entry = entry
+                    break
+        
+        if existing_entry:
+            # Update existing entry
+            new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(adjustment_amount)
+            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(new_amount))
+            app.logger.info(f"[AUTO-ADJUSTMENT] User {user_id}: Updated {entry_type} auto-adjustment to ${new_amount:.2f}")
+        else:
+            # Create new entry
+            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(adjustment_amount))
+            app.logger.info(f"[AUTO-ADJUSTMENT] User {user_id}: Created {entry_type} auto-adjustment for ${adjustment_amount:.2f}")
+        
+        return True, f"Auto-adjustment created: {entry_type} of ${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
+        
+    except Exception as e:
+        app.logger.error(f"[AUTO-ADJUSTMENT] Error for user {user_id}: {e}", exc_info=True)
+        return False, f"Error creating auto-adjustment: {str(e)}"
+
+
 @app.route('/quiltt/toggle-sync', methods=['POST'])
 @login_required
 def quiltt_toggle_sync():
@@ -13591,6 +13725,16 @@ def quiltt_toggle_sync():
             )
             
             if success_sync and success_active:
+                # Get account details AFTER enabling to check if it's a checking account
+                accounts = get_quiltt_accounts(current_user.id)
+                target_account = None
+                for acc in accounts:
+                    if acc.get('account_id') == account_id:
+                        target_account = acc
+                        break
+                
+                app.logger.info(f"[TOGGLE-SYNC] Found account: {target_account}")
+                
                 # Resync transactions for this specific account only
                 try:
                     app.logger.info(f"Re-syncing transactions for account {account_id}")
@@ -13598,15 +13742,41 @@ def quiltt_toggle_sync():
                         current_user.id, 
                         specific_account_id=account_id
                     )
+                    
+                    # Check if this is a checking account and create auto-adjustment
+                    auto_adjustment_msg = ""
+                    if target_account:
+                        account_name = target_account.get('account_name', '').lower()
+                        account_type = target_account.get('account_type', '').lower()
+                        current_balance = target_account.get('current_balance', 0)
+                        
+                        app.logger.info(f"[TOGGLE-SYNC] Account details - name: {account_name}, type: {account_type}, balance: {current_balance}")
+                        
+                        # Check if it's a checking account (depository type with "checking" in name)
+                        if account_type == 'depository' and 'checking' in account_name and current_balance:
+                            app.logger.info(f"[TOGGLE-SYNC] Detected checking account: {account_name}, balance: {current_balance}")
+                            auto_success, auto_msg = _create_auto_adjustment_for_bank_balance(
+                                current_user.id, 
+                                current_balance,
+                                account_name
+                            )
+                            if auto_success:
+                                auto_adjustment_msg = f" | {auto_msg}"
+                                app.logger.info(f"[TOGGLE-SYNC] Auto-adjustment created: {auto_msg}")
+                            else:
+                                app.logger.warning(f"[TOGGLE-SYNC] Auto-adjustment failed: {auto_msg}")
+                        else:
+                            app.logger.info(f"[TOGGLE-SYNC] Not a checking account or no balance - skipping auto-adjustment")
+                    
                     if success:
                         return jsonify({
                             'status': 'success', 
-                            'message': f'Account enabled and {count} transactions synced'
+                            'message': f'Account enabled and {count} transactions synced{auto_adjustment_msg}'
                         })
                     else:
                         return jsonify({
                             'status': 'warning', 
-                            'message': f'Account enabled but sync had issues: {message}'
+                            'message': f'Account enabled but sync had issues: {message}{auto_adjustment_msg}'
                         })
                 except Exception as tx_error:
                     app.logger.error(f"Error re-syncing transactions: {tx_error}")
@@ -13715,6 +13885,65 @@ def quiltt_sync_transactions_setup():
         
     except Exception as e:
         app.logger.error(f"Error syncing transactions during setup: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/auto-adjust-checking', methods=['POST'])
+@login_required
+def quiltt_auto_adjust_checking():
+    """
+    Create auto-adjustment entries for all active checking accounts.
+    Called after initial setup or when user enables checking accounts.
+    """
+    try:
+        # Get all active accounts for this user
+        accounts = get_quiltt_accounts(current_user.id)
+        
+        if not accounts:
+            return jsonify({'status': 'success', 'message': 'No accounts found'})
+        
+        adjustments_made = []
+        
+        for account in accounts:
+            # Only process active checking accounts (depository type with "checking" in name)
+            is_active = account.get('is_active', 0)
+            account_type = account.get('account_type', '').lower()
+            account_name = account.get('account_name', '').lower()
+            current_balance = account.get('current_balance', 0)
+            
+            if is_active and account_type == 'depository' and 'checking' in account_name and current_balance:
+                app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing checking account: {account_name}, balance: {current_balance}")
+                
+                success, message = _create_auto_adjustment_for_bank_balance(
+                    current_user.id,
+                    current_balance,
+                    account_name
+                )
+                
+                if success:
+                    adjustments_made.append({
+                        'account_name': account.get('account_name'),
+                        'balance': float(current_balance),
+                        'message': message
+                    })
+                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Success: {message}")
+                else:
+                    app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed for {account_name}: {message}")
+        
+        if adjustments_made:
+            return jsonify({
+                'status': 'success',
+                'adjustments': adjustments_made,
+                'message': f'Created {len(adjustments_made)} auto-adjustment(s)'
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'message': 'No checking accounts needed adjustment'
+            })
+    
+    except Exception as e:
+        app.logger.error(f"[AUTO-ADJUST-CHECKING] Error: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
