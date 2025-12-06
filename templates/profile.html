@@ -121,14 +121,16 @@
                             </form>
                             {% if pending_email %}
                             <div class="pending-email-banner">
-                                <strong>⏳ Pending Email Change:</strong>
+                                <div class="pending-email-header">
+                                    <i class="fas fa-hourglass-half"></i>
+                                    <strong>Pending Email Change:</strong>
+                                </div>
                                 <small>Verification email sent to <strong>{{ pending_email }}</strong>. Please check that inbox to complete the change. Your current email ({{ current_username }}) remains active until verified.</small>
-                                <div class="pending-email-resend-link">
-                                    <a href="{{ url_for('resend_pending_email_verification') }}">
+                                <div class="pending-email-actions">
+                                    <a href="{{ url_for('resend_pending_email_verification') }}" class="resend-verification-btn">
                                         <i class="fas fa-envelope"></i> Resend verification email
                                     </a>
-                                    <span style="margin: 0 8px;">|</span>
-                                    <a href="{{ url_for('cancel_pending_email_change') }}" style="color: #dc3545;">
+                                    <a href="{{ url_for('cancel_pending_email_change') }}" class="cancel-pending-email-btn">
                                         <i class="fas fa-times"></i> Cancel
                                     </a>
                                 </div>
@@ -138,40 +140,166 @@
                             <form id="password-change-form" class="profile-form">
                                 <div class="input-group">
                                     <label>Change Password:</label>
-                                    <span></span>
+                                    <input type="text" disabled class="hidden-spacer">
                                     <button type="button" id="change-password-btn" class="submit-button">
-                                        Change
+                                        <i class="fa-solid fa-pen"></i>
                                     </button>
                                 </div>
                             </form>
                             <form id="mfa-enable-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="enable-mfa-btn">MFA:</label>
-                                    <span id="mfa-status-message">
-                                        {% if mfa_enabled %}
-                                            <span>Enabled</span>
-                                        {% else %}
-                                            <span>Disabled</span>
-                                        {% endif %}
-                                    </span>
-                                    {% if mfa_enabled %}
-                                        <button type="button" id="disable-mfa-btn" class="submit-button">
-                                            Disable
-                                        </button>
-                                    {% else %}
-                                        <button type="button" id="enable-mfa-btn" class="submit-button">
-                                            Enable
-                                        </button>
-                                    {% endif %}
-                                </div>
-                            </form>
-                            <form id="delete-account-form" class="profile-form">
-                                <div class="input-group">
-                                    <button class="delete-account-button" data-url="{{ url_for('delete_user', username=current_user.username) }}">
-                                        Delete Account
+                                    <label for="mfa-toggle">MFA:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="mfa-toggle" {% if mfa_enabled %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="mfa-toggle">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if not mfa_enabled %}toggle-off{% endif %}"></i>
                                     </button>
                                 </div>
                             </form>
+                            <button class="delete-account-button" data-url="{{ url_for('delete_user', username=current_user.username) }}">
+                                Delete Account
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Bank Connections Section -->
+                    <div class="profile-section" id="bank-connections-section">
+                    <div class="section-liner profile-bank-connections">
+                            {% if connections and connections|length > 0 %}
+                                {% for connection in connections %}
+                                <div class="connection-card" data-connection-id="{{ connection.connection_id }}">
+                                    <div class="connection-header">
+                                        <div class="connection-info">
+                                            <h3>{{ connection.institution_name or 'Bank' }}</h3>
+                                            <span class="connection-status {% if connection.status == 'DISCONNECTED' %}disconnected{% elif connection.status in ['SYNCING', 'INITIALIZING', 'PENDING'] %}syncing{% else %}connected{% endif %}">
+                                                {% if connection.status in ['SYNCING', 'INITIALIZING', 'PENDING'] %}
+                                                    <i class="fa-solid fa-arrows-rotate fa-spin"></i>
+                                                {% elif connection.status == 'SYNCED' %}
+                                                    <i class="fa-solid fa-circle-check"></i>
+                                                {% endif %}
+                                                {{ connection.status or 'active' }}
+                                            </span>
+                                        </div>
+                                        <div class="connection-actions">
+                                            {% if connection.status == 'DISCONNECTED' %}
+                                                <button class="reconnect-btn" data-connection-id="{{ connection.connection_id }}" title="Reconnect">
+                                                    <i class="fa-solid fa-rotate"></i>
+                                                </button>
+                                            {% endif %}
+                                            <button class="delete-connection-btn danger-button" data-connection-id="{{ connection.connection_id }}" title="Delete Connection">
+                                                <i class="fa-solid fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                    
+                    {% if connection.accounts %}
+                    <div class="accounts-list">
+                        {% set checking_accounts = [] %}
+                        {% set savings_accounts = [] %}
+                        {% set credit_accounts = [] %}
+                        
+                        {% for account in connection.accounts %}
+                            {% if account.account_type == 'DEPOSITORY' and 'checking' in account.account_name.lower() %}
+                                {% set _ = checking_accounts.append(account) %}
+                            {% elif account.account_type == 'DEPOSITORY' and 'savings' in account.account_name.lower() %}
+                                {% set _ = savings_accounts.append(account) %}
+                            {% elif account.account_type == 'CREDIT' %}
+                                {% set _ = credit_accounts.append(account) %}
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if checking_accounts %}
+                        <div class="account-type-divider">Checking Accounts</div>
+                        {% for account in checking_accounts %}
+                        <div class="account-item">
+                            <div class="account-info">
+                                <input type="checkbox" 
+                                       id="account-{{ account.id }}"
+                                       class="account-sync-toggle"
+                                       data-account-id="{{ account.account_id }}"
+                                       {% if account.sync_transactions %}checked{% endif %}
+                                       style="width: 18px; height: 18px; cursor: pointer;">
+                                <label for="account-{{ account.id }}">
+                                    <strong>{{ account.account_name }}</strong>
+                                    <span class="account-mask">...{{ account.mask }}</span>
+                                </label>
+                            </div>
+                            <div class="account-balance">
+                                {{ currency_symbol }}{{ "{:,.2f}".format(account.current_balance or 0) }}
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% endif %}
+                        
+                        {% if savings_accounts %}
+                        <div class="account-type-divider">Savings Accounts</div>
+                        {% for account in savings_accounts %}
+                        <div class="account-item">
+                            <div class="account-info">
+                                <input type="checkbox" 
+                                       id="account-{{ account.id }}"
+                                       class="account-sync-toggle"
+                                       data-account-id="{{ account.account_id }}"
+                                       {% if account.sync_transactions %}checked{% endif %}
+                                       style="width: 18px; height: 18px; cursor: pointer;">
+                                <label for="account-{{ account.id }}">
+                                    <strong>{{ account.account_name }}</strong>
+                                    <span class="account-mask">...{{ account.mask }}</span>
+                                </label>
+                            </div>
+                            <div class="account-balance">
+                                {{ currency_symbol }}{{ "{:,.2f}".format(account.current_balance or 0) }}
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% endif %}
+                        
+                        {% if credit_accounts %}
+                        <div class="account-type-divider">Credit Accounts</div>
+                        {% for account in credit_accounts %}
+                        <div class="account-item">
+                            <div class="account-info">
+                                <input type="checkbox" 
+                                       id="account-{{ account.id }}"
+                                       class="account-sync-toggle"
+                                       data-account-id="{{ account.account_id }}"
+                                       {% if account.sync_transactions %}checked{% endif %}
+                                       style="width: 18px; height: 18px; cursor: pointer;">
+                                <label for="account-{{ account.id }}">
+                                    <strong>{{ account.account_name }}</strong>
+                                    <span class="account-mask">...{{ account.mask }}</span>
+                                </label>
+                            </div>
+                            <div class="account-balance">
+                                {{ currency_symbol }}{{ "{:,.2f}".format(account.current_balance or 0) }}
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    
+                    {% if connection.last_synced_at %}
+                    <div class="connection-footer">
+                        <small>Last synced: <span class="last-synced-time" data-timestamp="{{ connection.last_synced_at }}"></span></small>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                            {% else %}
+                                <div class="no-connections">
+                                    <i class="fa-solid fa-building-columns"></i>
+                                    <h3>No Bank Accounts Connected</h3>
+                                    <p>Connect your bank accounts to automatically import transactions and track your spending.</p>
+                                </div>
+                            {% endif %}
+                            
+                            <div class="connect-bank-container">
+                                <button id="connect-bank-btn" class="submit-button">
+                                    <i class="fa-solid fa-plus"></i> Connect Bank Account
+                                </button>
+                            </div>
                         </div>
                     </div>                  
                 </div>
@@ -192,8 +320,8 @@
     </div>
 
     <div id="delete-account-modal" class="modal">
-        <div id="delete-account-modal-content" class="modal-content">
-            <span id="close-delete-account-modal" class="close-modal" style="position:absolute;top:10px;right:18px;font-size:24px;cursor:pointer;">&times;</span>
+        <div id="delete-account-modal-content" class="modal-content center-modal">
+            <span id="close-delete-account-modal" class="close-modal">&times;</span>
             <h2>Delete Account</h2>
             <p>
                 Are you sure you want to delete your account? This action cannot be undone.
@@ -206,7 +334,7 @@
     </div>
 
     
-    <div id="mfa-qr-modal" class="modal" style="display:none;">
+    <div id="mfa-qr-modal" class="modal">
         <div class="modal-content">
             <span id="close-mfa-modal" class="close-modal">&times;</span>
             <h3>Enable Multi-Factor Authentication</h3>
@@ -228,10 +356,24 @@
                 </div>
             </div>
             <form id="mfa-verify-form" class="mfa-verify-form">
-                <input type="text" id="mfa-code" maxlength="6" placeholder="Enter 6-digit code" required style="width:120px;text-align:center;">
+                <input type="text" id="mfa-code" maxlength="6" placeholder="Enter 6-digit code" required>
                 <button type="submit" class="submit-button">Verify</button>
             </form>
             <div id="mfa-verify-message"></div>
+        </div>
+    </div>
+
+    <div id="delete-connection-modal" class="modal">
+        <div class="modal-content center-modal">
+            <span id="close-delete-connection-modal" class="close-modal">&times;</span>
+            <h2>Delete Bank Connection</h2>
+            <p id="delete-modal-message">
+                This will disconnect from your bank and permanently delete all associated data including accounts and transactions from your records.
+            </p>
+            <div class="modal-buttons">
+                <button id="confirm-delete-connection" class="confirm-delete-category-btn">Delete</button>
+                <button id="cancel-delete-connection" class="cancel-delete-category-btn">Cancel</button>
+            </div>
         </div>
     </div>
 
@@ -253,7 +395,7 @@
             <p>
                 A verification email has been sent to your new email address. Please check that inbox and click the verification link to complete your email change.
             </p>
-            <p style="font-size: 13px; color: #666; margin-top: 10px;">
+            <p class="profile-delete-info">
                 Your current email address will remain active until you verify the new one.
             </p>
             <div class="modal-buttons">
@@ -340,20 +482,59 @@
         $(document).ready(function() {
             let mfaVerified = false; // Track if MFA was successfully verified
 
-            $('#enable-mfa-btn').on('click', function() {
-                mfaVerified = false; // Reset flag
-                // Existing enable MFA logic...
-                $.post('/enable_mfa', function(data) {
-                    if (data.status === 'success' && data.qr_url) {
-                        $('#mfa-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code" style="width:200px;height:200px;">');
-                        $('#mfa-secret-key').text(data.secret);
-                        $('#mfa-verify-message').text('');
-                        $('#mfa-code').val(''); // Clear previous code
-                        $('#mfa-qr-modal').css('display', 'flex');
-                    } else {
-                        $('#mfa-status-message').text('Error enabling MFA.');
-                    }
-                });
+            // Handle MFA toggle switch
+            $('#mfa-toggle').on('change', function() {
+                const isChecked = $(this).is(':checked');
+                const icon = $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon');
+                
+                if (isChecked) {
+                    // Enabling MFA - show QR modal
+                    mfaVerified = false;
+                    $.post('/enable_mfa', function(data) {
+                        if (data.status === 'success' && data.qr_url) {
+                            $('#mfa-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code">');
+                            $('#mfa-secret-key').text(data.secret);
+                            $('#mfa-verify-message').text('');
+                            $('#mfa-code').val('');
+                            $('#mfa-qr-modal').css('display', 'flex');
+                        } else {
+                            // Error - revert toggle
+                            $('#mfa-toggle').prop('checked', false);
+                            icon.addClass('toggle-off');
+                        }
+                    });
+                } else {
+                    // Disabling MFA - show confirmation modal
+                    $('#disable-mfa-modal').css('display', 'flex');
+                }
+            });
+
+            // Initialize toggle icon based on checkbox state
+            const mfaToggle = $('#mfa-toggle');
+            const mfaIcon = $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon');
+            if (mfaToggle.prop('checked')) {
+                mfaIcon.removeClass('toggle-off');
+            } else {
+                mfaIcon.addClass('toggle-off');
+            }
+
+            // Handle toggle switch click
+            $('.toggle-switch[data-checkbox="mfa-toggle"]').on('click', function() {
+                const checkbox = $('#mfa-toggle');
+                const icon = $(this).find('.toggle-icon');
+                
+                // Toggle checkbox state
+                checkbox.prop('checked', !checkbox.prop('checked'));
+                
+                // Toggle icon state
+                if (checkbox.prop('checked')) {
+                    icon.removeClass('toggle-off');
+                } else {
+                    icon.addClass('toggle-off');
+                }
+                
+                // Trigger change event
+                checkbox.trigger('change');
             });
 
             // Copy MFA secret to clipboard
@@ -378,25 +559,29 @@
             // Handle disable MFA modal
             $('#close-disable-mfa-modal, #cancel-disable-mfa-btn').on('click', function() {
                 $('#disable-mfa-modal').css('display', 'none');
+                // Revert toggle back to on
+                $('#mfa-toggle').prop('checked', true);
+                $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
             });
 
             $('#disable-mfa-modal').on('click', function(e) {
                 if (e.target === this) {
                     $('#disable-mfa-modal').css('display', 'none');
+                    // Revert toggle back to on
+                    $('#mfa-toggle').prop('checked', true);
+                    $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
                 }
             });
 
             $('#confirm-disable-mfa-btn').on('click', function() {
                 $.post('/disable_mfa', function(data) {
                     if (data.status === 'success') {
-                        $('#mfa-status-message').html('<span>Disabled</span>');
-                        $('#disable-mfa-btn').replaceWith(
-                            '<button type="button" id="enable-mfa-btn" class="submit-button">Enable</button>'
-                        );
                         $('#disable-mfa-modal').css('display', 'none');
                     } else {
-                        $('#mfa-status-message').text('Error disabling MFA.');
                         $('#disable-mfa-modal').css('display', 'none');
+                        // Revert toggle
+                        $('#mfa-toggle').prop('checked', true);
+                        $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
                     }
                 });
             });
@@ -408,6 +593,9 @@
                         if (data.status === 'success') {
                             $('#mfa-code').val('');
                             $('#mfa-verify-message').text('');
+                            // Revert toggle to off
+                            $('#mfa-toggle').prop('checked', false);
+                            $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').addClass('toggle-off');
                         }
                     });
                 }
@@ -435,15 +623,6 @@
                     if (data.status === 'success') {
                         mfaVerified = true; // Mark as verified
                         $('#mfa-verify-message').css('color', 'green').text('MFA enabled successfully!');
-                        // Update status and button in the profile section
-                        $('#mfa-status-message').html('<span">Enabled</span>');
-                        $('#enable-mfa-btn').replaceWith(
-                            '<button type="button" id="disable-mfa-btn" class="submit-button">Disable</button>'
-                        );
-                        // Attach the disable handler to the new button
-                        $('#disable-mfa-btn').on('click', function() {
-                            $('#disable-mfa-modal').css('display', 'flex');
-                        });
                         setTimeout(function() { $('#mfa-qr-modal').hide(); }, 1500);
                     } else {
                         $('#mfa-verify-message').css('color', 'red').text('Invalid code. Please try again.');
@@ -883,10 +1062,21 @@
             const uploadForm = document.getElementById('profile-upload-form');
             if (uploadForm) {
                 uploadForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    // Check if an image has been selected
+                    if (!cropperState.image) {
+                        // Show error message using settings bubble pattern
+                        const errorMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: #dc3545; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">Please add image</div>');
+                        $('body').append(errorMsg);
+                        setTimeout(function() {
+                            errorMsg.fadeOut(300, function() { $(this).remove(); });
+                        }, 3000);
+                        return;
+                    }
+                    
                     // If an image has been cropped, use the canvas data
                     if (cropperState.image) {
-                        e.preventDefault();
-                        
                         const canvas = document.getElementById('crop-canvas');
                         canvas.toBlob(function(blob) {
                             const formData = new FormData();
@@ -903,12 +1093,10 @@
                                 window.location.reload();
                             })
                             .catch(error => {
-                                console.error('Error uploading:', error);
                                 alert('Error uploading profile picture');
                             });
                         }, 'image/png');
                     }
-                    // If no image was cropped, let the form submit normally
                 });
             }
         });
@@ -924,7 +1112,7 @@
 
             deleteAccountButton.on('click', function(e) {
                 e.preventDefault();
-                deleteAccountModal.show();
+                deleteAccountModal.css('display', 'flex');
             });
 
             closeDeleteModal.on('click', function() {
@@ -948,7 +1136,7 @@
                     method: 'POST',
                     success: function(response) {
                         if (response.status === 'success') {
-                            $('#deleteSuccessModal').show();
+                            $('#deleteSuccessModal').css('display', 'flex');
                             setTimeout(function() {
                                 window.location.href = "{{ url_for('login') }}";
                             }, 3000);
@@ -1295,6 +1483,826 @@
                     },
                     error: function() {
                         passwordMfaError.text('Error verifying MFA. Please try again.').show();
+                    }
+                });
+            });
+        });
+
+        // Bank Connections Management
+        $(document).ready(function() {
+            const connectBankBtn = $('#connect-bank-btn');
+            
+            // Format all last synced timestamps in user's timezone
+            function formatTimestamp($element) {
+                const timestamp = $element.data('timestamp');
+                
+                if (timestamp) {
+                    try {
+                        const date = new Date(timestamp);
+                        
+                        // Format: MM/DD/YYYY hh:mm AM/PM TZ
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const year = date.getFullYear();
+                        
+                        let hours = date.getHours();
+                        const minutes = String(date.getMinutes()).padStart(2, '0');
+                        const ampm = hours >= 12 ? 'PM' : 'AM';
+                        hours = hours % 12;
+                        hours = hours ? hours : 12; // 0 should be 12
+                        
+                        // Get timezone abbreviation
+                        const tzAbbr = new Date().toLocaleTimeString('en-us', {timeZoneName:'short'}).split(' ')[2];
+                        
+                        const formatted = `${month}/${day}/${year} ${hours}:${minutes} ${ampm} ${tzAbbr}`;
+                        $element.text(formatted);
+                    } catch (e) {
+                        $element.text(timestamp);
+                    }
+                }
+            }
+            
+            function formatLastSyncedTimes() {
+                $('.last-synced-time').each(function() {
+                    formatTimestamp($(this));
+                });
+            }
+            
+            // Format on page load
+            formatLastSyncedTimes();
+
+            // Poll for balance updates while syncing
+            let balancePollingInterval = null;
+            
+            function startBalancePolling() {
+                // Clear any existing interval
+                if (balancePollingInterval) {
+                    clearInterval(balancePollingInterval);
+                }
+                
+                // First, fetch and render connections immediately
+                updateConnectionsUI();
+                
+                // Poll every 2 seconds
+                balancePollingInterval = setInterval(function() {
+                    updateConnectionsUI();
+                }, 2000); // Poll every 2 seconds
+                
+                // Stop polling after 60 seconds max
+                setTimeout(function() {
+                    if (balancePollingInterval) {
+                        stopBalancePolling();
+                    }
+                }, 60000);
+            }
+            
+            function updateConnectionsUI() {
+                $.ajax({
+                    url: '/quiltt/connections',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.status === 'success' && response.connections) {
+                            
+                            // Check if we have new connections
+                            const currentConnectionIds = $('.connection-card').map(function() {
+                                return $(this).data('connection-id');
+                            }).get();
+                            
+                            try {
+                                response.connections.forEach(function(connection) {
+                                    const connectionExists = currentConnectionIds.includes(connection.connection_id);
+                                    
+                                    if (!connectionExists) {
+                                        // Add new connection card
+                                        renderConnectionCard(connection);
+                                    } else {
+                                        // Update existing connection
+                                        updateConnectionCard(connection);
+                                    }
+                                });
+                                
+                                // Check if all connections are synced
+                                const allSynced = response.connections.every(conn => conn.status === 'SYNCED');
+                                
+                                if (allSynced && response.connections.length > 0) {
+                                    stopBalancePolling();
+                                }
+                            } catch (error) {
+                                // Error during connection processing
+                            }
+                        } else {
+                            // Unexpected response format
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        // Don't stop on error, keep trying
+                    }
+                });
+            }
+            
+            function renderConnectionCard(connection) {
+                const currencySymbol = '{{ currency_symbol }}';
+                
+                // Group accounts by type
+                const checkingAccounts = (connection.accounts || []).filter(acc => 
+                    acc.account_type === 'DEPOSITORY' && acc.account_name.toLowerCase().includes('checking')
+                );
+                const savingsAccounts = (connection.accounts || []).filter(acc => 
+                    acc.account_type === 'DEPOSITORY' && acc.account_name.toLowerCase().includes('savings')
+                );
+                const creditAccounts = (connection.accounts || []).filter(acc => 
+                    acc.account_type === 'CREDIT'
+                );
+                
+                // Build accounts HTML
+                let accountsHtml = '';
+                
+                if (checkingAccounts.length > 0) {
+                    accountsHtml += '<div class="account-type-divider">Checking Accounts</div>';
+                    checkingAccounts.forEach(account => {
+                        accountsHtml += renderAccountItem(account, currencySymbol);
+                    });
+                }
+                
+                if (savingsAccounts.length > 0) {
+                    accountsHtml += '<div class="account-type-divider">Savings Accounts</div>';
+                    savingsAccounts.forEach(account => {
+                        accountsHtml += renderAccountItem(account, currencySymbol);
+                    });
+                }
+                
+                if (creditAccounts.length > 0) {
+                    accountsHtml += '<div class="account-type-divider">Credit Accounts</div>';
+                    creditAccounts.forEach(account => {
+                        accountsHtml += renderAccountItem(account, currencySymbol);
+                    });
+                }
+                
+                // Build connection card HTML
+                const statusClass = connection.status === 'DISCONNECTED' ? 'disconnected' : 
+                                  (['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 'syncing' : 'connected');
+                
+                const statusIcon = ['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 
+                                 '<i class="fa-solid fa-arrows-rotate fa-spin"></i>' :
+                                 (connection.status === 'SYNCED' ? '<i class="fa-solid fa-circle-check"></i>' : '');
+                
+                const reconnectBtn = connection.status === 'DISCONNECTED' ? 
+                    `<button class="reconnect-btn" data-connection-id="${connection.connection_id}" title="Reconnect">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>` : '';
+                
+                const cardHtml = `
+                    <div class="connection-card" data-connection-id="${connection.connection_id}">
+                        <div class="connection-header">
+                            <div class="connection-info">
+                                <h3>${connection.institution_name || 'Bank'}</h3>
+                                <span class="connection-status ${statusClass}">
+                                    ${statusIcon}
+                                    ${connection.status || 'active'}
+                                </span>
+                            </div>
+                            <div class="connection-actions">
+                                ${reconnectBtn}
+                                <button class="delete-connection-btn danger-button" data-connection-id="${connection.connection_id}" title="Delete Connection">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        ${accountsHtml ? '<div class="accounts-list">' + accountsHtml + '</div>' : ''}
+                        ${connection.last_synced_at ? 
+                            `<div class="connection-footer">
+                                <small>Last synced: <span class="last-synced-time" data-timestamp="${connection.last_synced_at}"></span></small>
+                            </div>` : ''}
+                    </div>
+                `;
+                
+                // Remove "no connections" message if it exists
+                $('.no-connections').remove();
+                
+                // Add card to the page
+                $('.connect-bank-container').before(cardHtml);
+                
+                // Format the timestamp
+                formatLastSyncedTimes();
+            }
+            
+            function renderAccountItem(account, currencySymbol) {
+                const balance = parseFloat(account.current_balance || 0).toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                });
+                
+                return `
+                    <div class="account-item">
+                        <div class="account-info">
+                            <input type="checkbox" 
+                                   id="account-${account.id}"
+                                   class="account-sync-toggle"
+                                   data-account-id="${account.account_id}"
+                                   ${account.sync_transactions ? 'checked' : ''}
+                                   style="width: 18px; height: 18px; cursor: pointer;">
+                            <label for="account-${account.id}">
+                                <strong>${account.account_name}</strong>
+                                <span class="account-mask">...${account.mask}</span>
+                            </label>
+                        </div>
+                        <div class="account-balance">
+                            ${currencySymbol}${balance}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            function updateConnectionCard(connection) {
+                const $card = $(`.connection-card[data-connection-id="${connection.connection_id}"]`);
+                if (!$card.length) {
+                    return;
+                }
+                
+                // Update status
+                const statusClass = connection.status === 'DISCONNECTED' ? 'disconnected' : 
+                                  (['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 'syncing' : 'connected');
+                
+                const statusIcon = ['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 
+                                 '<i class="fa-solid fa-arrows-rotate fa-spin"></i>' :
+                                 (connection.status === 'SYNCED' ? '<i class="fa-solid fa-circle-check"></i>' : '');
+                
+                const $status = $card.find('.connection-status');
+                const oldStatus = $status.text().trim();
+                const newStatus = connection.status || 'active';
+                
+                if (oldStatus !== newStatus) {
+                    $status.attr('class', 'connection-status ' + statusClass)
+                           .html(statusIcon + ' ' + newStatus);
+                } else {
+                }
+                
+                // Update account balances
+                (connection.accounts || []).forEach(function(account) {
+                    const $accountItem = $card.find(`.account-sync-toggle[data-account-id="${account.account_id}"]`).closest('.account-item');
+                    if ($accountItem.length) {
+                        const $balanceDiv = $accountItem.find('.account-balance');
+                        const currencySymbol = '{{ currency_symbol }}';
+                        const formattedBalance = currencySymbol + parseFloat(account.current_balance || 0).toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                        });
+                        
+                        // Update with fade effect
+                        if ($balanceDiv.text() !== formattedBalance) {
+                            $balanceDiv.fadeOut(200, function() {
+                                $(this).text(formattedBalance).fadeIn(200);
+                            });
+                        }
+                    }
+                });
+            }
+            
+            function stopBalancePolling() {
+                if (balancePollingInterval) {
+                    clearInterval(balancePollingInterval);
+                    balancePollingInterval = null;
+                }
+            }
+
+            // Connect bank account - Load Quiltt Connector
+            connectBankBtn.on('click', function() {
+                const connectorId = '{{ connector_id if connector_id else "" }}';
+                
+                if (!connectorId || connectorId === '') {
+                    alert('Quiltt Connector ID is missing.\n\nPlease:\n1. Go to https://dashboard.quiltt.dev/\n2. Create a new Connector\n3. Add QUILTT_CONNECTOR_ID to your .env file\n\nSee QUILTT_QUICK_START.md for details.');
+                    return;
+                }
+
+                // Fetch a fresh session token from the server
+                $.ajax({
+                    url: '/quiltt/get-session-token',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    success: function(response) {
+                        if (response.status === 'success' && response.session_token) {
+                            loadQuilttConnector(response.session_token, connectorId);
+                        } else {
+                            alert('Unable to connect bank. Please check server logs for details.');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        if (xhr.status === 500) {
+                            alert('Unable to connect bank. Quiltt API credentials may not be configured.\n\nPlease add QUILTT_API_KEY and QUILTT_ENVIRONMENT_ID to your server environment.\n\nSee QUILTT_QUICK_START.md for setup instructions.');
+                        } else {
+                            alert('Error connecting to bank service. Please try again.');
+                        }
+                    }
+                });
+            });
+
+            function loadQuilttConnector(sessionToken, connectorId) {
+                // Load Quiltt Connector SDK if not already loaded
+                if (typeof Quiltt === 'undefined') {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.quiltt.io/v1/connector.js';
+                    script.onload = function() {
+                        openQuilttConnector(sessionToken, connectorId);
+                    };
+                    script.onerror = function() {
+                        alert('Failed to load Quiltt Connector SDK. Please check your internet connection.');
+                    };
+                    document.head.appendChild(script);
+                } else {
+                    openQuilttConnector(sessionToken, connectorId);
+                }
+            }
+
+            function openQuilttConnector(sessionToken, connectorId) {
+                try {
+                    // Authenticate with session token
+                    Quiltt.authenticate(sessionToken);
+                    
+                    // Connect with the connector ID
+                    const connector = Quiltt.connect(connectorId, {
+                        onLoad: function(metadata) {
+                            // Connector loaded
+                        },
+                        onExitSuccess: function(metadata) {
+                            
+                            // Check if this was a reconnect operation
+                            if (window.reconnectingConnectionId) {
+                                const oldConnectionId = window.reconnectingConnectionId;
+                                
+                                // Delete the old disconnected connection first
+                                $.ajax({
+                                    url: '/quiltt/delete',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({ connection_id: oldConnectionId }),
+                                    success: function() {
+                                        // Clear reconnect state
+                                        delete window.reconnectingConnectionId;
+                                        delete window.reconnectingInstitution;
+                                        
+                                        // Sync the new connection
+                                        $.ajax({
+                                            url: '/quiltt/sync-profile',
+                                            method: 'POST',
+                                            success: function() {
+                                                // Trigger auto-adjustment for checking accounts after reconnect
+                                                $.ajax({
+                                                    url: '/quiltt/auto-adjust-checking',
+                                                    method: 'POST',
+                                                    contentType: 'application/json',
+                                                    success: function(autoAdjustResponse) {
+                                                        console.log('[AUTO-ADJUST] Reconnect response:', autoAdjustResponse);
+                                                        window.location.reload();
+                                                    },
+                                                    error: function(xhr, status, error) {
+                                                        console.warn('[AUTO-ADJUST] Failed on reconnect but continuing:', error);
+                                                        window.location.reload();
+                                                    }
+                                                });
+                                            },
+                                            error: function(xhr) {
+                                                alert('Connection successful but sync failed. Please refresh the page.');
+                                            }
+                                        });
+                                    },
+                                    error: function(xhr) {
+                                        // Still try to reload - new connection should appear
+                                        window.location.reload();
+                                    }
+                                });
+                            } else {
+                                // Normal new connection - sync and reload
+                                $.ajax({
+                                    url: '/quiltt/sync-profile',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    success: function(response) {
+                                        // Trigger auto-adjustment for checking accounts after sync
+                                        $.ajax({
+                                            url: '/quiltt/auto-adjust-checking',
+                                            method: 'POST',
+                                            contentType: 'application/json',
+                                            success: function(autoAdjustResponse) {
+                                                console.log('[AUTO-ADJUST] Response:', autoAdjustResponse);
+                                                // Start polling for balance updates
+                                                startBalancePolling();
+                                            },
+                                            error: function(xhr, status, error) {
+                                                console.warn('[AUTO-ADJUST] Failed but continuing:', error);
+                                                // Start polling anyway
+                                                startBalancePolling();
+                                            }
+                                        });
+                                    },
+                                    error: function(xhr, status, error) {
+                                        // Reload anyway - connections may still be visible
+                                        window.location.reload();
+                                    }
+                                });
+                            }
+                        },
+                        onExitAbort: function(metadata) {
+                            // User cancelled connection
+                        },
+                        onExitError: function(metadata) {
+                            alert('Error connecting bank. Please try again.');
+                        },
+                        onEvent: function(eventType, metadata) {
+                            // Connector event
+                        }
+                    });
+                    
+                    connector.open();
+                } catch (error) {
+                    alert('Error opening bank connection: ' + error.message);
+                }
+            }
+
+            // Reconnect bank (for disconnected accounts)
+            $(document).on('click', '.reconnect-btn', function() {
+                const connectionId = $(this).data('connection-id');
+                const $card = $(this).closest('.connection-card');
+                const institutionName = $card.find('h3').first().text().trim();
+                
+                // Show loading state
+                const $status = $card.find('.connection-status');
+                const originalStatus = $status.text();
+                $status.text('RECONNECTING...').removeClass('disconnected').addClass('connected');
+                
+                // Store connection info for after reconnection
+                window.reconnectingConnectionId = connectionId;
+                window.reconnectingInstitution = institutionName;
+                
+                // Fetch fresh session token
+                $.ajax({
+                    url: '/quiltt/get-session-token',
+                    method: 'POST',
+                    success: function(response) {
+                        const freshToken = response.session_token;
+                        
+                        // Open Quiltt Connector for re-authentication
+                        openQuilttConnector(freshToken, 'quiltt-profile-connector');
+                    },
+                    error: function(xhr) {
+                        alert('Failed to start reconnection. Please try again.');
+                        $status.text(originalStatus).removeClass('connected').addClass('disconnected');
+                        
+                        // Clear reconnect state
+                        delete window.reconnectingConnectionId;
+                        delete window.reconnectingInstitution;
+                    }
+                });
+            });
+
+            // Delete connection (disconnect from Quiltt + delete data)
+            let pendingDeleteConnectionId = null;
+            let pending$DeleteCard = null;
+            
+            $(document).on('click', '.delete-connection-btn', function() {
+                pendingDeleteConnectionId = $(this).data('connection-id');
+                pending$DeleteCard = $(this).closest('.connection-card');
+                const connectionStatus = pending$DeleteCard.find('.connection-status').text().trim();
+                
+                // Show appropriate modal message based on status
+                if (connectionStatus === 'DISCONNECTED') {
+                    $('#delete-modal-message').text('This will permanently delete this connection and all associated data including accounts and transactions from your records.');
+                } else {
+                    $('#delete-modal-message').text('This will disconnect from your bank and permanently delete all associated data including accounts and transactions from your records.');
+                }
+                
+                $('#delete-connection-modal').css('display', 'flex');
+                document.body.classList.add('modal-open');
+                document.documentElement.classList.add('modal-open');
+            });
+
+            // Close delete connection modal
+            $('#close-delete-connection-modal, #cancel-delete-connection').on('click', function() {
+                $('#delete-connection-modal').css('display', 'none');
+                document.body.classList.remove('modal-open');
+                document.documentElement.classList.remove('modal-open');
+                pendingDeleteConnectionId = null;
+                pending$DeleteCard = null;
+            });
+
+            // Close delete modal on backdrop click
+            $('#delete-connection-modal').on('click', function(e) {
+                if (e.target.id === 'delete-connection-modal') {
+                    $(this).css('display', 'none');
+                    document.body.classList.remove('modal-open');
+                    document.documentElement.classList.remove('modal-open');
+                    pendingDeleteConnectionId = null;
+                    pending$DeleteCard = null;
+                }
+            });
+
+            // Confirm delete connection
+            $('#confirm-delete-connection').on('click', function() {
+                if (!pendingDeleteConnectionId || !pending$DeleteCard) return;
+                
+                const connectionId = pendingDeleteConnectionId;
+                const $card = pending$DeleteCard;
+                const connectionStatus = $card.find('.connection-status').text().trim();
+                
+                // Show deleting state
+                $card.find('.connection-status').text('DELETING...');
+                
+                // Close modal first
+                $('#delete-connection-modal').css('display', 'none');
+                document.body.classList.remove('modal-open');
+                document.documentElement.classList.remove('modal-open');
+                
+                // If not disconnected, disconnect from Quiltt first
+                if (connectionStatus !== 'DISCONNECTED') {
+                    $.ajax({
+                        url: '/quiltt/disconnect',
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ connection_id: connectionId }),
+                        success: function() {
+                            // After disconnecting, delete the data
+                            deleteConnectionData(connectionId, $card);
+                        },
+                        error: function(xhr) {
+                            // Even if disconnect fails, try to delete
+                            deleteConnectionData(connectionId, $card);
+                        }
+                    });
+                } else {
+                    // Already disconnected, just delete the data
+                    deleteConnectionData(connectionId, $card);
+                }
+                
+                // Clear pending state
+                pendingDeleteConnectionId = null;
+                pending$DeleteCard = null;
+            });
+            
+            function deleteConnectionData(connectionId, $card) {
+                $.ajax({
+                    url: '/quiltt/delete',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ connection_id: connectionId }),
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            // Remove the connection card from UI
+                            $card.fadeOut(300, function() {
+                                $(this).remove();
+                                
+                                // Check if there are no more connections
+                                if ($('.connection-card').length === 0) {
+                                    window.location.reload();
+                                }
+                            });
+                        } else {
+                            alert('Failed to delete connection: ' + (response.message || 'Unknown error'));
+                            $card.find('.connection-status').text('ERROR');
+                        }
+                    },
+                    error: function() {
+                        alert('Error deleting connection. Please try again.');
+                        $card.find('.connection-status').text('ERROR');
+                    }
+                });
+            }
+
+            // Poll for sync status updates
+            let syncPollInterval = null;
+            
+            function checkSyncStatus() {
+                $.ajax({
+                    url: '/quiltt/check-sync-status',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            // Update each connection's status in the UI
+                            response.connections.forEach(function(conn) {
+                                const $card = $(`.connection-card`).filter(function() {
+                                    return $(this).find('.delete-connection-btn')
+                                        .data('connection-id') === conn.connection_id;
+                                });
+                                
+                                if ($card.length > 0) {
+                                    const $status = $card.find('.connection-status');
+                                    const currentStatus = $status.text().trim();
+                                    
+                                    // Update status if it changed
+                                    if (currentStatus !== conn.status) {
+                                        // Add icon based on status
+                                        let icon = '';
+                                        let statusClass = 'connected';
+                                        
+                                        if (['SYNCING', 'INITIALIZING', 'PENDING'].includes(conn.status)) {
+                                            icon = '<i class="fa-solid fa-arrows-rotate fa-spin"></i> ';
+                                            statusClass = 'syncing';
+                                        } else if (conn.status === 'SYNCED') {
+                                            icon = '<i class="fa-solid fa-circle-check"></i> ';
+                                            statusClass = 'connected';
+                                        } else if (conn.status === 'DISCONNECTED') {
+                                            statusClass = 'disconnected';
+                                        }
+                                        
+                                        $status.html(icon + conn.status)
+                                               .removeClass('connected syncing disconnected')
+                                               .addClass(statusClass);
+                                        
+                                        // Update status color
+                                        if (conn.status === 'SYNCED' || conn.status === 'ACTIVE') {
+                                            $status.removeClass('disconnected').addClass('connected');
+                                        } else if (conn.status === 'DISCONNECTED') {
+                                            $status.removeClass('connected').addClass('disconnected');
+                                        }
+                                    }
+                                    
+                                    // Update last synced time
+                                    if (conn.last_synced_at) {
+                                        let $footer = $card.find('.connection-footer');
+                                        if ($footer.length === 0) {
+                                            // Create footer if it doesn't exist
+                                            $card.append(`
+                                                <div class="connection-footer">
+                                                    <small>Last synced: <span class="last-synced-time" data-timestamp="${conn.last_synced_at}"></span></small>
+                                                </div>
+                                            `);
+                                            $footer = $card.find('.connection-footer');
+                                        } else {
+                                            // Update existing footer timestamp
+                                            $footer.find('.last-synced-time').attr('data-timestamp', conn.last_synced_at);
+                                        }
+                                        
+                                        // Format the timestamp
+                                        formatTimestamp($footer.find('.last-synced-time'));
+                                    }
+                                    
+                                    // Update account list if synced and accounts exist
+                                    if ((conn.status === 'SYNCED' || conn.status === 'ACTIVE') && conn.account_count > 0) {
+                                        // Check if accounts list is empty or missing
+                                        const $accountsList = $card.find('.accounts-list');
+                                        if ($accountsList.length === 0 || $accountsList.children().length === 0) {
+                                            // Fetch and display accounts without full page reload
+                                            fetchAndDisplayAccounts(conn.connection_id, $card);
+                                        }
+                                    }
+                                }
+                            });
+                            
+                            // If all connections are synced, stop polling
+                            if (response.all_synced) {
+                                if (syncPollInterval) {
+                                    clearInterval(syncPollInterval);
+                                    syncPollInterval = null;
+                                }
+                            }
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        // Stop polling on error
+                        if (syncPollInterval) {
+                            clearInterval(syncPollInterval);
+                            syncPollInterval = null;
+                        }
+                    }
+                });
+            }
+            
+            function fetchAndDisplayAccounts(connectionId, $card) {
+                // Fetch account data and update the card
+                $.ajax({
+                    url: '/quiltt/get-accounts?connection_id=' + connectionId,
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.status === 'success' && response.accounts && response.accounts.length > 0) {
+                            const accounts = response.accounts;
+                            
+                            // Group accounts by type
+                            const checkingAccounts = accounts.filter(a => 
+                                a.account_type === 'DEPOSITORY' && a.account_name.toLowerCase().includes('checking')
+                            );
+                            const savingsAccounts = accounts.filter(a => 
+                                a.account_type === 'DEPOSITORY' && a.account_name.toLowerCase().includes('savings')
+                            );
+                            const creditAccounts = accounts.filter(a => a.account_type === 'CREDIT');
+                            
+                            // Build accounts HTML
+                            let accountsHtml = '<div class="accounts-list">';
+                            
+                            if (checkingAccounts.length > 0) {
+                                accountsHtml += '<div class="account-type-divider">Checking Accounts</div>';
+                                checkingAccounts.forEach(account => {
+                                    accountsHtml += buildAccountHtml(account);
+                                });
+                            }
+                            
+                            if (savingsAccounts.length > 0) {
+                                accountsHtml += '<div class="account-type-divider">Savings Accounts</div>';
+                                savingsAccounts.forEach(account => {
+                                    accountsHtml += buildAccountHtml(account);
+                                });
+                            }
+                            
+                            if (creditAccounts.length > 0) {
+                                accountsHtml += '<div class="account-type-divider">Credit Accounts</div>';
+                                creditAccounts.forEach(account => {
+                                    accountsHtml += buildAccountHtml(account);
+                                });
+                            }
+                            
+                            accountsHtml += '</div>';
+                            
+                            // Insert accounts after connection-header, before connection-footer
+                            const $footer = $card.find('.connection-footer');
+                            if ($footer.length > 0) {
+                                $footer.before(accountsHtml);
+                            } else {
+                                $card.find('.connection-header').after(accountsHtml);
+                            }
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        // Error fetching accounts
+                    }
+                });
+            }
+            
+            function buildAccountHtml(account) {
+                const currencySymbol = '{{ currency_symbol }}';
+                const checked = account.sync_transactions ? 'checked' : '';
+                const balance = (account.current_balance || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                
+                return `
+                    <div class="account-item">
+                        <div class="account-info">
+                            <input type="checkbox" 
+                                   id="account-${account.id}"
+                                   class="account-sync-toggle"
+                                   data-account-id="${account.account_id}"
+                                   ${checked}
+                                   style="width: 18px; height: 18px; cursor: pointer;">
+                            <label for="account-${account.id}">
+                                <strong>${account.account_name}</strong>
+                                <span class="account-mask">...${account.mask}</span>
+                            </label>
+                        </div>
+                        <div class="account-balance">
+                            ${currencySymbol}${balance}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Start polling if there are any connections that need syncing
+            function startSyncPolling() {
+                // Check if any connections show syncing status
+                const $syncingConnections = $('.connection-status').filter(function() {
+                    const status = $(this).text().trim();
+                    return status === 'SYNCING' || status === 'INITIALIZING' || status === 'PENDING';
+                });
+                
+                if ($syncingConnections.length > 0) {
+                    // Poll every 3 seconds
+                    syncPollInterval = setInterval(checkSyncStatus, 3000);
+                }
+            }
+            
+            // Start polling on page load
+            startSyncPolling();
+
+            // Toggle account sync
+            $(document).on('change', '.account-sync-toggle', function() {
+                const accountId = $(this).data('account-id');
+                const syncEnabled = $(this).is(':checked');
+                const $checkbox = $(this);
+                
+                $.ajax({
+                    url: '/quiltt/toggle-sync',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ 
+                        account_id: accountId, 
+                        sync_enabled: syncEnabled 
+                    }),
+                    success: function(response) {
+                        if (response.status === 'success' || response.status === 'warning') {
+                            // Log the response message (includes auto-adjustment info if applicable)
+                            console.log('[TOGGLE-SYNC] ' + response.message);
+                            
+                            // If enabling account, refresh connections to show updated balances
+                            if (syncEnabled) {
+                                // Brief delay to allow backend to process, then refresh
+                                setTimeout(function() {
+                                    updateConnectionsUI();
+                                }, 1000);
+                            }
+                        } else {
+                            alert('Failed to update sync setting');
+                            // Revert checkbox
+                            $checkbox.prop('checked', !syncEnabled);
+                        }
+                    },
+                    error: function() {
+                        alert('Error updating sync setting');
+                        // Revert checkbox
+                        $checkbox.prop('checked', !syncEnabled);
                     }
                 });
             });

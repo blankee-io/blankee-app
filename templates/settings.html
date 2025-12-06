@@ -45,12 +45,10 @@
                             <form id="currency-type-form" class="profile-form">
                                 <div class="input-group">
                                     <label for="currency_type">Currency:</label>
-                                    <div class="currency-input-container">
-                                        <select name="currency_type" id="currency_type" class="login-input" required>
-                                            <option value="USD" {% if currency_type == 'USD' %}selected{% endif %}>USD</option>
-                                            <option value="EUR" {% if currency_type == 'EUR' %}selected{% endif %}>EUR</option>
-                                        </select>
-                                    </div>
+                                    <select name="currency_type" id="currency_type" class="login-input" required>
+                                        <option value="USD" {% if currency_type == 'USD' %}selected{% endif %}>USD</option>
+                                        <option value="EUR" {% if currency_type == 'EUR' %}selected{% endif %}>EUR</option>
+                                    </select>
                                     <button type="submit" class="submit-button">
                                         <i id="currency-type-submit-icon" class="fas fa-check"></i>
                                     </button>
@@ -58,10 +56,10 @@
                             </form>
                             <form id="starting-balance-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="starting_balance">Change Start Balance:</label>
+                                    <label for="starting_balance">Start Balance:</label>
                                     <div class="currency-input-container">
                                         <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                                        <input type="number" name="starting_balance" id="starting_balance" class="login-input" value="{{ starting_balance }}" required step="1" min="0" inputmode="decimal" placeholder="0" pattern="\\d*">
+                                        <input type="number" name="starting_balance" id="starting_balance" class="login-input" value="{{ starting_balance }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
                                     </div>
                                     <button type="submit" class="submit-button">
                                         <i id="starting-balance-submit-icon" class="fas fa-check"></i>
@@ -72,33 +70,37 @@
                             <!-- Balance Threshold Form -->
                             <form id="balance-threshold-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="balance_threshold">Change Threshold:</label>
+                                    <label for="balance_threshold">Threshold:</label>
                                     <div class="currency-input-container">
                                         <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                                        <input type="number" name="balance_threshold" id="balance_threshold" class="login-input" value="{{ balance_threshold }}" required step="1" min="0" inputmode="decimal" placeholder="0" pattern="\\d*">
+                                        <input type="number" name="balance_threshold" id="balance_threshold" class="login-input" value="{{ balance_threshold }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
                                     </div>
                                     <button type="submit" class="submit-button">
                                         <i id="balance-threshold-submit-icon" class="fas fa-check"></i>
                                     </button>
                                 </div>
                             </form>
-                            <form class="profile-form" method="POST" action="{{ url_for('update_landing_page') }}">
+                            <form id="landing-page-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="landing_page">Preferred Landing Page:</label>
+                                    <label for="landing_page">Landing Page:</label>
                                     <select class="login-input" name="landing_page" id="landing_page">
                                         <option value="dashboard" {% if landing_page == 'dashboard' %}selected{% endif %}>Week View</option>
                                         <option value="dashboard_d" {% if landing_page == 'dashboard_d' %}selected{% endif %}>Day View</option>
                                         <option value="dashboard_3m" {% if landing_page == 'dashboard_3m' %}selected{% endif %}>Month View</option>
                                     </select>
                                     <button type="submit" class="submit-button">
-                                        <i id="balance-threshold-submit-icon" class="fas fa-check"></i>
+                                        <i id="landing-page-submit-icon" class="fas fa-check"></i>
                                     </button>
                                 </div>
                             </form>
                             <form id="goofy-week-form" class="profile-form">
                                 <div class="input-group">
                                     <label for="goofy_week_mode">Goofy Week Mode:</label>
-                                    <input class="submit-checkbox" type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %}>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="goofy_week_mode">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if goofy_week_mode != 1 %}toggle-off{% endif %}"></i>
+                                    </button>
                                 </div>
                             </form>
                         </div>
@@ -108,7 +110,11 @@
                             <form id="email-notifications-form" class="profile-form">
                                 <div class="input-group">
                                     <label for="email_notifications">Email Notifications:</label>
-                                    <input class="submit-checkbox" type="checkbox" id="email_notifications" {% if email_notifications == 1 %}checked{% endif %}>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="email_notifications" {% if email_notifications == 1 %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="email_notifications">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if email_notifications != 1 %}toggle-off{% endif %}"></i>
+                                    </button>
                                 </div>
                             </form>
                         </div>
@@ -141,18 +147,100 @@
         const currencySymbols = { USD: "$", EUR: "€" };
         const currencySymbol = currencySymbols[currencyType] || currencyType;
 
+        // Helper function to show success messages
+        function showSuccessMessage(message) {
+            const successMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: #2aaaa8; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">' + message + '</div>');
+            $('body').append(successMsg);
+            setTimeout(function() {
+                successMsg.fadeOut(300, function() { $(this).remove(); });
+            }, 2000);
+        }
 
         $(document).ready(function() {
             // JS for form submissions and validation
             // For example, you can add similar logic to enable/disable buttons for balance fields
 
-            // Enable submit button on form input
+            // Format existing values to show .00 on page load
+            const startingBalance = $('#starting_balance');
+            const balanceThreshold = $('#balance_threshold');
+            
+            if (startingBalance.val() && !isNaN(startingBalance.val())) {
+                startingBalance.val(parseFloat(startingBalance.val()).toFixed(2));
+            }
+            
+            if (balanceThreshold.val() && !isNaN(balanceThreshold.val())) {
+                balanceThreshold.val(parseFloat(balanceThreshold.val()).toFixed(2));
+            }
+
+            // Enable submit button on form input and validate decimals
             $('#starting_balance').on('input', function() {
                 $('#starting-balance-submit-icon').removeClass('fa-times').addClass('fa-check');
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                // Limit to 2 decimal places
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+
+            // Format to show .00 on blur
+            $('#starting_balance').on('blur', function() {
+                if (this.value && !isNaN(this.value)) {
+                    this.value = parseFloat(this.value).toFixed(2);
+                }
             });
 
             $('#balance_threshold').on('input', function() {
                 $('#balance-threshold-submit-icon').removeClass('fa-times').addClass('fa-check');
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                // Limit to 2 decimal places
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+
+            // Format to show .00 on blur
+            $('#balance_threshold').on('blur', function() {
+                if (this.value && !isNaN(this.value)) {
+                    this.value = parseFloat(this.value).toFixed(2);
+                }
+            });
+
+            // Handle toggle switch clicks
+            $('.toggle-switch').on('click', function() {
+                const checkboxId = $(this).data('checkbox');
+                const checkbox = $('#' + checkboxId);
+                const icon = $(this).find('.toggle-icon');
+                
+                // Toggle checkbox state
+                checkbox.prop('checked', !checkbox.prop('checked'));
+                
+                // Toggle icon state
+                if (checkbox.prop('checked')) {
+                    icon.removeClass('toggle-off');
+                } else {
+                    icon.addClass('toggle-off');
+                }
+                
+                // Trigger change event for existing handlers
+                checkbox.trigger('change');
             });
         });
 
@@ -169,7 +257,7 @@
                     method: "POST",
                     data: { balance_threshold: balanceThreshold },  // Send the balance threshold value
                     success: function(response) {
-                        // Reload the page upon success
+                        showSuccessMessage('Balance threshold updated successfully');
                         saveDailyTotalsAndRemainders();
                     },
                     error: function() {
@@ -208,14 +296,37 @@
                     data: { currency_type: currencyType },
                     success: function(response) {
                         if (response.status === 'success') {
-                            // Optionally show a success message or reload the page to reflect changes
-                            location.reload();
+                            showSuccessMessage('Currency updated successfully');
+                            setTimeout(function() {
+                                location.reload();
+                            }, 1000);
                         } else {
                             alert('Error updating currency: ' + response.message);
                         }
                     },
                     error: function() {
                         alert('An error occurred while updating the currency.');
+                    }
+                });
+            });
+
+            $('#landing-page-form').on('submit', function(event) {
+                event.preventDefault();
+                const landingPage = $('#landing_page').val();
+
+                $.ajax({
+                    url: "{{ url_for('update_landing_page') }}",
+                    method: "POST",
+                    data: { landing_page: landingPage },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            showSuccessMessage('Landing page updated successfully');
+                        } else {
+                            alert('Error updating landing page: ' + response.message);
+                        }
+                    },
+                    error: function() {
+                        alert('An error occurred while updating the landing page.');
                     }
                 });
             });
@@ -227,7 +338,6 @@
             if (goofyWeekCheckbox.length) {
                 // Handle Goofy Week Mode checkbox toggle
                 goofyWeekCheckbox.on('change', function() {
-                    document.getElementById('loading-screen').style.display = 'flex';
                     const goofyWeekMode = $(this).is(':checked') ? 1 : 0;
 
                     // Send an AJAX request to update goofy_week_mode in the database
@@ -237,6 +347,7 @@
                         data: { goofy_week_mode: goofyWeekMode },
                         success: function(response) {
                             if (response.status === 'success') {
+                                showSuccessMessage('Goofy Week Mode ' + (goofyWeekMode ? 'enabled' : 'disabled'));
                                 saveDailyTotalsAndRemainders();
                                 saveCaDailyBalance();
                             } else {
@@ -265,12 +376,7 @@
                         data: { email_notifications: emailNotifications },
                         success: function(response) {
                             if (response.status === 'success') {
-                                // Show a brief success message
-                                const successMsg = $('<div style="position: fixed; top: 20px; right: 20px; background-color: #4CAF50; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">Email notifications ' + (emailNotifications ? 'enabled' : 'disabled') + '</div>');
-                                $('body').append(successMsg);
-                                setTimeout(function() {
-                                    successMsg.fadeOut(300, function() { $(this).remove(); });
-                                }, 2000);
+                                showSuccessMessage('Email notifications ' + (emailNotifications ? 'enabled' : 'disabled'));
                             } else {
                                 alert('Error updating email notifications: ' + response.message);
                                 // Revert checkbox on error
@@ -297,11 +403,11 @@
             $('#starting-balance-form').on('submit', function(event) {
                 event.preventDefault();
                 pendingStartingBalance = $('#starting_balance').val();
-                $('#starting-balance-modal').show();
+                $('#starting-balance-modal').css('display', 'flex');
             });
 
             $('#close-starting-balance-modal').on('click', function() {
-                $('#starting-balance-modal').hide();
+                $('#starting-balance-modal').css('display', 'none');
                 $('#starting_balance').val(originalStartingBalance); // Reset immediately
                 pendingStartingBalance = null;
             });
@@ -313,13 +419,14 @@
                         method: "POST",
                         data: { starting_balance: pendingStartingBalance },
                         success: function(response) {
+                            showSuccessMessage('Starting balance updated successfully');
                             saveTotalsAndRemainders();
                         },
                         error: function() {
                             alert('An error occurred while updating the starting balance.');
                         },
                         complete: function() {
-                            $('#starting-balance-modal').hide();
+                            $('#starting-balance-modal').css('display', 'none');
                             pendingStartingBalance = null;
                             // Optionally update originalStartingBalance here if you want to reflect the new value without reload:
                             // originalStartingBalance = $('#starting_balance').val();
@@ -331,7 +438,7 @@
             $('#starting-balance-modal').on('click', function(event) {
                 // Only close if the click is directly on the modal background, not the content
                 if (event.target === this) {
-                    $(this).hide();
+                    $(this).css('display', 'none');
                     $('#starting_balance').val(originalStartingBalance); // Reset immediately
                     pendingStartingBalance = null;
                 }

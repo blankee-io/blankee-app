@@ -115,7 +115,7 @@
                     <label for="dashboard-d-amount">Amount:</label>
                     <div class="currency-input-container">
                         <span class="d-d-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                        <input type="number" id="dashboard-d-amount" name="amount" step="1" min="1" required inputmode="numeric" placeholder="0">
+                        <input type="number" id="dashboard-d-amount" name="amount" step="0.01" min="0.01" required inputmode="decimal" placeholder="0.00">
                     </div>
                 </div>
 
@@ -300,7 +300,7 @@
         function addEntry(date) {
             populateEntryTypeDropdown();
             document.getElementById('dashboard-d-entryDate').value = date;
-            document.getElementById('dashboard-d-addEntryModal').style.display = 'block';
+            document.getElementById('dashboard-d-addEntryModal').style.display = 'flex';
             document.body.classList.add('modal-open');
             document.documentElement.classList.add('modal-open');
         }
@@ -679,6 +679,10 @@
                     remainderValue = parseFloat(totalsForDate.remainder ?? totalsForDate[5] ?? 0).toFixed(2);
                 }
 
+                // Calculate display income (income - last remainder)
+                const displayIncomeValue = (parseFloat(totalIncomeValue) - parseFloat(lastRemainderValue)).toFixed(2);
+                console.log('Dashboard_d income calculation:', {totalIncomeValue, lastRemainderValue, displayIncomeValue, date});
+
                 // Last remainder
                 const lastRemainder = document.createElement('div');
                 lastRemainder.classList.add('dashboard-d-lastremainder');
@@ -696,6 +700,9 @@
                     const entryDate = new Date(entry.date).toISOString().split('T')[0];
                     return entryDate === date && entry.category_name !== "Starting Balance";
                 });
+
+                // Calculate actual income for this day from entries
+                const actualDayIncome = filteredIncomeEntries.reduce((sum, entry) => sum + parseFloat(entry.amount || 0), 0);
 
                 filteredIncomeEntries.forEach(entry => {
                     const incomeRow = document.createElement('div');
@@ -716,7 +723,7 @@
                     incomeRow.innerHTML = `
                         ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                             <span class="calendar-icon">
-                            <i class="fa-light fa-up-down-left-right"></i>
+                            <i class="fa-solid fa-up-down-left-right"></i>
                             </span>
                         </span>` : ''}
                         <div class="dashboard-d-label-cell">
@@ -744,7 +751,7 @@
                 incomeTotal.classList.add('dashboard-d-income-total');
                 incomeTotal.innerHTML = `
                     <div class="dashboard-d-label-cell">Total Income:</div>
-                    <div class="dashboard-d-amount-cell">${formatCurrency(totalIncomeValue)}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(actualDayIncome.toFixed(2))}</div>`;
                 container.appendChild(incomeTotal);
 
                 // Expense entries
@@ -777,7 +784,7 @@
                     expenseRow.innerHTML = `
                         ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                             <span class="calendar-icon">
-                            <i class="fa-light fa-up-down-left-right"></i>
+                            <i class="fa-solid fa-up-down-left-right"></i>
                             </span>
                         </span>` : ''}
                         <div class="dashboard-d-label-cell">
@@ -894,7 +901,7 @@
                         entryRow.innerHTML = `
                             ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
                                 <span class="calendar-icon">
-                                    <i class="fa-light fa-up-down-left-right"></i>
+                                    <i class="fa-solid fa-up-down-left-right"></i>
                                 </span>
                             </span>` : ''}
                             <div class="dashboard-d-label-cell">
@@ -952,7 +959,7 @@
                 savingsDiv.classList.add('dashboard-d-savings');
                 savingsDiv.innerHTML = `
                     <div class="dashboard-d-label-cell">Savings:</div>
-                    <div class="dashboard-d-amount-cell">${currencySymbol}${savingsAmount.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+                    <div class="dashboard-d-amount-cell">${currencySymbol}${savingsAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                 `;
                 container.appendChild(savingsDiv);
 
@@ -1457,12 +1464,16 @@
 
 function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
     let entriesArray;
+    let categoriesArray;
     if (entryType === 'income') {
         entriesArray = incomeEntries;
+        categoriesArray = incomeCategories;
     } else if (entryType === 'expense') {
         entriesArray = expenseEntries;
+        categoriesArray = expenseCategories;
     } else if (entryType === 'ca' || entryType.startsWith('ca')) {
         entriesArray = c_expense_entries;
+        categoriesArray = c_expense_categories;
     } else {
         return;
     }
@@ -1472,6 +1483,10 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
     entryDateObj.setUTCHours(0, 0, 0, 0);
     const normalizedDate = entryDateObj.toISOString().split('T')[0];
     const categoryId = String(formData.category);
+
+    // Get category name from categories array
+    const category = categoriesArray.find(c => String(c.id) === categoryId);
+    const categoryName = category ? category.name : 'Unknown';
 
     let entry = entriesArray.find(e => {
         const normalizedEntryDate = new Date(e.date).toISOString().split('T')[0];
@@ -1492,6 +1507,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
         } else {
             let newEntry = {
                 category_id: categoryId,
+                category_name: categoryName,
                 date: normalizedDate,
                 total_amount: Number(formData.amount).toFixed(2)
             };
@@ -1513,6 +1529,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
         } else {
             let newEntry = {
                 category_id: categoryId,
+                category_name: categoryName,
                 date: normalizedDate,
                 total_amount: Number(formData.amount).toFixed(2)
             };
@@ -1543,14 +1560,8 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
             const num = parseFloat(value);
             if (isNaN(num)) return currencySymbol + '0';
             
-            // Check if the number has non-zero decimal part
-            if (Math.floor(num) === num) {
-                // No decimal part or .00
-                return currencySymbol + Math.floor(num);
-            } else {
-                // Has decimal part, format with 2 decimal places
-                return currencySymbol + num.toFixed(2);
-            }
+            // Always format with 2 decimal places
+            return currencySymbol + num.toFixed(2);
         }
         
         // Function to dynamically create and add an entry row to the dashboard
@@ -2333,6 +2344,25 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                         input.select();
                     });
 
+                    input.addEventListener('input', function () {
+                        // Allow numbers and decimal point
+                        input.value = input.value.replace(/[^0-9.]/g, '');
+                        
+                        // Allow only one decimal point
+                        const parts = input.value.split('.');
+                        if (parts.length > 2) {
+                            input.value = parts[0] + '.' + parts.slice(1).join('');
+                        }
+                        
+                        // Limit to 2 decimal places
+                        if (input.value.includes('.')) {
+                            const decimals = input.value.split('.');
+                            if (decimals[1] && decimals[1].length > 2) {
+                                input.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                            }
+                        }
+                    });
+
                     input.addEventListener('keydown', function (event) {
                         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                             event.preventDefault();
@@ -2561,6 +2591,26 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false) {
                     const todayContainer = document.querySelector('.dashboard-d-container.today-outline');
                     if (todayContainer) {
                         todayContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                });
+            }
+
+            // Limit decimal places for dashboard-d-amount input (2 decimals)
+            const dashboardDAmountInput = document.getElementById('dashboard-d-amount');
+            if (dashboardDAmountInput) {
+                dashboardDAmountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
                     }
                 });
             }

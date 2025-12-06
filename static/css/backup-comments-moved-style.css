@@ -47,90 +47,17 @@ html {
     overflow: hidden auto;
 }
 
-/* Custom Checkbox Styles */
 input[type="checkbox"] {
-    /* Reset native styles */
-    -webkit-appearance: none;
-    appearance: none;
-    background-color: #f9f9f9;
+    align-self: center;
+    /* Not removed via appearance */
     margin: 0;
-    
-    /* Match form field styling */
-    width: 20px;
-    height: 20px;
-    border: 1px solid #d1d1d6;
-    border-radius: 4px;
-    
-    /* Center the checkmark */
-    display: grid;
-    place-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-
-/* Create the checkmark using ::before pseudo element */
-input[type="checkbox"]::before {
-    content: "";
-    width: 12px;
-    height: 12px;
-    transform: scale(0);
-    transition: 120ms transform ease-in-out;
-    box-shadow: inset 1em 1em #e45f1c;
-    
-    /* Shape it as a checkmark */
-    transform-origin: bottom left;
-    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
-    
-    /* Support for Windows High Contrast Mode */
-    background-color: CanvasText;
-}
-
-/* Show checkmark when checked */
-input[type="checkbox"]:checked::before {
-    transform: scale(1);
-}
-
-/* Focus state - match form field focus */
-input[type="checkbox"]:focus {
+    /* For iOS < 15 to remove gradient background */
     background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
-}
-
-/* Login page forgot password link container */
-.forgot-password-container {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    margin-bottom: 10px;
-}
-
-.forgot-password-container > div:first-child {
-    flex-shrink: 0;
-    min-width: 100px;
-    margin: 0 10px;
-}
-
-.forgot-password-container > div:last-child {
-    text-align: right;
-}
-
-.forgot-password-link {
-    font-size: 0.9em;
-    color: #2aaaa8;
-}
-
-/* Disabled state */
-input[type="checkbox"]:disabled {
-    background-color: #e9ecef;
-    border-color: #ced4da;
-    cursor: not-allowed;
-}
-
-input[type="checkbox"]:disabled::before {
-    box-shadow: inset 1em 1em #959495;
+    /* Add if not using autoprefixer */
+    /* appearance: none; */
+    appearance: auto !important;
+    /* Optional: modern checkmark color styling */
+    accent-color: #2aaaa8; 
 }
 
 body {
@@ -143,7 +70,7 @@ body {
     padding-bottom: 100px;
     overflow-x: hidden;
     background-color: #f2f7f7;
-    color: #575757;
+    color: #1c1c1e;
     font-family: Nunito, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -160,93 +87,9 @@ body {
     align-items: center;
     width: 100%;
     height: 100%;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-}
-
-/* Setup Profile Loading Modal */
-.setup-loading-container {
-    text-align: center;
-    padding: 40px;
-    background: white;
-    border-radius: 20px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-    max-width: 400px;
-}
-
-.bank-icon-container {
-    position: relative;
-    display: inline-block;
-    margin-bottom: 30px;
-}
-
-.bank-icon {
-    color: #2AAAA8;
-    display: block;
-}
-
-.loading-arrows-circle {
-    position: absolute;
-    bottom: -7.5px;
-    right: -5px;
-    width: 30px;
-    height: 30px;
-    background-color: white;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.loading-arrows {
-    color: #3CC5C0;
-    font-size: 1rem;
-}
-
-.setup-loading-title {
-    font-size: 24px;
-    font-weight: 700;
-    color: #333;
-    margin: 0 0 10px 0;
-}
-
-.setup-loading-subtitle {
-    font-size: 16px;
-    color: #666;
-    margin: 0 0 20px 0;
-}
-
-.loading-dots {
-    display: flex;
-    justify-content: center;
-    gap: 8px;
-}
-
-.loading-dots .dot {
-    width: 10px;
-    height: 10px;
-    background: #2AAAA8;
-    border-radius: 50%;
-    animation: bounce 1.4s infinite ease-in-out both;
-}
-
-.loading-dots .dot:nth-child(1) {
-    animation-delay: -0.32s;
-}
-
-.loading-dots .dot:nth-child(2) {
-    animation-delay: -0.16s;
-}
-
-@keyframes bounce {
-    0%, 80%, 100% {
-        transform: scale(0);
-        opacity: 0.5;
-    }
-    40% {
-        transform: scale(1);
-        opacity: 1;
-    }
+    background-color: rgb(248 249 250 / 90%);
+    backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
 }
 
 /* Spinner container: default center */
@@ -379,7 +222,6 @@ body {
 }
 
 .nav-notifications {
-    position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -441,7 +283,6 @@ body {
     background-color: transparent;
     border-radius: 15px;
     cursor: pointer;
-
     /* Ensure padding is included in the width */
     box-sizing: border-box; 
 }
@@ -451,14 +292,11 @@ body {
     flex-shrink: 0; 
     width: 30px;
     height: 30px;
-
     /* Space between picture and username */
     margin-left: 10px; 
     border-radius: 50%;
-
     /* Ensures the image covers the container without squashing */
     object-fit: cover; 
-
     /* Center the image within the container */
     object-position: center; 
 }
@@ -466,7 +304,6 @@ body {
 .sidenavprofileinfo {
     display: flex;
     flex-direction: column;
-
     /* Aligns content to the right */
     align-items: flex-end; 
     overflow: hidden;
@@ -474,7 +311,6 @@ body {
 
 .sidenav-username {
     display: flex;
-
     /* Aligns text to the right */
     justify-content: flex-end; 
     align-items: center;
@@ -500,7 +336,6 @@ body {
 
 .dropdown-profile-label {
     display: flex;
-
     /* Center vertically */
     align-items: center; 
     height: 40px;
@@ -514,13 +349,10 @@ body {
 .dropdown-profile-section {
     display: flex;
     flex-direction: row;
-
     /* Center horizontally */
     justify-content: left;
-
     /* Center vertically */
     align-items: center;
-
     padding: 10px;
     padding-left: 20px;
     cursor: default;
@@ -560,19 +392,6 @@ body {
     word-break: break-all;
 }
 
-/* User's full name in dropdown */
-.dropdown-name {
-    display: flex;
-    justify-content: left;
-    width: 100%;
-    padding-left: 10px;
-    color: white;
-    font-size: 15px;
-    font-weight: 600;
-    text-align: left;
-    word-break: break-all;
-}
-
 /* Logout row in dropdown */
 .dropdown-logout-row {
     display: flex;
@@ -590,10 +409,8 @@ body {
 .dropdown-logout {
     /* Use flexbox for vertical centering */
     display: flex;
-
     /* Center text vertically */
     align-items: center;
-
     height: 40px;
     color: #fff;
     font-size: 13px;
@@ -631,13 +448,10 @@ body {
 
 .dropdown-link {
     display: flex;
-
     /* Center text vertically */
     align-items: center;
-
     /* Ensure a consistent height for vertical alignment */   
     height: 40px;
-
     padding: 0;
     padding-right: 20px;
     padding-left: 20px;
@@ -702,10 +516,8 @@ body {
     background: rgb(255 255 255 / 15%);
     border: 3px solid #575757;
     border-radius: 12px;
-
     /* Creates hole-effect */
     box-shadow: 0 0 0 9999px rgb(0 0 0 / 60%); 
-    
     pointer-events: none;
 }
 
@@ -894,7 +706,6 @@ body {
     left: calc(50% - 24.5px);
     width: 199px;
     /* width is longest now */ 
-
     /* width starts after transform */
     transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
     transform: translate(0, calc(-50% - 125px)) scaleX(1);
@@ -911,7 +722,6 @@ body {
     left: calc(50% - 24.5px);
     width: 190px;
     /* width is longest now */
-
     /* width starts after transform */
     transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
     transform: translate(0, calc(-50% - 65px)) scaleX(1);
@@ -928,7 +738,6 @@ body {
     left: calc(50% - 24.5px);
     width: 199px;
     /* width is longest now */
-
     /* width starts after transform */
     transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
     transform: translate(0, calc(-50% - 245px)) scaleX(1);
@@ -970,8 +779,6 @@ body {
     overflow: auto;
     background: rgb(0 0 0 / 30%);
     background-color: transparent;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
 }
 
 /* Modal content box */
@@ -1008,19 +815,8 @@ body {
     font-size: 1.5rem;
 }
 
-#dashboard-d-category-input,
-#footer-category-input,
-#footer-ca-category-input {
-    width: 100%;
-    height: 38px;
-    padding: 8px 12px;
-    border: 1px solid #575757;
-    border-radius: 8px;
-    box-sizing: border-box;
-}
 /* Form group */
 .footer-form-group {
-    position: relative;
     margin-bottom: 15px;
 }
 
@@ -1034,14 +830,12 @@ body {
 }
 
 /* Inputs and selects */
-.footer-form-group input[type="text"],
 .footer-form-group input[type="number"],
 .footer-form-group select {
     width: 100%;
-    height: 38px;
     margin-top: 5px;
     margin-bottom: 10px;
-    padding: 8px 12px;
+    padding: 10px 12px;
     background-color: #f9f9f9;
     border: 1px solid #d1d1d6;
     border-radius: 8px;
@@ -1053,7 +847,6 @@ body {
     box-sizing: border-box;
 }
 
-.footer-form-group input[type="text"]:focus,
 .footer-form-group input[type="number"]:focus,
 .footer-form-group select:focus {
     background-color: #fff;
@@ -1064,7 +857,6 @@ body {
 
 /* Submit button */
 .footer-form-group button[type="submit"] {
-    width: 100%;
     padding: 12px 24px;
     border: none;
     border-radius: 10px;
@@ -1090,7 +882,6 @@ body {
 
 /* Submit button */
 button#autobalance-submit {
-    width: 100%;
     padding: 12px 24px;
     border: none;
     border-radius: 10px;
@@ -1114,68 +905,12 @@ button#autobalance-submit:active {
     transform: translateY(0);
 }
 
-/* Confirm starting balance change button */
-#confirm-starting-balance-change {
-    width: 100%;
-    padding: 12px 24px;
-    border: none;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgb(42 170 168 / 30%);
-    color: white;
-    font-size: 1rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    background-color: #2AAAA8;
-}
-
-#confirm-starting-balance-change:hover {
-    box-shadow: 0 4px 12px rgb(42 170 168 / 40%);
-    transform: translateY(-1px);
-}
-
-#confirm-starting-balance-change:active {
-    box-shadow: 0 1px 4px rgb(42 170 168 / 30%);
-    transform: translateY(0);
-}
-
 /* Mobile responsiveness */
 @media screen and (width <= 600px) {
     .footer-modal-content {
         /* Make the modal slightly narrower on small screens */
         width: 350px; 
     }
-}
-
-/* Add Credit Account Modal Styles */
-.add-credit-account-modal-content {
-    width: 80%;
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 20px;
-    background-color: #fff;
-    border: 1px solid #575757;
-    border-radius: 10px;
-    box-shadow: 0 4px 8px rgb(0 0 0 / 20%);
-}
-
-.add-credit-account-close-modal {
-    color: #aaa;
-    float: right;
-    font-size: 28px;
-    font-weight: bold;
-}
-
-.add-credit-account-close-modal:hover,
-.add-credit-account-close-modal:focus {
-    color: #575757;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-.add-credit-account-modal-content h3 {
-    margin-top: 0;
-    color: #575757;
 }
 
 /* Auto Balance Modal Styles */
@@ -1233,12 +968,10 @@ button#autobalance-submit:active {
 
 #autobalance-modal input[type="\"number\""] {
     width: 100%;
-    height: 38px;
-    padding: 8px 12px;
+    padding: 0.5rem;
     border: 1px solid #ccc;
     border-radius: 6px;
-    font-size: 14px;
-    box-sizing: border-box;
+    font-size: 1.1rem;
 }
 
 #autobalance-modal button[type="\"button\""] {
@@ -1264,10 +997,8 @@ button#autobalance-submit:active {
     position: sticky;
     top: 50px;
     z-index: 99;
-
     /* box model */
     padding: 10px;
-
     /* visual */
     background-color: #f5fffe;
     box-shadow: 0 2px 5px rgb(0 0 0 / 20%);
@@ -1281,35 +1012,19 @@ button#autobalance-submit:active {
 
 .calendarnavbuttonscontainer {
     display: flex;
-
     /* Make children horizontal */
     flex-direction: row; 
-
     /* Ensures the left and right containers are on opposite sides */
     justify-content: space-between; 
-
     /* Vertically centers the content */
     align-items: center; 
-    
     max-width: 875px;
-
     /* Centers the container horizontally */
     margin: 0 auto; 
 }
 
-@media (width <=600px) {
-    .calendarnav {
-        padding: 6px 0px;     
-    }
-
-    .calendarnavbuttonscontainer {
-        justify-content: space-around;
-    }
-}
-
 .calendarnavbuttons {
     display: flex;
-
     /* Aligns the buttons to the right inside this container */
     justify-content: flex-end; 
 }
@@ -1357,7 +1072,7 @@ button#autobalance-submit:active {
     padding: 0 10px;
     border-radius: 15px;
     color: #2AAAA8;
-    font-size: clamp(1rem, 2vw + 0.75rem, 1.5rem);
+    font-size: 20px;
     transition: all 0.2s ease;
     cursor: pointer;
     background-color: transparent;
@@ -1368,13 +1083,9 @@ button#autobalance-submit:active {
     font-size: 15px;
 }
 
-.nav-button:hover:not(#current-nav-btn):not(.nav-button-focus) {
-    color: #59d6d4;
-    transform: scale(1.2);
-}
-
-#current-nav-btn:hover {
-    transform: scale(1.07);
+.nav-button:hover {
+    color: #1c1c1e;
+    transform: scale(1.05);
 }
 
 .nav-button a {
@@ -1384,10 +1095,6 @@ button#autobalance-submit:active {
 
 .nav-button-focus {
     color: #E45F1C !important;
-}
-
-.nav-button-focus:hover {
-    transform: scale(1);
 }
 
 .nav-select {
@@ -1454,11 +1161,6 @@ button#autobalance-submit:active {
     transition-delay: 0s;
 }
 
-@media (width <=460px) {
-    .nav-tooltip {
-        display: none;
-    }
-}
 
 .dashboard-button {
     margin: 0 10px;
@@ -1493,6 +1195,7 @@ button#autobalance-submit:active {
 
 /* Register Page Styles */
 .logincontainer {
+    width: calc(100% - 24px);
     max-width: 450px;
     margin: 20px auto;
     padding: 20px 16px;
@@ -1565,6 +1268,15 @@ button#autobalance-submit:active {
     text-align: right;
 }
 
+.logincontainer form .login-row input[type="password"],
+.logincontainer form .login-row input[type="text"] {
+    width: 174px;
+}
+
+.logincontainer form .login-row .password-input-wrapper {
+    width: 174px;
+}
+
 .remember-me {
     margin-right: auto;
     margin-left: auto;
@@ -1585,7 +1297,6 @@ button#autobalance-submit:active {
     font-size: 14px;
     transition: all 0.2s ease;
     box-sizing: border-box;
-    width:100%;
 }
 
 .login-input:focus {
@@ -1670,77 +1381,30 @@ button.login-button:active {
     text-decoration: underline;
 }
 
-/* Align password change form with MFA form */
-#password-change-form .input-group {
-    min-height: 72px;
-}
-
-#password-change-form .input-group input[disabled] {
-    flex: 1;
-    min-width: 100px;
-}
-
-.hidden-spacer {
-    visibility: hidden;
-    width: auto;
-    padding: 8px 12px;
-    border: 1px solid transparent;
-    flex: 1;
-    min-width: 40px;
-}
-
-.hidden-checkbox {
-    position: absolute;
-    visibility: hidden;
-}
-
-#mfa-enable-form .input-group {
-    min-height: 72px;
-}
-
-#mfa-enable-form .input-group input[type="checkbox"] {
-    flex: 1;
-    min-width: 180px;
-    position: absolute;
-    visibility: hidden;
-}
-
-#mfa-enable-form .toggle-switch {
-    flex: 0 0 auto;
-    margin-left: 0;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    justify-content: flex-end;
+.input-group {
+    display: flex;
+    justify-content: center;
     align-items: center;
-    align-self: center;
-    position: static;
-}
-
-#delete-account-form .input-group {
-    min-height: 72px;
-}
-
-#delete-account-form .input-group input[disabled] {
-    flex: 1;
-    min-width: 0;
-}
-
-#email-notifications-form {
-    margin: 0 auto;
     width: 100%;
+    height: 40px;
 }
 
-#email-notifications-form .input-group {
-    min-height: 72px;
+#gwm-input-group {
+    justify-content: center !important;
 }
 
-#goofy-week-form {
-    margin: 0 auto;
-    width: 100%;
+label[for="goofy_week_mode"] {
+    display: inline-flex;
+    /* Ensure vertical alignment of text */
+    align-items: center;
+    font-size: 13px;
+    cursor: pointer;
 }
 
-#goofy-week-form .input-group {
-    min-height: 72px;
+#goofy_week_mode {
+    /* Margin to space checkbox from label */
+    margin-right: 5px;
+    cursor: pointer;
 }
 
 #username-status {
@@ -1761,16 +1425,16 @@ button.login-button:active {
     top: 0;
     left: 0;
     z-index: 1000;
-
     /* Hidden by default */
     display: none; 
-
     justify-content: center;
     align-items: center;
     width: 100%;
     height: 100%;
     overflow: auto;
-
+    /* Black with transparency */
+    background-color: rgb(0 0 0 / 50%); 
+    backdrop-filter: blur(8px);
 }
 /* ----- modal content ----- */
 
@@ -1819,15 +1483,11 @@ button.login-button:active {
     display: flex;
     flex-direction: row;
     justify-content: center;
-
     /* Align input and label in the middle vertically */
     align-items: center; 
-
     /* Take full width to center the inputs */
     width: 90%; 
-
     margin-bottom: 10px;
-
     /* Prevent label and input from wrapping */
     white-space: nowrap; 
 }
@@ -1836,7 +1496,6 @@ button.login-button:active {
     /* Adjust this width as needed */
     width: 20%; 
     margin-right: 20px;
-
     /* Align text to the right of the label */
     text-align: right; 
 }
@@ -1850,74 +1509,18 @@ button.login-button:active {
 }
 
 /* Form Inputs */
-#setup-profile-name-form input {
-    /* Keep input fields at 80% of the container */
-    width: 100%; 
-    height: 38px;
-    margin: 10px 0;
-    padding: 8px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    font-size: 14px;
-    text-align: left;
-    transition: all 0.2s ease;
-    box-sizing: border-box;
-}
-
-#setup-profile-currency-form select {
-    /* Keep input fields at 80% of the container */
-    width: 100%; 
-    height: 38px;
-    margin: 10px 0;
-    padding: 8px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    font-size: 14px;
-    text-align: right;
-    transition: all 0.2s ease;
-    box-sizing: border-box;
-}
-
+#setup-profile-name-form input,
 #setup-profile-balance-form input,
 #setup-profile-threshold-form input {
-    width: 100%;
-    height: 38px;
+    /* Keep input fields at 80% of the container */
+    width: 80%; 
     margin: 10px 0;
-    padding: 8px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    font-size: 14px;
+    padding: 10px 0 10px 25px;
+    border: 1px solid #575757;
+    border-radius: 5px;
+    font-size: 16px;
     text-align: right;
-    transition: all 0.2s ease;
     box-sizing: border-box;
-}
-
-#setup-profile-name-form input:focus,
-#setup-profile-balance-form input:focus,
-#setup-profile-threshold-form input:focus,
-#setup-profile-currency-form select:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
-}
-
-#setup-profile-threshold-form .currency-input-container,
-#setup-profile-currency-form .currency-input-container,
-#setup-profile-balance-form .currency-input-container,
-#setup-profile-name-form .currency-input-container {
-    width: 100%;
-    display: flex;
-    flex-direction: row;
-    gap: 20px;
-}
-
-#setup-profile-balance-form .currency-input-container > div {
-    width: 100%;
-    flex: 1;
 }
 
 label[for="setup-profile-starting-balance"],
@@ -1935,24 +1538,19 @@ input#setup-profile-balance-threshold,
 input#setup-profile-starting-balance,
 input#setup-profile-starting-savings {
     padding-right: 10px;
-    padding-left: 25px;
 }
 
 #autobalance-current-balance,
 #footer-amount,
-#footer-ca-amount,
-#credit-account-interest,
-#credit-account-balance {
+#footer-ca-amount {
     text-align: right;
 }
 
 /* Button container for aligning buttons */
 .setup-profile-button-container {
     display: flex;
-
     /* Align buttons to opposite ends */
     justify-content: space-between; 
-
     width: 100%;
     margin-top: 15px;
 }
@@ -1965,21 +1563,12 @@ input#setup-profile-starting-savings {
     padding: 14px 24px;
     border: none;
     border-radius: 12px;
+    box-shadow: 0 2px 8px rgb(228 95 28 / 30%);
     color: white;
     font-size: 17px;
     font-weight: 600;
     transition: all 0.2s ease;
     cursor: pointer;
-}
-
-.setup-profile-next-button,
-.setup-profile-submit-button {
-    box-shadow: 0 2px 8px #2AAAA85c;
-    background-color: #2AAAA8;
-}
-
-.setup-profile-previous-button {
-    box-shadow: 0 2px 8px #E45F1C5c;
     background-color: #E45F1C;
 }
 
@@ -1991,121 +1580,16 @@ input#setup-profile-starting-savings {
 .setup-profile-previous-button:hover,
 .setup-profile-next-button:hover,
 .setup-profile-submit-button:hover {
+    box-shadow: 0 4px 12px rgb(228 95 28 / 40%);
     transform: translateY(-1px);
-}
-
-.setup-profile-next-button:hover,
-.setup-profile-submit-button:hover {
-    box-shadow: 0 2px 8px #2AAAA85c;
-    background-color: #59D6D4;
-}
-
-.setup-profile-previous-button:hover {
-    box-shadow: 0 2px 8px #E45F1C5c;
     background-color: #EF9F77;
 }
 
 .setup-profile-previous-button:active,
 .setup-profile-next-button:active,
 .setup-profile-submit-button:active {
+    box-shadow: 0 1px 4px rgb(228 95 28 / 30%);
     transform: translateY(0);
-}
-
-/* Bank Connection Modal */
-.bank-connection-benefits {
-    text-align: left;
-    margin: 20px auto;
-    max-width: 400px;
-}
-
-.bank-connection-benefits-list {
-    list-style: none;
-    padding: 0;
-}
-
-.bank-connection-benefits-list li {
-    color: #3CC5C0;
-    margin-bottom: 10px;
-}
-
-.bank-connection-benefits-list li i {
-    margin-right: 8px;
-}
-
-.bank-connection-security-note {
-    font-size: 0.9em;
-    color: #666;
-    margin-top: 20px;
-}
-
-/* Account Selection List */
-.account-selection-list {
-    max-width: 500px;
-    margin: 20px auto;
-    text-align: left;
-}
-
-.account-selection-item {
-    display: flex;
-    align-items: center;
-    padding: 15px;
-    margin-bottom: 10px;
-    background-color: #f9f9f9;
-    border-radius: 8px;
-    border: 2px solid #e0e0e0;
-    transition: border-color 0.2s;
-}
-
-.account-selection-item:hover {
-    border-color: #3CC5C0;
-}
-
-.account-selection-item input[type="checkbox"] {
-    width: 20px;
-    height: 20px;
-    margin-right: 15px;
-    cursor: pointer;
-}
-
-.account-selection-info {
-    flex-grow: 1;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.account-selection-name {
-    font-weight: 600;
-    font-size: 1em;
-    color: #333;
-}
-
-.account-mask {
-    color: #A9A9A9;
-    font-weight: 400;
-    font-size: 0.9em;
-}
-
-/* Balance auto-fill indicators */
-.balance-auto-filled-indicator {
-    color: #3CC5C0;
-    font-size: 0.9em;
-    margin-left: 8px;
-    visibility: hidden;
-    min-height: 1.2em;
-}
-
-.balance-auto-filled-indicator.visible {
-    visibility: visible;
-}
-
-.balance-auto-filled-indicator i {
-    margin-right: 4px;
-}
-
-.account-selection-details {
-    font-size: 0.9em;
-    color: #666;
 }
 
 /* Adjust the container and button width for mobile devices */
@@ -2121,14 +1605,8 @@ input#setup-profile-starting-savings {
         flex: 1 1 0; 
     }
 
-    #previous-nav-btn.nav-button,
-    #next-month-btn.nav-button,
-    #next-nav-btn.nav-button,
-    #current-nav-btn.nav-button {
-        margin-top: 0px;
-        margin-bottom: 0px;
-        padding-top: 0px;
-        padding-bottom: 0px;
+    .nav-button i{
+        font-size: 25px;
     }
 
     #previous-nav-btn.nav-button,
@@ -2139,6 +1617,28 @@ input#setup-profile-starting-savings {
         margin-bottom: 0 !important;
         padding-top: 0 !important;
         padding-bottom: 0 !important;
+        font-size: 8px;
+    }
+
+    #current-nav-btn.nav-button {
+        font-size: 20px;
+    }
+
+    .calendarnavbuttonscontainer {
+        /* Stack children vertically */
+        flex-direction: column; 
+        /* Align children to the top */
+        justify-content: flex-start; 
+        margin-bottom: 0;
+    }
+
+    .nav-dash-container {
+        justify-content: center;
+        width: 100% !important;
+    }
+
+    .calendarnavbuttons {
+        margin-top: 15px;
     }
 
     #nav-dropdown-toggle {
@@ -2153,16 +1653,18 @@ input#setup-profile-starting-savings {
     .setup-profile-previous-button,
     .setup-profile-next-button,
     .setup-profile-submit-button {
+        /* Buttons will stack on top of each other */
         width: 100%; 
-        margin-top: 1rem; 
+        /* Add space between stacked buttons */
+        margin-bottom: 10px; 
     }
 
     .nav-button, 
     .nav-select {
-        display: flex;
-        margin: 0px 0vw;
-        padding: 0px 1vw;
-        font-size: 1.8em;
+        position: flex;
+        margin: 7.5px;
+        padding: 2.5px;
+        font-size: 20px;
     }
 
     #nav-dropdown-toggle {
@@ -2179,13 +1681,6 @@ input#setup-profile-starting-savings {
     }
 }
 
-@media (width <= 460px) {
-    .nav-button, .nav-select {
-        margin: 0px .6vw;
-        padding: 0px;
-        font-size: 1.5em;
-    }
-}
 #next-indicator,
 #previous-indicator {
     position: relative;
@@ -2208,7 +1703,6 @@ input#setup-profile-starting-savings {
     align-items: center;
     width: 15px;
     height: 15px;
-
     /* default yellow */
     background: #F7C948; 
     border: 2px solid #575757;
@@ -2272,33 +1766,30 @@ input#setup-profile-starting-savings {
 /* Button for adding new entry */
 .dashboard-d-add-entry-btn {
     position: absolute;
-    top: -40px;
+    top: -30px;
     right: 0;
-    display: flex;
     justify-content: center;
     align-items: center;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    background-color: #676767;
+    width: 25px;
+    height: 25px;
+    padding: auto;
+    background-color: transparent;
+    background-color:#676767;
     border: none;
-    border-radius: 50%;
+    /* Make the button circular */
+    border-radius: 50%; 
     color: white;
-    font-size: 16px;
     cursor: pointer;
-    box-sizing: border-box;
-    transition: all 0.2s ease;
-    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
 }
 
 .dashboard-d-add-entry-btn i {
     position: relative;
-    margin: auto;
+    top: 1px;
+    right: 2px;
 }
 
 .dashboard-d-add-entry-btn:hover {
-    background-color: #A9A9A9;
+    background-color: #575757
 }
 
 /* Container for rows */
@@ -2308,7 +1799,6 @@ input#setup-profile-starting-savings {
     flex-direction: column;
     width: 100%;
     font-size: clamp(10px, 2vw, 14px);
-    color: #575757;
 }
 
 /* Row styling */
@@ -2418,33 +1908,23 @@ input#setup-profile-starting-savings {
 }
 
 .dashboard-d-credit-divider {
-    display: flex;
-    align-items: center;
     position: relative;
     width: 80%;
     margin: 18px 0 8px;
+    border-top: 2px solid #2AAAA8;
     text-align: center;
 }
 
-.dashboard-d-credit-divider::before,
-.dashboard-d-credit-divider::after {
-    content: '';
-    flex: 1;
-    height: 2px;
-    background: #2AAAA8;
-}
-
-.dashboard-d-credit-divider::before {
-    margin-right: 1em;
-}
-.dashboard-d-credit-divider::after {
-    margin-left: 1em;
-}
-
 .dashboard-d-credit-divider-text {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    padding: 0 16px;
+    background: #f5fffe;
     color: #2AAAA8;
     font-size: 12px;
     font-weight: bold;
+    transform: translateX(-50%);
     letter-spacing: 1px;
 }
 
@@ -2464,6 +1944,7 @@ input#setup-profile-starting-savings {
 
 .dashboard-d-container.dashboard-d-container-highlight {
     z-index: 1000;
+    /* or your desired value */
     border-radius: 15px; 
     outline: 4px solid #E45F1C;
     box-sizing: border-box;
@@ -2527,6 +2008,7 @@ input#setup-profile-starting-savings {
 
 .dashboard-d-move-btn {
   display: inline-block;
+  margin-left: 15px;
   cursor: pointer;
   vertical-align: middle;
 }
@@ -2534,21 +2016,8 @@ input#setup-profile-starting-savings {
 .calendar-icon {
   position: relative;
   display: inline-block;
-  font-size: 12px;
-}
-
-.dashboard-d-income-entries .dashboard-d-row:nth-child(even) .dashboard-d-move-btn .calendar-icon {
-    color: #59d6d4;
-}
-.dashboard-d-income-entries .dashboard-d-row:nth-child(odd) .dashboard-d-move-btn .calendar-icon {
-    color: #e6faf9;
-}
-
-.dashboard-d-expense-entries .dashboard-d-row:nth-child(even) .dashboard-d-move-btn .calendar-icon {
-    color: #EF9F77;
-}
-.dashboard-d-expense-entries .dashboard-d-row:nth-child(odd) .dashboard-d-move-btn .calendar-icon {
-    color: #fdeeee;
+  color: #575757;
+  font-size: 15px;
 }
 
 .calendar-icon .move-arrows {
@@ -2594,27 +2063,32 @@ input#setup-profile-starting-savings {
 
 /* Modal container */
 .dashboard-d-modal {
+    /* Stay in place */
     position: fixed; 
     top: 0;
     left: 0;
-    z-index: 200; 
-    display: none;
-    justify-content: center;
-    align-items: center;
+    /* Sit on top */
+    z-index: 1000; 
+    /* Hidden by default */
+    display: none; 
+    /* Full width */
     width: 100%; 
-    height: 100vh; 
+    /* Full height */
+    height: 100%; 
+    /* Enable scroll if needed */
     overflow: auto; 
-    background: rgb(0 0 0 / 30%);
-    background-color: transparent;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    /* Black background with opacity */
+    background-color: rgb(0 0 0 / 40%); 
 }
 
 /* Modal content box */
 .dashboard-d-modal-content {
+    /* Could be more or less depending on screen size */
     width: 80%; 
+    /* Set a max width for larger screens */
     max-width: 350px; 
-    margin: 15% auto;
+    /* 15% from the top and centered */
+    margin: 15% auto; 
     padding: 20px;
     background-color: #fff;
     border: 1px solid #575757;
@@ -2646,7 +2120,6 @@ input#setup-profile-starting-savings {
 
 /* Form group */
 .dashboard-d-form-group {
-    position: relative;
     margin-bottom: 15px;
 }
 
@@ -2665,22 +2138,15 @@ input#setup-profile-starting-savings {
     width: 100%;
     margin-top: 5px;
     margin-bottom: 10px;
-    padding: 10px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 10px;
-    font-size: 14px;
-    transition: all 0.2s ease;
+    padding: 5px;
+    border: 1px solid #A9A9A9;
+    border-radius: 5px;
+    font-size: 12px;
     appearance: none;
-    box-sizing: border-box;
-}
-
-.dashboard-d-form-group input[type="number"]:focus,
-.dashboard-d-form-group select:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
+    appearance: none;
+    appearance: none;
+    /* Ensure proper sizing */
+    box-sizing: border-box; 
 }
 
 /* Submit button */
@@ -2700,9 +2166,9 @@ input#setup-profile-starting-savings {
 
 /* Mobile responsiveness */
 @media screen and (width <= 600px) {
-
     .dashboard-d-modal-content {
-        width: 350px;
+        /* Make the modal slightly narrower on small screens */
+        width: 90%; 
     }
 
     .dashboard-d-lastremainder,
@@ -2725,14 +2191,12 @@ input#setup-profile-starting-savings {
     width: calc(100% - 40px);
     height: 10px;
     margin: 0 20px;
-    background-color: transparent;
-
+    /* Light gray background */
+    background-color: transparent; 
     /* Optional border for separation */
     border: 4px solid #2AAAA8; 
-
     /* Optional border for separation */
     border-bottom: 3px solid transparent; 
-
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
     color: #2AAAA8;
@@ -2744,18 +2208,13 @@ input#setup-profile-starting-savings {
 /* Style for the bottom empty div */
 .dashboard-d-date-bottom {
     width: calc(100% - 40px);
-
     /* Adjust the height if needed */
     height: 10px; 
-
     margin: 0 20px;
-
     /* Optional border for separation */
     border: 4px solid #2AAAA8; 
-
     /* Optional border for separation */
     border-top: 4px solid transparent; 
-
     border-bottom-left-radius: 10px;
     border-bottom-right-radius: 10px;
 }
@@ -2818,13 +2277,10 @@ input#setup-profile-starting-savings {
     display: flex;
     align-items: center;
     max-width: 875px;
-
     /* This will center the container horizontally */
     margin: 10px auto 0; 
-
     /* Prevents text from wrapping */
     white-space: nowrap; 
-
     /* Adds ellipsis (...) if the content is too long */
     text-overflow: ellipsis; 
 }
@@ -2838,9 +2294,11 @@ input#setup-profile-starting-savings {
 
 #categories-container {
     z-index: 10;
+    /* Adjust width as necessary */
     width: 30%; 
     margin-right: 5px;
     margin-bottom: 10px;
+    background-color: #f5fffe;
 }
 
 #income-categories-table,
@@ -2850,13 +2308,10 @@ input#setup-profile-starting-savings {
 .ca-categories-table {
     width: 100%;
     table-layout: fixed;
-
     /* Allows borders to be handled separately */
     border-collapse: collapse; 
-
     /* Space between the two categories tables */
     margin-bottom: 10px; 
-
     font-size: clamp(13px, calc(1.13vw + 4.65px), 14px);
 }
 
@@ -2903,14 +2358,15 @@ input#setup-profile-starting-savings {
     height: 10px;
     min-height: 10px;
     max-height: 10px;
+    /* Remove any margin */
     margin: 0; 
+    /* Remove any padding */
     padding: 0; 
     background-color: #E6FAF9 !important;
+    /* Disable borders */
     border: none; 
-
     /* Control the line-height to avoid extra space */
     line-height: 0; 
-
     box-sizing: border-box;
 }
 
@@ -2922,7 +2378,6 @@ input#setup-profile-starting-savings {
     color: #E6FAF9;
     font-size: 2px;
     --base-font-size: 3px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: .7vw; 
 }
@@ -2938,11 +2393,10 @@ input#setup-profile-starting-savings {
 
 .dashboard-this-week-bottom td {
     height: 10px;
+    /* Remove any padding inside the cells */
     padding: 0; 
-
     /* Optional, in case you want it to be transparent */
     background-color: transparent; 
-
     box-sizing: border-box;
 }
 
@@ -2989,7 +2443,6 @@ input#setup-profile-starting-savings {
     padding-left: calc(var(--base-padding) + var(--p-scaling-factor));
     text-align: left;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --p-scaling-factor: 0.9vw; 
 }
@@ -3066,38 +2519,33 @@ input#setup-profile-starting-savings {
 .search-btn-container {
     display: flex;
     flex-direction: row;
+    /* Align items to the right */
     justify-content: flex-end; 
     align-items: center;
-
     /* Adjust spacing between buttons as needed */
     gap: 5px; 
-
     margin-top: 10px;
 }
 
 .category-search-field {
+    /* Adjust as needed */
     width: 190px; 
-    padding: 10px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    font-size: 14px;
-    transition: all 0.2s ease;
-    appearance: none;
-    box-sizing: border-box;
+    height: 25px;
+    padding: 0 10px;
+    background: #fff;
+    border: 1px solid #ccc;
+    /* Half of height for pill shape */
+    border-radius: 12.5px; 
     outline: none;
     color: #575757;
-}
-
-.category-search-field:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
+    font-size: 12px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
 }
 
 .clear-filter-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: none; 
     justify-content: center;
     align-items: center;
@@ -3119,20 +2567,23 @@ input#setup-profile-starting-savings {
 }
 
 .clear-filter-btn:hover {
+    /* Darker shade on hover */
     color: #575757; 
 }
 
 .category-btn-container {
     display: flex;
     flex-direction: row;
+    /* Align items to the right */
     justify-content: flex-end; 
     align-items: center;
-    height: 38px;
-    gap: 5px;
+    /* Adjust spacing between buttons as needed */
+    gap: 5px; 
 }
 
 .add-category-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: flex; 
     justify-content: center;
     align-items: center;
@@ -3141,6 +2592,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: transparent;
     border: none;
+    /* Make the button circular */
     border-radius: 50%;
     color: white;
     font-size: 18px;
@@ -3160,11 +2612,13 @@ input#setup-profile-starting-savings {
 }
 
 .add-category-btn:hover {
+    /* Darker shade on hover */
     color: #434343; 
 }
 
 .edit-category-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: flex; 
     justify-content: center;
     align-items: center;
@@ -3173,6 +2627,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: transparent;
     border: none;
+    /* Make the button circular */
     border-radius: 50%; 
     color: white;
     font-size: 16px;
@@ -3192,11 +2647,13 @@ input#setup-profile-starting-savings {
 }
 
 .edit-category-btn:hover {
+    /* Darker shade on hover */
     color: #434343; 
 }
 
 .add-recurring-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: flex; 
     justify-content: center;
     align-items: center;
@@ -3205,6 +2662,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: transparent;
     border: none;
+    /* Make the button circular */
     border-radius: 50%; 
     color: white;
     font-size: 16px;
@@ -3224,11 +2682,13 @@ input#setup-profile-starting-savings {
 }
 
 .add-recurring-btn:hover {
+    /* Darker shade on hover */
     color: #434343; 
 }
 
 .toggle-hidden-btn {
     position: relative;
+    /* Changed from inline-block to flex for centering */
     display: flex; 
     justify-content: center;
     align-items: center;
@@ -3237,6 +2697,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     background-color: transparent;
     border: none;
+    /* Make the button circular */
     border-radius: 50%; 
     color: white;
     font-size: 16px;
@@ -3256,6 +2717,7 @@ input#setup-profile-starting-savings {
 }
 
 .toggle-hidden-btn:hover {
+    /* Darker shade on hover */
     color: #434343; 
 }
 
@@ -3281,17 +2743,12 @@ input#setup-profile-starting-savings {
     position: fixed;
     top: 0;
     left: 0;
-    z-index: 200;
-    display: none;
-    justify-content: center;
-    align-items: center;
+    z-index: 9998;
+    /* Shown when modal is open */
+    display: none; 
     width: 100vw;
     height: 100vh;
-    overflow: auto;
     background: rgb(0 0 0 / 30%);
-    background-color: transparent;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
 }
 
 /* Modal popup for category input */
@@ -3302,6 +2759,7 @@ input#setup-profile-starting-savings {
     top: 50%;
     left: 50%;
     z-index: 9999;
+    /* Set to flex when shown */
     display: none; 
     flex-direction: row;
     align-items: center;
@@ -3320,27 +2778,11 @@ input#setup-profile-starting-savings {
 #income-category-input-container input,
 #expense-category-input-container input,
 #ca-category-input-container input {
-    width: 100%;
-    height: 44px;
-    padding: 12px 14px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 10px;
-    font-size: 14px;
-    transition: all 0.2s ease;
-    appearance: none;
-    appearance: none;
-    appearance: none;
-    box-sizing: border-box;
-}
-
-#income-category-input-container input:focus,
-#expense-category-input-container input:focus,
-#ca-category-input-container input:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
 }
 
 /* Button styling inside the modal */
@@ -3377,33 +2819,26 @@ input#setup-profile-starting-savings {
     flex-wrap: wrap;
     margin-left: 5px;
     padding: 2px;
-
     /* Remove the default focus outline */
     outline: none; 
-
     white-space: normal;
 }
 
 /* Ensure the input field is clickable */
 .edit-input {
     position: relative;
-
     /* Ensure it appears above other elements */
     z-index: 100; 
-
     /* Ensure no browser styles block focus */
     outline: none; 
-
     pointer-events: auto;
 }
 
 .delete-category-btn {
     position: absolute;
     top: 50%;
-
     /* Move the button 10px further to the right */
     right: 0; 
-    
     display: none;
     border: none;
     color: #f94449;
@@ -3416,10 +2851,8 @@ input#setup-profile-starting-savings {
 .rename-category-btn {
     position: absolute;
     top: 50%;
-
     /* Move the button 10px further to the right */
     right: 0; 
-
     display: none;
     border: none;
     color: #575757;
@@ -3440,6 +2873,7 @@ input#setup-profile-starting-savings {
     padding: 0;
     padding-right: 10px;
     background: transparent;
+    /* Light gray border */
     border: none; 
     border-radius: 5px;
     outline: none;
@@ -3461,17 +2895,13 @@ input#setup-profile-starting-savings {
     position: fixed;
     top: 0;
     left: 0;
-    z-index: 200;
+    z-index: 50;
     display: none;
     justify-content: center;
     align-items: center;
     width: 100vw;
     height: 100vh;
-    overflow: auto;
     background: rgb(0 0 0 / 30%);
-    background-color: transparent;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
 }
 
 .category-edit-modal-content {
@@ -3489,20 +2919,10 @@ input#setup-profile-starting-savings {
 #editCategoryInput {
     flex: 1;
     width: 150px;
-    padding: 10px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 10px;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     font-size: 12px;
-    transition: all 0.2s ease;
-    box-sizing: border-box;
-}
-
-#editCategoryInput:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
 }
 
 .confirm-edit-category-btn {
@@ -3551,6 +2971,7 @@ input#setup-profile-starting-savings {
     left: 0;
     z-index: 1000;
     display: none;
+    /* Centering the modal */
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -3571,14 +2992,6 @@ input#setup-profile-starting-savings {
     text-align: center;
 }
 
-#close-email-pending-btn {
-    background-color: #2AAAA8;
-}
-
-#close-email-pending-btn:hover {
-    background-color: #59D6D4;
-}
-
 /* Close Button */
 .close-delete-modal {
     color: #aaa;
@@ -3595,46 +3008,21 @@ input#setup-profile-starting-savings {
 
 /* Buttons */
 .confirm-delete-category-btn, .cancel-delete-category-btn {
-    width: 45%;
-    padding: 14px 24px;
     margin: 10px;
+    padding: 5px 10px;
     border: none;
-    border-radius: 12px;
-    color: white;
-    font-size: 17px;
-    font-weight: 600;
-    transition: all 0.2s ease;
+    border-radius: 15px;
     cursor: pointer;
 }
 
 .confirm-delete-category-btn {
-    box-shadow: 0 2px 8px rgba(215, 58, 58, 0.36);
-    background-color: #f94449;
-}
-
-.confirm-delete-category-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(215, 58, 58, 0.36);
-    background-color: #ee6b6e;
-}
-
-.confirm-delete-category-btn:active {
-    transform: translateY(0);
+    background-color: #d73a3a;
+    color: white;
 }
 
 .cancel-delete-category-btn {
-    box-shadow: 0 2px 8px rgba(169, 169, 169, 0.36);
     background-color: #A9A9A9;
-}
-
-.cancel-delete-category-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(169, 169, 169, 0.36);
-    background-color: #c9c9c9;
-}
-
-.cancel-delete-category-btn:active {
-    transform: translateY(0);
+    color: white;
 }
 
 /* General table styling to ensure all tables align */
@@ -3765,7 +3153,6 @@ input#setup-profile-starting-savings {
     background: #fff;
     border-radius: 16px;
     box-shadow: 0 10px 40px rgb(0 0 0 / 20%);
-
     /* ensures padding is included within width */
     box-sizing: border-box; 
 }
@@ -3868,7 +3255,6 @@ input#setup-profile-starting-savings {
 /* Move the red exclamation circle up by the height of .dashboard-m-date */
 .dashboard-m-remainder.negative::before {
     left: -3px;
-
     /* Inherit the existing styles for the red circle */
     /* Move up by the height of .dashboard-m-date (assume 100% of parent for now) */
     transform: translateY(calc(-1 * var(--dashboard-m-date-height, 0px)) + 2.5vh);
@@ -3947,7 +3333,6 @@ input#setup-profile-starting-savings {
     text-align: left;
     vertical-align: bottom;
     --base-padding: .2px;
-    
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -3957,31 +3342,25 @@ input#setup-profile-starting-savings {
 .year-dropdown {
     /* Match the height of the header */
     height: 25px; 
-
     /* Add space between month and year dropdowns */
     margin-right: 0; 
-
     /* Optional: Make background transparent */
     background-color: transparent; 
-
     /* Explicitly remove the border */ /* Remove the outline */
     border: none; 
     outline: none;
-
     color: #2AAAA8;
-
     /* Use the same font size as the header */
     font-size: 25px; 
     font-weight: bold;
-
     /* Center the text vertically */
     line-height: 25px; 
-
     cursor: pointer;
-    
+    appearance: none;
     /* Remove default dropdown appearance for consistency */ /* For Safari */
     appearance: none; 
-
+    /* For Firefox */
+    appearance: none; 
     box-sizing: border-box;
 }
 
@@ -4023,10 +3402,12 @@ input#setup-profile-starting-savings {
 
 .negative {
     position: relative;
+    z-index: 6 !important;
 }
 
 .negative::before {
     position: absolute;
+    z-index: 7 !important;
 }
 
 .current-week-outline {
@@ -4048,10 +3429,8 @@ input#setup-profile-starting-savings {
     border-top-right-radius: 10px;
     color: white;
     font-size: 14px;
-
     /* Ensure columns stay aligned */
     table-layout: fixed; 
-
     /* Ensure borders are visible */
     border-collapse: collapse; 
 }
@@ -4081,10 +3460,8 @@ input#setup-profile-starting-savings {
 #savings-row-right {
     /* Ensure all tables take up the same width */
     width: 100%; 
-
     /* Ensure columns stay aligned */
     table-layout: fixed; 
-
     border-collapse: collapse;
     font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
 }
@@ -4094,10 +3471,8 @@ input#setup-profile-starting-savings {
     /* Set the height to 10px */
     height: 10px !important;
     padding: 0;
-
     /* Set the background to transparent */
     background-color: transparent;
-
     /* Remove any borders if needed */
     border: none !important;
 }
@@ -4138,7 +3513,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -4150,7 +3524,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -4162,7 +3535,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -4174,7 +3546,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -4186,7 +3557,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -4198,7 +3568,6 @@ input#setup-profile-starting-savings {
     font-weight: bold;
     text-align: right;
     --base-padding: .2px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.9vw; 
 }
@@ -4319,7 +3688,6 @@ input#setup-profile-starting-savings {
 /* Move the red exclamation circle up by the height of .dashboard-m-date */
 .dashboard-m-remainder.below-threshold::before {
     left: -3px;
-
     /* Inherit the existing styles for the red circle */
     /* Move up by the height of .dashboard-m-date (assume 100% of parent for now) */
     transform: translateY(calc(-1 * var(--dashboard-m-date-height, 0px)) + 2.5vh);
@@ -4386,8 +3754,8 @@ input#setup-profile-starting-savings {
 
 /* Arrow for menu to the left of the mouse (arrow on right) */
 .context-menu-arrow-right {
-    /* triangle pointing up-right */
     right: 12px;
+    /* triangle pointing up-right */
 }
 
 .context-menu-arrow {
@@ -4475,9 +3843,11 @@ input#setup-profile-starting-savings {
 
 .dashboard-m-month-year-header {
     display: flex;
+    /* center children horizontally */
     justify-content: center;
+    /* optional: center vertically */
     align-items: center;
-    margin: 0 50%;
+    margin: 0 auto;
     font-size: 25px;
     font-weight: bold;
     text-align: center;
@@ -4498,24 +3868,21 @@ input#setup-profile-starting-savings {
 .dashboard-m-year-dropdown {
     /* Match the height of the header */
     height: 30px; 
+    /* Optional: Make background transparent */
     background-color: transparent; 
-
-
     /* Explicitly remove the border */ /* Remove the outline */
     border: none; 
     outline: none;
-
     color: #2AAAA8;
-
     /* Use the same font size as the header */
     font-size: inherit; 
-
     font-weight: bold;
     cursor: pointer;
-    
-    /* Remove default dropdown appearance for consistency */ /* For Safari */ /* For Firefox */
+    appearance: none;
+    /* Remove default dropdown appearance for consistency */
     appearance: none; 
-
+    /* For Safari */ /* For Firefox */
+    appearance: none; 
     box-sizing: border-box;
 }
 
@@ -4549,37 +3916,12 @@ input#setup-profile-starting-savings {
     align-items: center;
     width: 100%;
     max-width: 875px;
-    min-width: 350px;
     margin: 0 auto;
     margin-bottom: 10px;
     background-color: transparent;
     text-align: center;
     border-collapse: separate;
     text-overflow: ellipsis;
-}
-
-@media (max-width: 875px) {
-    #dashboard-m-calendar {
-        max-width: 100%;
-    }
-}
-
-@media (max-width: 350px) {
-    #dashboard-m-calendar {
-        min-width: 100%;
-    }
-    
-    .dashboard-m-day-label,
-    .dashboard-m-date-number,
-    .dashboard-m-income-total,
-    .dashboard-m-expense-total,
-    .dashboard-m-remainder,
-    .dashboard-m-ca-balance,
-    .dashboard-m-savings,
-    .dashboard-m-ca-divider-text,
-    .dashboard-m-s-divider-text {
-        font-size: 6px !important;
-    }
 }
 
 #dashboard-m-calendar td {
@@ -4589,40 +3931,29 @@ input#setup-profile-starting-savings {
     box-sizing: border-box;
 }
 
-.dashboard-m-other-month .dashboard-m-main-sections::before {
+.dashboard-m-other-month::before {
     position: absolute;
-    inset: 0;
+    inset: 15px 0 0;
     z-index: 1;
     /* Much darker overlay */
     background-color: rgb(57 57 57 / 70%); 
+    border-radius: inherit;
     border-radius: 10px;
     content: '';
-    pointer-events: none;
-}
-
-.dashboard-m-main-sections {
-    display: flex;
-    flex-direction: column;
-    position: relative;
 }
 
 /* Ensure each date div inside the td fits without extra space */
 .dashboard-m-date {
     display: flex;
-
     /* Stack child divs vertically */
     flex-direction: column; 
-
     /* Ensure even spacing between divs */
     justify-content: space-between; 
-
     /* Make the div fill the td */
     height: 100%; 
-
     box-sizing: border-box;
-    margin: 10px 1px 0px;
+    margin-top: 20px;
     transition: opacity 0.2s ease;
-    font-size: 0.8em;
 }
 
 .dashboard-m-date:hover {
@@ -4631,41 +3962,34 @@ input#setup-profile-starting-savings {
 
 .dashboard-m-day-label {
     display: flex;
-
     /* Ensure this takes up 18% of the total height */
     flex: 1 0 18%; 
-
     justify-content: center;
     align-items: center;
     margin: 0;
     padding: 0;
     background-color: #676767;
     color: white;
-    font-size: clamp(3px, 2vw, 14px);
-
+    font-size: clamp(7px, 2vw, 14px);
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
 
 .dashboard-m-date-number {
     display: flex;
-
     /* Adjust the height to 10% */
     flex: 2 0 10%; 
     justify-content: center;
     align-items: center;
     margin: 0;
     padding: 0;
-    background-color: #f2f7f7;
-    color: #575757;
-    font-size: clamp(3px, 2vw, 14px);
-    border-left: 2px solid #A9A9A9;
-    border-right: 2px solid #A9A9A9;
+    background-color: #A9A9A9;
+    color: white;
+    font-size: clamp(7px, 2vw, 14px);
+    /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
@@ -4678,29 +4002,14 @@ input#setup-profile-starting-savings {
     align-items: center;
     margin: 0;
     padding: 0;
-    background-color: #59D6D4;
-    border-left: 2px solid #A9A9A9;
-    border-right: 2px solid #A9A9A9;
-
+    background-color: #2AAAA8;
     /* Adjust text color if needed */
-    color: #575757; 
-
-    font-size: clamp(3px, 2vw, 14px);
-
+    color: white; 
+    font-size: clamp(7px, 2vw, 14px);
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
-}
-
-.dashboard-m-income-total.zero-value {
-    background-color: #f2f7f7;
-}
-
-.dashboard-m-income-total.zero-value .dashboard-m-label,
-.dashboard-m-income-total.zero-value .dashboard-m-value {
-    visibility: hidden;
 }
 
 .dashboard-m-expense-total {
@@ -4711,29 +4020,14 @@ input#setup-profile-starting-savings {
     align-items: center;
     margin: 0;
     padding: 0;
-    background-color: #EF9F77;
-    border-left: 2px solid #A9A9A9;
-    border-right: 2px solid #A9A9A9;
-
+    background-color: #E45F1C;
     /* Adjust text color if needed */
-    color: #575757; 
-
-    font-size: clamp(3px, 2vw, 14px);
-
+    color: white; 
+    font-size: clamp(7px, 2vw, 14px);
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
-}
-
-.dashboard-m-expense-total.zero-value {
-    background-color: #f2f7f7;
-}
-
-.dashboard-m-expense-total.zero-value .dashboard-m-label,
-.dashboard-m-expense-total.zero-value .dashboard-m-value {
-    visibility: hidden;
 }
 
 .dashboard-m-remainder {
@@ -4745,122 +4039,114 @@ input#setup-profile-starting-savings {
     margin: 0;
     padding: 0;
     background-color: #A9A9A9;
-
     /* Adjust text color if needed */
     color: white; 
-
-    font-size: clamp(3px, 2vw, 14px);
-
+    font-size: clamp(7px, 2vw, 14px);
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
 
-.dashboard-m-ca-divider,
-.dashboard-m-s-divider {
-    display: flex;
-    align-items: center;
+.dashboard-m-ca-divider {
     position: relative;
-    width: 100%;
-    padding: 12px auto 8px;
+    width: 80%;
+    margin: 12px auto 8px;
+    border-top: 2px solid #2AAAA8;
     text-align: center;
-    border-left: 2px solid #A9A9A9;
-    border-right: 2px solid #A9A9A9;
 }
 
-.dashboard-m-ca-divider::before,
-.dashboard-m-ca-divider::after,
-.dashboard-m-s-divider::before,
-.dashboard-m-s-divider::after {
-    content: '';
-    flex: 1;
-    height: 2px;
-    background: #2AAAA8;
-}
-
-.dashboard-m-ca-divider::before,
-.dashboard-m-s-divider::before {
-    margin: 0.3em;
-}
-
-.dashboard-m-ca-divider::after,
-.dashboard-m-s-divider::after {
-    margin: 0.3em;
-}
-
-.dashboard-m-ca-divider-text,
-.dashboard-m-s-divider-text {
-    /* No background-color needed! */
+.dashboard-m-ca-divider-text {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    padding: 0 8px;
+    background: #f5fffe;
     color: #2AAAA8;
-    font-size: clamp(7px, 2vw, 12px);
+    font-size: 10px;
     font-weight: bold;
+    transform: translateX(-50%);
+    letter-spacing: 1px;
+}
+
+.dashboard-m-s-divider {
+    position: relative;
+    width: 80%;
+    margin: 12px auto 8px;
+    border-top: 2px solid #2AAAA8;
+    text-align: center;
+}
+
+.dashboard-m-s-divider-text {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    padding: 0 8px;
+    background: #f5fffe;
+    color: #2AAAA8;
+    font-size: 10px;
+    font-weight: bold;
+    transform: translateX(-50%);
     letter-spacing: 1px;
 }
 
 .dashboard-m-ca-balance {
     display: flex;
-
     /* Ensure these divs take up 18% each */
     flex: 6 0 18%; 
-
     justify-content: space-between;
     align-items: center;
     margin: 0;
+    margin-top: 3px;
     padding: 0;
     background-color: #676767;
-
+    border-radius: 10px;
     /* Adjust text color if needed */
     color: white; 
-
-    font-size: clamp(3px, 2vw, 14px);
-
+    font-size: clamp(7px, 2vw, 14px);
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
 
 .dashboard-m-savings {
     display: flex;
-
     /* Ensure these divs take up 18% each */
     flex: 6 0 18%; 
-
     justify-content: space-between;
     align-items: center;
     margin: 0;
+    margin-top: 3px;
     padding: 0;
     background-color: #2AAAA8;
-    border-bottom-right-radius: 10px;
-    border-bottom-left-radius: 10px;
-
+    border-radius: 10px;
     /* Adjust text color if needed */
     color: white; 
-
-    font-size: clamp(3px, 2vw, 14px);
-
+    font-size: clamp(7px, 2vw, 14px);
     /* Optionally make the text bold */
     font-weight: bold; 
-
     /* Horizontally center the text */
     text-align: center; 
 }
 
 .dashboard-m-label {
-    flex: 0 0 10%;
-    padding-left: 2px;
+    flex: 1 1 auto;
+    padding-left: 5px;
     text-align: left;
     justify-self: flex-start;
 }
 
 .dashboard-m-value {
     flex: 1 1 auto;
-    padding-right: 2px;
+    padding-right: 5px;
     text-align: right;
     justify-self: flex-end;
+}
+
+#dashboard-m-calendar .dashboard-m-remainder {
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
 }
 
 #dashboard-m-calendar .dashboard-m-day-label {
@@ -4875,47 +4161,25 @@ input#setup-profile-starting-savings {
 .dashboard-m_other-month::before {
     position: absolute;
     inset: 0;
-    z-index: 100;
-
+    z-index: 1;
     /* Adjust the darkness with the alpha value */
     background-color: rgb(157 157 157 / 70%); 
-
     /* Preserve the border radius */
     border-radius: inherit; 
-
     border-radius: 10px;
     content: '';
 }
 
 .dashboard-m-today {
     /* Add a border to further emphasize today's date */
-    position: relative;
-    border-radius: .8em;
-}
-
-.dashboard-m-today::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    border: 4px solid #E45F1C;
-    border-radius: .8em;
-    pointer-events: none;
-    z-index: 2;
-}
-
-.dashboard-m-today .dashboard-m-date {
-    position: relative;
+    border: 4px solid #E45F1C; 
+    border-radius: 15px;
 }
 
 .dashboard-d-today-container {
     display: flex;
-
     /* Centers horizontally */
     justify-content: center;
-
     /* Aligns content to the bottom */
     align-items: flex-end;
     height: 15px;
@@ -4923,7 +4187,6 @@ input#setup-profile-starting-savings {
     font-size: 14px;
     font-weight: bold;
     box-sizing: border-box;
-    z-index: 100;
 }
 
 /* Outline for today's dashboard-d-container */
@@ -4938,75 +4201,17 @@ input#setup-profile-starting-savings {
     position: absolute;
     top: 0;
     left: 0;
+    z-index: 20;
+    padding: 4px 14px 4px 10px;
     background: #E45F1C;
+    border-top-left-radius: 10px;
+    border-bottom-right-radius: 12px;
+    box-shadow: 0 2px 8px rgb(42 170 168 / 8%);
     color: #fff;
     font-size: 13px;
     font-weight: bold;
-    padding: 4px 39px 4px 10px;
-    border-top-left-radius: 10px;
-    border-bottom-right-radius: 12px;
-    z-index: 20;
-    box-shadow: 0 2px 8px rgba(42,170,168,0.08);
     letter-spacing: 1px;
     pointer-events: none;
-}
-
-.dashboard-wrapper {
-    position: relative;
-    max-width: 875px;
-    margin: -40px auto 0;
-}
-
-
-/* Floating Today Banner */
-.today-floating-banner {
-    position: sticky;
-    top: 120px; /* 70px nav + 50px extra */
-    z-index: 999;
-    display: none;
-    align-items: center;
-    gap: 6px;
-    background: #E45F1C;
-    color: #fff;
-    font-size: 13px;
-    font-weight: bold;
-    padding: 4px 14px 4px 10px;
-    border-top-left-radius: 10px;
-    border-bottom-right-radius: 12px;
-    box-shadow: 0 2px 8px rgba(42,170,168,0.08);
-    cursor: pointer;
-    transition: all 0.3s ease;
-    letter-spacing: 1px;
-    pointer-events: auto;
-    width: fit-content;
-    margin-bottom: 10px;
-}
-
-.today-floating-banner:hover {
-    background: #D04F0C;
-    box-shadow: 0 3px 10px rgba(228, 95, 28, 0.5);
-}
-
-.today-floating-banner:active {
-    transform: scale(0.98);
-}
-
-.today-banner-text {
-    font-size: 13px;
-}
-
-#today-banner-arrow {
-    font-size: 14px;
-    animation: bounce 1.5s ease-in-out infinite;
-}
-
-@keyframes bounce {
-    0%, 100% {
-        transform: translateY(0);
-    }
-    50% {
-        transform: translateY(-3px);
-    }
 }
 
 .category-row-hidden {
@@ -5019,21 +4224,16 @@ input#setup-profile-starting-savings {
 #year-calendar {
     display: grid;
     gap: clamp(5px, 10px, 15px);
-
     /* Always 3 columns */
     grid-template-columns: repeat(3, 1fr); 
-
     width: 100%;
     max-width: 875px;
     margin: 0 auto;
     padding-bottom: 10px;
     background-color: transparent;
-
     /* Ensure equal row height for all months */
     grid-auto-rows: 1fr; 
-
     box-sizing: border-box;
-
     /* Center the month containers horizontally */
     justify-items: center; 
 }
@@ -5047,18 +4247,13 @@ input#setup-profile-starting-savings {
 /* Style for each month container */
 .dashboard-y-month-container {
     display: flex;
-
     /* Allow content to stack vertically */
     flex-direction: column; 
-
     /* Align content to the top */
     justify-content: flex-start; 
-
     width: 100%;
-
     /* Ensure height auto-adjusts */
     height: auto; 
-
     text-align: center;
     box-sizing: border-box;
 }
@@ -5079,10 +4274,8 @@ input#setup-profile-starting-savings {
 .dashboard-y-calendar-table td {
     /* Responsive width */
     width: clamp(15px, 3vw, 25px); 
-
     /* Responsive height */
     height: clamp(15px, 3vw, 25px); 
-
     padding: 2px 0;
     font-size: clamp(8px, 2vw, 12px);
     text-align: center;
@@ -5149,36 +4342,45 @@ input#setup-profile-starting-savings {
 
 /* Profile Page Styles */
 .profile-box {
-    display: grid;
-    grid-template-columns: 1fr;
-    min-width: fit-content;
-    max-width: 750px;
-    padding-top: 25px;
-    margin-top: 2em;
-    margin-left: auto;
-    margin-right: auto;    
+    justify-content: space-between;
+    /* Allow the width to adjust based on content */
+    width: 875px; 
+    /* Set a max-width to ensure it doesn't stretch too far */
+    max-width: 100%; 
+    margin: 0 auto;
     background-color: transparent;
-    box-sizing: border-box;
+    text-align: center;
 }
 
 .profile-content {
-    display: grid;
-    justify-items: center;
-    height: 100%;
-    align-items: center;
+    display: flex;
+    /* Distribute space between the two sections */
+    justify-content: center; 
+    /* Align content vertically */
+    align-items: center; 
+    /* Ensure the container takes up full width */
+    width: calc(100% - 20px); 
+    /* Set height for the container (adjust if needed) */
+    height: 100%; 
 }
 
 .profile-header, 
 .profile-actions {
+    /* Each container takes up 50% of the width */
+    width: 50%; 
     /* Ensure padding doesn't affect the width */
     box-sizing: border-box; 
 }
 
 .profile-header {
     display: flex;
+    /* Stack the content vertically */
     flex-direction: column; 
+    /* Vertically center the content */
     justify-content: center; 
+    /* Center items horizontally */
     align-items: center; 
+    /* Optional padding for spacing */
     padding: 10px; 
 }
 
@@ -5248,47 +4450,34 @@ input#setup-profile-starting-savings {
     margin-top: 10px;
 }
 
-.cancel-upload-button,
-.upload-button {
-    width: 45%;
-    padding: 14px 24px;
+.cancel-upload-button {
+    margin-top: 15px;
+    padding: 10px 16px;
+    background-color: #A9A9A9;
     border: none;
-    border-radius: 12px;
+    border-radius: 8px;
     color: white;
-    font-size: 17px;
-    font-weight: 600;
-    transition: all 0.2s ease;
+    font-size: 10px;
     cursor: pointer;
 }
 
 .upload-button {
-    box-shadow: 0 2px 8px #2AAAA85c;
     background-color: #2aaaa8;
+    color: white;
 }
 
 .upload-button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px #2AAAA85c;
-    background-color: #2aaaa8;
-}
-
-.upload-button:active {
-    transform: translateY(0);
+    background-color: #575757;
 }
 
 .cancel-upload-button {
-    box-shadow: 0 2px 8px rgba(169, 169, 169, 0.36);
-    background-color: #A9A9A9;
+    background-color: #ccc;
+    color: #333;
 }
 
 .cancel-upload-button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(169, 169, 169, 0.36);
-    background-color: #A9A9A9;
-}
-
-.cancel-upload-button:active {
-    transform: translateY(0);
+    background-color: #999;
+    color: white;
 }
 
 .center-modal-content form {
@@ -5439,20 +4628,15 @@ input#setup-profile-starting-savings {
 
 .profile-info {
     /* Adjust margin to be closer to input fields */
-    margin-bottom: 20px;
-
+    margin-bottom: 20px; 
     /* Ensure the text color is prominent */
     background-color: #2aaaa8; 
-
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
-
     /* Ensure the text color is prominent */
     color: white; 
-
     /* Increased font size */
     font-size: 18px; 
-
     /* Make the text bold */
     font-weight: bold; 
 }
@@ -5463,64 +4647,66 @@ input#setup-profile-starting-savings {
 }
 
 .profile-actions {
-    display: grid;
+    display: flex;
+    /* Stack the forms vertically */
+    flex-direction: column; 
     text-align: right;
-    width: 100%;
-    min-width: 350px;
-    max-width: 650px;
 }
 
-.profile-form {
-    padding: 0;
-    margin-bottom: 8px;
-    width: 100%;
+/* When the screen width is less than 75px, stack the header above the actions */
+@media (width <= 740px) {
+    .profile-content {
+        /* Stack the elements vertically */
+        flex-direction: column; 
+        /* Center them horizontally */
+        align-items: center; 
+    }
+
+    .profile-header, 
+    .profile-actions {
+        /* Make each section take full width */
+        width: 100%; 
+        /* Center the content within each section */
+        text-align: center; 
+    }
+
+    .profile-header {
+        /* Add some space between the header and actions */
+        margin-bottom: 20px; 
+    }
 }
 
 .profile-form .input-group {
     display: flex;
+    justify-content: flex-start !important;
     align-items: center;
-    gap: 8px;
-    padding: 12px 16px;
-    background-color: #f9f9f9;
-    border-radius: 10px;
-    margin-bottom: 8px;
+    /* Ensure the input group takes up the full width */
+    width: auto !important; 
+    margin-right: auto !important;
+    margin-bottom: 5px;
 }
 
 .profile-form label {
     flex-shrink: 0;
-    width: 30%;
-    min-width: 40px;
-    margin: 0;
-    font-size: 14px;
-    font-weight: 500;
-    color: #000;
-    text-align: right;
+    /* Fixed width for labels */
+    width: 150px; 
+    /* Further reduce margin to bring the label closer to the input */
+    margin-right: -5px; 
+    font-size: 12px;
+    /* Align text to the left within the label */
+    text-align: left; 
 }
 
 .profile-form .login-input {
-    flex: 1;
-    min-width: 40px;
-    padding: 8px 12px;
-    background-color: #fff;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    font-size: 14px;
-    transition: all 0.2s ease;
-}
-
-.profile-form .login-input:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
-}
-
-.profile-form .currency-input-container {
-    position: relative;
-    flex: 1;
-    min-width: 40px;
-    display: flex;
-    align-items: center;
+    /* Adjusted width to balance the layout */
+    width: 155px; 
+    /* Fixed height to align with button */
+    height: 25px; 
+    /* Slightly reduce padding for a more compact appearance */
+    padding: 0 6px; 
+    border-radius: 5px;
+    color: #575757;
+    font-size: 12px;
 }
 
 .login-input[type="number"] {
@@ -5528,64 +4714,37 @@ input#setup-profile-starting-savings {
 }
 
 .profile-form .submit-button {
+    position: relative;
+    top: -8px;
     display: flex;
     justify-content: center;
     align-items: center;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
+    width: 25px;
+    height: 25px;
+    margin-left: 20px;
     padding: 0;
     background-color: #E45F1C;
     border: none;
     border-radius: 50%;
     color: white;
-    font-size: 16px;
+    font-size: 14px;
     cursor: pointer;
-    box-sizing: border-box;
-    transition: all 0.2s ease;
-    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
+    /* Ensure padding doesn't affect width/height */
+    box-sizing: border-box; 
 }
 
 .profile-form .submit-checkbox {
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    -moz-appearance: none !important;
-}
-
-.profile-form .toggle-switch {
+    position: relative;
+    top: -8px;
     display: flex;
     justify-content: center;
     align-items: center;
-    cursor: pointer;
     margin-left: 20px;
-    margin-right: 0;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
     padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 50%;
+    font-size: 14px;
     cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.profile-form .toggle-switch .toggle-icon {
-    height: 25px;
-    width: auto;
-    font-size: 30px;
-    line-height: 1;
-    color: #E45F1C;
-    transition: color 0.3s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transform-origin: center center;
-}
-
-.profile-form .toggle-switch .toggle-icon.toggle-off {
-    color: #A9A9A9;
-    transform: scaleX(-1);
+    /* Ensure padding doesn't affect width/height */
+    box-sizing: border-box; 
 }
 
 #enable-mfa-btn {
@@ -5593,7 +4752,6 @@ input#setup-profile-starting-savings {
     width: 65px !important;
     margin-left: 0 !important;
     padding: 0 10px;
-
     /* Make the button circular */
     border-radius: 25px !important; 
 }
@@ -5603,7 +4761,6 @@ input#setup-profile-starting-savings {
     width: 65px !important;
     margin-left: 0 !important;
     padding: 0 10px;
-
     /* Make the button circular */
     border-radius: 25px !important; 
 }
@@ -5626,21 +4783,17 @@ input#setup-profile-starting-savings {
 .input-status {
     position: absolute;
     top: 50%;
-
     /* Position the status icon inside the input field */
     right: 10px; 
+    /* Use flexbox to ensure proper alignment */
     display: flex; 
     align-items: center;
-
     /* Ensure the icon is aligned with the height of the input field */
     height: 100%; 
-
     /* Ensure the icon matches the text color */
     color: inherit; 
-
     font-size: 14px;
     transform: translateY(-50%);
-
     /* Prevent the icon from blocking clicks */
     pointer-events: none; 
 }
@@ -5654,10 +4807,8 @@ input#setup-profile-starting-savings {
     border: none;
     border-radius: 50%; 
     color: white;
-
     /* Show disabled cursor */
     cursor: not-allowed; 
-
     /* Prevent clicking */
     pointer-events: none; 
 }
@@ -5671,10 +4822,8 @@ input#setup-profile-starting-savings {
 .profile-form .submit-button.enabled {
     background-color: #E45F1C;
     color: white;
-
     /* Show clickable cursor */
     cursor: pointer; 
-
     /* Allow clicking */
     pointer-events: auto; 
 }
@@ -5695,34 +4844,27 @@ input#setup-profile-starting-savings {
     position: absolute;
     z-index: 1000;
     display: flex;
+    /* Horizontally center the text */
     justify-content: center;
+    /* Vertically center the text */
     align-items: center;
-
     /* Match the width of the input field */
     width: 100%;
-
     /* Ensure the height adjusts based on content */
     height: auto;
-
     /* Match the padding of the input field */
     padding: 15px;
-
     /* Match the rounded corners of the input field */
     border-radius: 25px;
-    
     box-shadow: 0 2px 10px rgb(0 0 0 / 20%);
-
     /* Start hidden */
     opacity: 0;
     color: white;
-
     /* Match the font size of the input field */
     font-size: 16px;
-
     /* Prevent interactions */
     pointer-events: none;
     transition: opacity 0.5s ease-in-out;
-
     /* Include padding in the width and height calculation */
     box-sizing: border-box;
 }
@@ -5735,34 +4877,24 @@ input#setup-profile-starting-savings {
 .password-requirements {
     position: absolute;
     z-index: 1000;
-
     /* Hidden by default */
     display: none; 
-
     /* Match the width of the input field */
     width: 100%; 
     padding: 10px;
-
     background-color: #E6FAF9;
-
     /* Match the rounded edges of the input field */
     border-radius: 25px; 
-
     box-shadow: 0 2px 10px rgb(0 0 0 / 10%);
-
     /* Start hidden */
     opacity: 0; 
     color: #575757;
-
     /* Smaller font size */
     font-size: 12px; 
-
     /* Align text to the left */
     text-align: left; 
-
     /* Smooth fade-in effect */
     transition: opacity 0.3s ease; 
-
     /* Ensure padding doesn't affect the width */
     box-sizing: border-box; 
 }
@@ -5770,35 +4902,24 @@ input#setup-profile-starting-savings {
 .email-requirements {
     position: absolute;
     z-index: 1000;
-
     /* Hidden by default */
     display: none; 
-
     /* Match the width of the input field */
     width: 100%; 
-
     padding: 10px;
     background-color: #E6FAF9;
-
     /* Match the rounded edges of the input field */
     border-radius: 25px; 
-
     box-shadow: 0 2px 10px rgb(0 0 0 / 10%);
-
     /* Start hidden */
     opacity: 0; 
-
     color: #575757;
-
     /* Smaller font size */
     font-size: 12px; 
-
     /* Align text to the left */
     text-align: left; 
-
     /* Smooth fade-in effect */
     transition: opacity 0.3s ease; 
-
     /* Ensure padding doesn't affect the width */
     box-sizing: border-box; 
 }
@@ -5896,151 +5017,95 @@ input#setup-profile-starting-savings {
 }
 
 .delete-account-button {
-    width: 100%;
-    padding: 14px 24px;
-    border-radius: 12px;
-    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
-    color: white;
-    font-size: 18px;
-    font-weight: 600;
-    transition: 0.2s;
-    cursor: pointer;
-    margin: 10px auto;
+    /* Ensure it behaves as a block-level element like the register button */
+    display: block; 
+    /* Same width as the register button */
+    width: 150px; 
+    height: 25px;
+    /* Center the button and add some space above */
+    margin: 10px auto; 
     background-color: #f94449;
     border: none;
+    /* Rounded corners to match the register button */
+    border-radius: 25px; 
+    color: white;
+    /* Font size to match */
+    font-size: 14px; 
+    text-align: center;
+    cursor: pointer;
 }
 
 .delete-account-button:hover {
-    box-shadow: 0 4px 12px rgba(249, 68, 73, 0.4);
-    transform: translateY(-1px);
-    background-color: #ee6b6e;
-}
-
-.delete-account-button:active {
-    box-shadow: 0 1px 4px rgba(249, 68, 73, 0.3);
-    transform: translateY(0);
+    /* Darker pink on hover */
+    background-color: #ee6b6e; 
 }
 
 .profile-section {
     /* Needed for absolute ::before */
     position: relative; 
-
     /* top right bottom left */
-    margin: 30px 0 35px; 
-
+    margin: 10px 0 25px; 
     /* top right bottom left */
-    padding: 16px;
-    background-color: #fff;
-    border-radius: 12px;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    padding: 10px 0; 
+    border: 1px solid #2AAAA8;
+    border-radius: 10px;
 }
 
 .data-section {
     /* Needed for absolute ::before */
     position: relative; 
-
     /* top right bottom left */
-    margin: 30px 0 35px; 
-
+    margin: 10px 0 35px; 
     /* top right bottom left */
-    padding: 16px;
-    background-color: #fff;
-    border-radius: 12px;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    padding: 10px 0; 
+    border: 1px solid #2AAAA8;
+    border-radius: 10px;
 }
 
 /* Profile label */
 .profile-section::before {
     position: absolute;
-    top: -25px;
-    left: 20px;
-    padding: 4px 12px 6px;
-    background-color: #fff;
-    border-radius: 8px 8px 0 0;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    top: -10px;
+    left: 10px;
+    padding: 0 5px;
+    background-color: #f5fffe;
     color: #2AAAA8;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
+    font-size: 12px;
     content: "Profile";
-}
-
-/* Bank Connections section label override */
-#bank-connections-section::before {
-    content: "Bank Connections";
-}
-
-/* Notifications section label override */
-#notification-section::before {
-    content: "Notifications";
 }
 
 /* Data label */
 .data-section::before {
     position: absolute;
-    top: -25px;
-    left: 20px;
-    padding: 4px 12px 6px;
-    background-color: #fff;
-    border-radius: 8px 8px 0 0;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    top: -10px;
+    left: 10px;
+    padding: 0 5px;
+    background-color: #f5fffe;
     color: #2AAAA8;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
+    font-size: 12px;
     content: "Data";
 }
 
 .section-liner {
     display: flex;
-
     /* or 'row' depending on layout */
     flex-direction: column; 
-
     justify-content: center !important;
     align-items: center;
-    width: 100%;
-    max-width: 100%;
+    min-width: 370px;
 }
 
-/* Notification section */
+/* Notification Styles */
+
 .notification-section {
+    border: 1px solid #2AAAA8;
+    border-radius: 10px;
+    /* top right bottom left */
+    padding: 10px 0px; 
+    /* top right bottom left */
+    margin: 10px 0 25px 0; 
     /* Needed for absolute ::before */
     position: relative; 
-
-    /* top right bottom left */
-    margin: 30px 0 35px; 
-
-    /* top right bottom left */
-    padding: 16px;
-    background-color: #fff;
-    border-radius: 12px;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
-}
-
-/* Notification label */
-.notification-section::before {
-    position: absolute;
-    top: -25px;
-    left: 20px;
-    padding: 4px 12px 6px;
-    background-color: #fff;
-    border-radius: 8px 8px 0 0;
-    box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
-    color: #2AAAA8;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    content: "Notifications";
 }
 
 .notification-item {
@@ -6069,7 +5134,6 @@ input#setup-profile-starting-savings {
     font-size: 14px;
     color: #333;
     line-height: 1.5;
-    text-align: left;
 }
 
 .notification-message a {
@@ -6142,37 +5206,28 @@ input#setup-profile-starting-savings {
 
 /* MFA QR Modal Styles */
 #mfa-qr-modal {
-    display: none;
     position: fixed;
-    z-index: 2000;
-    left: 0;
     top: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0,0,0,0.30);
-    background-color: transparent;
-    backdrop-filter: blur(8px);
-}
-
-#mfa-qr-modal.modal {
+    left: 0;
+    z-index: 2000;
+    display: none;
     justify-content: center;
     align-items: center;
-}
-
-#mfa-qr-modal.modal.show {
-    display: flex;
+    width: 100vw;
+    height: 100vh;
+    background: rgb(0 0 0 / 45%);
 }
 
 #mfa-qr-modal .modal-content {
-    background: #fff;
-    margin: auto;
-    padding: 2em 1.5em 1.5em 1.5em;
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
-    max-width: 95vw;
-    width: 100%;
-    max-width: 400px;
     position: relative;
+    width: 100%;
+    max-width: 95vw;
+    max-width: 400px;
+    margin: auto;
+    padding: 2em 1.5em 1.5em;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgb(0 0 0 / 18%);
     animation: modalFadeIn 0.2s;
 }
 
@@ -6180,55 +5235,54 @@ input#setup-profile-starting-savings {
     position: absolute;
     top: 0.7em;
     right: 1em;
-    font-size: 1.5em;
-    color: #888;
-    cursor: pointer;
-    transition: color 0.2s;
     z-index: 10;
+    color: #888;
+    font-size: 1.5em;
+    transition: color 0.2s;
+    cursor: pointer;
 }
+
 #mfa-qr-modal #close-mfa-modal:hover {
     color: #F15025;
 }
 
 #mfa-qr-modal #mfa-qr-image img {
-    max-width: 350px;
-    max-width: 350px;
-    width: 80%;
-    height: 80%;
-    margin: 0 auto;
     display: block;
+    margin: 0 auto;
+    padding: 8px;
+    background: #fafafa;
     border: 1px solid #eee;
     border-radius: 8px;
-    background: #fafafa;
-    padding: 8px;
 }
 
 #mfa-qr-modal #mfa-verify-form input[type="text"] {
-    font-size: 1.2em;
-    padding: 0.4em 0.6em;
-    border-radius: 6px;
-    border: 1px solid #ccc;
     margin-bottom: 0.5em;
-}
-#mfa-qr-modal #mfa-verify-form .submit-button {
-    margin-left: 0.5em;
-    padding: 0.4em 1.2em;
-    font-size: 1em;
+    padding: 0.4em 0.6em;
+    border: 1px solid #ccc;
     border-radius: 6px;
-    background: #F15025;
-    color: #fff;
-    border: none;
-    cursor: pointer;
-    transition: background 0.2s;
+    font-size: 1.2em;
 }
+
+#mfa-qr-modal #mfa-verify-form .submit-button {
+    padding: 0.4em 1.2em;
+    background: #F15025;
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 1em;
+    transition: background 0.2s;
+    cursor: pointer;
+    margin-left: 0.5em;
+}
+
 #mfa-qr-modal #mfa-verify-form .submit-button:hover {
     background: #d13e13;
 }
 
 #mfa-qr-modal #mfa-verify-message {
+    min-height: 1.2em;
     margin-top: 1em;
     font-size: 1.1em;
-    min-height: 1.2em;
     text-align: center;
 }
 
@@ -6238,79 +5292,14 @@ input#setup-profile-starting-savings {
     font-size: 1em;
 }
 
-/* MFA Secret Key Styles */
-.mfa-instructions {
-    margin-bottom: 1em;
-    text-align: left;
-    font-size: 13px;
-    padding-left: 20px;
-}
-
-#mfa-qr-image {
-    text-align: center;
-    margin-bottom: 1em;
-}
-
-.mfa-secret-container {
-    text-align: center;
-    margin-bottom: 1em;
-}
-
-.mfa-secret-label {
-    font-size: 12px;
-    color: #666;
-    margin-bottom: 5px;
-}
-
-.mfa-secret-box {
-    display: inline-flex;
-    align-items: center;
-    background: #f5f5f5;
-    padding: 6px 10px;
-    border-radius: 5px;
-    max-width: 90%;
-}
-
-#mfa-secret-key {
-    font-size: 11px;
-    letter-spacing: 0.5px;
-    margin-right: 8px;
-    word-break: break-all;
-    line-height: 1.4;
-}
-
-.mfa-copy-button {
-    padding: 5px 10px;
-    font-size: 12px;
-    background-color: #F15025;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    flex-shrink: 0;
-}
-
-.mfa-copy-button:hover {
-    background-color: #d43f1a;
-}
-
-.mfa-verify-form {
-    text-align: center;
-}
-
-#starting-balance-modal {
-    display: none;
-    justify-content: center;
-    align-items: center;
-}
-
 #starting-balance-modal-content {
     position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
     width: 350px;
-    margin: auto;
+    height: 300px;
+    margin: 10% auto;
     padding: 10px;
     background: #fff;
     border-radius: 12px;
@@ -6333,7 +5322,7 @@ input#setup-profile-starting-savings {
     flex-direction: column;
     align-items: center;
     width: 350px;
-    margin: auto;
+    margin: 10% auto;
     padding: 10px;
     background: #fff;
     border-radius: 12px;
@@ -6342,24 +5331,23 @@ input#setup-profile-starting-savings {
     animation: modalFadeIn 0.2s;
 }
 
-#delete-account-modal,
-#deleteSuccessModal {
-    display: none;
-    justify-content: center;
-    align-items: center;
-}
-
 .delete-account-modal-buttons {
     display: flex;
     flex-direction: row;
     justify-content: center;
     margin-top: 15px;
-    width: 100%;
 }
 
 @keyframes modalFadeIn {
     from { transform: translateY(40px) scale(0.97); opacity: 0; }
     to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@media (width <= 500px) {
+    #mfa-qr-modal .modal-content {
+        max-width: 98vw;
+        padding: 1em 0.5em;
+    }
 }
 
 /* /////////////////////////////  Recurring Income /////////////////////////// */
@@ -6370,10 +5358,8 @@ input#setup-profile-starting-savings {
 
 .recurring-income-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
-
     justify-content: center;
     align-items: center;
     min-width: 350px;
@@ -6396,6 +5382,7 @@ input#setup-profile-starting-savings {
 
 .recurring-header span {
     position: relative;
+    /* Take up remaining space */
     flex: 1;  
     padding-left: 120px;
     color: #2AAAA8;
@@ -6417,10 +5404,8 @@ input#setup-profile-starting-savings {
     width: 100%; 
     border-collapse: collapse;
     --base-font-size: 7.5px;
-
     /* Adjust this factor based on the desired responsiveness */
     --scaling-factor: 0.5vw; 
-
     font-size: calc(var(--base-font-size) + var(--scaling-factor));
     text-align: left;
 }
@@ -6500,12 +5485,14 @@ input#setup-profile-starting-savings {
 .income-action-col {
     padding-right: 2px !important;
     padding-left: 2px !important;
+    /* Aligns content to the right */
     text-align: right !important; 
 }    
 
 .income-actions {
     padding-right: 2px !important;
     padding-left: 2px !important;
+    /* Aligns content to the right */
     text-align: right !important; 
 }   
 
@@ -6589,22 +5576,18 @@ input#setup-profile-starting-savings {
     position: fixed;
     top: 0;
     left: 0;
-    z-index: 200;
+    z-index: 1000;
     display: none;
     justify-content: center;
     align-items: center;
     width: 100vw;
     height: 100vh;
-    overflow: auto;
-    background: rgb(0 0 0 / 30%);
-    background-color: transparent;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background-color: rgb(0 0 0 / 40%);
 }
 
 /* General Modal Content */
 .modal-content {
-    background-color: #fff;
+    background-color: #f5fffe;
     border-radius: 10px;
     padding: 20px 30px;
     width: 400px;
@@ -6648,103 +5631,55 @@ input#setup-profile-starting-savings {
 /* Form Container Styling */
 .expense-form-container,
 .income-form-container,
-.ca-form-container,
-.expense-form-container {
+.ca-form-container {
+    display: flex;
+    flex-direction: column;
     width: 350px;
-    margin: 15% auto;
-    padding: 20px;
+    max-width: 90%;
+    padding: 24px 32px;
     background-color: #fff;
-    border: 1px solid #575757;
-    border-radius: 10px;
-    box-shadow: 0 4px 8px rgb(0 0 0 / 20%);
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgb(0 0 0 / 25%);
 }
 
 .expense-form-container h2,
 .income-form-container h2,
 .ca-form-container h2 {
-    margin-top: 0;
-    color: #575757;
-    font-size: 1.5rem;
+    margin: 0 0 10px;
+    font-size: 16px;
 }
 
-/* General Label & Input Layout for recurring forms */
-.income-form-container label,
-.ca-form-container label,
-.expense-form-container label {
+/* General Label & Input Layout */
+form label {
     display: block;
-    margin-bottom: 8px;
-    color: #555;
+    margin: 10px 0 5px;
     font-size: 14px;
-    font-weight: bold;
+    font-weight: 600;
+    text-align: left;
 }
 
-.income-form-container input[type="number"],
-.income-form-container input[type="text"],
-.income-form-container input[type="date"],
-.income-form-container select,
-.ca-form-container input[type="number"],
-.ca-form-container input[type="text"],
-.ca-form-container input[type="date"],
-.ca-form-container select,
-.expense-form-container input[type="number"],
-.expense-form-container input[type="text"],
-.expense-form-container input[type="date"],
-.expense-form-container select {
+form input,
+form select {
     width: 100%;
-    margin-top: 5px;
-    margin-bottom: 10px;
-    padding: 10px 12px;
+    height: 44px;
+    padding: 12px 14px;
     background-color: #f9f9f9;
     border: 1px solid #d1d1d6;
-    border-radius: 8px;
+    border-radius: 10px;
     font-size: 14px;
     transition: all 0.2s ease;
+    appearance: none;
+    appearance: none;
     appearance: none;
     box-sizing: border-box;
 }
 
-.income-form-container input:focus,
-.income-form-container select:focus,
-.ca-form-container input:focus,
-.ca-form-container select:focus,
-.expense-form-container input:focus,
-.expense-form-container select:focus {
+form input:focus,
+form select:focus {
     background-color: #fff;
     border-color: #2aaaa8;
     box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
     outline: none;
-}
-
-/* Submit buttons for recurring forms */
-.income-form-container button[type="submit"],
-.ca-form-container button[type="submit"],
-.expense-form-container button[type="submit"] {
-    padding: 12px 24px;
-    border: none;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgb(228 95 28 / 30%);
-    color: white;
-    font-size: 1rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    background-color: #E45F1C;
-    width: 100%;
-}
-
-.income-form-container button[type="submit"]:hover,
-.ca-form-container button[type="submit"]:hover,
-.expense-form-container button[type="submit"]:hover {
-    box-shadow: 0 4px 12px rgb(228 95 28 / 40%);
-    transform: translateY(-1px);
-    background-color: #EF9F77;
-}
-
-.income-form-container button[type="submit"]:active,
-.ca-form-container button[type="submit"]:active,
-.expense-form-container button[type="submit"]:active {
-    box-shadow: 0 1px 4px rgb(228 95 28 / 30%);
-    transform: translateY(0);
 }
 
 /* Special Widths for Category and Amount */
@@ -6767,11 +5702,6 @@ input#setup-profile-starting-savings {
     align-items: center;
 }
 
-.currency-input-container .login-input {
-    width: 100%;
-    padding-left: 24px;
-}
-
 .currency-symbol {
     position: absolute;
     top: 2px;
@@ -6783,32 +5713,29 @@ input#setup-profile-starting-savings {
 
 .s-p-sb-currency-symbol {
     position: absolute;
-    top: 42px;
-    left: 10%;
+    top: 55px;
     color: #888;
     font-size: 14px;
     font-weight: bold;
-    pointer-events: none;
+    transform: translateX(10px);
 }
 
 .s-p-ss-currency-symbol {
     position: absolute;
-    top: 42px;
-    left: 10%;
+    top: 55px;
     color: #888;
     font-size: 14px;
     font-weight: bold;
-    pointer-events: none;
+    transform: translateX(10px);
 }
 
 .s-p-bt-currency-symbol {
     position: absolute;
-    top: 20px;
-    left: 5%;
+    top: 15px;
     color: #888;
     font-size: 14px;
     font-weight: bold;
-    pointer-events: none;
+    transform: translateX(10px);
 }
 
 .d-d-currency-symbol {
@@ -6822,7 +5749,7 @@ input#setup-profile-starting-savings {
 
 .f-currency-symbol {
     position: absolute;
-    top: 15px;
+    top: 10px;
     color: #888;
     font-size: 14px;
     font-weight: bold;
@@ -6831,7 +5758,7 @@ input#setup-profile-starting-savings {
 
 .r-currency-symbol {
     position: absolute;
-    top: 15px;
+    top: 5px;
     color: #888;
     font-size: 14px;
     font-weight: bold;
@@ -6840,14 +5767,11 @@ input#setup-profile-starting-savings {
 
 .p-currency-symbol {
     position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #86868b;
-    font-size: 14px;
-    font-weight: 500;
-    pointer-events: none;
-    z-index: 1;
+    top: 5px;
+    color: #888;
+    font-size: 12px;
+    font-weight: bold;
+    transform: translateX(10px);
 }
 
 /* Cadence Inputs */
@@ -6872,36 +5796,12 @@ input#setup-profile-starting-savings {
 }
 
 /* Weekly Options */
-#weekly-options,
-#edit-weekly-options,
-#expense-weekly-options,
-#ca-weekly-options {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-}
-
-#weekly-options label,
-#edit-weekly-options label,
-#expense-weekly-options label,
-#ca-weekly-options label {
-    font-size: 14px;
-    margin: 0 0 8px 0;
-    white-space: nowrap;
-    width: 100%;
-}
-
 #weekly-options .weekday,
-#edit-weekly-options .weekday,
-#expense-weekly-options .weekday,
-#ca-weekly-options .weekday {
+#edit-weekly-options .weekday {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 3px;
-    margin: 0;
+    margin: 5px 0;
     font-size: 12px;
-    flex: 0 1 auto;
 }
 
 .weekday input {
@@ -6926,85 +5826,28 @@ input#setup-profile-starting-savings {
 }
 
 .add-day-btn {
-    padding: 12px 24px;
+    width: 25px;
+    height: 25px;
+    margin-top: 8px;
+    padding: 6px 10px;
+    background-color: #e0e0e0;
     border: none;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgb(42 170 168 / 30%);
-    color: white;
-    font-size: 1rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
+    border-radius: 6px;
     cursor: pointer;
-    background-color: #2AAAA8;
-    width: 100%;
-}
-
-.add-day-btn:hover {
-    box-shadow: 0 4px 12px rgb(42 170 168 / 40%);
-    transform: translateY(-1px);
-}
-
-.add-day-btn:active {
-    box-shadow: 0 1px 4px rgb(42 170 168 / 30%);
-    transform: translateY(0);
 }
 
 .remove-day-btn {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
+    width: 25px;
+    height: 25px;
     margin-left: 8px;
-    padding: 0;
-    background-color: #E45F1C;
+    padding: 6px 10px;
+    background-color: #e0e0e0;
     border: none;
-    border-radius: 50%;
-    color: white;
-    font-size: 16px;
+    border-radius: 6px;
     cursor: pointer;
-    box-sizing: border-box;
-    transition: all 0.2s ease;
-    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
-    margin-top: 5px;
-    margin-bottom: 10px;
-}
-
-.remove-day-btn:hover {
-    opacity: 0.85;
 }
 
 /* Yearly Options */
-#yearly-options,
-#edit-yearly-options,
-#weekly-options,
-#edit-weekly-options,
-#monthly-options,
-#edit-monthly-options,
-#expense-yearly-options,
-#expense-weekly-options,
-#expense-monthly-options,
-#ca-yearly-options,
-#ca-weekly-options,
-#ca-monthly-options {
-    margin-bottom: 20px;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    background-color: #E6FAF9;
-    border: 1px solid #59D6D4;
-    border-radius: 8px;
-    padding: 12px;
-}
-
-#weekly-options,
-#edit-weekly-options,
-#expense-weekly-options,
-#ca-weekly-options {
-    justify-content: space-between;
-}
-
 #yearly-options,
 #edit-yearly-options {
     display: flex;
@@ -7028,22 +5871,7 @@ input#setup-profile-starting-savings {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
-}
-
-.cadence-row {
-    display: flex;
-    gap: 10px;
-    width: 100%;
-}
-
-.cadence-row input[type="number"] {
-    flex: 0 0 20%;
-    min-width: 0;
-}
-
-.cadence-row select {
-    flex: 1;
-    min-width: 0;
+    margin-top: 16px;
 }
 
 .date-label-row {
@@ -7054,8 +5882,6 @@ input#setup-profile-starting-savings {
 }
 
 .date-label-row label {
-    flex: 1 1 0;
-    min-width: 0;
     font-size: 14px;
 }
 
@@ -7064,35 +5890,24 @@ input#setup-profile-starting-savings {
     justify-content: space-between;
     gap: 12px;
     width: 100%;
-}
-
-.date-input-row input[type="date"],
-.date-label-row label {
-    flex: 1 1 0;
-    min-width: 0;
+    height: 30px;
 }
 
 .date-input-row input[type="date"] {
-    height: 38px;
-    padding: 8px 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    font-size: 14px;
-    transition: all 0.2s ease;
-    box-sizing: border-box;
+    flex: 1;
+    max-width: 120px;
+    padding: 6px 8px;
+    font-size: 12px;
 }
 
-.date-input-row input[type="date"]:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
-    outline: none;
+#start_date,
+#end_date {
+    width: 110px;
 }
 
 .date-checkbox-row {
     display: flex;
-    justify-content: flex-end;
+    justify-content: right;
     align-items: center;
     gap: 6px;
     width: 100%;
@@ -7115,7 +5930,7 @@ input#setup-profile-starting-savings {
     font-size: 12px;
 }
 
-/* Submit Button 
+/* Submit Button */
 form button[type="submit"] {
     margin-top: 15px;
     padding: 10px 16px;
@@ -7125,7 +5940,7 @@ form button[type="submit"] {
     color: white;
     font-size: 10px;
     cursor: pointer;
-}*/
+}
 
 
 
@@ -7138,15 +5953,11 @@ form button[type="submit"] {
     gap: 16px;
     width: fit-content;
     max-width: 350px;
-
     /* Align to the right */
     margin: 20px 0 0 auto; 
-
     padding: 16px 24px;
-
     /* Example income color */
     background: #59D6D4; 
-
     border-radius: 8px;
     color: white;
     font-size: 16px;
@@ -7163,7 +5974,6 @@ form button[type="submit"] {
     width: 0;
     height: 0;
     border-right: 18px solid transparent;
-
     /* Same as background */
     border-bottom: 18px solid #59D6D4; 
     border-left: 18px solid transparent;
@@ -7205,10 +6015,8 @@ form button[type="submit"] {
 
 .recurring-expense-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
-
     justify-content: center;
     align-items: center;
     min-width: 350px;
@@ -7315,7 +6123,6 @@ form button[type="submit"] {
 .expense-action-col {
     padding-right: 2px !important;
     padding-left: 2px !important;
-
     /* Aligns content to the right */
     text-align: right !important; 
     white-space: nowrap !important;
@@ -7324,7 +6131,6 @@ form button[type="submit"] {
 .expense-actions {
     padding-right: 2px !important;
     padding-left: 2px !important;
-
     /* Aligns content to the right */
     text-align: right !important; 
 }    
@@ -7376,6 +6182,18 @@ form button[type="submit"] {
     margin-left: 3px;
 }
 
+/* Expense Weekly Options */
+#expense-weekly-options .weekday {
+    display: flex;
+    align-items: center;
+    margin: 5px 0;
+    font-size: 12px;
+}
+
+#expense-weekly-options input {
+    width: 20px;
+}
+
 /* Expense Monthly Option Row */
 #expense-monthly-day-container div {
     display: flex;
@@ -7389,6 +6207,28 @@ form button[type="submit"] {
     appearance: none;
     appearance: none;
     appearance: none;
+}
+
+#expense-add-monthly-day-btn {
+    width: 25px;
+    height: 25px;
+    margin-top: 8px;
+    padding: 6px 10px;
+    background-color: #e0e0e0;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+#expense-monthly-day-container .remove-day-btn {
+    width: 25px;
+    height: 25px;
+    margin-left: 8px;
+    padding: 6px 10px;
+    background-color: #e0e0e0;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
 }
 
 /* Expense Yearly Options */
@@ -7508,6 +6348,19 @@ form button[type="submit"] {
     filter: drop-shadow(-1.5px 0 0 #59D6D4);  
 }
 
+.recurring-hint-container {
+    display: flex;
+    justify-content: center;
+    margin: 0 auto;
+}
+
+.recurring-hint {
+    display: flex;
+    width: 100%;
+    min-width: 350px;
+    max-width: 650px;
+}
+
 /* Match the color of your table row (adjust as needed) */
 #recurring-expense-callout {
     position: relative;
@@ -7517,10 +6370,8 @@ form button[type="submit"] {
     gap: 16px;
     width: fit-content;
     max-width: 350px;
-
     /* Align to the right */
     margin: 20px 0 0 auto; 
-
     padding: 16px 24px;
     background: #EF9F77;
     border-radius: 8px;
@@ -7538,7 +6389,6 @@ form button[type="submit"] {
     right: 6px;
     width: 0; height: 0;
     border-right: 18px solid transparent;
-
     /* Same as background */
     border-bottom: 18px solid #EF9F77; 
     border-left: 18px solid transparent;
@@ -7597,10 +6447,8 @@ form button[type="submit"] {
 
 .recurring-ca-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
-
     justify-content: center;
     align-items: center;
     min-width: 350px;
@@ -7653,10 +6501,8 @@ form button[type="submit"] {
     display: inline-block;
     width: 100%;
     padding-right: 0;
-
     /* reserve space for the button */
     padding-left: 0; 
-
     font-weight: bold;
     box-sizing: border-box;
 }
@@ -7750,6 +6596,7 @@ form button[type="submit"] {
 .ca-action-col {
     padding-right: 2px !important;
     padding-left: 2px !important;
+    /* Aligns content to the right */
     text-align: right !important; 
     white-space: nowrap !important;
 }    
@@ -7757,6 +6604,7 @@ form button[type="submit"] {
 .ca-actions {
     padding-right: 2px !important;
     padding-left: 2px !important;
+    /* Aligns content to the right */
     text-align: right !important; 
 }    
 
@@ -7789,6 +6637,18 @@ form button[type="submit"] {
 #ca-cadence-unit {
     width: 215px;
     margin-left: 3px;
+}
+
+/* ca Weekly Options */
+#ca-weekly-options .weekday {
+    display: flex;
+    align-items: center;
+    margin: 5px 0;
+    font-size: 12px;
+}
+
+#ca-weekly-options input {
+    width: 20px;
 }
 
 /* ca Monthly Option Row */
@@ -7938,6 +6798,11 @@ form button[type="submit"] {
     filter: drop-shadow(-1.5px 0 0 #EF9F77);
 }
 
+.floating-hint#income-add-hint::after {
+    border-right: 14px solid #59D6D4;
+    filter: drop-shadow(-1.5px 0 0 #59D6D4);  
+}
+
 .recurring-hint-container {
     display: flex;
     justify-content: center;
@@ -7960,6 +6825,7 @@ form button[type="submit"] {
     gap: 16px;
     width: fit-content;
     max-width: 350px;
+    /* Align to the right */
     margin: 20px 0 0 auto; 
     padding: 16px 24px;
     background: #EF9F77;
@@ -7978,7 +6844,6 @@ form button[type="submit"] {
     right: 6px;
     width: 0; height: 0;
     border-right: 18px solid transparent;
-
     /* Same as background */
     border-bottom: 18px solid #EF9F77; 
     border-left: 18px solid transparent;
@@ -8064,7 +6929,6 @@ form button[type="submit"] {
 
 .buds-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
     justify-content: center;
@@ -8090,6 +6954,7 @@ form button[type="submit"] {
 
 .buds-title span {
     position: relative;
+    /* Take up remaining space */
     flex: 1;  
     padding-left: 120px;
     color: #2AAAA8;
@@ -8100,7 +6965,7 @@ form button[type="submit"] {
 
 .add-bud-btn {
     position: relative;
-    align-self: flex-end;
+    align-self: right;
     width: 120px;
     height: 35px;
     padding: 0;
@@ -8122,12 +6987,14 @@ form button[type="submit"] {
     width: 100%;
     background-color: #575757;
     border-top-left-radius: 10px;
+    /* Round bottom-left corner */
     border-top-right-radius: 10px; 
 }
 
 .bud-name {
     position: relative;
     right: 50px;
+    /* Take up remaining space */
     flex: 1;  
     color: white;
     text-align: center;
@@ -8176,7 +7043,9 @@ form button[type="submit"] {
 }
 
 .bud-table tfoot tr td {
+    /* Round bottom-left corner */
     border-bottom-left-radius: 10px; 
+    /* Round bottom-right corner */
     border-bottom-right-radius: 10px; 
 }
 
@@ -8308,19 +7177,17 @@ form button[type="submit"] {
 .bud-item-edit-input {
     width: 100%;
     height: 100%;
-    padding: 8px 10px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    transition: all 0.2s ease;
+    padding: 0;
+    background: transparent;
+    border: 2px solid #575757;
+    border-radius: 5px;
     outline: none;
     box-sizing: border-box;
 }
 
 .bud-item-edit-input:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
+    background: transparent;
+    border-color: #575757;
 }
 
 /* The Modal (background) */
@@ -8330,6 +7197,7 @@ form button[type="submit"] {
     left: 0;
     z-index: 1000;
     display: none;
+    /* Centering the modal */
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -8376,6 +7244,7 @@ form button[type="submit"] {
     left: 0;
     z-index: 1000;
     display: none;
+    /* Centering the modal */
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -8555,7 +7424,6 @@ form button[type="submit"] {
 
 .credit-accounts-container {
     display: flex;
-
     /* Stack header and table vertically */
     flex-direction: column; 
     justify-content: center;
@@ -8581,6 +7449,7 @@ form button[type="submit"] {
 
 .credit-accounts-title span {
     position: relative;
+    /* Take up remaining space */
     flex: 1;  
     padding-left: 150px;
     color: #2AAAA8;
@@ -8615,6 +7484,7 @@ form button[type="submit"] {
 .credit-accounts-header span {
     position: relative;
     left: 18px;
+    /* Take up remaining space */
     flex: 1;  
     color: white;
     text-align: center;
@@ -8645,7 +7515,9 @@ form button[type="submit"] {
 }
 
 .credit-accounts-table tfoot tr td {
+    /* Round bottom-left corner */
     border-bottom-left-radius: 10px; 
+    /* Round bottom-right corner */
     border-bottom-right-radius: 10px; 
 }
 
@@ -8713,37 +7585,33 @@ form button[type="submit"] {
 .credit-account-input {
     width: 100%;
     height: 100%;
-    padding: 8px 10px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    transition: all 0.2s ease;
+    padding: 0;
+    background: transparent;
+    border: 2px solid #575757;
+    border-radius: 5px;
     outline: none;
     box-sizing: border-box;
 }
 
 .credit-account-input:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
+    background: transparent;
+    border-color: #575757;
 }
 
 .credit-account-edit-input {
     width: 100%;
     height: 100%;
-    padding: 8px 10px;
-    background-color: #f9f9f9;
-    border: 1px solid #d1d1d6;
-    border-radius: 8px;
-    transition: all 0.2s ease;
+    padding: 0;
+    background: transparent;
+    border: 2px solid #575757;
+    border-radius: 5px;
     outline: none;
     box-sizing: border-box;
 }
 
 .credit-account-edit-input:focus {
-    background-color: #fff;
-    border-color: #2aaaa8;
-    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
+    background: transparent;
+    border-color: #575757;
 }
 
 /* The Modal (background) */
@@ -8753,6 +7621,7 @@ form button[type="submit"] {
     left: 0;
     z-index: 1000;
     display: none;
+    /* Centering the modal */
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -8791,7 +7660,6 @@ form button[type="submit"] {
     background-color: #A9A9A9;
     color: white;
 }
-
 /* Category Dropdown Autocomplete Styles */
 .category-dropdown {
     position: absolute;
@@ -8837,811 +7705,26 @@ form button[type="submit"] {
     margin-right: 6px;
 }
 
+.dashboard-d-form-group,
+.footer-form-group {
+    position: relative;
+}
+
+#dashboard-d-category-input,
+#footer-category-input,
+#footer-ca-category-input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #575757;
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
 /* Prevent scrolling when modal is open */
 body.modal-open,
 html.modal-open {
     position: fixed;
     width: 100%;
     height: 100%;
-}
-
-/* Registration Success Page */
-.registration-success-content {
-    text-align: center;
-    padding: 20px;
-}
-
-.success-message {
-    background-color: #d4edda;
-    border: 1px solid #c3e6cb;
-    color: #155724;
-    padding: 20px;
-    border-radius: 8px;
-    margin: 20px 0;
-    font-size: 16px;
-    line-height: 1.6;
-}
-
-.success-message i {
-    margin-right: 10px;
-    font-size: 20px;
-}
-
-.warning-message {
-    background-color: #fff3cd;
-    border: 1px solid #ffeaa7;
-    color: #856404;
-    padding: 20px;
-    border-radius: 8px;
-    margin: 20px 0;
-    font-size: 16px;
-    line-height: 1.6;
-}
-
-.warning-message i {
-    margin-right: 10px;
-    font-size: 20px;
-}
-
-.info-box {
-    background-color: #f5fffe;
-    border: 2px solid #2aaaa8;
-    border-radius: 8px;
-    padding: 20px;
-    margin: 20px 0;
-    text-align: left;
-}
-
-.info-box h3 {
-    color: #2aaaa8;
-    margin-top: 0;
-    margin-bottom: 15px;
-}
-
-.info-box i {
-    margin-right: 8px;
-}
-
-.info-box ol {
-    margin: 10px 0;
-    padding-left: 25px;
-}
-
-.info-box ol li {
-    margin: 8px 0;
-    line-height: 1.6;
-}
-
-.warning-box {
-    background-color: #fff3cd;
-    border-left: 4px solid #ffc107;
-    padding: 15px 20px;
-    margin: 20px 0;
-    border-radius: 4px;
-    text-align: left;
-}
-
-.warning-box i {
-    margin-right: 10px;
-    color: #856404;
-}
-
-.action-buttons {
-    margin: 30px 0 20px 0;
-}
-
-.action-buttons .btn {
-    display: inline-block;
-    padding: 12px 30px;
-    font-size: 16px;
-    font-weight: 600;
-    text-decoration: none;
-    border-radius: 5px;
-    transition: all 0.3s ease;
-}
-
-.action-buttons .btn-primary {
-    background-color: #2aaaa8;
-    color: white;
-    border: none;
-}
-
-.action-buttons .btn-primary:hover {
-    background-color: #228886;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(42, 170, 168, 0.3);
-}
-
-.action-buttons .btn i {
-    margin-right: 8px;
-}
-
-.help-text {
-    margin-top: 20px;
-    padding-top: 20px;
-    border-top: 1px solid #ddd;
-    color: #666;
-    font-size: 14px;
-}
-
-.help-text .resend-link {
-    color: #2aaaa8;
-    text-decoration: none;
-    font-weight: 600;
-}
-
-.help-text .resend-link:hover {
-    text-decoration: underline;
-}
-
-.login-header i.fa-check-circle {
-    animation: scaleIn 0.5s ease-out;
-}
-
-@keyframes scaleIn {
-    0% {
-        transform: scale(0);
-        opacity: 0;
-    }
-    50% {
-        transform: scale(1.1);
-    }
-    100% {
-        transform: scale(1);
-        opacity: 1;
-    }
-}
-
-/* Email Verification Modal Styles */
-.verification-modal-icon {
-    font-size: 48px;
-    color: #2aaaa8;
-    display: block;
-    margin-bottom: 15px;
-}
-
-.verification-modal-divider {
-    margin-top: 20px;
-    padding-top: 15px;
-    border-top: 1px solid #ddd;
-}
-
-.verification-modal-help-text {
-    color: #666;
-}
-
-.verification-modal-resend-btn {
-    background: none;
-    border: none;
-    color: #2aaaa8;
-    cursor: pointer;
-    text-decoration: underline;
-    font-size: 14px;
-    margin-top: 5px;
-}
-
-.verification-modal-resend-btn:hover {
-    color: #228886;
-}
-
-/* Modal Content Styles */
-.modal-content-center {
-    text-align: center;
-}
-
-.error-modal-icon {
-    font-size: 48px;
-    color: #dc3545;
-    margin-bottom: 15px;
-}
-
-.error-modal-title {
-    font-weight: bold;
-}
-
-.error-modal-message {
-    margin-top: 15px;
-}
-
-.success-modal-icon {
-    font-size: 48px;
-    color: #155724;
-    margin-bottom: 15px;
-}
-
-.success-modal-title {
-    font-weight: bold;
-}
-
-.success-modal-message {
-    margin-top: 15px;
-}
-
-/* Profile Bank Connections Styles */
-.profile-bank-connections h2 {
-    margin-bottom: 20px;
-}
-
-.connection-card {
-    width: 100%;
-    margin: 20px 0px;
-    padding: 20px 0px;
-    border-top: 1px solid #e0e0e0;
-    border-bottom: 1px solid #e0e0e0;
-}
-
-.connection-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 15px;
-    padding-right: 16px;
-}
-
-.connection-info {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.connection-header h3 {
-    margin: 0;
-}
-
-.connection-header span {
-    display: flex;
-    justify-self: flex-start;
-}
-
-.connection-status {
-    font-size: 12px;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-weight: 600;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    white-space: nowrap;
-}
-
-.connection-status i {
-    font-size: 12px;
-    line-height: 1;
-}
-
-.connection-status.status-synced {
-    color: #28a745;
-    background-color: rgba(40, 167, 69, 0.1);
-}
-
-.connection-status.status-syncing,
-.connection-status.status-initializing {
-    color: #ffc107;
-    background-color: rgba(255, 193, 7, 0.1);
-}
-
-.connection-status.status-error,
-.connection-status.status-error_repairable {
-    color: #dc3545;
-    background-color: rgba(220, 53, 69, 0.1);
-}
-
-.connection-status.status-disconnected {
-    color: #6c757d;
-    background-color: rgba(108, 117, 125, 0.1);
-}
-
-.connection-status.disconnected {
-    color: #dc3545;
-}
-
-.connection-status.syncing {
-    color: #ffc107;
-}
-
-.connection-status.connected {
-    color: #28a745;
-}
-
-.connection-status i {
-    margin-right: 6px;
-}
-
-.connection-status .fa-circle-check {
-    color: #28a745;
-}
-
-.connection-actions {
-    display: flex;
-    gap: 10px;
-    align-self: flex-start;
-}
-
-.connection-actions button {
-    padding: 8px 16px;
-}
-
-.disconnect-btn,
-.delete-connection-btn {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    background-color: #f94449;
-    border: none;
-    border-radius: 50%;
-    color: white;
-    font-size: 16px;
-    cursor: pointer;
-    box-sizing: border-box;
-    transition: all 0.2s ease;
-    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
-}
-
-.reconnect-btn {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    background-color: #2aaaa8;
-    border: none;
-    border-radius: 50%;
-    color: white;
-    font-size: 16px;
-    cursor: pointer;
-    box-sizing: border-box;
-    transition: all 0.2s ease;
-    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
-    margin-right: 8px;
-}
-
-.reconnect-btn:hover {
-    background-color: #239795;
-}
-
-.disconnect-btn:hover,
-.delete-connection-btn:hover {
-    background-color: #ee6b6e;
-}
-
-.disconnect-btn i,
-.delete-connection-btn i,
-.reconnect-btn i {
-    font-size: 10px;
-    position: relative;
-    line-height: 1;
-    margin: 0;
-}
-
-.accounts-list {
-    margin-top: 15px;
-}
-
-.account-type-divider {
-    font-weight: 600;
-    font-size: 0.9rem;
-    color: #495057;
-    padding: 8px 0;
-    margin-top: 12px;
-    margin-bottom: 8px;
-    border-bottom: 2px solid #dee2e6;
-    text-align: left;
-}
-
-.account-type-divider:first-child {
-    margin-top: 0;
-}
-
-.account-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    margin-bottom: 8px;
-}
-
-.account-type-divider {
-    font-weight: bold;
-    font-size: 14px;
-    color: #2aaaa8;
-    padding: 12px 8px 8px 8px;
-    margin-top: 16px;
-    margin-bottom: 8px;
-    border-bottom: 2px solid #2aaaa8;
-}
-
-.account-type-divider:first-child {
-    margin-top: 0;
-}
-
-.account-info {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.account-sync-toggle {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-}
-
-.account-info label {
-    cursor: pointer;
-    margin: 0;
-}
-
-.account-mask {
-    color: #666;
-    margin-left: 8px;
-}
-
-.account-balance {
-    font-weight: bold;
-    transition: all 0.3s ease;
-}
-
-.account-balance.balance-updated {
-    color: #2aaaa8;
-    animation: balancePulse 0.6s ease;
-}
-
-@keyframes balancePulse {
-    0% {
-        transform: scale(1);
-    }
-    50% {
-        transform: scale(1.05);
-        color: #2aaaa8;
-    }
-    100% {
-        transform: scale(1);
-    }
-}
-
-.connection-footer {
-    margin-top: 12px;
-}
-
-.connection-footer small {
-    color: #666;
-}
-
-.no-connections {
-    text-align: center;
-    padding: 20px 0px;
-    background: #f8f9fa;
-    border-radius: 8px;
-    min-width: 345px;
-}
-
-.no-connections i {
-    font-size: 48px;
-    color: #ccc;
-    margin-bottom: 16px;
-    display: flex;
-    justify-self: center;
-}
-
-.no-connections h3 {
-    margin: 0 0 10px 0;
-}
-
-.no-connections p {
-    color: #666;
-    margin-bottom: 20px;
-}
-
-.connect-bank-container {
-    margin-top: 20px;
-    text-align: center;
-    width: 100%;
-}
-
-.connect-bank-container button {
-    padding: 12px 24px;
-}
-
-#connect-bank-btn {
-    width: 100%;
-    padding: 14px 24px;
-    border-radius: 12px;
-    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
-    color: white;
-    font-size: 18px;
-    font-weight: 600;
-    transition: 0.2s;
-    cursor: pointer;
-    margin: 10px auto;
-    background-color: #2aaaa8;
-    border: none;
-}
-
-#connect-bank-btn:hover {
-    box-shadow: 0 4px 12px rgba(249, 68, 73, 0.4);
-    transform: translateY(-1px);
-    background-color: #59D6D4;
-}
-
-#connect-bank-btn:active {
-    box-shadow: 0 1px 4px rgba(249, 68, 73, 0.3);
-    transform: translateY(0);
-}
-
-/* Profile Pending Email Styles */
-.pending-email-separator {
-    margin: 0 8px;
-}
-
-/* Pending Email Banner */
-.pending-email-banner {
-    background-color: #fff3e0;
-    border: 1px solid #ffb74d;
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 16px;
-}
-
-.pending-email-header {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin-bottom: 8px;
-}
-
-.pending-email-header i {
-    color: #ff9800;
-    font-size: 16px;
-}
-
-.pending-email-header strong {
-    color: #333;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.pending-email-banner small {
-    display: block;
-    color: #555;
-    line-height: 1.5;
-    margin-bottom: 12px;
-    text-align: center;
-}
-
-.pending-email-actions {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-}
-
-.resend-verification-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    flex: 1;
-    padding: 8px 16px;
-    background-color: #2aaaa8;
-    color: white;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 500;
-    transition: background-color 0.2s ease;
-    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
-}
-
-.resend-verification-btn:hover {
-    background-color: #59D6D4;
-}
-
-.cancel-pending-email-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    flex: 1;
-    padding: 8px 16px;
-    background-color: #f94449;
-    color: white;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 500;
-    transition: background-color 0.2s ease;
-    box-shadow: rgb(0 0 0 / 30%) 0 4px 8px;
-}
-
-.cancel-pending-email-btn:hover {
-    background-color: #ee6b6e;
-}
-
-.cancel-pending-email {
-    color: #dc3545;
-}
-
-/* MFA Modal Styles */
-#mfa-qr-modal {
-    display: none;
-}
-
-#mfa-code {
-    width: 120px;
-    text-align: center;
-}
-
-#mfa-qr-image img {
-    width: 200px;
-    height: 200px;
-}
-
-.profile-delete-info {
-    font-size: 13px;
-    color: #666;
-    margin-top: 10px;
-}
-
-/* Quiltt-style Account Selection Modal */
-.quiltt-style-modal {
-    max-width: 400px;
-    width: 400px;
-    max-height: 90vh;
-    height: auto;
-    border-radius: 16px;
-    padding: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-}
-
-.quiltt-modal-header {
-    padding: 24px 24px 16px 24px;
-    border-bottom: 1px solid #e5e5e5;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.quiltt-modal-header h2 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    color: #1a1a1a;
-}
-
-.quiltt-modal-header .close-modal {
-    position: static;
-    color: #666;
-    font-size: 24px;
-    font-weight: 400;
-    line-height: 1;
-    padding: 0;
-    margin: 0;
-    cursor: pointer;
-    transition: color 0.2s;
-}
-
-.quiltt-modal-header .close-modal:hover {
-    color: #1a1a1a;
-}
-
-.quiltt-modal-body {
-    padding: 20px 24px;
-    overflow-y: auto;
-    max-height: calc(90vh - 180px);
-    flex: 1;
-}
-
-.account-selection-description {
-    margin: 0 0 20px 0;
-    font-size: 14px;
-    color: #666;
-}
-
-.account-selection-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.account-group-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: #666;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 16px;
-    margin-bottom: 8px;
-}
-
-.account-group-title:first-child {
-    margin-top: 0;
-}
-
-.account-selection-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 16px;
-    border: 1px solid #e5e5e5;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s;
-    background: white;
-}
-
-.account-selection-item:hover {
-    border-color: #2aaaa8;
-    background: rgba(42, 170, 168, 0.02);
-}
-
-.account-selection-check {
-    flex-shrink: 0;
-}
-
-.account-selection-checkbox {
-    width: 20px;
-    height: 20px;
-    cursor: pointer;
-}
-
-.account-selection-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.account-selection-name {
-    font-size: 15px;
-    font-weight: 500;
-    color: #1a1a1a;
-}
-
-.account-selection-details {
-    display: flex;
-    align-items: center;
-    font-size: 13px;
-    color: #666;
-}
-
-.account-selection-mask {
-    font-family: monospace;
-}
-
-.quiltt-modal-footer {
-    padding: 16px 24px;
-    border-top: 1px solid #e5e5e5;
-    display: flex;
-    justify-content: flex-end;
-}
-
-.quiltt-save-btn {
-    background: #2aaaa8;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    padding: 12px 32px;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.quiltt-save-btn:hover {
-    background: #258a88;
-}
-
-.quiltt-save-btn:active {
-    transform: scale(0.98);
+    overflow: hidden !important;
 }

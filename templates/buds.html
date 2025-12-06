@@ -103,7 +103,7 @@
                                     <td>
                                         <span class="bud-currency-symbol">
                                             {{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}
-                                        </span>{{ item.value|int }}
+                                        </span>{{ "%.2f"|format(item.value) }}
                                     </td>
                                     <td>{{ item.date }}</td>
                                     <td>{{ item.account }}</td> <!-- Show account value here -->
@@ -132,7 +132,7 @@
                         <span>
                             {{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}
                         </span>
-                        <span>{{ total|int }}</span>
+                        <span>{{ "%.2f"|format(total) }}</span>
                     </div>
                 </div>
             </div>
@@ -182,7 +182,7 @@
                 </div>
                 <div class="footer-form-group">
                     <label for="bud-item-value">Amount:</label>
-                    <input type="number" id="bud-item-value" name="value" min="0" step="1" required placeholder="Amount">
+                    <input type="number" id="bud-item-value" name="value" min="0" step="0.01" required placeholder="0.00">
                 </div>
                 <div class="footer-form-group">
                     <label for="bud-item-date">Payment Date:</label>
@@ -225,6 +225,26 @@
             const budInputOverlay = document.getElementById('bud-input-overlay');
             const confirmAddBudBtn = document.getElementById('confirm-add-bud-btn');
             const newBudInput = document.getElementById('new-bud');
+
+            // Limit decimal places for bud-item-value input (2 decimals)
+            const budItemValueInput = document.getElementById('bud-item-value');
+            if (budItemValueInput) {
+                budItemValueInput.addEventListener('input', function() {
+                    let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
 
             // Toggle overlay visibility
             addBudBtn.addEventListener('click', function() {
@@ -432,18 +452,8 @@
                         document.getElementById('loading-screen').style.display = 'none';
                     }
                 });
-            });
-
-            // Prevent decimal input on amount field
-            $('#bud-item-value').on('input', function() {
-                let val = $(this).val();
-                if (val && val.includes('.')) {
-                    $(this).val(val.split('.')[0]);
-                }
-            });
         });
-
-        $(function() {
+    });        $(function() {
             const $budTableBody = $('.bud-table tbody');
             const $budsContainer = $('.buds-container');
 

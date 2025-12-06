@@ -26,7 +26,12 @@
                 <div class="dropdown-profile-section" id="dropdownProfileSection">
                     <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}" 
                         alt="Profile Picture" class="dropdown-profile-pic">
-                    <div class="dropdown-username">{{ current_user.username }}</div>
+                    <div style="display: flex; flex-direction: column; width: 100%;">
+                        {% if nav_first_name or nav_last_name %}
+                        <div class="dropdown-name">{{ nav_first_name }} {{ nav_last_name }}</div>
+                        {% endif %}
+                        <div class="dropdown-username">{{ current_user.username }}</div>
+                    </div>
                 </div>
                 <div class="dropdown-menu-section">
                     <div class="dropdown-link"><a href="{{ url_for('profile') }}">Profile and security</a><i class="fa-regular fa-user"></i></div>

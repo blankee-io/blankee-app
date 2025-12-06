@@ -1,6 +1,9 @@
 users
 users:v1:<user_id>
 
+setup_name
+setup_name:v1:<user_id>
+
 income_categories
 income_categories:v1:<user_id>
 

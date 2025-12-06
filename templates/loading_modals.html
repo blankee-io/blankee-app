@@ -1,9 +1,28 @@
     <!-- Loading Screen -->
-    <div id="loading-screen" class="loading-screen" style="display: flex;">
+    <div id="loading-screen" class="loading-screen" style="display: none;">
         <div id="loading-spinner-container">
             <span class="spinner-circle">
                 <i id="loading-spinner" class="fa-solid fa-spinner-scale fa-spin-pulse"></i>
             </span>
+        </div>
+    </div>
+
+    <!-- Setup Profile Loading Modal -->
+    <div id="setup-profile-loading-modal" class="loading-screen" style="display: none;">
+        <div class="setup-loading-container">
+            <div class="bank-icon-container">
+                <i class="fa-solid fa-building-columns fa-3x bank-icon"></i>
+                <div class="loading-arrows-circle">
+                    <i class="fa-solid fa-arrows-spin fa-spin loading-arrows"></i>
+                </div>
+            </div>
+            <h2 class="setup-loading-title">Fetching Your Bank Information</h2>
+            <p class="setup-loading-subtitle">Hang tight, we're syncing your balances...</p>
+            <div class="loading-dots">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+            </div>
         </div>
     </div>
 
