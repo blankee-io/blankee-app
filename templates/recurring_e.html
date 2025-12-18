@@ -197,7 +197,7 @@
                 </div>
 
                 <br>
-                <button type="submit">Add Recurring Expense</button>
+                <button type="submit">Submit</button>
             </form>            
         </div>        
     </div>  
@@ -221,13 +221,15 @@
             
                 <!-- Same structure for editing cadence -->
                 <label for="edit-cadence-interval">Repeat Every</label>
-                <input type="number" id="edit-cadence-interval" name="cadence_interval" min="1" placeholder="0" step="1" required>
-                <select id="edit-cadence-unit" name="cadence_unit" required>
-                    <option value="days">Day(s)</option>
-                    <option value="weeks">Week(s)</option>
-                    <option value="months">Month(s)</option>
-                    <option value="years">Year(s)</option>
-                </select>
+                <div class="cadence-row">
+                    <input type="number" id="edit-cadence-interval" name="cadence_interval" min="1" placeholder="0" step="1" required>
+                    <select id="edit-cadence-unit" name="cadence_unit" required>
+                        <option value="days">Day(s)</option>
+                        <option value="weeks">Week(s)</option>
+                        <option value="months">Month(s)</option>
+                        <option value="years">Year(s)</option>
+                    </select>
+                </div>
 
                 <!-- Edit Weekly Options -->
                 <div id="edit-weekly-options" style="display:none;">
@@ -988,7 +990,7 @@
             document.getElementById('edit-yearly-options').style.display = 'none';
 
             if (cadenceUnit === 'weeks') {
-                document.getElementById('edit-weekly-options').style.display = 'block';
+                document.getElementById('edit-weekly-options').style.display = 'flex';
             } else if (cadenceUnit === 'months') {
                 document.getElementById('edit-monthly-options').style.display = 'block';
             } else if (cadenceUnit === 'years') {

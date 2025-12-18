@@ -616,6 +616,7 @@
                 url: "/save_totals_remainders_d", // Back-end route
                 type: "POST", // Or "GET" depending on your method
                 contentType: "application/json",
+                data: JSON.stringify(data),
                 async: false,  // Make the request synchronous
                 success: function(response) {
                     if (response.status === "success") {

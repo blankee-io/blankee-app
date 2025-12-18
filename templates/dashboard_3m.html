@@ -1880,7 +1880,6 @@
             const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
             
             if (!incomeBottomRow || !lastRemainderRowRight) {
-                console.warn('Income bottom row or last remainder row not found');
                 return Promise.resolve();
             }
             
@@ -1915,7 +1914,6 @@
                         const displayIncome = incomeTotal - lastRemainder;
                         tdElement.textContent = formatCurrency(displayIncome);
                     }).catch(function(error) {
-                        console.error('Error fetching income total for date:', date, error);
                         tdElement.textContent = formatCurrency(0);
                     })
                 );
@@ -1931,7 +1929,6 @@
             const expensesBottomRow = document.getElementById('expenses-bottom-row');
             
             if (!expensesBottomRow) {
-                console.warn('Expenses bottom row not found');
                 return Promise.resolve();
             }
             
@@ -1960,7 +1957,6 @@
                             tdElement.textContent = formatCurrency(0);
                         }
                     }).catch(function(error) {
-                        console.error('Error fetching expense total for date:', date, error);
                         tdElement.textContent = formatCurrency(0);
                     })
                 );
@@ -2008,7 +2004,6 @@
                                 tdElement.textContent = currencySymbol + '0.00';
                             }
                         }).catch(function(error) {
-                            console.error('Error fetching CA balance for account:', accountId, 'date:', date, error);
                             tdElement.textContent = currencySymbol + '0.00';
                         })
                     );
@@ -3489,7 +3484,8 @@
                     category_id: categoryId,
                     start_date: startDate,
                     end_date: endDate,
-                    type: type
+                    type: type,
+                    aggregation: 'month'
                 };
                 $.ajax({
                     url: "/delete-week-entry",
@@ -3506,6 +3502,74 @@
                             td.classList.remove('paid');
                             
                             updateLocalState(type, categoryId, startDate, 0, true, endDate);
+                            
+                            // Update bucket entries if returned from server
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    // bucket.date is the period key (month-end date for dashboard_3m)
+                                    // bucket.amount is the total for the period (bucket + manual entries)
+                                    // Update the DOM directly - no need to modify local arrays since they're already aggregated
+                                    let table;
+                                    if (type === 'income') {
+                                        table = document.getElementById('income-table');
+                                    } else if (type === 'expense') {
+                                        table = document.getElementById('expenses-table');
+                                    } else if (type === 'ca') {
+                                        // For CA, get the table from the closest parent
+                                        const caTable = td.closest('table[id^="cas-table-"]');
+                                        table = caTable;
+                                    }
+                                    const bucketRow = table ? table.querySelector(`tr[data-category-id="${categoryId}"]`) : null;
+                                    if (bucketRow) {
+                                        const bucketCell = Array.from(bucketRow.querySelectorAll('td')).find(tdCell => {
+                                            const cellDate = tdCell.getAttribute('data-date');
+                                            return cellDate === bucket.date;
+                                        });
+                                        if (bucketCell) {
+                                            const bucketInput = bucketCell.querySelector('input');
+                                            if (bucketInput) {
+                                                if (bucket.amount > 0) {
+                                                    bucketInput.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                } else {
+                                                    // Clear the cell when bucket is depleted
+                                                    bucketInput.value = '';
+                                                    // Also update local state to remove bucket entries for this period
+                                                    // This ensures UI updates properly without page reload
+                                                    let entryList;
+                                                    if (type === 'income') {
+                                                        entryList = incomeEntries;
+                                                    } else if (type === 'expense') {
+                                                        entryList = expenseEntries;
+                                                    } else if (type === 'ca') {
+                                                        entryList = c_expense_entries;
+                                                    }
+                                                    if (entryList) {
+                                                        // Parse bucket.date to get month range
+                                                        const bucketDateObj = new Date(bucket.date + 'T00:00:00Z');
+                                                        const { startOfMonth, endOfMonth } = calculateMonthRange(bucketDateObj);
+                                                        // Remove all entries for this category in this month that are bucket entries
+                                                        for (let i = entryList.length - 1; i >= 0; i--) {
+                                                            const e = entryList[i];
+                                                            const entryDate = new Date(e.date + 'T00:00:00Z');
+                                                            if (
+                                                                String(e.category_id) === String(categoryId) &&
+                                                                entryDate >= startOfMonth && entryDate <= endOfMonth &&
+                                                                e.is_bucket === 1
+                                                            ) {
+                                                                entryList.splice(i, 1);
+                                                            }
+                                                        }
+                                                    }
+                                                    // Clear processed state for the cell
+                                                    bucketCell.removeAttribute('data-processed');
+                                                    bucketCell.classList.remove('paid');
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
@@ -3539,7 +3603,8 @@
                     start_date: startDate,
                     end_date: endDate,
                     amount: amount,
-                    type: type
+                    type: type,
+                    aggregation: 'month'
                 };
                 $.ajax({
                     url: "/update-week-entry",
@@ -3566,12 +3631,81 @@
                                 }
                             }
                             updateLocalState(type, categoryId, endDate, amount, amount === 0, endDate);
+                            
+                            // Update bucket entries if returned from server
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    // bucket.date is the period key (month-end date for dashboard_3m)
+                                    // bucket.amount is the total for the period (bucket + manual entries)
+                                    // Update the DOM directly - no need to modify local arrays since they're already aggregated
+                                    let table;
+                                    if (type === 'income') {
+                                        table = document.getElementById('income-table');
+                                    } else if (type === 'expense') {
+                                        table = document.getElementById('expenses-table');
+                                    } else if (type === 'ca') {
+                                        // For CA, get the table from the closest parent
+                                        const caTable = td.closest('table[id^="cas-table-"]');
+                                        table = caTable;
+                                    }
+                                    const bucketRow = table ? table.querySelector(`tr[data-category-id="${categoryId}"]`) : null;
+                                    if (bucketRow) {
+                                        const bucketCell = Array.from(bucketRow.querySelectorAll('td')).find(tdCell => {
+                                            const cellDate = tdCell.getAttribute('data-date');
+                                            return cellDate === bucket.date;
+                                        });
+                                        if (bucketCell) {
+                                            const bucketInput = bucketCell.querySelector('input');
+                                            if (bucketInput) {
+                                                if (bucket.amount > 0) {
+                                                    bucketInput.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                } else {
+                                                    // Clear the cell when bucket is depleted
+                                                    bucketInput.value = '';
+                                                    // Also update local state to remove bucket entries for this period
+                                                    // This ensures UI updates properly without page reload
+                                                    let entryList;
+                                                    if (type === 'income') {
+                                                        entryList = incomeEntries;
+                                                    } else if (type === 'expense') {
+                                                        entryList = expenseEntries;
+                                                    } else if (type === 'ca') {
+                                                        entryList = c_expense_entries;
+                                                    }
+                                                    if (entryList) {
+                                                        // Parse bucket.date to get month range
+                                                        const bucketDateObj = new Date(bucket.date + 'T00:00:00Z');
+                                                        const { startOfMonth, endOfMonth } = calculateMonthRange(bucketDateObj);
+                                                        // Remove all entries for this category in this month that are bucket entries
+                                                        for (let i = entryList.length - 1; i >= 0; i--) {
+                                                            const e = entryList[i];
+                                                            const entryDate = new Date(e.date + 'T00:00:00Z');
+                                                            if (
+                                                                String(e.category_id) === String(categoryId) &&
+                                                                entryDate >= startOfMonth && entryDate <= endOfMonth &&
+                                                                e.is_bucket === 1
+                                                            ) {
+                                                                entryList.splice(i, 1);
+                                                            }
+                                                        }
+                                                    }
+                                                    // Clear processed state for the cell
+                                                    bucketCell.removeAttribute('data-processed');
+                                                    bucketCell.classList.remove('paid');
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
                             // Defer updateView to next tick to avoid blocking
+                            // Don't re-populate tables after immediate DOM update to avoid flickering
                             setTimeout(() => {
                                 updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                             }, 0);
