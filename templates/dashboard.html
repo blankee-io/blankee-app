@@ -2140,6 +2140,7 @@
             const allCells = new Set(); // Track all cells to identify empty ones
 
             incomeEntries.forEach(entry => {
+                
                 const entryDate = new Date(entry.date); // Date of the income entry
 
                 // Find the row with the matching data-category-id
@@ -2184,7 +2185,8 @@
 
                     if (matchedCell) {
                         const input = matchedCell.querySelector('input');
-                        const amount = parseFloat(entry.total_amount);
+                        // Use 'amount' for raw entries (from API) or 'total_amount' for aggregated entries (from page load)
+                        const amount = parseFloat(entry.amount || entry.total_amount || 0);
                         if (input && !isNaN(amount)) {
                             input.value = currencySymbol + amount.toFixed(2);
                         }
@@ -2234,6 +2236,7 @@
             const allCells = new Set(); // Track all cells to identify empty ones
 
             expenseEntries.forEach(entry => {
+                
                 const entryDate = new Date(entry.date); // Date of the expense entry
 
                 // Find the row with the matching data-category-id
@@ -2274,7 +2277,8 @@
 
                     if (matchedCell) {
                         const input = matchedCell.querySelector('input');
-                        const amount = parseFloat(entry.total_amount);
+                        // Use 'amount' for raw entries (from API) or 'total_amount' for aggregated entries (from page load)
+                        const amount = parseFloat(entry.amount || entry.total_amount || 0);
                         if (input && !isNaN(amount)) {
                             input.value = currencySymbol + amount.toFixed(2);
                         }
@@ -3529,6 +3533,7 @@
 
             const categoryId = td.closest('tr').getAttribute('data-category-id');
             const date = new Date(td.getAttribute('data-date'));
+            const fridayDateStr = td.getAttribute('data-date'); // The Friday date string (always Friday regardless of goofy mode)
             const { startOfWeek, endOfWeek } = calculateWeekRange(date);
             const startDate = startOfWeek.toISOString().split('T')[0];
             const endDate = endOfWeek.toISOString().split('T')[0];
@@ -3554,13 +3559,74 @@
                             td.setAttribute('data-processed', '0');
                             td.classList.remove('paid');
                             
-                            updateLocalState(type, categoryId, startDate, 0, true, endDate);
+                            // Use fridayDateStr (the cell's data-date) since entries are keyed by Friday
+                            updateLocalState(type, categoryId, fridayDateStr, 0, true, fridayDateStr);
+                            
+                            // Update bucket entries if returned from server
+                            // IMPORTANT: Only process the bucket for the current week being edited
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                let entriesArray = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
+                                
+                                response.updated_buckets.forEach(bucket => {
+                                    // Only process the bucket for the week we're currently editing
+                                    if (bucket.date !== fridayDateStr) {
+                                        return;
+                                    }
+                                    
+                                    // In dashboard.html, entries don't have id/is_bucket, match by category_id and date
+                                    const bucketEntry = entriesArray.find(e => String(e.category_id) === String(categoryId) && e.date === bucket.date);
+                                    if (bucketEntry) {
+                                        if (bucket.amount > 0) {
+                                            // Update existing bucket
+                                            bucketEntry.total_amount = bucket.amount;
+                                        } else {
+                                            // Bucket depleted - remove from local state
+                                            const index = entriesArray.indexOf(bucketEntry);
+                                            if (index > -1) {
+                                                entriesArray.splice(index, 1);
+                                            }
+                                        }
+                                    } else if (bucket.amount > 0) {
+                                        // Bucket was recreated - add it to local state
+                                        entriesArray.push({
+                                            id: bucket.id,
+                                            category_id: parseInt(categoryId),
+                                            date: bucket.date,
+                                            total_amount: bucket.amount,
+                                            is_bucket: 1
+                                        });
+                                    }
+                                    
+                                    // Immediately update the DOM for the bucket cell
+                                    const table = type === 'income' ? document.getElementById('income-table') : document.getElementById('expenses-table');
+                                    const bucketRow = table ? table.querySelector(`tr[data-category-id="${categoryId}"]`) : null;
+                                    if (bucketRow) {
+                                        const bucketCell = Array.from(bucketRow.querySelectorAll('td')).find(td => {
+                                            const cellDate = td.getAttribute('data-date');
+                                            return cellDate === bucket.date;
+                                        });
+                                        if (bucketCell) {
+                                            const input = bucketCell.querySelector('input');
+                                            if (input) {
+                                                if (bucket.amount > 0) {
+                                                    input.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                } else {
+                                                    // Clear the cell when bucket is depleted
+                                                    input.value = '';
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
                             // Defer updateView to next tick to avoid blocking
+                            // Don't call populateIncome/populateExpense since we already updated the DOM
                             setTimeout(() => {
                                 updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                             }, 0);
@@ -3581,10 +3647,9 @@
                     input.value = '';
                     return;
                 }
-                const fridayDate = endDate;
                 const data = {
                     category_id: categoryId,
-                    friday_date: fridayDate,
+                    friday_date: fridayDateStr,
                     start_date: startDate,
                     end_date: endDate,
                     amount: amount,
@@ -3595,9 +3660,13 @@
                     method: "POST",
                     contentType: "application/json",
                     data: JSON.stringify(data),
-                    success: function(response) {
+                    success: async function(response) {
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
+                            console.log('[DEBUG] update-week-entry success, goofyWeekMode=', goofyWeekMode);
+                            console.log('[DEBUG] fridayDateStr=', fridayDateStr, 'startDate=', startDate, 'endDate=', endDate);
+                            console.log('[DEBUG] updated_buckets=', response.updated_buckets);
+                            
                             // If amount is 0, clear the input immediately (entry was deleted)
                             if (amount === 0) {
                                 input.value = '';
@@ -3614,15 +3683,86 @@
                                     input.value = rounded;
                                 }
                             }
-                            updateLocalState(type, categoryId, endDate, amount, amount === 0, endDate);
+                            // Use fridayDateStr (the cell's data-date) since entries are keyed by Friday
+                            updateLocalState(type, categoryId, fridayDateStr, amount, amount === 0, fridayDateStr);
+                            
+                            // Update bucket entries if returned from server
+                            // IMPORTANT: Only process the bucket for the current week being edited
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                let entriesArray = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
+                                console.log('[DEBUG] Before bucket update, entriesArray for category', categoryId, '=', 
+                                    entriesArray.filter(e => String(e.category_id) === String(categoryId)));
+                                console.log('[DEBUG] Current week being edited: fridayDateStr=', fridayDateStr);
+                                
+                                response.updated_buckets.forEach(bucket => {
+                                    console.log('[DEBUG] Processing bucket:', bucket);
+                                    
+                                    // Only process the bucket for the week we're currently editing
+                                    if (bucket.date !== fridayDateStr) {
+                                        console.log('[DEBUG] Skipping bucket - not the current week being edited. bucket.date=', bucket.date, 'fridayDateStr=', fridayDateStr);
+                                        return;
+                                    }
+                                    
+                                    // In dashboard.html, entries don't have id/is_bucket, match by category_id and date
+                                    const bucketEntry = entriesArray.find(e => {
+                                        return String(e.category_id) === String(categoryId) && e.date === bucket.date;
+                                    });
+                                    console.log('[DEBUG] Found bucketEntry:', bucketEntry);
+                                    if (bucketEntry) {
+                                        if (bucket.amount > 0) {
+                                            // Update existing bucket
+                                            bucketEntry.total_amount = bucket.amount;
+                                            console.log('[DEBUG] Updated bucketEntry.total_amount to', bucket.amount);
+                                        } else {
+                                            // Bucket depleted - remove from local state
+                                            const index = entriesArray.indexOf(bucketEntry);
+                                            if (index > -1) {
+                                                entriesArray.splice(index, 1);
+                                            }
+                                        }
+                                    } else if (bucket.amount > 0) {
+                                        // Bucket was recreated - add it to local state
+                                        entriesArray.push({
+                                            id: bucket.id,
+                                            category_id: parseInt(categoryId),
+                                            date: bucket.date,
+                                            total_amount: bucket.amount,
+                                            is_bucket: 1
+                                        });
+                                    }
+                                    
+                                    // Immediately update the DOM for the bucket cell
+                                    const table = type === 'income' ? document.getElementById('income-table') : document.getElementById('expenses-table');
+                                    const bucketRow = table ? table.querySelector(`tr[data-category-id="${categoryId}"]`) : null;
+                                    if (bucketRow) {
+                                        const bucketCell = Array.from(bucketRow.querySelectorAll('td')).find(td => {
+                                            const cellDate = td.getAttribute('data-date');
+                                            return cellDate === bucket.date;
+                                        });
+                                        if (bucketCell) {
+                                            const input = bucketCell.querySelector('input');
+                                            if (input) {
+                                                if (bucket.amount > 0) {
+                                                    input.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                } else {
+                                                    // Clear the cell when bucket is depleted
+                                                    input.value = '';
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
                             // Defer updateView to next tick to avoid blocking
+                            // Don't re-populate tables after immediate DOM update to avoid flickering
                             setTimeout(() => {
-                                updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
+                                updateView(["updateIncomeTotals", "updateExpenseTotals", "updateCaBalance", "updateRemainderRows"]);
                             }, 0);
                         } else {
                         }
@@ -3675,16 +3815,8 @@
             const entryDateObj = new Date(entryDate);
             entryDateObj.setUTCHours(0, 0, 0, 0);
 
-            // Find the Saturday on or before entryDate (week start)
-            let startOfWeek = new Date(entryDateObj);
-            let day = startOfWeek.getUTCDay();
-            startOfWeek.setUTCDate(entryDateObj.getUTCDate() - ((day + 1) % 7));
-            startOfWeek.setUTCHours(0, 0, 0, 0);
-
-            // End of week is the next Friday (6 days after Saturday)
-            let endOfWeek = new Date(startOfWeek);
-            endOfWeek.setUTCDate(startOfWeek.getUTCDate() + 6);
-            endOfWeek.setUTCHours(0, 0, 0, 0);
+            // Use calculateWeekRange which respects goofyWeekMode
+            const { startOfWeek, endOfWeek } = calculateWeekRange(entryDateObj);
 
             // 1. Add/substitute/delete for the specific date
             let entry = entryList.find(e => {
@@ -3749,7 +3881,7 @@
                 }
             }
 
-            // 2. Calculate the week sum (Saturday–Friday)
+            // 2. Calculate the week sum (respects goofyWeekMode via calculateWeekRange)
             const weekSum = entryList
                 .filter(e => {
                     const entryDate = new Date(e.date);

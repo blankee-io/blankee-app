@@ -74,7 +74,7 @@
                                 </td>
                                 <td>
                                     {% set currency_symbol = '$' if currency_type == 'USD' else '€' if currency_type == 'EUR' else currency_type %}
-                                    {% if ca_balances_today[account.id] is not none %}
+                                    {% if account.id in ca_balances_today and ca_balances_today[account.id] is not none %}
                                         {{ currency_symbol }}{{ "%.2f"|format(ca_balances_today[account.id]) }}
                                     {% else %}
                                         &mdash;
