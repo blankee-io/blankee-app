@@ -496,8 +496,15 @@ def _dehydrate_user_data(user_id: int):
                 'income_entries',
                 'expense_entries',
                 'c_expense_entries',
+                'recurring_income',
+                'recurring_expense',
+                'recurring_c_expense',
+                'recurring_income_buckets',  # Bucket state tracking - must flush before dehydration
+                'recurring_expense_buckets',
+                'recurring_c_expense_buckets',
                 'buds',  # Must flush before bud_items to resolve temp IDs
-                'bud_items'
+                'bud_items',
+                'users',  # User settings (goofy_week_mode, landing_page, etc.)
             ]
             
             flushed_count = 0
@@ -531,7 +538,8 @@ def _dehydrate_user_data(user_id: int):
             _redis_client.delete(*keys_to_delete)
             # Also clean up dirty_tables and pending_deletes keys
             _redis_client.delete(dirty_tables_key)
-            for table in ['income_entries', 'expense_entries', 'c_expense_entries']:
+            for table in ['income_entries', 'expense_entries', 'c_expense_entries', 
+                          'recurring_income_buckets', 'recurring_expense_buckets', 'recurring_c_expense_buckets']:
                 pending_key = f"pending_deletes:{table}:{user_id}"
                 _redis_client.delete(pending_key)
             
