@@ -196,7 +196,7 @@
                 </div>
 
                 <br>
-                <button type="submit">Add Recurring Income</button>
+                <button type="submit">Submit</button>
             </form>            
         </div>        
     </div>    
@@ -230,7 +230,7 @@
                         </select>
                     </div>                <!-- Edit Weekly Options -->
                 <div id="edit-weekly-options" style="display:none;">
-                    <label>Repeat on:</label><br>
+                    <label>Repeat on:</label>
                     <div class="weekday"><input type="checkbox" name="edit_weekdays" value="monday"> Mo</div>
                     <div class="weekday"><input type="checkbox" name="edit_weekdays" value="tuesday"> Tu</div>
                     <div class="weekday"><input type="checkbox" name="edit_weekdays" value="wednesday"> We</div>
@@ -969,7 +969,7 @@
             document.getElementById('edit-yearly-options').style.display = 'none';
 
             if (cadenceUnit === 'weeks') {
-                document.getElementById('edit-weekly-options').style.display = 'block';
+                document.getElementById('edit-weekly-options').style.display = 'flex';
             } else if (cadenceUnit === 'months') {
                 document.getElementById('edit-monthly-options').style.display = 'block';
             } else if (cadenceUnit === 'years') {

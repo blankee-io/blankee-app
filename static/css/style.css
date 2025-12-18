@@ -6794,8 +6794,7 @@ input#setup-profile-starting-savings {
 /* Form Container Styling */
 .expense-form-container,
 .income-form-container,
-.ca-form-container,
-.expense-form-container {
+.ca-form-container {
     width: 350px;
     margin: 15% auto;
     padding: 20px;
