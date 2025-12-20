@@ -1307,11 +1307,15 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_income from pending set")
                 
                 # Now UPSERT the current state from Redis
+                # Track temp IDs for later resolution
+                temp_id_to_row = {}  # temp_id -> row data for resolving after insert
                 batch_data = []
                 for row in rows:
                     # Skip temporary negative IDs - they'll be handled as INSERTs
                     row_id = int(row.get('id', 0))  # Convert to int for comparison
                     if row_id < 0:
+                        # Track this temp ID for later resolution
+                        temp_id_to_row[row_id] = row
                         batch_data.append((
                             None,  # Let MySQL auto-generate
                             user_id,
@@ -1361,6 +1365,56 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     """, batch_data)
                 
                 conn.commit()
+                
+                # CRITICAL: Resolve temp IDs to real MySQL IDs
+                if temp_id_to_row:
+                    logger.info(f"[FLUSH] Resolving {len(temp_id_to_row)} temp recurring_income IDs")
+                    
+                    # Query MySQL to find newly inserted records by matching category_id + start_date
+                    for temp_id, row_data in temp_id_to_row.items():
+                        category_id = row_data.get('category_id')
+                        start_date = row_data.get('start_date')
+                        amount = row_data.get('amount')
+                        
+                        cursor.execute("""
+                            SELECT id FROM recurring_income 
+                            WHERE user_id = %s AND category_id = %s AND start_date = %s AND amount = %s
+                            ORDER BY id DESC LIMIT 1
+                        """, (user_id, category_id, start_date, float(amount) if amount else 0))
+                        
+                        result = cursor.fetchone()
+                        if result:
+                            new_mysql_id = result[0]
+                            logger.info(f"[FLUSH] Resolved recurring_income temp_id {temp_id} -> MySQL id {new_mysql_id}")
+                            
+                            # Update income_entries in Redis to use the new ID
+                            entries_key = f"income_entries:v1:{user_id}"
+                            entries_data = _redis_client.get(entries_key)
+                            if entries_data:
+                                entries = json.loads(entries_data)
+                                updated_count = 0
+                                for entry in entries:
+                                    if entry.get('recurring_id') == temp_id:
+                                        entry['recurring_id'] = new_mysql_id
+                                        updated_count += 1
+                                if updated_count > 0:
+                                    _redis_client.setex(entries_key, 604800, json.dumps(entries))
+                                    logger.info(f"[FLUSH] Updated {updated_count} income_entries with new recurring_id {new_mysql_id}")
+                            
+                            # Also update the recurring record in Redis with the new ID
+                            recurring_key = f"recurring_income:v1:{user_id}"
+                            recurring_data = _redis_client.get(recurring_key)
+                            if recurring_data:
+                                recurring_records = json.loads(recurring_data)
+                                for rec in recurring_records:
+                                    if rec.get('id') == temp_id:
+                                        rec['id'] = new_mysql_id
+                                        logger.info(f"[FLUSH] Updated recurring_income record id from {temp_id} to {new_mysql_id}")
+                                        break
+                                _redis_client.setex(recurring_key, 604800, json.dumps(recurring_records))
+                        else:
+                            logger.warning(f"[FLUSH] Could not find MySQL id for temp recurring_income {temp_id}")
+                
                 cursor.close()
                 
                 # Clear pending deletions set after successful flush
@@ -1401,11 +1455,15 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_expense from pending set")
                 
                 # Now UPSERT the current state from Redis
+                # Track temp IDs for later resolution
+                temp_id_to_row = {}  # temp_id -> row data for resolving after insert
                 batch_data = []
                 for row in rows:
                     # Skip temporary negative IDs - they'll be handled as INSERTs
                     row_id = int(row.get('id', 0))  # Convert to int for comparison
                     if row_id < 0:
+                        # Track this temp ID for later resolution
+                        temp_id_to_row[row_id] = row
                         batch_data.append((
                             None,  # Let MySQL auto-generate
                             user_id,
@@ -1455,6 +1513,56 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     """, batch_data)
                 
                 conn.commit()
+                
+                # CRITICAL: Resolve temp IDs to real MySQL IDs
+                if temp_id_to_row:
+                    logger.info(f"[FLUSH] Resolving {len(temp_id_to_row)} temp recurring_expense IDs")
+                    
+                    # Query MySQL to find newly inserted records by matching category_id + start_date
+                    for temp_id, row_data in temp_id_to_row.items():
+                        category_id = row_data.get('category_id')
+                        start_date = row_data.get('start_date')
+                        amount = row_data.get('amount')
+                        
+                        cursor.execute("""
+                            SELECT id FROM recurring_expense 
+                            WHERE user_id = %s AND category_id = %s AND start_date = %s AND amount = %s
+                            ORDER BY id DESC LIMIT 1
+                        """, (user_id, category_id, start_date, float(amount) if amount else 0))
+                        
+                        result = cursor.fetchone()
+                        if result:
+                            new_mysql_id = result[0]
+                            logger.info(f"[FLUSH] Resolved recurring_expense temp_id {temp_id} -> MySQL id {new_mysql_id}")
+                            
+                            # Update expense_entries in Redis to use the new ID
+                            entries_key = f"expense_entries:v1:{user_id}"
+                            entries_data = _redis_client.get(entries_key)
+                            if entries_data:
+                                entries = json.loads(entries_data)
+                                updated_count = 0
+                                for entry in entries:
+                                    if entry.get('recurring_id') == temp_id:
+                                        entry['recurring_id'] = new_mysql_id
+                                        updated_count += 1
+                                if updated_count > 0:
+                                    _redis_client.setex(entries_key, 604800, json.dumps(entries))
+                                    logger.info(f"[FLUSH] Updated {updated_count} expense_entries with new recurring_id {new_mysql_id}")
+                            
+                            # Also update the recurring record in Redis with the new ID
+                            recurring_key = f"recurring_expense:v1:{user_id}"
+                            recurring_data = _redis_client.get(recurring_key)
+                            if recurring_data:
+                                recurring_records = json.loads(recurring_data)
+                                for rec in recurring_records:
+                                    if rec.get('id') == temp_id:
+                                        rec['id'] = new_mysql_id
+                                        logger.info(f"[FLUSH] Updated recurring_expense record id from {temp_id} to {new_mysql_id}")
+                                        break
+                                _redis_client.setex(recurring_key, 604800, json.dumps(recurring_records))
+                        else:
+                            logger.warning(f"[FLUSH] Could not find MySQL id for temp recurring_expense {temp_id}")
+                
                 cursor.close()
                 
                 # Clear pending deletions set after successful flush
@@ -1620,6 +1728,24 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             json.dumps(rows, cls=DecimalEncoder)
                         )
                         logger.info(f"[FLUSH] Updated Redis cache for recurring_c_expense with real MySQL IDs")
+                        
+                        # CRITICAL: Also update c_expense_entries with new recurring_id
+                        entries_key = f"c_expense_entries:v1:{user_id}"
+                        entries_data = _redis_client.get(entries_key)
+                        if entries_data:
+                            entries = json.loads(entries_data)
+                            # Build mapping of old temp_id -> new mysql_id
+                            for temp_id, row_idx in temp_id_to_row_idx.items():
+                                new_id = rows[row_idx].get('id')
+                                if new_id and new_id != temp_id:
+                                    updated_count = 0
+                                    for entry in entries:
+                                        if entry.get('recurring_id') == temp_id:
+                                            entry['recurring_id'] = new_id
+                                            updated_count += 1
+                                    if updated_count > 0:
+                                        logger.info(f"[FLUSH] Updated {updated_count} c_expense_entries recurring_id from {temp_id} to {new_id}")
+                            _redis_client.setex(entries_key, 604800, json.dumps(entries))
                 
                 conn.commit()
                 cursor.close()

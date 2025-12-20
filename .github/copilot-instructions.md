@@ -174,11 +174,12 @@ In 192.0.2.44 through root ssh. User is ms_admin pw: dune6MEANTIME.ching_reek
 
 ## Deployment & File Structure
 
-**The local VS Code files ARE the production files.**  
-- Local path: `/srv/blankee/`
-- Server path: `root@192.0.2.44:/root/budget/`
-- **These are the SAME files** (mounted/synced)
-- Any edits in VS Code are immediately live on the server
+**The local VS Code files ARE the production files via network mount.**  
+- VS Code path: `/srv/blankee/`
+- Server path: `root@192.0.2.44:/var/www/html/budget/`
+- **These are the SAME files** — `/srv/blankee/` is a network-mounted folder pointing directly to `/var/www/html/budget/` on the server
+- Any edits in VS Code are immediately live on the server (no copy/deploy needed)
+- **Do NOT use `scp` or copy files** — just edit locally and reload Apache
 
 ### Error Logs
 To check application errors:
