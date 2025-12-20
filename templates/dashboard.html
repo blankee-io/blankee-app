@@ -3563,15 +3563,12 @@
                             updateLocalState(type, categoryId, fridayDateStr, 0, true, fridayDateStr);
                             
                             // Update bucket entries if returned from server
-                            // IMPORTANT: Only process the bucket for the current week being edited
+                            // Process ALL returned buckets - depleting an entry can affect buckets in other weeks
                             if (response.updated_buckets && response.updated_buckets.length > 0) {
                                 let entriesArray = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
                                 
                                 response.updated_buckets.forEach(bucket => {
-                                    // Only process the bucket for the week we're currently editing
-                                    if (bucket.date !== fridayDateStr) {
-                                        return;
-                                    }
+                                    // Process all returned buckets (server returns only relevant ones)
                                     
                                     // In dashboard.html, entries don't have id/is_bucket, match by category_id and date
                                     const bucketEntry = entriesArray.find(e => String(e.category_id) === String(categoryId) && e.date === bucket.date);
@@ -3697,11 +3694,8 @@
                                 response.updated_buckets.forEach(bucket => {
                                     console.log('[DEBUG] Processing bucket:', bucket);
                                     
-                                    // Only process the bucket for the week we're currently editing
-                                    if (bucket.date !== fridayDateStr) {
-                                        console.log('[DEBUG] Skipping bucket - not the current week being edited. bucket.date=', bucket.date, 'fridayDateStr=', fridayDateStr);
-                                        return;
-                                    }
+                                    // Process ALL returned buckets - the server returns only relevant ones
+                                    // (removed the week filter - depleting an entry can affect buckets in other weeks)
                                     
                                     // In dashboard.html, entries don't have id/is_bucket, match by category_id and date
                                     const bucketEntry = entriesArray.find(e => {
