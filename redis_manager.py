@@ -924,17 +924,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid income categories for user {user_id}")
                 
                 batch_data = []
+                temp_id_entries = []  # Entries with temp negative IDs that need INSERT
                 skipped_count = 0
                 skipped_temp_category = 0
-                skipped_temp_id = 0
+                redis_needs_update = False  # Track if we need to update Redis with new IDs
+                
                 for row in rows:
                     entry_id = row.get('id')
                     category_id = row.get('category_id')
-                    
-                    # Skip entries with temp negative ID - will get real ID on next flush
-                    if entry_id and entry_id < 0:
-                        skipped_temp_id += 1
-                        continue
                     
                     # Skip entries with temp negative category_id - category hasn't been flushed yet
                     if category_id and category_id < 0:
@@ -961,6 +958,21 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         except (ValueError, TypeError) as e:
                             logger.error(f"[FLUSH] Invalid recurring_id value: {recurring_id}, type: {type(recurring_id)}, row: {row}")
                             recurring_id = None
+                    
+                    # Handle entries with temp negative ID - need to INSERT and get real ID
+                    if entry_id and entry_id < 0:
+                        temp_id_entries.append({
+                            'temp_id': entry_id,
+                            'category_id': category_id,
+                            'date': row.get('date'),
+                            'amount': float(row.get('amount', 0)),
+                            'recurring_id': recurring_id,
+                            'is_bucket': int(row.get('is_bucket', 0)),
+                            'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                            'processed': int(row.get('processed', 0))
+                        })
+                        continue
+                    
                     batch_data.append((
                         row.get('id'),
                         category_id,
@@ -978,8 +990,35 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 if skipped_temp_category > 0:
                     logger.info(f"[FLUSH] Skipped {skipped_temp_category} income_entries with temp category_ids - will retry next flush")
                 
-                if skipped_temp_id > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_temp_id} income_entries with temp negative IDs - will get real IDs on next flush")
+                # Handle entries with temp negative IDs - INSERT them and update Redis with real IDs
+                if temp_id_entries:
+                    logger.info(f"[FLUSH] Processing {len(temp_id_entries)} income_entries with temp negative IDs")
+                    id_mapping = {}  # temp_id -> real_id
+                    
+                    for entry in temp_id_entries:
+                        cursor.execute("""
+                            INSERT INTO income_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            entry['category_id'],
+                            entry['date'],
+                            entry['amount'],
+                            entry['recurring_id'],
+                            entry['is_bucket'],
+                            entry['original_amount'],
+                            entry['processed']
+                        ))
+                        new_id = cursor.lastrowid
+                        id_mapping[entry['temp_id']] = new_id
+                        logger.info(f"[FLUSH] Inserted income_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
+                    
+                    # Update Redis entries with new real IDs
+                    if id_mapping:
+                        for row in rows:
+                            if row.get('id') in id_mapping:
+                                row['id'] = id_mapping[row['id']]
+                        redis_needs_update = True
+                        logger.info(f"[FLUSH] Updated {len(id_mapping)} entries in rows list with real IDs")
                 
                 if batch_data:
                     # Log the first few rows for debugging
@@ -996,6 +1035,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             is_bucket = VALUES(is_bucket),
                             original_amount = VALUES(original_amount)
                     """, batch_data)
+                
+                # Update Redis with real IDs if we inserted temp entries
+                if redis_needs_update:
+                    redis_key = f"income_entries:v1:{user_id}"
+                    _redis_client.setex(redis_key, 604800, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Updated Redis with real IDs for income_entries")
                 
                 conn.commit()
                 cursor.close()
@@ -1028,17 +1073,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid expense categories for user {user_id}")
                 
                 batch_data = []
+                temp_id_entries = []  # Entries with temp negative IDs that need INSERT
                 skipped_count = 0
                 skipped_temp_category = 0
-                skipped_temp_id = 0
+                redis_needs_update = False  # Track if we need to update Redis with new IDs
+                
                 for row in rows:
                     entry_id = row.get('id')
                     category_id = row.get('category_id')
-                    
-                    # Skip entries with temp negative ID - will get real ID on next flush
-                    if entry_id and entry_id < 0:
-                        skipped_temp_id += 1
-                        continue
                     
                     # Skip entries with temp negative category_id - category hasn't been flushed yet
                     if category_id and category_id < 0:
@@ -1054,6 +1096,22 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     recurring_id = row.get('recurring_id')
                     if recurring_id is not None:
                         recurring_id = int(recurring_id)
+                    
+                    # Handle entries with temp negative ID - need to INSERT and get real ID
+                    if entry_id and entry_id < 0:
+                        temp_id_entries.append({
+                            'temp_id': entry_id,
+                            'category_id': category_id,
+                            'date': row.get('date'),
+                            'amount': float(row.get('amount', 0)),
+                            'recurring_id': recurring_id,
+                            'is_bucket': int(row.get('is_bucket', 0)),
+                            'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                            'processed': int(row.get('processed', 0)),
+                            'bud_item_id': row.get('bud_item_id')
+                        })
+                        continue
+                    
                     batch_data.append((
                         row.get('id'),
                         row.get('category_id'),
@@ -1072,8 +1130,36 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 if skipped_temp_category > 0:
                     logger.info(f"[FLUSH] Skipped {skipped_temp_category} expense_entries with temp category_ids - will retry next flush")
                 
-                if skipped_temp_id > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_temp_id} expense_entries with temp negative IDs - will get real IDs on next flush")
+                # Handle entries with temp negative IDs - INSERT them and update Redis with real IDs
+                if temp_id_entries:
+                    logger.info(f"[FLUSH] Processing {len(temp_id_entries)} expense_entries with temp negative IDs")
+                    id_mapping = {}  # temp_id -> real_id
+                    
+                    for entry in temp_id_entries:
+                        cursor.execute("""
+                            INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            entry['category_id'],
+                            entry['date'],
+                            entry['amount'],
+                            entry['recurring_id'],
+                            entry['is_bucket'],
+                            entry['original_amount'],
+                            entry['processed'],
+                            entry['bud_item_id']
+                        ))
+                        new_id = cursor.lastrowid
+                        id_mapping[entry['temp_id']] = new_id
+                        logger.info(f"[FLUSH] Inserted expense_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
+                    
+                    # Update Redis entries with new real IDs
+                    if id_mapping:
+                        for row in rows:
+                            if row.get('id') in id_mapping:
+                                row['id'] = id_mapping[row['id']]
+                        redis_needs_update = True
+                        logger.info(f"[FLUSH] Updated {len(id_mapping)} entries in rows list with real IDs")
                 
                 if batch_data:
                     cursor.executemany("""
@@ -1087,6 +1173,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             original_amount = VALUES(original_amount),
                             bud_item_id = VALUES(bud_item_id)
                     """, batch_data)
+                
+                # Update Redis with real IDs if we inserted temp entries
+                if redis_needs_update:
+                    redis_key = f"expense_entries:v1:{user_id}"
+                    _redis_client.setex(redis_key, 604800, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Updated Redis with real IDs for expense_entries")
                 
                 conn.commit()
                 cursor.close()
@@ -1124,17 +1216,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid credit expense categories for user {user_id}")
                 
                 batch_data = []
+                temp_id_entries = []  # Entries with temp negative IDs that need INSERT
                 skipped_count = 0
                 skipped_temp_category = 0
-                skipped_temp_id = 0
+                redis_needs_update = False  # Track if we need to update Redis with new IDs
+                
                 for row in rows:
                     entry_id = row.get('id')
                     category_id = row.get('category_id')
-                    
-                    # Skip entries with temp negative ID - will get real ID on next flush
-                    if entry_id and entry_id < 0:
-                        skipped_temp_id += 1
-                        continue
                     
                     # Skip entries with temp negative category_id - category hasn't been flushed yet
                     if category_id and category_id < 0:
@@ -1150,6 +1239,22 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     recurring_id = row.get('recurring_id')
                     if recurring_id is not None:
                         recurring_id = int(recurring_id)
+                    
+                    # Handle entries with temp negative ID - need to INSERT and get real ID
+                    if entry_id and entry_id < 0:
+                        temp_id_entries.append({
+                            'temp_id': entry_id,
+                            'category_id': category_id,
+                            'date': row.get('date'),
+                            'amount': float(row.get('amount', 0)),
+                            'recurring_id': recurring_id,
+                            'is_bucket': int(row.get('is_bucket', 0)),
+                            'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                            'processed': int(row.get('processed', 0)),
+                            'bud_item_id': row.get('bud_item_id')
+                        })
+                        continue
+                    
                     batch_data.append((
                         row.get('id'),
                         category_id,
@@ -1168,8 +1273,36 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 if skipped_temp_category > 0:
                     logger.info(f"[FLUSH] Skipped {skipped_temp_category} c_expense_entries with temp category_ids - will retry next flush")
                 
-                if skipped_temp_id > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_temp_id} c_expense_entries with temp negative IDs - will get real IDs on next flush")
+                # Handle entries with temp negative IDs - INSERT them and update Redis with real IDs
+                if temp_id_entries:
+                    logger.info(f"[FLUSH] Processing {len(temp_id_entries)} c_expense_entries with temp negative IDs")
+                    id_mapping = {}  # temp_id -> real_id
+                    
+                    for entry in temp_id_entries:
+                        cursor.execute("""
+                            INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            entry['category_id'],
+                            entry['date'],
+                            entry['amount'],
+                            entry['recurring_id'],
+                            entry['is_bucket'],
+                            entry['original_amount'],
+                            entry['processed'],
+                            entry['bud_item_id']
+                        ))
+                        new_id = cursor.lastrowid
+                        id_mapping[entry['temp_id']] = new_id
+                        logger.info(f"[FLUSH] Inserted c_expense_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
+                    
+                    # Update Redis entries with new real IDs
+                    if id_mapping:
+                        for row in rows:
+                            if row.get('id') in id_mapping:
+                                row['id'] = id_mapping[row['id']]
+                        redis_needs_update = True
+                        logger.info(f"[FLUSH] Updated {len(id_mapping)} entries in rows list with real IDs")
                 
                 if batch_data:
                     cursor.executemany("""
@@ -1183,6 +1316,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             original_amount = VALUES(original_amount),
                             bud_item_id = VALUES(bud_item_id)
                     """, batch_data)
+                
+                # Update Redis with real IDs if we inserted temp entries
+                if redis_needs_update:
+                    redis_key = f"c_expense_entries:v1:{user_id}"
+                    _redis_client.setex(redis_key, 604800, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Updated Redis with real IDs for c_expense_entries")
                 
                 conn.commit()
                 cursor.close()

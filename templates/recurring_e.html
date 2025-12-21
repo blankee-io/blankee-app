@@ -49,6 +49,7 @@
                             <th class="expense-category-col">Category</th>
                             <th class="expense-amount-col">Amount</th>
                             <th class="expense-cadence-col">Cadence</th>
+                            <th class="expense-bucket-col">Current Bucket</th>
                             <th class="expense-start-date-col">Start Date</th>
                             <th class="expense-end-date-col">End Date</th>
                             <th class="expense-action-col"></th>
@@ -60,6 +61,22 @@
                             <td class="editable expense-category" data-column="category_name">{{ record.category_name }}</td>
                             <td class="editable expense-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
                             <td class="editable expense-cadence" data-column="cadence">{{ record.cadence_description }}</td>
+                            <td class="expense-bucket" data-column="bucket">
+                                {% if record.bucket_original is not none %}
+                                    <div class="bucket-status">
+                                        <div class="bucket-bar-container">
+                                            <div class="bucket-bar {% if record.bucket_spent >= record.bucket_original %}bucket-bar-over{% else %}bucket-bar-ok{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div>
+                                        </div>
+                                        <div class="bucket-text {% if record.bucket_spent >= record.bucket_original %}bucket-over{% endif %}">
+                                            <span class="bucket-spent">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_spent) }}</span>
+                                            <span class="bucket-separator">/</span>
+                                            <span class="bucket-total">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_original) }}</span>
+                                        </div>
+                                    </div>
+                                {% else %}
+                                    <span class="bucket-none">—</span>
+                                {% endif %}
+                            </td>
                             <td class="editable expense-start-date" data-column="start_date">{{ record.start_date }}</td>
                             <td class="editable expense-end-date" data-column="end_date">
                                 {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}
@@ -79,7 +96,7 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="6" class="recurring-footer"></td>
+                            <td colspan="7" class="recurring-footer"></td>
                         </tr>
                     </tfoot>
                 </table>

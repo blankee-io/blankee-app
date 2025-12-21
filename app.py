@@ -2396,7 +2396,9 @@ def get_dashboard_d_data():
                     'processed': entry.get('processed'),
                     'category_id': entry.get('category_id'),
                     'category_name': cat.get('name', ''),
-                    'display_order': cat.get('display_order', 0)
+                    'display_order': cat.get('display_order', 0),
+                    'is_bucket': entry.get('is_bucket', 0),
+                    'original_amount': entry.get('original_amount')
                 })
             
             # Enrich expense entries
@@ -2409,7 +2411,9 @@ def get_dashboard_d_data():
                     'processed': entry.get('processed'),
                     'category_id': entry.get('category_id'),
                     'category_name': cat.get('name', ''),
-                    'display_order': cat.get('display_order', 0)
+                    'display_order': cat.get('display_order', 0),
+                    'is_bucket': entry.get('is_bucket', 0),
+                    'original_amount': entry.get('original_amount')
                 })
             
             # Enrich c_expense entries
@@ -2502,7 +2506,8 @@ def get_dashboard_d_data():
             if not entries_cached:
                 # Fetch all income entries for the user
                 cursor.execute("""
-                    SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
+                    SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount,
+                           ic.id AS category_id, ic.name AS category_name, ic.display_order
                     FROM income_entries ie
                     JOIN income_categories ic ON ie.category_id = ic.id
                     WHERE ic.user_id = %s
@@ -2514,7 +2519,8 @@ def get_dashboard_d_data():
 
                 # Fetch all expense entries for the user
                 cursor.execute("""
-                    SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
+                    SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount,
+                           ec.id AS category_id, ec.name AS category_name, ec.display_order
                     FROM expense_entries ee
                     JOIN expense_categories ec ON ee.category_id = ec.id
                     WHERE ec.user_id = %s
@@ -6842,8 +6848,21 @@ def dashboard():
         else:
             app.logger.debug(f"[REDIS HIT] dashboard income_entries for user {current_user.id}")
 
+        # Get bucket records for tracking bucket vs non-bucket amounts
+        income_bucket_records = _get_entries_from_redis('recurring_income_buckets', current_user.id) or []
+        income_bucket_lookup = {}
+        for bucket in income_bucket_records:
+            cat_id = bucket.get('category_id')
+            bucket_date = bucket.get('bucket_date')
+            if cat_id is not None and bucket_date:
+                income_bucket_lookup[(cat_id, bucket_date)] = {
+                    'original_amount': float(bucket.get('original_amount', 0)),
+                    'current_amount': float(bucket.get('amount', 0))
+                }
+
         income_map = {}
         processed_map = {}
+        bucket_info_map = {}  # Track bucket info per cell
         for entry in raw_income_entries:
             week_key = get_week_key(entry['date'], goofy_week_mode)
             key = (entry['category_id'], week_key)
@@ -6851,6 +6870,14 @@ def dashboard():
             if key not in processed_map:
                 processed_map[key] = []
             processed_map[key].append(entry['processed'])
+            
+            # Track bucket info
+            if key not in bucket_info_map:
+                bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+            if entry.get('is_bucket') == 1:
+                bucket_info_map[key]['has_bucket'] = True
+                bucket_info_map[key]['bucket_amount'] += float(entry.get('amount', 0))
+                bucket_info_map[key]['original_amount'] = float(entry.get('original_amount', 0)) if entry.get('original_amount') else float(entry.get('amount', 0))
 
         income_entries = []
         for key, total_amount in income_map.items():
@@ -6858,12 +6885,18 @@ def dashboard():
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, week_key = key
-            income_entries.append({
+            bucket_info = bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            entry_data = {
                 'category_id': category_id,
                 'date': week_key,
                 'total_amount': total_amount,
                 'processed': processed
-            })
+            }
+            if bucket_info['has_bucket']:
+                entry_data['has_bucket'] = True
+                entry_data['bucket_amount'] = bucket_info['bucket_amount']
+                entry_data['original_amount'] = bucket_info['original_amount']
+            income_entries.append(entry_data)
 
         # --- AGGREGATE EXPENSE ENTRIES ---
         # Try Redis first
@@ -6885,6 +6918,7 @@ def dashboard():
 
         expense_map = {}
         expense_processed_map = {}
+        expense_bucket_info_map = {}  # Track bucket info per cell
         for entry in raw_expense_entries:
             week_key = get_week_key(entry['date'], goofy_week_mode)
             key = (entry['category_id'], week_key)
@@ -6892,6 +6926,14 @@ def dashboard():
             if key not in expense_processed_map:
                 expense_processed_map[key] = []
             expense_processed_map[key].append(entry['processed'])
+            
+            # Track bucket info
+            if key not in expense_bucket_info_map:
+                expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+            if entry.get('is_bucket') == 1:
+                expense_bucket_info_map[key]['has_bucket'] = True
+                expense_bucket_info_map[key]['bucket_amount'] += float(entry.get('amount', 0))
+                expense_bucket_info_map[key]['original_amount'] = float(entry.get('original_amount', 0)) if entry.get('original_amount') else float(entry.get('amount', 0))
 
         expense_entries = []
         for key, total_amount in expense_map.items():
@@ -6899,12 +6941,18 @@ def dashboard():
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, week_key = key
-            expense_entries.append({
+            bucket_info = expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            entry_data = {
                 'category_id': category_id,
                 'date': week_key,
                 'total_amount': total_amount,
                 'processed': processed
-            })
+            }
+            if bucket_info['has_bucket']:
+                entry_data['has_bucket'] = True
+                entry_data['bucket_amount'] = bucket_info['bucket_amount']
+                entry_data['original_amount'] = bucket_info['original_amount']
+            expense_entries.append(entry_data)
 
         # --- AGGREGATE CA ENTRIES ---
         # Try Redis first
@@ -6928,6 +6976,7 @@ def dashboard():
 
         c_expense_map = {}
         c_expense_processed_map = {}
+        c_expense_bucket_info_map = {}  # Track bucket info per cell
         for entry in raw_c_expense_entries:
             week_key = get_week_key(entry['date'], goofy_week_mode)
             key = (entry['category_id'], week_key)
@@ -6935,6 +6984,14 @@ def dashboard():
             if key not in c_expense_processed_map:
                 c_expense_processed_map[key] = []
             c_expense_processed_map[key].append(entry['processed'])
+            
+            # Track bucket info
+            if key not in c_expense_bucket_info_map:
+                c_expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+            if entry.get('is_bucket') == 1:
+                c_expense_bucket_info_map[key]['has_bucket'] = True
+                c_expense_bucket_info_map[key]['bucket_amount'] += float(entry.get('amount', 0))
+                c_expense_bucket_info_map[key]['original_amount'] = float(entry.get('original_amount', 0)) if entry.get('original_amount') else float(entry.get('amount', 0))
 
         c_expense_entries = []
         for key, total_amount in c_expense_map.items():
@@ -6942,12 +6999,18 @@ def dashboard():
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, week_key = key
-            c_expense_entries.append({
+            bucket_info = c_expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            entry_data = {
                 'category_id': category_id,
                 'date': week_key,
                 'total_amount': total_amount,
                 'processed': processed
-            })
+            }
+            if bucket_info['has_bucket']:
+                entry_data['has_bucket'] = True
+                entry_data['bucket_amount'] = bucket_info['bucket_amount']
+                entry_data['original_amount'] = bucket_info['original_amount']
+            c_expense_entries.append(entry_data)
 
         # Fetch all totals and remainders
         # Try Redis first
@@ -7406,6 +7469,7 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
         # Group all entries by period for this category
         period_totals = {}
         bucket_ids = {}
+        bucket_original_amounts = {}
         
         app.logger.info(f"[GET BUCKETS] Processing {len(entries)} total entries for category {category_id}")
         
@@ -7419,10 +7483,11 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                     period_totals[period_key] = 0
                 period_totals[period_key] += amount
                 
-                # Track bucket ID for this period (if this is a bucket entry)
+                # Track bucket ID and original_amount for this period (if this is a bucket entry)
                 if entry.get('is_bucket') == 1:
                     bucket_ids[period_key] = entry.get('id')
-                    app.logger.info(f"[GET BUCKETS] Found bucket entry: id={entry.get('id')}, date={entry_date}, period_key={period_key}, amount={amount}, is_bucket={entry.get('is_bucket')}")
+                    bucket_original_amounts[period_key] = float(entry.get('original_amount') or 0)
+                    app.logger.info(f"[GET BUCKETS] Found bucket entry: id={entry.get('id')}, date={entry_date}, period_key={period_key}, amount={amount}, original_amount={entry.get('original_amount')}, is_bucket={entry.get('is_bucket')}")
         
         # Return aggregated period totals (only for periods that have a bucket)
         buckets = []
@@ -7431,7 +7496,7 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
         # This ensures frontend knows to remove the bucket from UI
         from recurring_bucket_manager import get_bucket_table_for_entry_table
         bucket_table = get_bucket_table_for_entry_table(table_name)
-        deleted_bucket_periods = set()
+        deleted_bucket_periods = {}  # Dict to store period_key -> original_amount
         
         if bucket_table:
             # All bucket tables now use user_id consistently
@@ -7443,12 +7508,13 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                     if record.get('category_id') == int(category_id):
                         record_date = record.get('bucket_date')
                         record_amount = float(record.get('amount', 0))
+                        record_original_amount = float(record.get('original_amount', 0))
                         period_key = get_period_key(record_date)
                         
                         # If bucket record exists but has amount <= 0 and no bucket entry exists
                         if record_amount <= 0 and period_key not in bucket_ids:
-                            deleted_bucket_periods.add(period_key)
-                            app.logger.info(f"[GET BUCKETS] Found deleted bucket record: period={period_key}, amount={record_amount}")
+                            deleted_bucket_periods[period_key] = record_original_amount
+                            app.logger.info(f"[GET BUCKETS] Found deleted bucket record: period={period_key}, amount={record_amount}, original_amount={record_original_amount}")
         
         # If specific_date is provided, only return the bucket for that period
         if specific_date:
@@ -7460,18 +7526,20 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                     'id': bucket_ids[target_period_key],
                     'category_id': int(category_id),
                     'amount': period_totals[target_period_key],
+                    'original_amount': bucket_original_amounts.get(target_period_key, 0),
                     'date': target_period_key
                 })
-                app.logger.info(f"[GET BUCKETS] Found bucket for period {target_period_key}: amount={period_totals[target_period_key]}")
+                app.logger.info(f"[GET BUCKETS] Found bucket for period {target_period_key}: amount={period_totals[target_period_key]}, original_amount={bucket_original_amounts.get(target_period_key, 0)}")
             elif target_period_key in deleted_bucket_periods:
-                # Return bucket with amount=0 to signal deletion
+                # Return bucket with amount=0 to signal deletion, but preserve original_amount for progress bar
                 buckets.append({
                     'id': None,
                     'category_id': int(category_id),
                     'amount': 0,
+                    'original_amount': deleted_bucket_periods[target_period_key],
                     'date': target_period_key
                 })
-                app.logger.info(f"[GET BUCKETS] Found deleted bucket for period {target_period_key}")
+                app.logger.info(f"[GET BUCKETS] Found deleted bucket for period {target_period_key}, original_amount={deleted_bucket_periods[target_period_key]}")
             else:
                 app.logger.info(f"[GET BUCKETS] No bucket found for period {target_period_key}")
         else:
@@ -7481,15 +7549,17 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                     'id': bucket_ids[period_key],
                     'category_id': int(category_id),
                     'amount': period_totals[period_key],  # Total for the period (bucket + manual)
+                    'original_amount': bucket_original_amounts.get(period_key, 0),
                     'date': period_key
                 })
             
-            # Also include deleted buckets
-            for period_key in deleted_bucket_periods:
+            # Also include deleted buckets (with their original_amount for progress bar)
+            for period_key, orig_amount in deleted_bucket_periods.items():
                 buckets.append({
                     'id': None,
                     'category_id': int(category_id),
                     'amount': 0,
+                    'original_amount': orig_amount,
                     'date': period_key
                 })
         
@@ -8544,6 +8614,7 @@ def dashboard_3m():
             app.logger.debug(f"[REDIS HIT] dashboard_3m income_entries for user {current_user.id}")
         income_map = {}
         processed_map = {}
+        bucket_info_map = {}  # Track bucket info per cell
         for entry in raw_income_entries:
             month_end = get_month_end_str(entry['date'])
             key = (entry['category_id'], month_end)
@@ -8551,18 +8622,32 @@ def dashboard_3m():
             if key not in processed_map:
                 processed_map[key] = []
             processed_map[key].append(entry['processed'])
+            
+            # Track bucket info
+            if key not in bucket_info_map:
+                bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+            if entry.get('is_bucket') == 1:
+                bucket_info_map[key]['has_bucket'] = True
+                bucket_info_map[key]['bucket_amount'] += float(entry.get('amount', 0))
+                bucket_info_map[key]['original_amount'] = float(entry.get('original_amount', 0)) if entry.get('original_amount') else float(entry.get('amount', 0))
         income_entries = []
         for key, total_amount in income_map.items():
             processed_list = processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, month_end = key
-            income_entries.append({
+            bucket_info = bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            entry_data = {
                 'category_id': category_id,
                 'date': month_end,
                 'total_amount': total_amount,
                 'processed': processed
-            })
+            }
+            if bucket_info['has_bucket']:
+                entry_data['has_bucket'] = True
+                entry_data['bucket_amount'] = bucket_info['bucket_amount']
+                entry_data['original_amount'] = bucket_info['original_amount']
+            income_entries.append(entry_data)
 
         # --- AGGREGATE EXPENSE ENTRIES BY MONTH ---
         # Try Redis first
@@ -8571,7 +8656,7 @@ def dashboard_3m():
             # Redis miss - fallback to MySQL
             app.logger.info(f"[REDIS MISS] dashboard_3m expense_entries for user {current_user.id}")
             cursor.execute("""
-                SELECT id, category_id, date, amount, processed
+                SELECT id, category_id, date, amount, processed, is_bucket, original_amount
                 FROM expense_entries
                 WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -8583,6 +8668,7 @@ def dashboard_3m():
             app.logger.debug(f"[REDIS HIT] dashboard_3m expense_entries for user {current_user.id}")
         expense_map = {}
         expense_processed_map = {}
+        expense_bucket_info_map = {}
         for entry in raw_expense_entries:
             month_end = get_month_end_str(entry['date'])
             key = (entry['category_id'], month_end)
@@ -8590,18 +8676,31 @@ def dashboard_3m():
             if key not in expense_processed_map:
                 expense_processed_map[key] = []
             expense_processed_map[key].append(entry['processed'])
+            # Track bucket info
+            if key not in expense_bucket_info_map:
+                expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+            if entry.get('is_bucket'):
+                expense_bucket_info_map[key]['has_bucket'] = True
+                expense_bucket_info_map[key]['bucket_amount'] += float(entry['amount'])
+                expense_bucket_info_map[key]['original_amount'] = float(entry.get('original_amount') or 0)
         expense_entries = []
         for key, total_amount in expense_map.items():
             processed_list = expense_processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, month_end = key
-            expense_entries.append({
+            expense_bucket_info = expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            entry_data = {
                 'category_id': category_id,
                 'date': month_end,
                 'total_amount': total_amount,
                 'processed': processed
-            })
+            }
+            if expense_bucket_info['has_bucket']:
+                entry_data['has_bucket'] = True
+                entry_data['bucket_amount'] = expense_bucket_info['bucket_amount']
+                entry_data['original_amount'] = expense_bucket_info['original_amount']
+            expense_entries.append(entry_data)
 
         # --- AGGREGATE CA ENTRIES BY MONTH ---
         # Try Redis first
@@ -8610,7 +8709,7 @@ def dashboard_3m():
             # Redis miss - fallback to MySQL
             app.logger.info(f"[REDIS MISS] dashboard_3m c_expense_entries for user {current_user.id}")
             cursor.execute("""
-                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount
                 FROM c_expense_entries cee
                 JOIN c_expense_categories cec ON cee.category_id = cec.id
                 JOIN credit_accounts ca ON cec.account_id = ca.id
@@ -8624,6 +8723,7 @@ def dashboard_3m():
             app.logger.debug(f"[REDIS HIT] dashboard_3m c_expense_entries for user {current_user.id}")
         c_expense_map = {}
         c_expense_processed_map = {}
+        c_expense_bucket_info_map = {}
         for entry in raw_c_expense_entries:
             month_end = get_month_end_str(entry['date'])
             key = (entry['category_id'], month_end)
@@ -8631,18 +8731,31 @@ def dashboard_3m():
             if key not in c_expense_processed_map:
                 c_expense_processed_map[key] = []
             c_expense_processed_map[key].append(entry['processed'])
+            # Track bucket info
+            if key not in c_expense_bucket_info_map:
+                c_expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+            if entry.get('is_bucket'):
+                c_expense_bucket_info_map[key]['has_bucket'] = True
+                c_expense_bucket_info_map[key]['bucket_amount'] += float(entry['amount'])
+                c_expense_bucket_info_map[key]['original_amount'] = float(entry.get('original_amount') or 0)
         c_expense_entries = []
         for key, total_amount in c_expense_map.items():
             processed_list = c_expense_processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, month_end = key
-            c_expense_entries.append({
+            c_expense_bucket_info = c_expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            entry_data = {
                 'category_id': category_id,
                 'date': month_end,
                 'total_amount': total_amount,
                 'processed': processed
-            })
+            }
+            if c_expense_bucket_info['has_bucket']:
+                entry_data['has_bucket'] = True
+                entry_data['bucket_amount'] = c_expense_bucket_info['bucket_amount']
+                entry_data['original_amount'] = c_expense_bucket_info['original_amount']
+            c_expense_entries.append(entry_data)
 
         # Fetch all monthly totals and remainders
         # Try Redis first
@@ -10788,6 +10901,36 @@ def recurring_income():
     current_date = date.today()
     no_end_date = date(current_date.year + 3, 12, 31)
 
+    # Get bucket records and entries for calculating spent amounts
+    bucket_records = _get_entries_from_redis('recurring_income_buckets', current_user.id) or []
+    income_entries = _get_entries_from_redis('income_entries', current_user.id) or []
+    
+    app.logger.info(f"[RECURRING_I] Found {len(bucket_records)} bucket records for user {current_user.id}")
+    
+    # Create lookup for bucket records by category_id (use int for consistent comparison)
+    bucket_by_category = {}
+    for bucket in bucket_records:
+        cat_id = int(bucket.get('category_id')) if bucket.get('category_id') is not None else None
+        bucket_date = bucket.get('bucket_date')
+        app.logger.info(f"[RECURRING_I] Bucket: cat_id={cat_id}, date={bucket_date}, amount={bucket.get('amount')}, original={bucket.get('original_amount')}")
+        if cat_id is not None and bucket_date:
+            # Keep the earliest bucket (current period) for each category
+            if cat_id not in bucket_by_category or bucket_date < bucket_by_category[cat_id]['bucket_date']:
+                bucket_by_category[cat_id] = bucket
+    
+    app.logger.info(f"[RECURRING_I] bucket_by_category keys: {list(bucket_by_category.keys())}")
+    
+    # Calculate spent amount per category (sum of manual entries for current bucket period)
+    # Also track bucket entry amounts (is_bucket=1 entries show remaining)
+    bucket_entry_by_category = {}
+    for entry in income_entries:
+        if entry.get('is_bucket') == 1:
+            cat_id = int(entry.get('category_id')) if entry.get('category_id') is not None else None
+            entry_date = entry.get('date')
+            if cat_id is not None:
+                if cat_id not in bucket_entry_by_category or entry_date > bucket_entry_by_category[cat_id]['date']:
+                    bucket_entry_by_category[cat_id] = entry
+
     # Format cadence for display and check for 'No end date'
     for record in recurring_income_records:
         record['cadence_description'] = get_cadence_description(
@@ -10803,6 +10946,27 @@ def recurring_income():
             record['display_end_date'] = 'No end date'
         else:
             record['display_end_date'] = record['end_date']
+        
+        # Add bucket information
+        cat_id = int(record.get('category_id')) if record.get('category_id') is not None else None
+        app.logger.info(f"[RECURRING_I] Looking up bucket for category {cat_id}, type={type(cat_id)}")
+        bucket_record = bucket_by_category.get(cat_id)
+        bucket_entry = bucket_entry_by_category.get(cat_id)
+        app.logger.info(f"[RECURRING_I] Found bucket_record: {bucket_record}")
+        
+        if bucket_record:
+            original_amount = float(bucket_record.get('original_amount', 0))
+            current_amount = float(bucket_record.get('amount', 0))
+            spent_amount = original_amount - current_amount
+            record['bucket_original'] = original_amount
+            record['bucket_remaining'] = current_amount
+            record['bucket_spent'] = spent_amount
+            record['bucket_date'] = bucket_record.get('bucket_date')
+        else:
+            record['bucket_original'] = None
+            record['bucket_remaining'] = None
+            record['bucket_spent'] = None
+            record['bucket_date'] = None
 
     # Pass landing_page to the template
     return render_template(
@@ -11311,6 +11475,31 @@ def recurring_expense():
             
             # Cache to Redis
             _set_recurring_to_redis('recurring_expense', current_user.id, recurring_expense_records)
+    else:
+        # Redis data exists, but ensure all records have category_name
+        # If any are missing, enrich from expense_categories cache or DB
+        needs_enrichment = any('category_name' not in rec or not rec.get('category_name') for rec in recurring_expense_records)
+        
+        if needs_enrichment:
+            # Get expense categories from Redis or DB
+            expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+            if expense_categories is None:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT id, name FROM expense_categories WHERE user_id = %s", (current_user.id,))
+                    expense_categories = cursor.fetchall()
+                    cursor.close()
+            
+            # Create a lookup dict
+            category_lookup = {cat['id']: cat['name'] for cat in expense_categories}
+            
+            # Enrich the recurring records
+            for rec in recurring_expense_records:
+                if 'category_name' not in rec or not rec.get('category_name'):
+                    rec['category_name'] = category_lookup.get(rec['category_id'], 'Unknown')
+            
+            # Update Redis cache with enriched data
+            _set_recurring_to_redis('recurring_expense', current_user.id, recurring_expense_records)
     
     # Fetch user profile data
     with get_db_pool().get_connection() as conn:
@@ -11329,6 +11518,19 @@ def recurring_expense():
     current_date = date.today()
     no_end_date = date(current_date.year + 3, 12, 31)
 
+    # Get bucket records for calculating spent amounts
+    bucket_records = _get_entries_from_redis('recurring_expense_buckets', current_user.id) or []
+    
+    # Create lookup for bucket records by category_id (use int for consistent comparison)
+    bucket_by_category = {}
+    for bucket in bucket_records:
+        cat_id = int(bucket.get('category_id')) if bucket.get('category_id') is not None else None
+        bucket_date = bucket.get('bucket_date')
+        if cat_id is not None and bucket_date:
+            # Keep the earliest bucket (current period) for each category
+            if cat_id not in bucket_by_category or bucket_date < bucket_by_category[cat_id]['bucket_date']:
+                bucket_by_category[cat_id] = bucket
+
     # Format cadence for display and check for 'No end date'
     for record in recurring_expense_records:
         record['cadence_description'] = get_cadence_description(
@@ -11344,6 +11546,24 @@ def recurring_expense():
             record['display_end_date'] = 'No end date'
         else:
             record['display_end_date'] = record['end_date']
+        
+        # Add bucket information
+        cat_id = int(record.get('category_id')) if record.get('category_id') is not None else None
+        bucket_record = bucket_by_category.get(cat_id)
+        
+        if bucket_record:
+            original_amount = float(bucket_record.get('original_amount', 0))
+            current_amount = float(bucket_record.get('amount', 0))
+            spent_amount = original_amount - current_amount
+            record['bucket_original'] = original_amount
+            record['bucket_remaining'] = current_amount
+            record['bucket_spent'] = spent_amount
+            record['bucket_date'] = bucket_record.get('bucket_date')
+        else:
+            record['bucket_original'] = None
+            record['bucket_remaining'] = None
+            record['bucket_spent'] = None
+            record['bucket_date'] = None
 
     # Pass landing_page to the template
     return render_template(
@@ -11910,6 +12130,19 @@ def recurring_ca_expense():
     current_date = date.today()
     no_end_date = date(current_date.year + 3, 12, 31)
 
+    # Get bucket records for calculating spent amounts
+    bucket_records = _get_entries_from_redis('recurring_c_expense_buckets', current_user.id) or []
+    
+    # Create lookup for bucket records by category_id (use int for consistent comparison)
+    bucket_by_category = {}
+    for bucket in bucket_records:
+        cat_id = int(bucket.get('category_id')) if bucket.get('category_id') is not None else None
+        bucket_date = bucket.get('bucket_date')
+        if cat_id is not None and bucket_date:
+            # Keep the earliest bucket (current period) for each category
+            if cat_id not in bucket_by_category or bucket_date < bucket_by_category[cat_id]['bucket_date']:
+                bucket_by_category[cat_id] = bucket
+
     for record in recurring_ca_expense_records:
         record['cadence_description'] = get_cadence_description(
             record['cadence_interval'],
@@ -11923,6 +12156,24 @@ def recurring_ca_expense():
             record['display_end_date'] = 'No end date'
         else:
             record['display_end_date'] = record['end_date']
+        
+        # Add bucket information
+        cat_id = int(record.get('category_id')) if record.get('category_id') is not None else None
+        bucket_record = bucket_by_category.get(cat_id)
+        
+        if bucket_record:
+            original_amount = float(bucket_record.get('original_amount', 0))
+            current_amount = float(bucket_record.get('amount', 0))
+            spent_amount = original_amount - current_amount
+            record['bucket_original'] = original_amount
+            record['bucket_remaining'] = current_amount
+            record['bucket_spent'] = spent_amount
+            record['bucket_date'] = bucket_record.get('bucket_date')
+        else:
+            record['bucket_original'] = None
+            record['bucket_remaining'] = None
+            record['bucket_spent'] = None
+            record['bucket_date'] = None
 
     return render_template(
         'recurring_ca_e.html',

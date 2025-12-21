@@ -43,7 +43,7 @@
                 <table class="ca-recurring-table" data-account-id="{{ account.id }}">
                     <thead>
                         <tr>
-                            <th class="ca-recurring-title" colspan="6">
+                            <th class="ca-recurring-title" colspan="7">
                                 <span>{{ account.name }}</span>
                                 <button class="add-ca-btn" data-account-id="{{ account.id }}"><i class="fa-solid fa-plus"></i><span> Add Category</span></button>
                             </th>
@@ -52,6 +52,7 @@
                             <th class="ca-category-col">Category</th>
                             <th class="ca-amount-col">Amount</th>
                             <th class="ca-cadence-col">Cadence</th>
+                            <th class="ca-bucket-col">Current Bucket</th>
                             <th class="ca-start-date-col">Start Date</th>
                             <th class="ca-end-date-col">End Date</th>
                             <th class="ca-action-col">
@@ -64,6 +65,22 @@
                             <td class="editable ca-category" data-column="category_name">{{ record.category_name }}</td>
                             <td class="editable ca-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
                             <td class="editable ca-cadence" data-column="cadence">{{ record.cadence_description }}</td>
+                            <td class="ca-bucket" data-column="bucket">
+                                {% if record.bucket_original is not none %}
+                                    <div class="bucket-status">
+                                        <div class="bucket-bar-container">
+                                            <div class="bucket-bar {% if record.bucket_spent >= record.bucket_original %}bucket-bar-over{% else %}bucket-bar-ok{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div>
+                                        </div>
+                                        <div class="bucket-text {% if record.bucket_spent >= record.bucket_original %}bucket-over{% endif %}">
+                                            <span class="bucket-spent">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_spent) }}</span>
+                                            <span class="bucket-separator">/</span>
+                                            <span class="bucket-total">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_original) }}</span>
+                                        </div>
+                                    </div>
+                                {% else %}
+                                    <span class="bucket-none">—</span>
+                                {% endif %}
+                            </td>
                             <td class="editable ca-start-date" data-column="start_date">{{ record.start_date }}</td>
                             <td class="editable ca-end-date" data-column="end_date">
                                 {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}
@@ -83,7 +100,7 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="6" class="recurring-footer"></td>
+                            <td colspan="7" class="recurring-footer"></td>
                         </tr>
                     </tfoot> 
                 </table>

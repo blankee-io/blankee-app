@@ -3494,6 +3494,32 @@ input#setup-profile-starting-savings {
     box-sizing: border-box;
 }
 
+/* Bucket Progress Bar - Shows spent (red) and remaining (green) */
+.bucket-progress-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    display: flex;
+}
+
+.bucket-progress-spent {
+    background-color: #e53935;
+    height: 100%;
+}
+
+.bucket-progress-remaining {
+    background-color: #4caf50;
+    height: 100%;
+    flex: 1;
+}
+
+/* Container needs relative positioning for progress bar */
+td:has(.bucket-progress-container) {
+    position: relative;
+}
+
 .category-edit-modal {
     position: fixed;
     top: 0;
@@ -5613,7 +5639,7 @@ input#setup-profile-starting-savings {
     text-align: right;
     width: 100%;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
 }
 
 .profile-form {
@@ -6523,7 +6549,7 @@ input#setup-profile-starting-savings {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -6625,22 +6651,27 @@ input#setup-profile-starting-savings {
 
 .income-recurring-table th.income-cadence-col,
 .income-recurring-table td.income-cadence-col {
-    width: 30%;
+    width: 22%;
 }
 
 .income-recurring-table th.income-start-date-col,
 .income-recurring-table td.income-start-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .income-recurring-table th.income-end-date-col,
 .income-recurring-table td.income-end-date-col {
+    width: 12%;
+}
+
+.income-recurring-table th.income-bucket-col,
+.income-recurring-table td.income-bucket-col {
     width: 15%;
 }
 
 .income-recurring-table th.income-action-col,
 .income-recurring-table td.income-action-col {
-    width: 10%;
+    width: 8%;
 }
 
 .income-action-col {
@@ -6657,6 +6688,76 @@ input#setup-profile-starting-savings {
 
 .income-recurring-table tfoot tr {
     background-color: #A9A9A9;
+}
+
+/* Bucket status display for recurring tables */
+.bucket-status {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bucket-bar-container {
+    width: 100%;
+    height: 8px;
+    background-color: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.bucket-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.bucket-bar-income {
+    background-color: #4CAF50;
+}
+
+.bucket-bar-ok {
+    background-color: #4CAF50;
+}
+
+.bucket-bar-expense {
+    background-color: #f44336;
+}
+
+.bucket-bar-over {
+    background-color: #f44336;
+}
+
+.bucket-text {
+    font-size: 0.85em;
+    color: #666;
+    text-align: center;
+}
+
+.bucket-text.bucket-over {
+    color: #f44336;
+}
+
+.bucket-text.bucket-over .bucket-spent {
+    color: #f44336;
+}
+
+.bucket-spent {
+    font-weight: 600;
+    color: #333;
+}
+
+.bucket-separator {
+    margin: 0 2px;
+    color: #999;
+}
+
+.bucket-total {
+    color: #888;
+}
+
+.bucket-none {
+    color: #999;
+    font-style: italic;
 }
 
 .add-income-btn {
@@ -7357,7 +7458,7 @@ form button[type="submit"] {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -7439,22 +7540,27 @@ form button[type="submit"] {
 
 .expense-recurring-table th.expense-cadence-col,
 .expense-recurring-table td.expense-cadence-col {
-    width: 30%;
+    width: 22%;
+}
+
+.expense-recurring-table th.expense-bucket-col,
+.expense-recurring-table td.expense-bucket-col {
+    width: 15%;
 }
 
 .expense-recurring-table th.expense-start-date-col,
 .expense-recurring-table td.expense-start-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .expense-recurring-table th.expense-end-date-col,
 .expense-recurring-table td.expense-end-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .expense-recurring-table th.expense-action-col,
 .expense-recurring-table td.expense-action-col {
-    width: 10%;
+    width: 8%;
 }
 
 .expense-action-col {
@@ -7749,7 +7855,7 @@ form button[type="submit"] {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -7874,22 +7980,27 @@ form button[type="submit"] {
 
 .ca-recurring-table th.ca-cadence-col,
 .ca-recurring-table td.ca-cadence-col {
-    width: 30%;
+    width: 22%;
+}
+
+.ca-recurring-table th.ca-bucket-col,
+.ca-recurring-table td.ca-bucket-col {
+    width: 15%;
 }
 
 .ca-recurring-table th.ca-start-date-col,
 .ca-recurring-table td.ca-start-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .ca-recurring-table th.ca-end-date-col,
 .ca-recurring-table td.ca-end-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .ca-recurring-table th.ca-action-col,
 .ca-recurring-table td.ca-action-col {
-    width: 10%;
+    width: 8%;
 }
 
 .ca-action-col {
@@ -8093,7 +8204,7 @@ form button[type="submit"] {
     display: flex;
     width: 100%;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
 }
 
 /* Match the color of your table row (adjust as needed) */
@@ -8215,7 +8326,7 @@ form button[type="submit"] {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -8229,7 +8340,7 @@ form button[type="submit"] {
     justify-content: space-between;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 20px auto;
 }
 
@@ -8706,7 +8817,7 @@ form button[type="submit"] {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -8720,7 +8831,7 @@ form button[type="submit"] {
     justify-content: space-between;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 20px auto;
 }
 

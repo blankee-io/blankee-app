@@ -365,6 +365,10 @@
                     if (typeof saveDailyTotalsAndRemainders === "function") {
                         saveDailyTotalsAndRemainders();
                     }
+                    // Refresh notification badge (bucket depletion may have created a notification)
+                    if (typeof refreshNotificationBadge === 'function') {
+                        refreshNotificationBadge();
+                    }
                 } else {
                     alert('Failed to add entry: ' + response.message);
                 }
