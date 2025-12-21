@@ -2197,6 +2197,49 @@
             });
         }
 
+        // Helper function to update bucket progress bar in a cell
+        // Shows red (spent) on left and green (remaining) on right
+        function updateBucketProgressBar(cell, entry) {
+            // Remove any existing progress bar
+            const existingBar = cell.querySelector('.bucket-progress-container');
+            if (existingBar) {
+                existingBar.remove();
+            }
+            
+            // Only add progress bar if entry has bucket info
+            if (!entry || !entry.has_bucket) return;
+            
+            const remainingAmount = parseFloat(entry.bucket_amount || 0);
+            const originalAmount = parseFloat(entry.original_amount || 0);
+            
+            // Don't show if no original amount (avoid division by zero)
+            if (originalAmount <= 0) return;
+            
+            // Calculate spent amount and percentage
+            const spentAmount = originalAmount - remainingAmount;
+            const spentPercent = Math.min((spentAmount / originalAmount) * 100, 100);
+            
+            // Create container
+            const container = document.createElement('div');
+            container.className = 'bucket-progress-container';
+            
+            // Create spent (red) bar - what has been used
+            const spentBar = document.createElement('div');
+            spentBar.className = 'bucket-progress-spent';
+            spentBar.style.width = spentPercent + '%';
+            
+            // Create remaining (green) bar - what's left
+            const remainingBar = document.createElement('div');
+            remainingBar.className = 'bucket-progress-remaining';
+            
+            container.appendChild(spentBar);
+            container.appendChild(remainingBar);
+            
+            // Ensure cell has relative positioning
+            cell.style.position = 'relative';
+            cell.appendChild(container);
+        }
+
         function populateIncomeData() {
             const monthEntriesMap = {}; // Map to track entries for each month-category
 
@@ -2209,12 +2252,18 @@
                 const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                 if (!monthEntriesMap[monthKey]) {
-                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [] };
+                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                 // Convert processed to boolean and check if all entries are processed
                 const isEntryProcessed = Number(entry.processed) === 1;
                 monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
+                // Track bucket info
+                if (entry.has_bucket) {
+                    monthEntriesMap[monthKey].has_bucket = true;
+                    monthEntriesMap[monthKey].bucket_amount += parseFloat(entry.bucket_amount) || 0;
+                    monthEntriesMap[monthKey].original_amount = parseFloat(entry.original_amount) || 0;
+                }
             });
 
             // For each row in the income month table
@@ -2240,10 +2289,15 @@
                         } else {
                             td.classList.remove('paid');
                         }
+                        // Update bucket progress bar
+                        updateBucketProgressBar(td, monthEntriesMap[monthKey]);
                     } else {
                         if (input) input.value = '';
                         td.removeAttribute('data-processed');
                         td.classList.remove('paid');
+                        // Remove any existing progress bar
+                        const existingBar = td.querySelector('.bucket-progress-container');
+                        if (existingBar) existingBar.remove();
                     }
                 });
             });
@@ -2261,12 +2315,18 @@
                 const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                 if (!monthEntriesMap[monthKey]) {
-                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [] };
+                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                 // Convert processed to boolean and check if all entries are processed
                 const isEntryProcessed = Number(entry.processed) === 1;
                 monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
+                // Track bucket info
+                if (entry.has_bucket) {
+                    monthEntriesMap[monthKey].has_bucket = true;
+                    monthEntriesMap[monthKey].bucket_amount += parseFloat(entry.bucket_amount) || 0;
+                    monthEntriesMap[monthKey].original_amount = parseFloat(entry.original_amount) || 0;
+                }
             });
 
             // For each row in the expense month table
@@ -2292,10 +2352,15 @@
                         } else {
                             td.classList.remove('paid');
                         }
+                        // Update bucket progress bar
+                        updateBucketProgressBar(td, monthEntriesMap[monthKey]);
                     } else {
                         if (input) input.value = '';
                         td.removeAttribute('data-processed');
                         td.classList.remove('paid');
+                        // Remove any existing progress bar
+                        const existingBar = td.querySelector('.bucket-progress-container');
+                        if (existingBar) existingBar.remove();
                     }
                 });
             });
@@ -2317,12 +2382,18 @@
                     const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                     if (!monthEntriesMap[monthKey]) {
-                        monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [] };
+                        monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
                     }
                     monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                     // Convert processed to boolean and check if all entries are processed
                     const isEntryProcessed = Number(entry.processed) === 1;
                     monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
+                    // Track bucket info
+                    if (entry.has_bucket) {
+                        monthEntriesMap[monthKey].has_bucket = true;
+                        monthEntriesMap[monthKey].bucket_amount += parseFloat(entry.bucket_amount) || 0;
+                        monthEntriesMap[monthKey].original_amount = parseFloat(entry.original_amount) || 0;
+                    }
                 });
 
                 // For each row in the CA month table
@@ -2348,10 +2419,15 @@
                             } else {
                                 td.classList.remove('paid');
                             }
+                            // Update bucket progress bar
+                            updateBucketProgressBar(td, monthEntriesMap[monthKey]);
                         } else {
                             if (input) input.value = '';
                             td.removeAttribute('data-processed');
                             td.classList.remove('paid');
+                            // Remove any existing progress bar
+                            const existingBar = td.querySelector('.bucket-progress-container');
+                            if (existingBar) existingBar.remove();
                         }
                     });
                 });
@@ -3471,7 +3547,8 @@
             const td = input.parentElement;
             
             showDashboardSpinner(true);
-            const newValue = input.value.trim();
+            // Strip currency symbol if present (needed when called after blur reformats the value)
+            const newValue = input.value.trim().replace(currencySymbol, '').trim();
 
             const categoryId = td.closest('tr').getAttribute('data-category-id');
             const date = new Date(td.getAttribute('data-date'));
@@ -3530,9 +3607,23 @@
                                             if (bucketInput) {
                                                 if (bucket.amount > 0) {
                                                     bucketInput.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    // Update progress bar
+                                                    updateBucketProgressBar(bucketCell, {
+                                                        has_bucket: true,
+                                                        bucket_amount: bucket.amount,
+                                                        original_amount: bucket.original_amount
+                                                    });
                                                 } else {
-                                                    // Clear the cell when bucket is depleted
+                                                    // Bucket fully depleted - clear the value but keep progress bar at 100%
                                                     bucketInput.value = '';
+                                                    // Show progress bar at 100% spent (all red)
+                                                    if (bucket.original_amount > 0) {
+                                                        updateBucketProgressBar(bucketCell, {
+                                                            has_bucket: true,
+                                                            bucket_amount: 0, // 0 remaining = 100% spent
+                                                            original_amount: bucket.original_amount
+                                                        });
+                                                    }
                                                     // Also update local state to remove bucket entries for this period
                                                     // This ensures UI updates properly without page reload
                                                     let entryList;
@@ -3575,14 +3666,19 @@
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
+                            // Refresh notification badge (bucket depletion may have created a notification)
+                            if (typeof refreshNotificationBadge === 'function') {
+                                refreshNotificationBadge();
+                            }
                             // Defer updateView to next tick to avoid blocking
                             setTimeout(() => {
                                 updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                             }, 0);
-                        } else {
                         }
+                        showDashboardSpinner(false);
                     },
                     error: function() {
+                        showDashboardSpinner(false);
                     }
                 });
             } else {
@@ -3659,9 +3755,27 @@
                                             if (bucketInput) {
                                                 if (bucket.amount > 0) {
                                                     bucketInput.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    // Update progress bar
+                                                    updateBucketProgressBar(bucketCell, {
+                                                        has_bucket: true,
+                                                        bucket_amount: bucket.amount,
+                                                        original_amount: bucket.original_amount
+                                                    });
                                                 } else {
                                                     // Clear the cell when bucket is depleted
                                                     bucketInput.value = '';
+                                                    // Show progress bar at 100% spent (all red) if there was an original amount
+                                                    if (bucket.original_amount && bucket.original_amount > 0) {
+                                                        updateBucketProgressBar(bucketCell, {
+                                                            has_bucket: true,
+                                                            bucket_amount: 0, // 0 remaining = 100% spent
+                                                            original_amount: bucket.original_amount
+                                                        });
+                                                    } else {
+                                                        // Only remove if no original amount
+                                                        const existingBar = bucketCell.querySelector('.bucket-progress-container');
+                                                        if (existingBar) existingBar.remove();
+                                                    }
                                                     // Also update local state to remove bucket entries for this period
                                                     // This ensures UI updates properly without page reload
                                                     let entryList;
@@ -3704,15 +3818,20 @@
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
+                            // Refresh notification badge (bucket depletion may have created a notification)
+                            if (typeof refreshNotificationBadge === 'function') {
+                                refreshNotificationBadge();
+                            }
                             // Defer updateView to next tick to avoid blocking
                             // Don't re-populate tables after immediate DOM update to avoid flickering
                             setTimeout(() => {
                                 updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                             }, 0);
-                        } else {
                         }
+                        showDashboardSpinner(false);
                     },
                     error: function() {
+                        showDashboardSpinner(false);
                     }
                 });
             }

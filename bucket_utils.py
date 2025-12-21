@@ -284,6 +284,259 @@ def find_bucket_for_entry(table, category_id, entry_date, user_id, cadence_info)
     return matching_bucket
 
 
+def _format_cadence_string(cadence_unit, cadence_interval):
+    """
+    Format cadence information into a human-readable string.
+    
+    Args:
+        cadence_unit: 'days', 'weeks', 'months', or 'years'
+        cadence_interval: Integer interval (e.g., 1, 2, 3)
+    
+    Returns:
+        Human-readable string like "week", "month", "2 weeks", etc.
+    """
+    interval = int(cadence_interval) if cadence_interval else 1
+    unit = cadence_unit or 'months'
+    
+    # Map plural to singular for interval of 1
+    unit_singular = {
+        'days': 'day',
+        'weeks': 'week', 
+        'months': 'month',
+        'years': 'year'
+    }
+    
+    if interval == 1:
+        return unit_singular.get(unit, unit.rstrip('s'))
+    else:
+        return f"{interval} {unit}"
+
+
+def _create_bucket_depleted_notification(user_id, table, category_id, bucket_date, original_amount, recurring_id=None):
+    """
+    Create a notification when a bucket is fully depleted.
+    
+    Args:
+        user_id: The user ID
+        table: Entry table name ('income_entries', 'expense_entries', 'c_expense_entries')
+        category_id: The category ID of the depleted bucket
+        bucket_date: The date of the bucket
+        original_amount: The original amount of the bucket
+        recurring_id: The recurring entry ID (to get cadence info)
+    """
+    from datetime import datetime
+    from flask import current_app
+    
+    try:
+        # Map entry table to category table and recurring table
+        table_map = {
+            'income_entries': {'category': 'income_categories', 'recurring': 'recurring_income'},
+            'expense_entries': {'category': 'expense_categories', 'recurring': 'recurring_expense'},
+            'c_expense_entries': {'category': 'c_expense_categories', 'recurring': 'recurring_c_expense'}
+        }
+        tables = table_map.get(table)
+        if not tables:
+            current_app.logger.error(f"[BUCKET NOTIFICATION] Unknown entry table: {table}")
+            return
+        
+        category_table = tables['category']
+        recurring_table = tables['recurring']
+        
+        # Get category name (and account_id for credit expenses) from Redis
+        category_name = None
+        account_id = None
+        redis_key = f"{category_table}:v1:{user_id}"
+        redis_data = redis_manager._redis_client.get(redis_key) if redis_manager._redis_client else None
+        
+        if redis_data:
+            categories = json.loads(redis_data)
+            for cat in categories:
+                if cat.get('id') == int(category_id):
+                    category_name = cat.get('name', 'Unknown Category')
+                    account_id = cat.get('account_id')  # For credit expense categories
+                    break
+        
+        # Fallback to database if not found in Redis
+        if not category_name:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute(f"SELECT name, account_id FROM {category_table} WHERE id = %s", (category_id,))
+                result = cursor.fetchone()
+                if result:
+                    category_name = result.get('name', 'Unknown Category')
+                    account_id = result.get('account_id')
+                cursor.close()
+        
+        if not category_name:
+            category_name = 'Unknown Category'
+        
+        # Get credit account name if this is a credit expense
+        credit_account_name = None
+        if table == 'c_expense_entries' and account_id:
+            # Try Redis first
+            accounts_key = f"credit_accounts:v1:{user_id}"
+            accounts_data = redis_manager._redis_client.get(accounts_key) if redis_manager._redis_client else None
+            
+            if accounts_data:
+                accounts = json.loads(accounts_data)
+                for acc in accounts:
+                    if acc.get('id') == int(account_id):
+                        credit_account_name = acc.get('name')
+                        break
+            
+            # Fallback to database
+            if not credit_account_name:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT name FROM credit_accounts WHERE id = %s", (account_id,))
+                    result = cursor.fetchone()
+                    if result:
+                        credit_account_name = result.get('name')
+                    cursor.close()
+        
+        # Get cadence info from recurring entry
+        cadence_str = None
+        cadence_unit = None
+        cadence_interval = None
+        recurring_entry = None
+        
+        if recurring_id:
+            # Try Redis first
+            recurring_key = f"{recurring_table}:v1:{user_id}"
+            recurring_data = redis_manager._redis_client.get(recurring_key) if redis_manager._redis_client else None
+            
+            if recurring_data:
+                recurring_entries = json.loads(recurring_data)
+                for rec in recurring_entries:
+                    if rec.get('id') == int(recurring_id):
+                        recurring_entry = rec
+                        cadence_unit = rec.get('cadence_unit', 'months')
+                        cadence_interval = rec.get('cadence_interval', 1)
+                        cadence_str = _format_cadence_string(cadence_unit, cadence_interval)
+                        break
+            
+            # Fallback to database
+            if not recurring_entry:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute(f"SELECT * FROM {recurring_table} WHERE id = %s", (recurring_id,))
+                    recurring_entry = cursor.fetchone()
+                    if recurring_entry:
+                        cadence_unit = recurring_entry.get('cadence_unit', 'months')
+                        cadence_interval = recurring_entry.get('cadence_interval', 1)
+                        cadence_str = _format_cadence_string(cadence_unit, cadence_interval)
+                    cursor.close()
+        
+        # Format date for display - use date range for non-daily cadences
+        from datetime import date as date_type
+        from dateutil.relativedelta import relativedelta
+        if isinstance(bucket_date, str):
+            date_obj = date_type.fromisoformat(bucket_date)
+        else:
+            date_obj = bucket_date
+        
+        # Calculate date range based on cadence
+        # The bucket_date is when the recurring entry occurs (end of period)
+        # The period starts from the day after the previous occurrence
+        formatted_date = ''
+        if date_obj and cadence_unit and cadence_interval:
+            interval = int(cadence_interval)
+            if cadence_unit == 'days':
+                if interval == 1:
+                    # Daily cadence - just show the single date
+                    formatted_date = date_obj.strftime('%b %d, %Y')
+                else:
+                    # Multi-day cadence (e.g., every 3 days)
+                    interval_end = date_obj
+                    interval_start = date_obj - timedelta(days=interval - 1)
+                    formatted_date = f"{interval_start.strftime('%b %d')} - {interval_end.strftime('%b %d, %Y')}"
+            elif cadence_unit == 'weeks':
+                # Weekly cadence - period is (interval * 7) days
+                interval_end = date_obj
+                interval_start = date_obj - timedelta(days=(interval * 7) - 1)
+                formatted_date = f"{interval_start.strftime('%b %d')} - {interval_end.strftime('%b %d, %Y')}"
+            elif cadence_unit == 'months':
+                # Monthly cadence - period starts from previous occurrence + 1 day
+                interval_end = date_obj
+                # Go back by cadence_interval months, then add 1 day
+                prev_occurrence = date_obj - relativedelta(months=interval)
+                interval_start = prev_occurrence + timedelta(days=1)
+                formatted_date = f"{interval_start.strftime('%b %d')} - {interval_end.strftime('%b %d, %Y')}"
+            elif cadence_unit == 'years':
+                # Yearly cadence - period starts from previous occurrence + 1 day
+                interval_end = date_obj
+                prev_occurrence = date_obj - relativedelta(years=interval)
+                interval_start = prev_occurrence + timedelta(days=1)
+                formatted_date = f"{interval_start.strftime('%b %d, %Y')} - {interval_end.strftime('%b %d, %Y')}"
+            else:
+                formatted_date = date_obj.strftime('%b %d, %Y')
+        elif date_obj:
+            formatted_date = date_obj.strftime('%b %d, %Y')
+        
+        # Format the notification message based on entry type
+        if table == 'income_entries':
+            # Income message
+            if cadence_str and formatted_date:
+                message = f"Your income for \"{category_name}\" for the {cadence_str} {formatted_date} is more than expected!"
+            elif cadence_str:
+                message = f"Your income for \"{category_name}\" for the {cadence_str} is more than expected!"
+            else:
+                message = f"Your income for \"{category_name}\" is more than expected!"
+        elif table == 'c_expense_entries':
+            # Credit expense message - include credit account name
+            account_part = f" on \"{credit_account_name}\"" if credit_account_name else ""
+            if cadence_str and formatted_date:
+                message = f"You've spent more than the allowance for credit expense category \"{category_name}\"{account_part} for the {cadence_str} {formatted_date}."
+            elif cadence_str:
+                message = f"You've spent more than the allowance for credit expense category \"{category_name}\"{account_part} for the {cadence_str}."
+            else:
+                message = f"You've spent more than the allowance for credit expense category \"{category_name}\"{account_part}."
+        else:
+            # Regular expense message
+            if cadence_str and formatted_date:
+                message = f"You've spent more than the allowance for expense category \"{category_name}\" for the {cadence_str} {formatted_date}."
+            elif cadence_str:
+                message = f"You've spent more than the allowance for expense category \"{category_name}\" for the {cadence_str}."
+            else:
+                message = f"You've spent more than the allowance for expense category \"{category_name}\"."
+        
+        # Insert notification directly into MySQL (avoid circular import with app.py)
+        notification_date = datetime.now()
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                INSERT INTO notifications (user_id, date, message, is_read)
+                VALUES (%s, %s, %s, 0)
+            """, (user_id, notification_date, message))
+            notification_id = cursor.lastrowid
+            
+            # Check if user has email notifications enabled
+            cursor.execute("""
+                SELECT email, email_notifications, first_name
+                FROM users
+                WHERE id = %s
+            """, (user_id,))
+            user = cursor.fetchone()
+            
+            conn.commit()
+            cursor.close()
+        
+        current_app.logger.info(f"[BUCKET NOTIFICATION] Created notification {notification_id}: {message}")
+        
+        # Send email notification if enabled
+        if user and user.get('email_notifications') and user.get('email'):
+            try:
+                from email_utils import send_notification_email
+                user_name = user.get('first_name', 'User')
+                send_notification_email(user['email'], user_name, message, notification_date)
+                current_app.logger.info(f"[BUCKET NOTIFICATION] Email sent to {user['email']}")
+            except Exception as e:
+                current_app.logger.error(f"[BUCKET NOTIFICATION] Failed to send email: {e}")
+                
+    except Exception as e:
+        current_app.logger.error(f"[BUCKET NOTIFICATION] Error creating notification: {e}")
+
+
 def subtract_from_bucket(table, bucket_id, subtract_amount, user_id):
     """
     Subtract an amount from a bucket entry. Deletes the bucket if it reaches <= 0.
@@ -340,6 +593,11 @@ def subtract_from_bucket(table, bucket_id, subtract_amount, user_id):
         
         if new_amount <= 0:
             # Bucket is depleted, delete it from Redis
+            category_id = bucket_entry.get('category_id')
+            bucket_date = bucket_entry.get('date')
+            original_amount = bucket_entry.get('original_amount', current_amount)
+            recurring_id = bucket_entry.get('recurring_id')
+            
             del entries_list[bucket_index]
             redis_manager._redis_client.setex(redis_key, 604800, json.dumps(entries_list))
             # Mark table as dirty for flush
@@ -349,6 +607,13 @@ def subtract_from_bucket(table, bucket_id, subtract_amount, user_id):
             redis_manager._redis_client.sadd(f"pending_deletes:{table}:{user_id}", str(bucket_id))
             redis_manager._redis_client.expire(f"pending_deletes:{table}:{user_id}", 604800)
             logger.info(f"[SUBTRACT BUCKET] Bucket depleted and deleted from Redis")
+            
+            # Create notification for depleted bucket
+            try:
+                _create_bucket_depleted_notification(user_id, table, category_id, bucket_date, original_amount, recurring_id)
+            except Exception as e:
+                logger.error(f"[SUBTRACT BUCKET] Failed to create notification: {e}")
+            
             return True
         else:
             # Update bucket with new amount in Redis
