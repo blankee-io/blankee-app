@@ -474,17 +474,34 @@ def add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date
             current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Bucket went from negative/zero to positive - need to recreate bucket entry")
             # Get the entry table for this bucket table
             entry_table = None
+            recurring_table = None
             if bucket_table == 'recurring_income_buckets':
                 entry_table = 'income_entries'
+                recurring_table = 'recurring_income'
             elif bucket_table == 'recurring_expense_buckets':
                 entry_table = 'expense_entries'
+                recurring_table = 'recurring_expense'
             elif bucket_table == 'recurring_c_expense_buckets':
                 entry_table = 'c_expense_entries'
+                recurring_table = 'recurring_c_expense'
             
             if entry_table:
                 # Recreate bucket entry with the current positive amount
                 from app import _update_entry_in_redis
                 import time
+                
+                # Look up the recurring_id from the recurring table in Redis
+                recurring_id = None
+                if recurring_table:
+                    recurring_redis_key = f"{recurring_table}:v1:{user_id}"
+                    recurring_data = redis_manager._redis_client.get(recurring_redis_key)
+                    if recurring_data:
+                        recurring_list = json.loads(recurring_data)
+                        for rec in recurring_list:
+                            if int(rec.get('category_id', 0)) == int(category_id):
+                                recurring_id = rec.get('id')
+                                current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Found recurring_id={recurring_id} for category {category_id}")
+                                break
                 
                 # Generate a new temporary ID for the recreated bucket entry
                 # Use negative timestamp to avoid conflicts with real IDs
@@ -496,12 +513,12 @@ def add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date
                     category_id,
                     bucket_date.isoformat(),
                     float(new_amount),
-                    recurring_id=None,
+                    recurring_id=recurring_id,
                     is_bucket=True,
                     original_amount=float(original_amount),
                     entry_id=bucket_entry_id
                 )
-                current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Recreated bucket entry {bucket_entry_id} in {entry_table} with amount {new_amount}")
+                current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Recreated bucket entry {bucket_entry_id} in {entry_table} with amount {new_amount}, recurring_id={recurring_id}")
         
         current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Updated in Redis with new amount: {new_amount}")
         return True
