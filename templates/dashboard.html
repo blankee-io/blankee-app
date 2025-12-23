@@ -620,6 +620,27 @@
         // Add this near the other server-side variables
         let member_since = {{ member_since | tojson | safe }};
 
+        // Helper function to check if a Friday's week is before member_since
+        function isWeekBeforeMemberSince(friday) {
+            if (!member_since) return false;
+            
+            const memberSinceDate = new Date(member_since);
+            memberSinceDate.setUTCHours(0, 0, 0, 0);
+            
+            let weekEnd;
+            if (goofyWeekMode) {
+                // Goofy mode: Friday to Thursday
+                weekEnd = new Date(friday);
+                weekEnd.setUTCDate(friday.getUTCDate() + 6); // Thursday
+            } else {
+                // Normal mode: Saturday to Friday
+                weekEnd = new Date(friday); // Friday
+            }
+            weekEnd.setUTCHours(23, 59, 59, 999);
+            
+            return weekEnd < memberSinceDate;
+        }
+
         let incomeHiddenActive = true;
         let expenseHiddenActive = true;
 
@@ -1198,18 +1219,58 @@
                 // Create and append header cells for Fridays
                 const thFriday = document.createElement('th');
                 thFriday.setAttribute('data-date', fridayDate);
+                thFriday.style.position = 'relative';
                 thFriday.textContent = friday.getUTCDate(); // Show the day number (e.g., 5, 12, 19, 26)
+                
+                // Check if member_since falls within or after this week's range
+                let isBeforeMemberSince = false;
+                if (member_since) {
+                    const memberSinceDate = new Date(member_since);
+                    memberSinceDate.setUTCHours(0, 0, 0, 0);
+                    
+                    let weekStart, weekEnd;
+                    if (goofyWeekMode) {
+                        // Goofy mode: Friday to Thursday
+                        weekStart = new Date(friday);
+                        weekEnd = new Date(friday);
+                        weekEnd.setUTCDate(friday.getUTCDate() + 6); // Thursday
+                    } else {
+                        // Normal mode: Saturday to Friday
+                        weekStart = new Date(friday);
+                        weekStart.setUTCDate(friday.getUTCDate() - 6); // Saturday
+                        weekEnd = new Date(friday); // Friday
+                    }
+                    weekStart.setUTCHours(0, 0, 0, 0);
+                    weekEnd.setUTCHours(23, 59, 59, 999);
+                    
+                    // Check if entire week is before member_since
+                    if (weekEnd < memberSinceDate) {
+                        isBeforeMemberSince = true;
+                        thFriday.classList.add('before-member-since');
+                    }
+                    
+                    if (memberSinceDate >= weekStart && memberSinceDate <= weekEnd) {
+                        const badge = document.createElement('div');
+                        badge.className = 'member-since-badge';
+                        badge.title = 'Member Since';
+                        badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
+                        thFriday.appendChild(badge);
+                    }
+                }
+                
                 fridayDatesRow.appendChild(thFriday);
 
                 // Create <th> elements for the income and expense tables
                 const thIncome = document.createElement('th');
                 thIncome.setAttribute('data-date', fridayDate);
                 thIncome.textContent = ""; // Remove the number
+                if (isBeforeMemberSince) thIncome.classList.add('before-member-since');
                 incomeHeaderRow.appendChild(thIncome);
 
                 const thExpenses = document.createElement('th');
                 thExpenses.setAttribute('data-date', fridayDate);
                 thExpenses.textContent = ""; // Remove the number
+                if (isBeforeMemberSince) thExpenses.classList.add('before-member-since');
                 expensesHeaderRow.appendChild(thExpenses);
 
                 // Create <th> elements for each CA table header row
@@ -1217,6 +1278,7 @@
                     const thCa = document.createElement('th');
                     thCa.setAttribute('data-date', fridayDate);
                     thCa.textContent = ""; // Remove the number
+                    if (isBeforeMemberSince) thCa.classList.add('before-member-since');
                     caHeaderRow.appendChild(thCa);
                 });
             });
@@ -1247,6 +1309,7 @@
                 const fridayDate = friday.toISOString().split('T')[0];
                 const lastRemainderTd = document.createElement('td');
                 lastRemainderTd.setAttribute('data-date', fridayDate);
+                if (isWeekBeforeMemberSince(friday)) lastRemainderTd.classList.add('before-member-since');
                 lastRemainderRowRight.appendChild(lastRemainderTd);
             });
         }
@@ -1268,6 +1331,7 @@
                 const fridayDate = friday.toISOString().split('T')[0];
                 const remainderTdRight = document.createElement('td');
                 remainderTdRight.setAttribute('data-date', fridayDate);
+                if (isWeekBeforeMemberSince(friday)) remainderTdRight.classList.add('before-member-since');
                 remainderRowRight.appendChild(remainderTdRight);
             });
         }
@@ -1280,6 +1344,7 @@
                 const fridayDate = friday.toISOString().split('T')[0];
                 const savingsTd = document.createElement('td');
                 savingsTd.setAttribute('data-date', fridayDate);
+                if (isWeekBeforeMemberSince(friday)) savingsTd.classList.add('before-member-since');
 
                 let targetDate = fridayDate;
                 if (goofyWeekMode) {
@@ -1353,6 +1418,7 @@
                     const td = document.createElement('td');
                     const fridayDate = new Date(friday);
                     td.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                    if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
 
                     // Instead of contentEditable, use an input
                     const input = document.createElement('input');
@@ -1363,8 +1429,8 @@
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
-                    // If the date is older than the cutoff, disable the input
-                    if (fridayDate < cutoffDate) {
+                    // If the date is older than the cutoff OR before member_since, disable the input
+                    if (fridayDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
@@ -1411,6 +1477,7 @@
                     const td = document.createElement('td');
                     const fridayDate = new Date(friday);
                     td.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                    if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
 
                     const input = document.createElement('input');
                     input.type = 'text';
@@ -1420,8 +1487,8 @@
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
-                    // Disable input if date is older than cutoff
-                    if (fridayDate < cutoffDate) {
+                    // Disable input if date is older than cutoff OR before member_since
+                    if (fridayDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
@@ -1480,6 +1547,7 @@
                         const td = document.createElement('td');
                         const fridayDate = new Date(friday);
                         td.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                        if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
 
                         const input = document.createElement('input');
                         input.type = 'text';
@@ -1489,8 +1557,8 @@
                         input.style.width = '100%';
                         input.style.textAlign = 'right';
 
-                        // Disable input if date is older than cutoff
-                        if (fridayDate < cutoffDate) {
+                        // Disable input if date is older than cutoff OR before member_since
+                        if (fridayDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
                             input.disabled = true;
                             input.classList.add('auto-disable');
                             td.classList.add('readonly-cell');
@@ -1526,6 +1594,7 @@
                 const td = document.createElement('td');
                 const dateISOString = friday.toISOString().split('T')[0];
                 td.setAttribute('data-date', dateISOString); // Assign data-date attribute
+                if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
                 td.textContent = currencySymbol + '0.00'; // Placeholder for total income data
                 incomeBottomRow.appendChild(td);
             });
@@ -1553,12 +1622,14 @@
                 const td = document.createElement('td');
                 const dateISOString = friday.toISOString().split('T')[0];
                 td.setAttribute('data-date', dateISOString); // Assign data-date attribute
+                if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
                 td.textContent = currencySymbol + '0.00'; // Placeholder for total expense data
                 expensesBottomRow.appendChild(td);
 
                 // Create and append the gap row cells
                 const gapTd = document.createElement('td');
                 gapTd.setAttribute('data-date', dateISOString); // Assign data-date attribute for the gap row
+                if (isWeekBeforeMemberSince(friday)) gapTd.classList.add('before-member-since');
                 expenseGapRow.appendChild(gapTd);
             });
 
@@ -1581,6 +1652,7 @@
                     const td = document.createElement('td');
                     const dateISOString = friday.toISOString().split('T')[0];
                     td.setAttribute('data-date', dateISOString); // Assign data-date attribute
+                    if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
                     td.textContent = currencySymbol + '0.00'; // Placeholder for total CA data
                     caBottomRow.appendChild(td);
                 });

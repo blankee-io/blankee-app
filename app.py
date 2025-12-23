@@ -764,12 +764,14 @@ def complete_profile_setup():
         if existing_entry:
             # Update existing entry amount
             existing_entry['amount'] = float(starting_balance)
+            existing_entry['category_name'] = 'Starting Balance'  # Ensure category_name is set
             existing_entry['processed'] = 0  # Mark for re-processing
             print(f"[complete_profile_setup] Updated existing starting balance entry for {income_entry_date}: {starting_balance}")
         else:
             # Add new starting balance entry
             income_entries.append({
                 'category_id': starting_balance_category_id,
+                'category_name': 'Starting Balance',
                 'date': income_entry_date,
                 'amount': float(starting_balance),
                 'recurring_id': None,
@@ -1739,10 +1741,15 @@ def dashboard_d():
         else:
             app.logger.debug(f"[REDIS HIT] dashboard_d income_entries for user {current_user.id}")
             # Enrich with category names from income_categories
-            income_cat_map = {cat['id']: cat['name'] for cat in income_categories}
+            # Build maps with both int and string keys to handle JSON type variations
+            income_cat_map = {}
+            for cat in income_categories:
+                income_cat_map[cat['id']] = cat['name']
+                income_cat_map[str(cat['id'])] = cat['name']
             for entry in income_entries:
                 if 'category_name' not in entry:
-                    entry['category_name'] = income_cat_map.get(entry.get('category_id'), 'Unknown')
+                    cat_id = entry.get('category_id')
+                    entry['category_name'] = income_cat_map.get(cat_id) or income_cat_map.get(str(cat_id), 'Unknown')
 
         # Try Redis first for expense entries
         expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
@@ -10086,17 +10093,29 @@ def mark_notification_read():
         return jsonify({'success': False, 'error': 'No notification ID provided'}), 400
     
     with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        # Verify notification belongs to current user before updating
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        # Get current read status
         cursor.execute("""
-            UPDATE notifications
-            SET is_read = 1
+            SELECT is_read FROM notifications
             WHERE id = %s AND user_id = %s
         """, (notification_id, current_user.id))
+        result = cursor.fetchone()
+        
+        if not result:
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Notification not found'}), 404
+        
+        # Toggle the read status
+        new_status = 0 if result['is_read'] == 1 else 1
+        cursor.execute("""
+            UPDATE notifications
+            SET is_read = %s
+            WHERE id = %s AND user_id = %s
+        """, (new_status, notification_id, current_user.id))
         conn.commit()
         cursor.close()
     
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'is_read': new_status})
 
 @app.route('/delete-notification', methods=['POST'])
 @login_required
@@ -10135,6 +10154,23 @@ def clear_read_notifications():
         cursor.close()
     
     return jsonify({'success': True, 'deleted_count': deleted_count})
+
+@app.route('/mark-all-notifications-read', methods=['POST'])
+@login_required
+def mark_all_notifications_read():
+    """Mark all notifications as read for the current user"""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE notifications
+            SET is_read = 1
+            WHERE user_id = %s AND is_read = 0
+        """, (current_user.id,))
+        updated_count = cursor.rowcount
+        conn.commit()
+        cursor.close()
+    
+    return jsonify({'success': True, 'updated_count': updated_count})
 
 @app.route('/get-unread-notification-count', methods=['GET'])
 @login_required
@@ -11454,12 +11490,27 @@ def recurring_expense():
     # Try Redis first
     recurring_expense_records = _get_recurring_from_redis('recurring_expense', current_user.id)
     
+    # Get expense categories to filter out credit account categories
+    expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+    if expense_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT id, name, is_credit_account FROM expense_categories WHERE user_id = %s", (current_user.id,))
+            expense_categories = cursor.fetchall()
+            cursor.close()
+    
+    # Build set of credit account category IDs to exclude
+    credit_account_category_ids = {
+        int(cat['id']) for cat in expense_categories 
+        if cat.get('is_credit_account') == 1 or cat.get('is_credit_account') == '1'
+    }
+    
     if recurring_expense_records is None:
         # Fallback to MySQL
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
-            # Fetch recurring expense records, including no_end_date and name from expense_categories
+            # Fetch recurring expense records, excluding credit account categories
             cursor.execute("""
                 SELECT ri.id, ri.user_id, ri.category_id, ic.name as category_name, ri.amount, 
                        ri.cadence_interval, ri.cadence_unit, ri.weekdays, ri.monthly_days, 
@@ -11467,39 +11518,32 @@ def recurring_expense():
                        ic.no_end_date
                 FROM recurring_expense ri
                 JOIN expense_categories ic ON ri.category_id = ic.id
-                WHERE ri.user_id = %s
+                WHERE ri.user_id = %s AND ic.is_credit_account = 0
             """, (current_user.id,))
 
             recurring_expense_records = cursor.fetchall()
             cursor.close()
             
-            # Cache to Redis
-            _set_recurring_to_redis('recurring_expense', current_user.id, recurring_expense_records)
+            # Cache to Redis (note: Redis stores ALL recurring expenses, we filter on display)
+            # Don't cache the filtered results - get fresh from Redis if needed
     else:
-        # Redis data exists, but ensure all records have category_name
-        # If any are missing, enrich from expense_categories cache or DB
+        # Filter out credit account recurring expenses from Redis data
+        recurring_expense_records = [
+            rec for rec in recurring_expense_records 
+            if int(rec.get('category_id', 0)) not in credit_account_category_ids
+        ]
+        
+        # Ensure all records have category_name
         needs_enrichment = any('category_name' not in rec or not rec.get('category_name') for rec in recurring_expense_records)
         
         if needs_enrichment:
-            # Get expense categories from Redis or DB
-            expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
-            if expense_categories is None:
-                with get_db_pool().get_connection() as conn:
-                    cursor = conn.cursor(pymysql.cursors.DictCursor)
-                    cursor.execute("SELECT id, name FROM expense_categories WHERE user_id = %s", (current_user.id,))
-                    expense_categories = cursor.fetchall()
-                    cursor.close()
-            
-            # Create a lookup dict
-            category_lookup = {cat['id']: cat['name'] for cat in expense_categories}
+            # Create a lookup dict from categories we already have
+            category_lookup = {int(cat['id']): cat['name'] for cat in expense_categories}
             
             # Enrich the recurring records
             for rec in recurring_expense_records:
                 if 'category_name' not in rec or not rec.get('category_name'):
-                    rec['category_name'] = category_lookup.get(rec['category_id'], 'Unknown')
-            
-            # Update Redis cache with enriched data
-            _set_recurring_to_redis('recurring_expense', current_user.id, recurring_expense_records)
+                    rec['category_name'] = category_lookup.get(int(rec['category_id']), 'Unknown')
     
     # Fetch user profile data
     with get_db_pool().get_connection() as conn:
@@ -14546,6 +14590,35 @@ def credit_accounts():
         if row_date == today_str:
             ca_balances_today[row['account_id']] = row['balance']
 
+    # Get recurring expense info for each credit account's payment category
+    expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+    recurring_expenses = _get_recurring_from_redis('recurring_expense', current_user.id)
+    
+    # Build a map of account_id -> recurring payment info
+    ca_recurring_info = {}
+    if expense_categories and credit_accounts:
+        for account in credit_accounts:
+            payment_cat_name = f"{account['name']} payment"
+            # Find the payment category
+            payment_cat = next((cat for cat in expense_categories 
+                               if cat.get('name') == payment_cat_name and cat.get('is_credit_account') == 1), None)
+            if payment_cat:
+                # Find the recurring expense for this category
+                recurring = next((r for r in (recurring_expenses or []) 
+                                 if r.get('category_id') == payment_cat['id']), None)
+                if recurring:
+                    ca_recurring_info[account['id']] = {
+                        'enabled': True,
+                        'category_id': payment_cat['id'],
+                        'recurring_id': recurring.get('id'),
+                        'amount': recurring.get('amount', 0),
+                        'monthly_days': recurring.get('monthly_days', '1')
+                    }
+                else:
+                    ca_recurring_info[account['id']] = {'enabled': False}
+            else:
+                ca_recurring_info[account['id']] = {'enabled': False}
+
     return render_template(
         'credit_accounts.html',
         credit_accounts=credit_accounts,
@@ -14554,6 +14627,7 @@ def credit_accounts():
         c_a_balances=c_a_balances,
         ca_balances_today=ca_balances_today,
         c_a_balances_m=c_a_balances_m,
+        ca_recurring_info=ca_recurring_info,
         landing_page=landing_page,
         currency_type=currency_type
     )
@@ -14644,6 +14718,11 @@ def add_credit_account():
     starting_balance_cat = next((cat for cat in c_expense_cats if cat.get('name') == 'Starting Balance' and cat.get('account_id') == temp_account_id), None)
     starting_balance_cat_id = starting_balance_cat.get('id') if starting_balance_cat else None
     
+    # Check if user wants recurring payment reminder
+    recurring_payment = data.get('recurring_payment', False)
+    due_date = data.get('due_date', '1')
+    payment_amount = float(data.get('payment_amount', 0) or 0)
+    
     # Create matching expense_categories record for payment
     payment_category_name = f"{name} payment"
     
@@ -14655,18 +14734,177 @@ def add_credit_account():
         max_display_order = 0
     new_display_order = max_display_order + 1
     
-    _add_category_to_redis('expense_categories', current_user.id, {
+    # Set is_recurring and no_end_date if recurring payment is enabled
+    is_recurring = 1 if recurring_payment else 0
+    no_end_date = 1 if recurring_payment else 0
+    
+    payment_category_id = _add_category_to_redis('expense_categories', current_user.id, {
         'user_id': current_user.id,
         'name': payment_category_name,
         'display_order': new_display_order,
         'group_id': None,
-        'is_recurring': 0,
+        'is_recurring': is_recurring,
         'is_auto_adjustment': 0,
-        'no_end_date': 0,
+        'no_end_date': no_end_date,
         'hidden': 0,
         'is_bud': 0,
         'is_credit_account': 1
     })
+    
+    # Create recurring expense entry if recurring payment is enabled
+    if recurring_payment and payment_category_id:
+        try:
+            # Calculate start date (next occurrence of due date)
+            today = date.today()
+            if due_date == 'Last Day':
+                # Find next last day of month
+                if today.day == calendar.monthrange(today.year, today.month)[1]:
+                    start_date = today
+                else:
+                    # Move to last day of current month or next month
+                    last_day_current = calendar.monthrange(today.year, today.month)[1]
+                    if today.day < last_day_current:
+                        start_date = today.replace(day=last_day_current)
+                    else:
+                        next_month = today.month + 1 if today.month < 12 else 1
+                        next_year = today.year if today.month < 12 else today.year + 1
+                        start_date = date(next_year, next_month, calendar.monthrange(next_year, next_month)[1])
+                monthly_days = ['Last Day']
+            else:
+                due_day = int(due_date)
+                # Find next occurrence of due_day
+                if today.day <= due_day:
+                    # Due date is later this month
+                    try:
+                        start_date = today.replace(day=due_day)
+                    except ValueError:
+                        # Day doesn't exist in this month, use last day
+                        start_date = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+                else:
+                    # Due date has passed this month, use next month
+                    next_month = today.month + 1 if today.month < 12 else 1
+                    next_year = today.year if today.month < 12 else today.year + 1
+                    try:
+                        start_date = date(next_year, next_month, due_day)
+                    except ValueError:
+                        start_date = date(next_year, next_month, calendar.monthrange(next_year, next_month)[1])
+                monthly_days = [str(due_day)]
+            
+            # End date is 3 years from now (standard for recurring entries)
+            end_date = date(today.year + 3, 12, 31)
+            
+            # Create recurring expense record in Redis
+            recurring_data = {
+                'id': None,
+                'user_id': current_user.id,
+                'category_id': payment_category_id,
+                'amount': payment_amount,
+                'cadence_interval': 1,
+                'cadence_unit': 'months',
+                'weekdays': None,
+                'monthly_days': ','.join(monthly_days),
+                'yearly_day': None,
+                'yearly_month': None,
+                'start_date': start_date.strftime('%Y-%m-%d'),
+                'end_date': end_date.strftime('%Y-%m-%d'),
+                'no_end_date': 1
+            }
+            
+            _update_recurring_in_redis('recurring_expense', current_user.id, recurring_data)
+            app.logger.info(f"[ADD CREDIT ACCOUNT] Created recurring payment reminder for {payment_category_name} with amount {payment_amount}")
+            
+            # Generate the expense entries (bucket entries) for this recurring expense
+            recurring_id = recurring_data.get('id')
+            if recurring_id:
+                generate_expense_entries(
+                    recurring_id=recurring_id,
+                    category_id=payment_category_id,
+                    amount=payment_amount,
+                    cadence_interval=1,
+                    cadence_unit='months',
+                    start_date_str=start_date.strftime('%Y-%m-%d'),
+                    end_date_str=end_date.strftime('%Y-%m-%d'),
+                    weekdays=None,
+                    monthly_days=monthly_days,
+                    yearly_day=None,
+                    yearly_month=None,
+                    user_id=current_user.id
+                )
+                app.logger.info(f"[ADD CREDIT ACCOUNT] Generated expense entries for recurring payment")
+                
+                # Also generate c_payment_entries for the same dates
+                # These track payments TO the credit account
+                try:
+                    # Generate the same dates as expense entries
+                    payment_dates = []
+                    year = start_date.year
+                    month = start_date.month
+                    while True:
+                        for day_str in monthly_days:
+                            try:
+                                if str(day_str).lower() == 'last day':
+                                    day_num = calendar.monthrange(year, month)[1]
+                                else:
+                                    day_num = int(day_str)
+                                    last_day_of_month = calendar.monthrange(year, month)[1]
+                                    if day_num > last_day_of_month:
+                                        continue
+                                payment_date = date(year=year, month=month, day=day_num)
+                            except Exception:
+                                continue
+                            if payment_date < start_date:
+                                continue
+                            if payment_date > end_date:
+                                continue
+                            payment_dates.append(payment_date)
+                        month += 1
+                        while month > 12:
+                            month -= 12
+                            year += 1
+                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                            break
+                    
+                    # Add c_payment_entries to Redis
+                    if payment_dates:
+                        payment_redis_key = f"c_payment_entries:v1:{current_user.id}"
+                        cached = _redis_client.get(payment_redis_key)
+                        payments = json.loads(cached) if cached else []
+                        
+                        # Generate temp IDs
+                        existing_ids = [int(p.get('id', 0)) for p in payments]
+                        min_id = min(existing_ids) if existing_ids else 0
+                        next_id = min_id - 1 if min_id <= 0 else -1
+                        
+                        for payment_date in payment_dates:
+                            payments.append({
+                                'id': next_id,
+                                'account_id': temp_account_id,  # Temp ID, will be resolved by flush worker
+                                'date': payment_date.strftime('%Y-%m-%d'),
+                                'amount': float(payment_amount),
+                                'recurring_id': recurring_id,
+                                'processed': 0
+                            })
+                            next_id -= 1
+                        
+                        # Save to Redis
+                        _redis_client.setex(
+                            payment_redis_key,
+                            PERSISTENT_CACHE_TTL,
+                            json.dumps(payments, cls=DecimalEncoder)
+                        )
+                        
+                        # Mark dirty
+                        dirty_key = f"dirty_tables:{current_user.id}"
+                        _redis_client.sadd(dirty_key, 'c_payment_entries')
+                        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                        
+                        app.logger.info(f"[ADD CREDIT ACCOUNT] Generated {len(payment_dates)} c_payment_entries for recurring payment")
+                        
+                except Exception as payment_err:
+                    app.logger.error(f"[ADD CREDIT ACCOUNT] Error generating c_payment_entries: {payment_err}")
+            
+        except Exception as e:
+            app.logger.error(f"[ADD CREDIT ACCOUNT] Error creating recurring payment: {e}")
     
     # Insert c_expense_entry for starting balance if provided
     if starting_balance and float(starting_balance) != 0.0:
@@ -14731,6 +14969,15 @@ def add_credit_account():
         except Exception as e:
             app.logger.error(f"Error adding starting balance entry to Redis: {e}")
     
+    # Recalculate totals and remainders for the new expense entries (if recurring payment was set up)
+    if recurring_payment:
+        try:
+            app.logger.info(f"[ADD CREDIT ACCOUNT] Recalculating totals for recurring payment entries")
+            save_totals_remainders_d()
+            app.logger.info(f"[ADD CREDIT ACCOUNT] Totals recalculation completed")
+        except Exception as totals_err:
+            app.logger.error(f"Error recalculating totals for recurring payment: {totals_err}")
+    
     # Note: We return the account_id after flush, so it should have the real MySQL ID now
     # The frontend can use this immediately
     
@@ -14739,6 +14986,397 @@ def add_credit_account():
         'account_id': temp_account_id,
         'message': 'Credit account created. Changes will sync to database within 15 seconds.'
     })
+
+
+@app.route('/update-credit-account', methods=['POST'])
+@login_required
+def update_credit_account():
+    """Update a credit account's basic info and recurring payment settings."""
+    data = request.get_json()
+    account_id = data.get('id')
+    name = data.get('name')
+    interest_rate = data.get('interest_rate')
+    account_type = data.get('type')
+    recurring_payment = data.get('recurring_payment', False)
+    payment_amount = float(data.get('payment_amount', 0) or 0)
+    due_date = data.get('due_date', '1')
+    
+    if not account_id or not name or interest_rate is None or not account_type:
+        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+    
+    try:
+        account_id = int(account_id)
+        is_card = 1 if account_type == 'card' else 0
+        is_line = 1 if account_type == 'line' else 0
+        
+        # Get the old account name for finding/renaming payment category
+        old_account_name = None
+        credit_accounts_list = _get_credit_accounts_from_redis(current_user.id)
+        if credit_accounts_list:
+            old_account = next((a for a in credit_accounts_list if a.get('id') == account_id), None)
+            if old_account:
+                old_account_name = old_account.get('name')
+        
+        # Update credit account in Redis
+        if app.config.get('REDIS_OK') and credit_accounts_list:
+            for acc in credit_accounts_list:
+                if acc.get('id') == account_id:
+                    acc['name'] = name
+                    acc['interest_rate'] = float(interest_rate)
+                    acc['is_card'] = is_card
+                    acc['is_line'] = is_line
+                    break
+            
+            redis_key = f"credit_accounts:v1:{current_user.id}"
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(credit_accounts_list, cls=DecimalEncoder))
+            
+            dirty_key = f"dirty_tables:{current_user.id}"
+            _redis_client.sadd(dirty_key, 'credit_accounts')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        # Handle payment category and recurring expense
+        expense_categories = _get_categories_from_redis('expense_categories', current_user.id) or []
+        old_payment_cat_name = f"{old_account_name} payment" if old_account_name else None
+        new_payment_cat_name = f"{name} payment"
+        
+        # Find existing payment category
+        payment_category = None
+        for cat in expense_categories:
+            if cat.get('is_credit_account') == 1:
+                if cat.get('name') == old_payment_cat_name or cat.get('name') == new_payment_cat_name:
+                    payment_category = cat
+                    break
+        
+        # Get existing recurring expense for this category
+        recurring_expenses = _get_recurring_from_redis('recurring_expense', current_user.id) or []
+        existing_recurring = None
+        if payment_category:
+            existing_recurring = next((r for r in recurring_expenses if r.get('category_id') == payment_category['id']), None)
+        
+        # Determine if recurring state changed
+        was_recurring = existing_recurring is not None
+        
+        if recurring_payment and not was_recurring:
+            # TURNING ON recurring payment
+            # Create payment category if it doesn't exist
+            if not payment_category:
+                max_display_order = max([cat.get('display_order', 0) for cat in expense_categories], default=0)
+                payment_category_id = _add_category_to_redis('expense_categories', current_user.id, {
+                    'user_id': current_user.id,
+                    'name': new_payment_cat_name,
+                    'display_order': max_display_order + 1,
+                    'group_id': None,
+                    'is_recurring': 1,
+                    'is_auto_adjustment': 0,
+                    'no_end_date': 1,
+                    'hidden': 0,
+                    'is_bud': 0,
+                    'is_credit_account': 1
+                })
+            else:
+                payment_category_id = payment_category['id']
+                # Update category to be recurring
+                for cat in expense_categories:
+                    if cat.get('id') == payment_category_id:
+                        cat['is_recurring'] = 1
+                        cat['no_end_date'] = 1
+                        cat['name'] = new_payment_cat_name
+                        break
+                exp_redis_key = f"expense_categories:v1:{current_user.id}"
+                _redis_client.setex(exp_redis_key, PERSISTENT_CACHE_TTL, json.dumps(expense_categories, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+            
+            # Create recurring expense and entries
+            today = date.today()
+            if due_date == 'Last Day':
+                last_day_current = calendar.monthrange(today.year, today.month)[1]
+                if today.day < last_day_current:
+                    start_date = today.replace(day=last_day_current)
+                else:
+                    next_month = today.month + 1 if today.month < 12 else 1
+                    next_year = today.year if today.month < 12 else today.year + 1
+                    start_date = date(next_year, next_month, calendar.monthrange(next_year, next_month)[1])
+                monthly_days = ['Last Day']
+            else:
+                due_day = int(due_date)
+                if today.day <= due_day:
+                    try:
+                        start_date = today.replace(day=due_day)
+                    except ValueError:
+                        start_date = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+                else:
+                    next_month = today.month + 1 if today.month < 12 else 1
+                    next_year = today.year if today.month < 12 else today.year + 1
+                    try:
+                        start_date = date(next_year, next_month, due_day)
+                    except ValueError:
+                        start_date = date(next_year, next_month, calendar.monthrange(next_year, next_month)[1])
+                monthly_days = [str(due_day)]
+            
+            end_date = date(today.year + 3, 12, 31)
+            
+            recurring_data = {
+                'id': None,
+                'user_id': current_user.id,
+                'category_id': payment_category_id,
+                'amount': payment_amount,
+                'cadence_interval': 1,
+                'cadence_unit': 'months',
+                'weekdays': None,
+                'monthly_days': ','.join(monthly_days),
+                'yearly_day': None,
+                'yearly_month': None,
+                'start_date': start_date.strftime('%Y-%m-%d'),
+                'end_date': end_date.strftime('%Y-%m-%d'),
+                'no_end_date': 1
+            }
+            
+            _update_recurring_in_redis('recurring_expense', current_user.id, recurring_data)
+            
+            recurring_id = recurring_data.get('id')
+            if recurring_id:
+                generate_expense_entries(
+                    recurring_id=recurring_id,
+                    category_id=payment_category_id,
+                    amount=payment_amount,
+                    cadence_interval=1,
+                    cadence_unit='months',
+                    start_date_str=start_date.strftime('%Y-%m-%d'),
+                    end_date_str=end_date.strftime('%Y-%m-%d'),
+                    weekdays=None,
+                    monthly_days=monthly_days,
+                    yearly_day=None,
+                    yearly_month=None,
+                    user_id=current_user.id
+                )
+                
+                # Also generate c_payment_entries for the same dates
+                try:
+                    payment_dates = []
+                    year = start_date.year
+                    month = start_date.month
+                    while True:
+                        for day_str in monthly_days:
+                            try:
+                                if str(day_str).lower() == 'last day':
+                                    day_num = calendar.monthrange(year, month)[1]
+                                else:
+                                    day_num = int(day_str)
+                                    last_day_of_month = calendar.monthrange(year, month)[1]
+                                    if day_num > last_day_of_month:
+                                        continue
+                                payment_date = date(year=year, month=month, day=day_num)
+                            except Exception:
+                                continue
+                            if payment_date < start_date:
+                                continue
+                            if payment_date > end_date:
+                                continue
+                            payment_dates.append(payment_date)
+                        month += 1
+                        while month > 12:
+                            month -= 12
+                            year += 1
+                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
+                            break
+                    
+                    if payment_dates:
+                        payment_redis_key = f"c_payment_entries:v1:{current_user.id}"
+                        cached = _redis_client.get(payment_redis_key)
+                        payments = json.loads(cached) if cached else []
+                        
+                        existing_ids = [int(p.get('id', 0)) for p in payments]
+                        min_id = min(existing_ids) if existing_ids else 0
+                        next_id = min_id - 1 if min_id <= 0 else -1
+                        
+                        for payment_date in payment_dates:
+                            payments.append({
+                                'id': next_id,
+                                'account_id': account_id,  # Real account ID since account already exists
+                                'date': payment_date.strftime('%Y-%m-%d'),
+                                'amount': float(payment_amount),
+                                'recurring_id': recurring_id,
+                                'processed': 0
+                            })
+                            next_id -= 1
+                        
+                        _redis_client.setex(
+                            payment_redis_key,
+                            PERSISTENT_CACHE_TTL,
+                            json.dumps(payments, cls=DecimalEncoder)
+                        )
+                        
+                        dirty_key = f"dirty_tables:{current_user.id}"
+                        _redis_client.sadd(dirty_key, 'c_payment_entries')
+                        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                        
+                        app.logger.info(f"[UPDATE CREDIT ACCOUNT] Generated {len(payment_dates)} c_payment_entries")
+                        
+                except Exception as payment_err:
+                    app.logger.error(f"[UPDATE CREDIT ACCOUNT] Error generating c_payment_entries: {payment_err}")
+            
+            save_totals_remainders_d()
+            app.logger.info(f"[UPDATE CREDIT ACCOUNT] Enabled recurring payment for {name}")
+            
+        elif not recurring_payment and was_recurring:
+            # TURNING OFF recurring payment - only delete future entries, keep past entries as-is
+            if payment_category and existing_recurring:
+                category_id = payment_category['id']
+                recurring_id = existing_recurring.get('id')
+                today_str = date.today().strftime('%Y-%m-%d')
+                
+                # Get expense entries for this category
+                expense_entries = _get_entries_from_redis('expense_entries', current_user.id) or []
+                
+                entries_to_delete = []
+                
+                for entry in expense_entries:
+                    if entry.get('category_id') == category_id:
+                        entry_date = entry.get('date')
+                        if isinstance(entry_date, date):
+                            entry_date = entry_date.strftime('%Y-%m-%d')
+                        
+                        if entry_date >= today_str:
+                            # Future entry (including today) - delete
+                            entries_to_delete.append(entry)
+                        # Past entries are kept as-is
+                
+                # Remove future entries from the list
+                filtered_entries = [e for e in expense_entries if e not in entries_to_delete]
+                
+                # Save updated entries
+                entries_key = f"expense_entries:v1:{current_user.id}"
+                _redis_client.setex(entries_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_entries, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_entries')
+                
+                # Add deleted entry IDs to pending deletes
+                for entry in entries_to_delete:
+                    if entry.get('id') and entry['id'] > 0:
+                        pending_key = f"pending_deletes:expense_entries:{current_user.id}"
+                        _redis_client.sadd(pending_key, str(entry['id']))
+                        _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+                
+                # Delete recurring expense
+                filtered_recurring = [r for r in recurring_expenses if r.get('id') != recurring_id]
+                recurring_key = f"recurring_expense:v1:{current_user.id}"
+                if filtered_recurring:
+                    _redis_client.setex(recurring_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_recurring, cls=DecimalEncoder))
+                else:
+                    _redis_client.delete(recurring_key)
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_expense')
+                
+                if recurring_id and recurring_id > 0:
+                    pending_rec_key = f"pending_deletes:recurring_expense:{current_user.id}"
+                    _redis_client.sadd(pending_rec_key, str(recurring_id))
+                    _redis_client.expire(pending_rec_key, PERSISTENT_CACHE_TTL)
+                
+                # Delete recurring expense buckets for this category
+                buckets = _get_entries_from_redis('recurring_expense_buckets', current_user.id) or []
+                bucket_ids_to_delete = [b.get('id') for b in buckets if b.get('category_id') == category_id]
+                filtered_buckets = [b for b in buckets if b.get('category_id') != category_id]
+                buckets_key = f"recurring_expense_buckets:v1:{current_user.id}"
+                if filtered_buckets:
+                    _redis_client.setex(buckets_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_buckets, cls=DecimalEncoder))
+                else:
+                    _redis_client.delete(buckets_key)
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_expense_buckets')
+                
+                for bucket_id in bucket_ids_to_delete:
+                    if bucket_id and bucket_id > 0:
+                        pending_bucket_key = f"pending_deletes:recurring_expense_buckets:{current_user.id}"
+                        _redis_client.sadd(pending_bucket_key, str(bucket_id))
+                        _redis_client.expire(pending_bucket_key, PERSISTENT_CACHE_TTL)
+                
+                # Delete future c_payment_entries for this account
+                try:
+                    payment_redis_key = f"c_payment_entries:v1:{current_user.id}"
+                    cached_payments = _redis_client.get(payment_redis_key)
+                    if cached_payments:
+                        payments = json.loads(cached_payments)
+                        payments_to_delete = []
+                        
+                        for payment in payments:
+                            if payment.get('account_id') == account_id:
+                                payment_date = payment.get('date')
+                                if isinstance(payment_date, date):
+                                    payment_date = payment_date.strftime('%Y-%m-%d')
+                                
+                                if payment_date >= today_str:
+                                    payments_to_delete.append(payment)
+                        
+                        if payments_to_delete:
+                            filtered_payments = [p for p in payments if p not in payments_to_delete]
+                            _redis_client.setex(payment_redis_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_payments, cls=DecimalEncoder))
+                            _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_payment_entries')
+                            
+                            for payment in payments_to_delete:
+                                if payment.get('id') and payment['id'] > 0:
+                                    pending_key = f"pending_deletes:c_payment_entries:{current_user.id}"
+                                    _redis_client.sadd(pending_key, str(payment['id']))
+                                    _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+                            
+                            app.logger.info(f"[UPDATE CREDIT ACCOUNT] Deleted {len(payments_to_delete)} future c_payment_entries")
+                            
+                except Exception as payment_err:
+                    app.logger.error(f"[UPDATE CREDIT ACCOUNT] Error deleting future c_payment_entries: {payment_err}")
+                
+                # Update category to not be recurring
+                for cat in expense_categories:
+                    if cat.get('id') == category_id:
+                        cat['is_recurring'] = 0
+                        cat['no_end_date'] = 0
+                        cat['name'] = new_payment_cat_name
+                        break
+                exp_redis_key = f"expense_categories:v1:{current_user.id}"
+                _redis_client.setex(exp_redis_key, PERSISTENT_CACHE_TTL, json.dumps(expense_categories, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+                
+                save_totals_remainders_d()
+                app.logger.info(f"[UPDATE CREDIT ACCOUNT] Disabled recurring payment for {name}, deleted {len(entries_to_delete)} future entries")
+        
+        elif recurring_payment and was_recurring:
+            # Recurring was on and stays on - just update amount/due date if changed
+            # Update the recurring expense record
+            if existing_recurring:
+                existing_recurring['amount'] = payment_amount
+                if due_date == 'Last Day':
+                    existing_recurring['monthly_days'] = 'Last Day'
+                else:
+                    existing_recurring['monthly_days'] = str(due_date)
+                
+                recurring_key = f"recurring_expense:v1:{current_user.id}"
+                _redis_client.setex(recurring_key, PERSISTENT_CACHE_TTL, json.dumps(recurring_expenses, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_expense')
+            
+            # Update payment category name if account name changed
+            if payment_category and old_account_name != name:
+                for cat in expense_categories:
+                    if cat.get('id') == payment_category['id']:
+                        cat['name'] = new_payment_cat_name
+                        break
+                exp_redis_key = f"expense_categories:v1:{current_user.id}"
+                _redis_client.setex(exp_redis_key, PERSISTENT_CACHE_TTL, json.dumps(expense_categories, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+        
+        else:
+            # Recurring was off and stays off - just update payment category name if needed
+            if payment_category and old_account_name != name:
+                for cat in expense_categories:
+                    if cat.get('id') == payment_category['id']:
+                        cat['name'] = new_payment_cat_name
+                        break
+                exp_redis_key = f"expense_categories:v1:{current_user.id}"
+                _redis_client.setex(exp_redis_key, PERSISTENT_CACHE_TTL, json.dumps(expense_categories, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+        
+        return jsonify({'status': 'success', 'message': 'Credit account updated successfully'})
+        
+    except Exception as e:
+        app.logger.error(f"Error updating credit account: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 def initialize_ca_balances_for_account(account_id):
     today = date.today()
@@ -15040,6 +15678,65 @@ def delete_credit_account():
                         app.logger.info(f"[REDIS] Added payment category {category_id_to_delete} to pending deletes")
                     elif category_id_to_delete:
                         app.logger.info(f"[REDIS] Skipped pending delete for temp payment category ID {category_id_to_delete}")
+                    
+                    # CASCADE DELETE: Delete recurring_expense entries for this payment category
+                    if category_id_to_delete:
+                        recurring_exp_key = f"recurring_expense:v1:{current_user.id}"
+                        recurring_exp_cached = _redis_client.get(recurring_exp_key)
+                        if recurring_exp_cached:
+                            recurring_exp_list = json.loads(recurring_exp_cached)
+                            recurring_ids_to_delete = [r.get('id') for r in recurring_exp_list if r.get('category_id') == category_id_to_delete]
+                            filtered_recurring_exp = [r for r in recurring_exp_list if r.get('category_id') != category_id_to_delete]
+                            if filtered_recurring_exp:
+                                _redis_client.setex(recurring_exp_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_recurring_exp, cls=DecimalEncoder))
+                            else:
+                                _redis_client.delete(recurring_exp_key)
+                            _redis_client.sadd(dirty_key, 'recurring_expense')
+                            # Add real IDs to pending deletes
+                            for rec_id in recurring_ids_to_delete:
+                                if rec_id and rec_id > 0:
+                                    pending_rec_key = f"pending_deletes:recurring_expense:{current_user.id}"
+                                    _redis_client.sadd(pending_rec_key, str(rec_id))
+                                    _redis_client.expire(pending_rec_key, PERSISTENT_CACHE_TTL)
+                            app.logger.info(f"[REDIS] Deleted {len(recurring_ids_to_delete)} recurring_expense records for payment category {category_id_to_delete}")
+                        
+                        # CASCADE DELETE: Delete recurring_expense_buckets for this payment category
+                        recurring_buckets_key = f"recurring_expense_buckets:v1:{current_user.id}"
+                        buckets_cached = _redis_client.get(recurring_buckets_key)
+                        if buckets_cached:
+                            buckets_list = json.loads(buckets_cached)
+                            bucket_ids_to_delete = [b.get('id') for b in buckets_list if b.get('category_id') == category_id_to_delete]
+                            filtered_buckets = [b for b in buckets_list if b.get('category_id') != category_id_to_delete]
+                            if filtered_buckets:
+                                _redis_client.setex(recurring_buckets_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_buckets, cls=DecimalEncoder))
+                            else:
+                                _redis_client.delete(recurring_buckets_key)
+                            _redis_client.sadd(dirty_key, 'recurring_expense_buckets')
+                            # Add real IDs to pending deletes
+                            for bucket_id in bucket_ids_to_delete:
+                                if bucket_id and bucket_id > 0:
+                                    pending_bucket_key = f"pending_deletes:recurring_expense_buckets:{current_user.id}"
+                                    _redis_client.sadd(pending_bucket_key, str(bucket_id))
+                                    _redis_client.expire(pending_bucket_key, PERSISTENT_CACHE_TTL)
+                            app.logger.info(f"[REDIS] Deleted {len(bucket_ids_to_delete)} recurring_expense_buckets for payment category {category_id_to_delete}")
+                        
+                        # CASCADE DELETE: Delete expense_entries for this payment category
+                        expense_entries_key = f"expense_entries:v1:{current_user.id}"
+                        entries_cached = _redis_client.get(expense_entries_key)
+                        if entries_cached:
+                            entries_list = json.loads(entries_cached)
+                            entry_ids_to_delete = [e.get('id') for e in entries_list if e.get('category_id') == category_id_to_delete]
+                            filtered_entries = [e for e in entries_list if e.get('category_id') != category_id_to_delete]
+                            # Always set to filtered list (even if empty) so Redis is source of truth
+                            _redis_client.setex(expense_entries_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_entries, cls=DecimalEncoder))
+                            _redis_client.sadd(dirty_key, 'expense_entries')
+                            # Add real IDs to pending deletes
+                            for entry_id in entry_ids_to_delete:
+                                if entry_id and entry_id > 0:
+                                    pending_entry_key = f"pending_deletes:expense_entries:{current_user.id}"
+                                    _redis_client.sadd(pending_entry_key, str(entry_id))
+                                    _redis_client.expire(pending_entry_key, PERSISTENT_CACHE_TTL)
+                            app.logger.info(f"[REDIS] Deleted {len(entry_ids_to_delete)} expense_entries for payment category {category_id_to_delete}")
 
 
         save_ca_daily_balance()
@@ -15080,40 +15777,6 @@ def get_credit_account_status():
     except Exception as e:
         app.logger.error(f"Error checking credit account status: {e}")
         return jsonify({'flushed': True})  # Default to flushed to prevent infinite loop
-
-@app.route('/update-credit-account', methods=['POST'])
-@login_required
-def update_credit_account():
-    data = request.get_json()
-    account_id = data.get('id')
-    field = data.get('field')
-    value = data.get('value')
-
-    if field not in ['name', 'interest_rate', 'type']:
-        return jsonify({'status': 'error', 'message': 'Invalid field.'})
-
-    try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-            if field == 'type':
-                is_card = 1 if value == 'card' else 0
-                is_line = 1 if value == 'line' else 0
-                cursor.execute(
-                    "UPDATE credit_accounts SET is_card = %s, is_line = %s WHERE id = %s AND user_id = %s",
-                    (is_card, is_line, account_id, current_user.id)
-                )
-            else:
-                cursor.execute(
-                    f"UPDATE credit_accounts SET {field} = %s WHERE id = %s AND user_id = %s",
-                    (value, account_id, current_user.id)
-                )
-            conn.commit()
-            cursor.close()
-        
-        return jsonify({'status': 'success'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
 
 
 #################################################################################

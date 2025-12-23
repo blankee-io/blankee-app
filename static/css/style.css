@@ -1088,6 +1088,27 @@ body {
     transform: translateY(0);
 }
 
+/* Checkbox label styling for forms */
+.footer-form-group .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-color);
+}
+
+.footer-form-group .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #2aaaa8;
+}
+
+.footer-form-group .checkbox-label span {
+    user-select: none;
+}
+
 /* Submit button */
 button#autobalance-submit {
     width: 100%;
@@ -2275,6 +2296,7 @@ input#setup-profile-starting-savings {
 
 /* Header for each day */
 .dashboard-d-day-header {
+    position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -2286,6 +2308,89 @@ input#setup-profile-starting-savings {
     color: white;
     font-size: clamp(14px, 2vw, 18px);
     text-align: center;
+}
+
+/* Member Since badge on day header */
+.member-since-badge {
+    position: absolute;
+    top: -5px;
+    left: -10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 20px;
+    height: 20px;
+    background-color: #2AAAA8;
+    border-radius: 50%;
+    color: white;
+    font-size: 10px;
+    z-index: 20;
+}
+
+/* Member Since badge positioning for dashboard_d */
+.dashboard-d-day-header .member-since-badge {
+    top: -40px;
+    left: 0;
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+}
+
+/* Dim dates before member_since */
+.before-member-since .dashboard-d-day-header,
+.before-member-since .dashboard-d-lastremainder,
+.before-member-since .dashboard-d-income-entries,
+.before-member-since .dashboard-d-income-total,
+.before-member-since .dashboard-d-expense-entries,
+.before-member-since .dashboard-d-expense-total,
+.before-member-since .dashboard-d-remainder,
+.before-member-since .dashboard-d-credit-accounts,
+.before-member-since .dashboard-d-credit-row,
+.before-member-since .dashboard-d-credit-divider,
+.before-member-since .dashboard-d-savings {
+    opacity: 0.5;
+}
+
+/* Dim columns before member_since in weekly dashboard */
+th.before-member-since,
+td.before-member-since {
+    opacity: 0.5;
+}
+
+/* Member Since badge positioning for dashboard_m day-label */
+.dashboard-m-day-label {
+    position: relative;
+}
+.dashboard-m-day-label .member-since-badge {
+    top: -10;
+    left: -5;
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+}
+
+/* Dim cells before member_since in dashboard_m */
+#dashboard-m-calendar td.before-member-since {
+    opacity: 0.5;
+}
+
+/* Member Since badge positioning for dashboard_y month title */
+.dashboard-y-month-title {
+    position: relative;
+}
+.dashboard-y-month-title .member-since-badge {
+    top: -5px;
+    left: -5px;
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+    background-color: #2AAAA8;
+    color: white;
+}
+
+/* Dim cells before member_since in dashboard_y */
+#year-calendar td.before-member-since {
+    opacity: 0.5;
 }
 
 /* Button for adding new entry */
@@ -6220,7 +6325,8 @@ td:has(.bucket-progress-container) {
     transition: background-color 0.2s;
 }
 
-.notification-item.notification-read {
+.notification-item.notification-read .notification-date,
+.notification-item.notification-read .notification-message {
     opacity: 0.6;
 }
 
@@ -6309,7 +6415,54 @@ td:has(.bucket-progress-container) {
 }
 
 .clear-read-button:hover {
-    color: #d63e1a;
+    color: #ff7f55 !important;
+}
+
+.mark-all-read-button {
+    color: #17a2b8;
+    background: none;
+    cursor: pointer;
+    border: none;
+    font-size: 18px;
+}
+
+.mark-all-read-button:hover {
+    color: #59d6d4;
+}
+
+.mark-all-read-button:hover .envelope-back {
+    color: #59d6d4;
+}
+
+/* Stacked envelope icons for Mark All Read button */
+.stacked-envelopes {
+    position: relative;
+    display: inline-block;
+    width: 24px;
+    height: 20px;
+}
+
+.stacked-envelopes .envelope-back {
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    font-size: 14px;
+    color: #17a2b8;
+}
+
+.stacked-envelopes .envelope-front {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    font-size: 14px;
+    background-color: #f2f7f7;
+    padding: 1px 3px;
+    border-radius: 3px;
+}
+
+/* Mark read button states */
+.mark-read-button.is-read {
+    background-color: #c9c9c9;
 }
 
 /* MFA QR Modal Styles */
@@ -8930,6 +9083,21 @@ form button[type="submit"] {
     width: 100%;
     height: 100%;
     box-sizing: border-box;
+}
+
+.edit-credit-account-btn {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    color: #2aaaa8;
+    cursor: pointer;
+    margin-right: 8px;
+}
+
+.edit-credit-account-btn:hover {
+    color: #575757;
 }
 
 .delete-credit-account-btn {

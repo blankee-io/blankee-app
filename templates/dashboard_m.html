@@ -353,6 +353,30 @@
                     const dayOfWeekDiv = document.createElement('div');
                     dayOfWeekDiv.classList.add('dashboard-m-day-label');
                     dayOfWeekDiv.textContent = dayOfWeek;
+                    
+                    // Add member_since badge and dimming
+                    let normalizedMemberSinceDate = null;
+                    if (member_since) {
+                        normalizedMemberSinceDate = member_since;
+                        if (member_since.length > 10 || member_since.includes('GMT')) {
+                            const msDate = new Date(member_since);
+                            if (!isNaN(msDate)) {
+                                normalizedMemberSinceDate = msDate.toISOString().split('T')[0];
+                            }
+                        }
+                        // Add badge if this is the member_since date
+                        if (dateStr === normalizedMemberSinceDate) {
+                            const badge = document.createElement('div');
+                            badge.className = 'member-since-badge';
+                            badge.title = 'Member Since';
+                            badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
+                            dayOfWeekDiv.appendChild(badge);
+                        }
+                        // Add dimming for dates before member_since
+                        if (dateStr < normalizedMemberSinceDate) {
+                            dayCell.classList.add('before-member-since');
+                        }
+                    }
 
                     const dateNumberDiv = document.createElement('div');
                     dateNumberDiv.classList.add('dashboard-m-date-number');
