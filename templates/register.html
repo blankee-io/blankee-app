@@ -141,8 +141,11 @@
 
             $('form').on('submit', function() {
                 const now = new Date();
-                // Format as YYYY-MM-DD
-                const localDate = now.toISOString().slice(0, 10);
+                // Format as YYYY-MM-DD using local time
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+                const localDate = `${year}-${month}-${day}`;
                 $('#member_since').val(localDate);
             });
 

@@ -54,7 +54,14 @@
                     </thead>
                     <tbody>
                         {% for account in credit_accounts %}
-                            <tr>
+                            {% set recurring_info = ca_recurring_info.get(account.id, {}) %}
+                            <tr data-account-id="{{ account.id }}" 
+                                data-name="{{ account.name }}" 
+                                data-interest="{{ account.interest_rate }}"
+                                data-type="{% if account.is_card %}card{% elif account.is_line %}line{% else %}other{% endif %}"
+                                data-recurring="{{ 'true' if recurring_info.get('enabled') else 'false' }}"
+                                data-payment-amount="{{ recurring_info.get('amount', 0) }}"
+                                data-due-date="{{ recurring_info.get('monthly_days', '1') }}">
                                 <td>{{ account.name }}</td>
                                 <td>
                                     {% if account.interest_rate is not none %}
@@ -81,6 +88,9 @@
                                     {% endif %}
                                 </td>
                                 <td class="credit-account-action-cell">
+                                    <button class="edit-credit-account-btn" data-account-id="{{ account.id }}">
+                                        <i class="fas fa-pencil-alt"></i>
+                                    </button>
                                     <button class="delete-credit-account-btn" data-account-id="{{ account.id }}">
                                         <i class="fa-regular fa-trash"></i>
                                     </button>
@@ -137,6 +147,30 @@
                     </div>
                 </div>
                 <div class="footer-form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="credit-account-recurring-payment" name="recurring_payment">
+                        <span>Set up recurring monthly payment reminder</span>
+                    </label>
+                </div>
+                <div id="recurring-payment-options" style="display: none;">
+                    <div class="footer-form-group">
+                        <label for="credit-account-payment-amount">Payment Amount:</label>
+                        <div class="f-amount-container">
+                            <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                            <input type="number" id="credit-account-payment-amount" name="payment_amount" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+                        </div>
+                    </div>
+                    <div class="footer-form-group">
+                        <label for="credit-account-due-date">Payment Due Date (day of month):</label>
+                        <select id="credit-account-due-date" name="due_date">
+                            {% for day in range(1, 29) %}
+                            <option value="{{ day }}">{{ day }}</option>
+                            {% endfor %}
+                            <option value="Last Day">Last Day</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="footer-form-group">
                     <button type="submit">Add Account</button>
                 </div>
             </form>
@@ -149,6 +183,59 @@
             <h3>Are you sure you want to delete this item? If the date for this item is in the past, the amount will be moved to Auto Adjustments for that date.</h3>
             <button id="delete-credit-account-confirm" class="delete-credit-account-confirm-btn">Delete</button>
             <button id="delete-credit-account-cancel" class="delete-credit-account-cancel-btn">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Modal for editing credit account -->
+    <div id="edit-credit-account-modal" class="footer-modal">
+        <div class="add-credit-account-modal-content">
+            <span class="add-credit-account-close-modal" id="edit-credit-account-close">&times;</span>
+            <h3>Edit Credit Account</h3>
+            <form id="edit-credit-account-form">
+                <input type="hidden" id="edit-credit-account-id" name="id">
+                <div class="footer-form-group">
+                    <label for="edit-credit-account-name">Account Name:</label>
+                    <input type="text" id="edit-credit-account-name" name="name" required placeholder="Account name">
+                </div>
+                <div class="footer-form-group">
+                    <label for="edit-credit-account-interest">Interest Rate (%):</label>
+                    <input type="number" id="edit-credit-account-interest" name="interest_rate" min="0" max="100" step="0.001" required inputmode="decimal" placeholder="0.000">
+                </div>
+                <div class="footer-form-group">
+                    <label for="edit-credit-account-type">Account Type:</label>
+                    <select id="edit-credit-account-type" name="type" required>
+                        <option value="card">Card</option>
+                        <option value="line">Line</option>
+                    </select>
+                </div>
+                <div class="footer-form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="edit-credit-account-recurring-payment" name="recurring_payment">
+                        <span>Set up recurring monthly payment reminder</span>
+                    </label>
+                </div>
+                <div id="edit-recurring-payment-options" style="display: none;">
+                    <div class="footer-form-group">
+                        <label for="edit-credit-account-payment-amount">Payment Amount:</label>
+                        <div class="f-amount-container">
+                            <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                            <input type="number" id="edit-credit-account-payment-amount" name="payment_amount" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+                        </div>
+                    </div>
+                    <div class="footer-form-group">
+                        <label for="edit-credit-account-due-date">Payment Due Date (day of month):</label>
+                        <select id="edit-credit-account-due-date" name="due_date">
+                            {% for day in range(1, 29) %}
+                            <option value="{{ day }}">{{ day }}</option>
+                            {% endfor %}
+                            <option value="Last Day">Last Day</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="footer-form-group">
+                    <button type="submit">Save Changes</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -204,6 +291,134 @@
                 }
             });
 
+            // Toggle recurring payment options
+            $('#credit-account-recurring-payment').on('change', function() {
+                if ($(this).is(':checked')) {
+                    $('#recurring-payment-options').show();
+                } else {
+                    $('#recurring-payment-options').hide();
+                }
+            });
+
+            // Toggle edit modal recurring payment options
+            $('#edit-credit-account-recurring-payment').on('change', function() {
+                if ($(this).is(':checked')) {
+                    $('#edit-recurring-payment-options').show();
+                } else {
+                    $('#edit-recurring-payment-options').hide();
+                }
+            });
+
+            // Open edit modal when edit button is clicked
+            $('.credit-accounts-table').on('click', '.edit-credit-account-btn', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const $row = $(this).closest('tr');
+                const accountId = $row.data('account-id');
+                const name = $row.data('name');
+                const interest = $row.data('interest');
+                const type = $row.data('type');
+                const recurring = $row.data('recurring') === true || $row.data('recurring') === 'true';
+                const paymentAmount = $row.data('payment-amount') || 0;
+                const dueDate = $row.data('due-date') || '1';
+                
+                // Populate the edit form
+                $('#edit-credit-account-id').val(accountId);
+                $('#edit-credit-account-name').val(name);
+                $('#edit-credit-account-interest').val(interest);
+                $('#edit-credit-account-type').val(type);
+                $('#edit-credit-account-recurring-payment').prop('checked', recurring);
+                $('#edit-credit-account-payment-amount').val(paymentAmount);
+                $('#edit-credit-account-due-date').val(dueDate);
+                
+                // Show/hide recurring options
+                if (recurring) {
+                    $('#edit-recurring-payment-options').show();
+                } else {
+                    $('#edit-recurring-payment-options').hide();
+                }
+                
+                $('#edit-credit-account-modal').show();
+                $('#edit-credit-account-name').focus();
+            });
+
+            // Close edit modal
+            $('#edit-credit-account-close').on('click', function() {
+                $('#edit-credit-account-modal').hide();
+            });
+            $('#edit-credit-account-modal').on('mousedown', function(e) {
+                if (e.target === this) {
+                    $(this).hide();
+                }
+            });
+
+            // Submit edit form
+            $('#edit-credit-account-form').on('submit', function(e) {
+                e.preventDefault();
+                $('#loading-screen').show();
+                const formData = {
+                    id: $('#edit-credit-account-id').val(),
+                    name: $('#edit-credit-account-name').val().trim(),
+                    interest_rate: $('#edit-credit-account-interest').val().trim(),
+                    type: $('#edit-credit-account-type').val(),
+                    recurring_payment: $('#edit-credit-account-recurring-payment').is(':checked'),
+                    payment_amount: $('#edit-credit-account-payment-amount').val().trim() || '0',
+                    due_date: $('#edit-credit-account-due-date').val()
+                };
+                $.ajax({
+                    url: '/update-credit-account',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(formData),
+                    success: function(data) {
+                        $('#loading-screen').hide();
+                        $('#edit-credit-account-modal').hide();
+                        if (data.status === 'success') {
+                            location.reload();
+                        } else {
+                            alert(data.message || 'Error updating credit account.');
+                        }
+                    },
+                    error: function() {
+                        $('#loading-screen').hide();
+                        $('#edit-credit-account-modal').hide();
+                        alert('Error updating credit account.');
+                    }
+                });
+            });
+
+            // Limit decimal places for edit interest rate
+            $('#edit-credit-account-interest').on('input', function() {
+                let value = $(this).val();
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    $(this).val(parts[0] + '.' + parts.slice(1).join(''));
+                    value = $(this).val();
+                }
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1].length > 3) {
+                        $(this).val(decimals[0] + '.' + decimals[1].substring(0, 3));
+                    }
+                }
+            });
+
+            // Limit decimal places for edit payment amount
+            $('#edit-credit-account-payment-amount').on('input', function() {
+                let value = $(this).val();
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    $(this).val(parts[0] + '.' + parts.slice(1).join(''));
+                    value = $(this).val();
+                }
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1].length > 2) {
+                        $(this).val(decimals[0] + '.' + decimals[1].substring(0, 2));
+                    }
+                }
+            });
+
             // Close modal on X click or clicking outside modal content
             $('#add-credit-account-close').on('click', function() {
                 $('#add-credit-account-modal').hide();
@@ -222,7 +437,10 @@
                     name: $('#credit-account-name').val().trim(),
                     interest_rate: $('#credit-account-interest').val().trim(),
                     type: $('#credit-account-type').val(),
-                    starting_balance: $('#credit-account-balance').val().trim()
+                    starting_balance: $('#credit-account-balance').val().trim(),
+                    recurring_payment: $('#credit-account-recurring-payment').is(':checked'),
+                    payment_amount: $('#credit-account-payment-amount').val().trim() || '0',
+                    due_date: $('#credit-account-due-date').val()
                 };
                 $.ajax({
                     url: '/add-credit-account',

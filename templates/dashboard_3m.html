@@ -621,6 +621,39 @@
         // Add this near the other server-side variables
         let member_since = {{ member_since | tojson | safe }};
 
+        // Helper function to check if a month is before member_since
+        function isMonthBeforeMemberSince(monthDate) {
+            if (!member_since) return false;
+            
+            const memberSinceDate = new Date(member_since);
+            memberSinceDate.setUTCHours(0, 0, 0, 0);
+            
+            // Get the last day of the month
+            const dateParts = monthDate.split('-');
+            const year = parseInt(dateParts[0]);
+            const month = parseInt(dateParts[1]) - 1;
+            const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+            
+            return lastDayOfMonth < memberSinceDate;
+        }
+        
+        // Helper function to check if member_since falls within a month
+        function isMemberSinceMonth(monthDate) {
+            if (!member_since) return false;
+            
+            const memberSinceDate = new Date(member_since);
+            memberSinceDate.setUTCHours(0, 0, 0, 0);
+            
+            const dateParts = monthDate.split('-');
+            const year = parseInt(dateParts[0]);
+            const month = parseInt(dateParts[1]) - 1;
+            
+            const firstDayOfMonth = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+            const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+            
+            return memberSinceDate >= firstDayOfMonth && memberSinceDate <= lastDayOfMonth;
+        }
+
         let incomeHiddenActive = true;
         let expenseHiddenActive = true;
 
@@ -1217,9 +1250,25 @@
             months.forEach(monthObj => {
                 const th = document.createElement('th');
                 th.setAttribute('data-date', monthObj.date);
+                th.style.position = 'relative';
                 th.textContent = monthObj.label;
                 th.style.cursor = 'pointer';
                 th.title = 'Click to view this month in weekly view';
+                
+                // Check if month is before member_since
+                if (isMonthBeforeMemberSince(monthObj.date)) {
+                    th.classList.add('before-member-since');
+                }
+                
+                // Check if member_since is in this month
+                if (isMemberSinceMonth(monthObj.date)) {
+                    const badge = document.createElement('div');
+                    badge.className = 'member-since-badge';
+                    badge.title = 'Member Since';
+                    badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
+                    th.appendChild(badge);
+                }
+                
                 th.addEventListener('click', function() {
                     // Navigate to dashboard.html with the specific year and month
                     // Parse the date string properly to avoid timezone issues
@@ -1239,11 +1288,13 @@
                 const thIncome = document.createElement('th');
                 thIncome.setAttribute('data-date', monthObj.date);
                 thIncome.textContent = monthObj.label;
+                if (isMonthBeforeMemberSince(monthObj.date)) thIncome.classList.add('before-member-since');
                 incomeHeaderRow.appendChild(thIncome);
 
                 const thExpenses = document.createElement('th');
                 thExpenses.setAttribute('data-date', monthObj.date);
                 thExpenses.textContent = monthObj.label;
+                if (isMonthBeforeMemberSince(monthObj.date)) thExpenses.classList.add('before-member-since');
                 expensesHeaderRow.appendChild(thExpenses);
             });
 
@@ -1258,6 +1309,7 @@
                     const thCa = document.createElement('th');
                     thCa.setAttribute('data-date', monthObj.date);
                     thCa.textContent = ""; // Remove the number
+                    if (isMonthBeforeMemberSince(monthObj.date)) thCa.classList.add('before-member-since');
                     caHeaderRow.appendChild(thCa);
                 });
             });
@@ -1290,6 +1342,7 @@
             months.forEach(monthObj => {
                 const lastRemainderTd = document.createElement('td');
                 lastRemainderTd.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) lastRemainderTd.classList.add('before-member-since');
                 lastRemainderRowRight.appendChild(lastRemainderTd);
             });
         }
@@ -1306,6 +1359,7 @@
             months.forEach(monthObj => {
                 const remainderTdRight = document.createElement('td');
                 remainderTdRight.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) remainderTdRight.classList.add('before-member-since');
                 remainderRowRight.appendChild(remainderTdRight);
             });
         }
@@ -1318,6 +1372,7 @@
                 const monthDate = monthObj.date;
                 const savingsTd = document.createElement('td');
                 savingsTd.setAttribute('data-date', monthDate);
+                if (isMonthBeforeMemberSince(monthDate)) savingsTd.classList.add('before-member-since');
 
                 // Find the savings entry for this date
                 const entry = savingsEntries.find(e => {
@@ -1385,6 +1440,7 @@
                 months.forEach(monthObj => {
                     const td = document.createElement('td');
                     td.setAttribute('data-date', monthObj.date);
+                    if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
 
                     const input = document.createElement('input');
                     input.type = 'text';
@@ -1394,9 +1450,9 @@
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
-                    // If the date is older than the cutoff, disable the input
+                    // If the date is older than the cutoff OR before member_since, disable the input
                     const monthDate = new Date(monthObj.date);
-                    if (monthDate < cutoffDate) {
+                    if (monthDate < cutoffDate || isMonthBeforeMemberSince(monthObj.date)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
@@ -1447,6 +1503,7 @@
                 months.forEach(monthObj => {
                     const td = document.createElement('td');
                     td.setAttribute('data-date', monthObj.date);
+                    if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
 
                     const input = document.createElement('input');
                     input.type = 'text';
@@ -1456,9 +1513,9 @@
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
-                    // If the date is older than the cutoff, disable the input
+                    // If the date is older than the cutoff OR before member_since, disable the input
                     const monthDate = new Date(monthObj.date);
-                    if (monthDate < cutoffDate) {
+                    if (monthDate < cutoffDate || isMonthBeforeMemberSince(monthObj.date)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
@@ -1519,6 +1576,7 @@
                     months.forEach(monthObj => {
                         const td = document.createElement('td');
                         td.setAttribute('data-date', monthObj.date);
+                        if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
 
                         const input = document.createElement('input');
                         input.type = 'text';
@@ -1528,9 +1586,9 @@
                         input.style.width = '100%';
                         input.style.textAlign = 'right';
 
-                        // If the date is older than the cutoff, disable the input
+                        // If the date is older than the cutoff OR before member_since, disable the input
                         const monthDate = new Date(monthObj.date);
-                        if (monthDate < cutoffDate) {
+                        if (monthDate < cutoffDate || isMonthBeforeMemberSince(monthObj.date)) {
                             input.disabled = true;
                             input.classList.add('auto-disable');
                             td.classList.add('readonly-cell');
@@ -1568,6 +1626,7 @@
             months.forEach(monthObj => {
                 const td = document.createElement('td');
                 td.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
                 td.textContent = currencySymbol + '0.00';
                 incomeBottomRow.appendChild(td);
             });
@@ -1596,11 +1655,13 @@
             months.forEach(monthObj => {
                 const td = document.createElement('td');
                 td.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
                 td.textContent = currencySymbol + '0.00';
                 expensesBottomRow.appendChild(td);
 
                 const gapTd = document.createElement('td');
                 gapTd.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) gapTd.classList.add('before-member-since');
                 expenseGapRow.appendChild(gapTd);
             });
 
@@ -1625,6 +1686,7 @@
                 months.forEach(monthObj => {
                     const td = document.createElement('td');
                     td.setAttribute('data-date', monthObj.date);
+                    if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
                     td.textContent = currencySymbol + '0.00';
                     caBottomRow.appendChild(td);
                 });

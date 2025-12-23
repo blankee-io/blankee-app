@@ -631,6 +631,21 @@
                 container.classList.add('dashboard-d-date-container');
                 container.setAttribute('data-date', date);
 
+                // Check if date is before member_since and add class for dimming
+                let normalizedMemberSinceDate = null;
+                if (memberSince) {
+                    normalizedMemberSinceDate = memberSince;
+                    if (memberSince.length > 10 || memberSince.includes('GMT')) {
+                        const msDate = new Date(memberSince);
+                        if (!isNaN(msDate)) {
+                            normalizedMemberSinceDate = msDate.toISOString().split('T')[0];
+                        }
+                    }
+                    if (date < normalizedMemberSinceDate) {
+                        container.classList.add('before-member-since');
+                    }
+                }
+
                 // Highlight today
                 const currentLocalDate = new Date();
                 const currentLocalDateString = currentLocalDate.toLocaleDateString('en-CA');
@@ -653,7 +668,18 @@
                     day: 'numeric',
                     year: 'numeric'
                 });
-                dayHeader.innerHTML = `${formattedDate} <button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-solid fa-plus"></i><span class="nav-tooltip">Add New Entry</span></button>`;
+                
+                // Check if this date is the member_since date
+                let memberSinceIcon = '';
+                if (normalizedMemberSinceDate && date === normalizedMemberSinceDate) {
+                    memberSinceIcon = '<div class="member-since-badge" title="Member Since"><i class="fa-solid fa-flag-checkered"></i></div>';
+                }
+                
+                // Hide add button if date is before member_since
+                const isBeforeMemberSince = normalizedMemberSinceDate && date < normalizedMemberSinceDate;
+                const addButton = isBeforeMemberSince ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-solid fa-plus"></i><span class="nav-tooltip">Add New Entry</span></button>`;
+                
+                dayHeader.innerHTML = `${formattedDate} ${addButton}${memberSinceIcon}`;
                 container.appendChild(dayHeader);
 
                 // --- Use latest AJAX-fetched data ---
@@ -697,7 +723,7 @@
 
                 const filteredIncomeEntries = incomeArr.filter(entry => {
                     const entryDate = new Date(entry.date).toISOString().split('T')[0];
-                    return entryDate === date && entry.category_name !== "Starting Balance";
+                    return entryDate === date;
                 });
 
                 // Calculate actual income for this day from entries
@@ -713,14 +739,18 @@
                     const paidClass = entry.processed == 1 ? 'paid' : '';
                     const catObj = incomeCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
+                    const isStartingBalance = entry.category_name === 'Starting Balance' || (catObj && catObj.name === 'Starting Balance');
+                    const isReadonly = isBud || isStartingBalance;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
-                    if (catObj) {
+                    if (isStartingBalance) {
+                        iconHtml = '<i class="fa-solid fa-flag-checkered category-icon"></i>';
+                    } else if (catObj) {
                         if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
                         else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
                         else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
                     }
                     incomeRow.innerHTML = `
-                        ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
+                        ${!isReadonly ? `<span class="dashboard-d-move-btn" title="Move to date">
                             <span class="calendar-icon">
                             <i class="fa-solid fa-up-down-left-right"></i>
                             </span>
@@ -737,7 +767,7 @@
                                 data-entry-id="${entry.id}"
                                 data-category-id="${entry.category_id}"
                                 data-date="${date}"
-                                ${isBud ? 'readonly tabindex="-1"' : ''}
+                                ${isReadonly ? 'readonly tabindex="-1"' : ''}
                             />
                         </div>
                     `;
