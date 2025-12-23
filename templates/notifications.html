@@ -26,6 +26,13 @@
                 </a>
             </div>
             {% if notifications %}
+                <button class="nav-button mark-all-read-button" onclick="markAllAsRead()">
+                    <span class="stacked-envelopes">
+                        <i class="fa-solid fa-envelope-open envelope-back"></i>
+                        <i class="fa-solid fa-envelope-open envelope-front"></i>
+                    </span>
+                    <span class="nav-tooltip">Mark All Read</span>
+                </button>
                 <button class="nav-button clear-read-button" onclick="clearReadNotifications()">
                     <i class="fa-solid fa-broom-wide"></i>
                     <span class="nav-tooltip">Clear Read</span>
@@ -42,13 +49,13 @@
                         {% for notification in notifications %}
                             <div class="profile-section notification-section notification-item {% if notification.is_read %}notification-read{% endif %}" data-notification-id="{{ notification.id }}" id="notification-section">
                                 <div class="notification-header">
-                                    <span class="notification-date">{{ notification.date.strftime('%b %d, %Y at %I:%M %p') }}</span>
+                                    <span class="notification-date">
+                                        {{ notification.date.strftime('%b %d, %Y at %I:%M %p') }}
+                                    </span>
                                     <div class="notification-buttons">
-                                        {% if not notification.is_read %}
-                                            <button class="mark-read-button" onclick="markAsRead({{ notification.id }})">
-                                                <i class="fas fa-check"></i>
-                                            </button>
-                                        {% endif %}
+                                        <button class="mark-read-button {% if notification.is_read %}is-read{% endif %}" onclick="toggleReadStatus({{ notification.id }})">
+                                            <i class="fa-solid {% if notification.is_read %}fa-envelope-open{% else %}fa-envelope{% endif %}"></i>
+                                        </button>
                                         <button class="delete-notification-button" onclick="deleteNotification({{ notification.id }})">
                                             <i class="fas fa-trash"></i>
                                         </button>
@@ -118,7 +125,7 @@
             }
         }
 
-        function markAsRead(notificationId) {
+        function toggleReadStatus(notificationId) {
             $.ajax({
                 url: '/mark-notification-read',
                 method: 'POST',
@@ -126,17 +133,65 @@
                 data: JSON.stringify({ notification_id: notificationId }),
                 success: function(response) {
                     if (response.success) {
-                        // Update UI to reflect read status
                         const notificationItem = $('[data-notification-id="' + notificationId + '"]');
-                        notificationItem.addClass('notification-read');
-                        notificationItem.find('.mark-read-button').remove();
+                        const markReadBtn = notificationItem.find('.mark-read-button');
+                        
+                        if (response.is_read === 1) {
+                            // Now read - show open envelope
+                            notificationItem.addClass('notification-read');
+                            markReadBtn.addClass('is-read');
+                            markReadBtn.find('i').removeClass('fa-envelope').addClass('fa-envelope-open');
+                        } else {
+                            // Now unread - show closed envelope
+                            notificationItem.removeClass('notification-read');
+                            markReadBtn.removeClass('is-read');
+                            markReadBtn.find('i').removeClass('fa-envelope-open').addClass('fa-envelope');
+                        }
                         
                         // Update the notification badge
                         updateNotificationBadge();
                     }
                 },
                 error: function() {
-                    alert('Failed to mark notification as read.');
+                    alert('Failed to update notification status.');
+                }
+            });
+        }
+
+        function markAllAsRead() {
+            const unreadCount = $('.notification-item:not(.notification-read)').length;
+            
+            if (unreadCount === 0) {
+                // Show a simple message without making a request
+                const messageDiv = $('<div class="profile-section" style="background-color: #d4edda; border-color: #c3e6cb; color: #155724; text-align: center; padding: 15px; margin: 10px 0;">All notifications are already read.</div>');
+                $('.profile-actions').prepend(messageDiv);
+                setTimeout(function() {
+                    messageDiv.fadeOut(300, function() { $(this).remove(); });
+                }, 2000);
+                return;
+            }
+            
+            $.ajax({
+                url: '/mark-all-notifications-read',
+                method: 'POST',
+                contentType: 'application/json',
+                success: function(response) {
+                    if (response.success) {
+                        // Update UI for all unread notifications
+                        $('.notification-item:not(.notification-read)').each(function() {
+                            $(this).addClass('notification-read');
+                            // Change button to read state
+                            const markReadBtn = $(this).find('.mark-read-button');
+                            markReadBtn.addClass('is-read');
+                            markReadBtn.find('i').removeClass('fa-envelope').addClass('fa-envelope-open');
+                        });
+                        
+                        // Update the notification badge
+                        updateNotificationBadge();
+                    }
+                },
+                error: function() {
+                    alert('Failed to mark all notifications as read.');
                 }
             });
         }
@@ -179,8 +234,9 @@
                 if ($('.notification-item').length === 0) {
                     // Show "no notifications" message
                     $('.profile-actions').html('<div class="profile-section"><p style="text-align: center; color: #666;">No notifications.</p></div>');
-                    // Hide the clear read button
+                    // Hide both buttons
                     $('.clear-read-button').hide();
+                    $('.mark-all-read-button').hide();
                 }
                 
                 // Update the badge if we deleted an unread notification
@@ -235,8 +291,9 @@
                             if ($('.notification-item').length === 0) {
                                 // Show "no notifications" message
                                 $('.profile-actions').html('<div class="profile-section"><p style="text-align: center; color: #666;">No notifications.</p></div>');
-                                // Hide the clear read button
+                                // Hide both buttons
                                 $('.clear-read-button').hide();
+                                $('.mark-all-read-button').hide();
                             }
                             
                             // Badge doesn't need updating since we only cleared read notifications
