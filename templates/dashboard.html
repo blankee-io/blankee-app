@@ -2315,15 +2315,6 @@
                         // Get the start and end of the week for the current cell's Friday
                         const { startOfWeek, endOfWeek } = calculateWeekRange(cellDate);
 
-                        // ...inside populateIncomeData, inside cells.forEach(td => { ... })...
-                        const matchingEntries = incomeEntries.filter(e => {
-                            const d = new Date(e.date);
-                            const isMatch = String(e.category_id) === String(entry.category_id) && d >= startOfWeek && d <= endOfWeek;
-                            if (isMatch) {
-                            }
-                            return isMatch;
-                        });
-
                         // Check if entryDate falls between startOfWeek and endOfWeek (inclusive)
                         if (entryDate >= startOfWeek && entryDate <= endOfWeek) {
                             matchedCell = td;
@@ -2415,11 +2406,6 @@
 
                         // Get the start and end of the week for the current cell's Friday
                         const { startOfWeek, endOfWeek } = calculateWeekRange(cellDate);
-
-                        const matchingEntries = expenseEntries.filter(e => {
-                            const d = new Date(e.date);
-                            return String(e.category_id) === String(entry.category_id) && d >= startOfWeek && d <= endOfWeek;
-                        });
 
                         // Check if entryDate falls between startOfWeek and endOfWeek (inclusive)
                         if (entryDate >= startOfWeek && entryDate <= endOfWeek) {
