@@ -480,6 +480,10 @@
 
     <!-- Include the recurring modal template -->
     {% include 'loading_modals.html' %}
+    <script>
+        // Show loading screen immediately on page load
+        document.getElementById('loading-screen').style.display = 'flex';
+    </script>
 
     <div id="dashboard-context-menu" class="dashboard-context-menu" style="display: none; position: absolute;">
         <ul>
@@ -569,6 +573,10 @@
         }
 
         let lastFridayRemainder = 0;
+
+        // Batch cache for totals to reduce AJAX calls
+        let batchTotalsCache = {};
+        let batchCaBalancesCache = {};
 
         // Variables to keep track of touch positions
         let touchStartX = null;
@@ -768,6 +776,7 @@
 
         // Function to go to the next month
         function nextCluster() {
+            clearBatchCache();
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-left');
@@ -796,6 +805,7 @@
         }
 
         function goToCurrentCluster() {
+            clearBatchCache();
             document.getElementById('loading-screen').style.display = 'flex';
             const today = new Date();
             const currentMonth = today.getUTCMonth(); // 0 = Jan, 1 = Feb, ..., 11 = Dec
@@ -815,6 +825,7 @@
 
         // Function to go to the previous month
         function previousCluster() {
+            clearBatchCache();
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-right');
@@ -1934,70 +1945,138 @@
 
         /////////////////////////// Data Updates //////////////////////////////
 
+        // Helper function to collect all dates from visible cells
+        function collectAllDates() {
+            const dates = new Set();
+            
+            // Collect from income bottom row
+            const incomeBottomRow = document.getElementById('income-bottom-row');
+            if (incomeBottomRow) {
+                const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
+                if (lastRemainderRowRight) {
+                    for (let i = 0; i < incomeBottomRow.children.length; i++) {
+                        const cell = lastRemainderRowRight.children[i];
+                        const date = cell ? cell.getAttribute('data-date') : null;
+                        if (date && date !== 'null') dates.add(date);
+                    }
+                }
+            }
+            
+            // Collect from expense bottom row
+            const expensesBottomRow = document.getElementById('expenses-bottom-row');
+            if (expensesBottomRow) {
+                for (let i = 0; i < expensesBottomRow.children.length; i++) {
+                    const cell = expensesBottomRow.children[i];
+                    const date = cell ? cell.getAttribute('data-date') : null;
+                    if (date && date !== 'null') dates.add(date);
+                }
+            }
+            
+            // Collect from remainder row
+            const remainderRowRight = document.getElementById('remainder-row-right');
+            if (remainderRowRight) {
+                for (let i = 0; i < remainderRowRight.children.length; i++) {
+                    const cell = remainderRowRight.children[i];
+                    const date = cell ? cell.getAttribute('data-date') : null;
+                    if (date && date !== 'null') dates.add(date);
+                }
+            }
+            
+            return Array.from(dates);
+        }
+
+        // Batch fetch all monthly totals at once
+        async function fetchBatchTotals(dates) {
+            if (!dates || dates.length === 0) return;
+            
+            // Check if all dates are already cached
+            const uncachedDates = dates.filter(d => !batchTotalsCache[d]);
+            if (uncachedDates.length === 0) return;
+            
+            try {
+                const response = await $.ajax({
+                    url: '/get_month_totals_batch',
+                    method: 'GET',
+                    data: { dates: uncachedDates.join(',') }
+                });
+                
+                if (response && response.status === 'success' && response.data) {
+                    Object.assign(batchTotalsCache, response.data);
+                }
+            } catch (error) {
+                console.error('Error fetching batch totals:', error);
+            }
+        }
+
+        // Batch fetch all CA balances at once
+        async function fetchBatchCaBalances(dates) {
+            if (!dates || dates.length === 0) return;
+            
+            try {
+                const response = await $.ajax({
+                    url: '/get_ca_balances_3m_batch',
+                    method: 'GET',
+                    data: { dates: dates.join(',') }
+                });
+                
+                if (response && response.status === 'success' && response.data) {
+                    batchCaBalancesCache = response.data;
+                }
+            } catch (error) {
+                console.error('Error fetching batch CA balances:', error);
+            }
+        }
+
+        // Clear batch cache (call when navigating months)
+        function clearBatchCache() {
+            batchTotalsCache = {};
+            batchCaBalancesCache = {};
+        }
+
         // Function to update the total income in the bottom row
-        function updateIncomeTotals() {
-
-
+        async function updateIncomeTotals() {
             const incomeBottomRow = document.getElementById('income-bottom-row');
             const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
             
             if (!incomeBottomRow || !lastRemainderRowRight) {
-                return Promise.resolve();
+                return;
             }
+            
+            // Collect all dates and fetch them in batch
+            const dates = collectAllDates();
+            await fetchBatchTotals(dates);
             
             const numberOfColumns = incomeBottomRow.children.length;
 
-            // Create array of promises for all AJAX requests
-            const promises = [];
             for (let i = 0; i < numberOfColumns; i++) {
                 const tdElement = incomeBottomRow.children[i];
                 const lastRemainderCell = lastRemainderRowRight.children[i];
                 const date = lastRemainderCell ? lastRemainderCell.getAttribute('data-date') : null;
 
-                if (!date) continue;
+                if (!date || date === 'null') continue;
 
-                // Fetch both income and last remainder
-                const incomePromise = $.ajax({
-                    url: '/get_total_income_3m',
-                    method: 'GET',
-                    data: { date: date }
-                });
-
-                const lastRemainderPromise = $.ajax({
-                    url: '/get_last_remainder_3m',
-                    method: 'GET',
-                    data: { date: date }
-                });
-
-                promises.push(
-                    Promise.all([incomePromise, lastRemainderPromise]).then(function([incomeResponse, lastRemainderResponse]) {
-                        const incomeTotal = (incomeResponse && incomeResponse.status === 'success') ? parseFloat(incomeResponse.total_income) || 0 : 0;
-                        const lastRemainder = (lastRemainderResponse && lastRemainderResponse.status === 'success') ? parseFloat(lastRemainderResponse.last_remainder) || 0 : 0;
-                        const displayIncome = incomeTotal - lastRemainder;
-                        tdElement.textContent = formatCurrency(displayIncome);
-                    }).catch(function(error) {
-                        tdElement.textContent = formatCurrency(0);
-                    })
-                );
+                // Get from batch cache
+                const cached = batchTotalsCache[date] || {};
+                const incomeTotal = parseFloat(cached.total_income || 0);
+                const lastRemainder = parseFloat(cached.last_month_remainder || 0);
+                const displayIncome = incomeTotal - lastRemainder;
+                tdElement.textContent = formatCurrency(displayIncome);
             }
-            
-            // Wait for all requests to complete
-            return Promise.all(promises);
         }
 
-        function updateExpenseTotals() {
-
-
+        async function updateExpenseTotals() {
             const expensesBottomRow = document.getElementById('expenses-bottom-row');
             
             if (!expensesBottomRow) {
-                return Promise.resolve();
+                return;
             }
+            
+            // Ensure batch cache is populated
+            const dates = collectAllDates();
+            await fetchBatchTotals(dates);
             
             const numberOfColumns = expensesBottomRow.children.length;
 
-            // Create array of promises for all AJAX requests
-            const promises = [];
             for (let i = 0; i < numberOfColumns; i++) {
                 const tdElement = expensesBottomRow.children[i];
                 const date = tdElement ? tdElement.getAttribute('data-date') : null;
@@ -2006,36 +2085,23 @@
                     continue;
                 }
 
-                promises.push(
-                    $.ajax({
-                        url: '/get_total_expenses_3m',
-                        method: 'GET',
-                        data: { date: date }
-                    }).then(function(response) {
-                        if (response && response.status === 'success') {
-                            const expenseTotal = parseFloat(response.total_expenses) || 0;
-                            tdElement.textContent = formatCurrency(expenseTotal);
-                        } else {
-                            tdElement.textContent = formatCurrency(0);
-                        }
-                    }).catch(function(error) {
-                        tdElement.textContent = formatCurrency(0);
-                    })
-                );
+                // Get from batch cache
+                const cached = batchTotalsCache[date] || {};
+                const expenseTotal = parseFloat(cached.total_expenses || 0);
+                tdElement.textContent = formatCurrency(expenseTotal);
             }
-            
-            // Wait for all requests to complete
-            return Promise.all(promises);
         }
 
-        function updateCaBalance() {
-            const allPromises = [];
-            
+        async function updateCaBalance() {
             const caTables = document.querySelectorAll('table[id^="cas-table-"]');
             
             if (caTables.length === 0) {
-                return Promise.resolve();
+                return;
             }
+            
+            // Collect all dates and fetch CA balances in batch
+            const dates = collectAllDates();
+            await fetchBatchCaBalances(dates);
             
             caTables.forEach(caTable => {
                 const accountId = caTable.id.replace('cas-table-', '');
@@ -2052,122 +2118,86 @@
                         continue;
                     }
 
-                    // Fetch the CA balance for this account and date from the server (monthly)
-                    allPromises.push(
-                        $.ajax({
-                            url: '/get_ca_balance_3m',
-                            method: 'GET',
-                            data: { account_id: accountId, date: date }
-                        }).then(function(response) {
-                            if (response && response.status === 'success') {
-                                const balance = parseFloat(response.balance) || 0;
-                                tdElement.textContent = formatCurrency(balance);
-                            } else {
-                                tdElement.textContent = currencySymbol + '0.00';
-                            }
-                        }).catch(function(error) {
-                            tdElement.textContent = currencySymbol + '0.00';
-                        })
-                    );
+                    // Get from batch cache
+                    const accountCache = batchCaBalancesCache[accountId] || {};
+                    const balance = parseFloat(accountCache[date] || 0);
+                    tdElement.textContent = formatCurrency(balance);
                 }
             });
-            
-            // Wait for all requests to complete
-            return Promise.all(allPromises);
         }
 
         // Function to update the remainder and last remainder rows
-        function updateRemainderRows() {
-
-
+        async function updateRemainderRows() {
             const remainderRowRight = document.getElementById('remainder-row-right');
             const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
+            
+            if (!remainderRowRight || !lastRemainderRowRight) {
+                return;
+            }
+            
+            // Ensure batch cache is populated
+            const dates = collectAllDates();
+            await fetchBatchTotals(dates);
+            
             const numberOfColumns = remainderRowRight.children.length;
 
-            // Create array of promises for all AJAX requests
-            const promises = [];
-            
             for (let i = 0; i < numberOfColumns; i++) {
                 const remainderCell = remainderRowRight.children[i];
                 const lastRemainderCell = lastRemainderRowRight.children[i];
                 const date = remainderCell.getAttribute('data-date');
 
-                // Fetch both last remainder and remainder for this date
-                const lastRemainderPromise = $.ajax({
-                    url: '/get_last_remainder_3m',
-                    method: 'GET',
-                    data: { date: date }
-                });
+                if (!date || date === 'null') continue;
 
-                const remainderPromise = $.ajax({
-                    url: '/get_remainder_3m',
-                    method: 'GET',
-                    data: { date: date }
-                });
+                // Get from batch cache
+                const cached = batchTotalsCache[date] || {};
+                const lastRemainder = parseFloat(cached.last_month_remainder || 0);
+                const remainder = parseFloat(cached.remainder || 0);
 
-                // Wait for both promises and update the cells
-                promises.push(
-                    Promise.all([lastRemainderPromise, remainderPromise]).then(function([lastRemainderResponse, remainderResponse]) {
-                        const lastRemainder = (lastRemainderResponse.status === 'success') 
-                            ? parseFloat(lastRemainderResponse.last_remainder) || 0 
-                            : 0;
-                        const remainder = (remainderResponse.status === 'success') 
-                            ? parseFloat(remainderResponse.remainder) || 0 
-                            : 0;
+                // Format values
+                const formattedLast = formatCurrency(lastRemainder);
+                const formattedRemainder = formatCurrency(remainder);
 
-                        // Format values
-                        const formattedLast = formatCurrency(lastRemainder);
-                        const formattedRemainder = formatCurrency(remainder);
+                // Determine threshold class
+                let thresholdClass = '';
+                let applyThresholdClass = true;
+                if (member_since) {
+                    const cellDate = new Date(remainderCell.getAttribute('data-date'));
+                    const memberSinceDate = new Date(member_since);
+                    if (cellDate < memberSinceDate) {
+                        applyThresholdClass = false;
+                    }
+                }
+                if (applyThresholdClass) {
+                    if (remainder < 0) {
+                        thresholdClass = 'negative';
+                    } else if (remainder < balance_threshold) {
+                        thresholdClass = 'below-threshold';
+                    } else {
+                        thresholdClass = 'above-threshold';
+                    }
+                }
 
-                        // Determine threshold class
-                        let thresholdClass = '';
-                        let applyThresholdClass = true;
-                        if (member_since) {
-                            const cellDate = new Date(remainderCell.getAttribute('data-date'));
-                            const memberSinceDate = new Date(member_since);
-                            if (cellDate < memberSinceDate) {
-                                applyThresholdClass = false;
-                            }
-                        }
-                        if (applyThresholdClass) {
-                            if (remainder < 0) {
-                                thresholdClass = 'negative';
-                            } else if (remainder < balance_threshold) {
-                                thresholdClass = 'below-threshold';
-                            } else {
-                                thresholdClass = 'above-threshold';
-                            }
-                        }
+                // Only update if values have changed
+                if (lastRemainderCell.textContent !== formattedLast) {
+                    lastRemainderCell.textContent = formattedLast;
+                }
 
-                        // Only update if values have changed
-                        if (lastRemainderCell.textContent !== formattedLast) {
-                            lastRemainderCell.textContent = formattedLast;
-                        }
+                if (remainderCell.textContent !== formattedRemainder) {
+                    remainderCell.textContent = formattedRemainder;
+                }
 
-                        if (remainderCell.textContent !== formattedRemainder) {
-                            remainderCell.textContent = formattedRemainder;
-                        }
-
-                        // Only update classes if needed
-                        const currentClass = remainderCell.classList.contains('negative') ? 'negative' 
-                            : remainderCell.classList.contains('below-threshold') ? 'below-threshold'
-                            : remainderCell.classList.contains('above-threshold') ? 'above-threshold' : '';
-                        
-                        if (currentClass !== thresholdClass) {
-                            remainderCell.classList.remove('below-threshold', 'negative', 'above-threshold');
-                            if (thresholdClass) {
-                                remainderCell.classList.add(thresholdClass);
-                            }
-                        }
-                    }).catch(function() {
-                        lastRemainderCell.textContent = formatCurrency(0);
-                        remainderCell.textContent = formatCurrency(0);
-                    })
-                );
+                // Only update classes if needed
+                const currentClass = remainderCell.classList.contains('negative') ? 'negative' 
+                    : remainderCell.classList.contains('below-threshold') ? 'below-threshold'
+                    : remainderCell.classList.contains('above-threshold') ? 'above-threshold' : '';
+                
+                if (currentClass !== thresholdClass) {
+                    remainderCell.classList.remove('below-threshold', 'negative', 'above-threshold');
+                    if (thresholdClass) {
+                        remainderCell.classList.add(thresholdClass);
+                    }
+                }
             }
-            
-            // Wait for all requests to complete
-            return Promise.all(promises);
         }
 
         function updateLocalTotalsRemainders(updatedData, updatedSavings = null) {

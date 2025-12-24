@@ -3265,8 +3265,13 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
         if not found:
             # Create new entry
             app.logger.info(f"[REDIS CREATE] Creating entry: recurring_id param={recurring_id}, type={type(recurring_id)}")
+            # Generate a NEGATIVE temp ID to avoid collision with MySQL IDs
+            # The flush worker will replace this with the real auto-increment ID
+            existing_ids = [e.get('id', 0) for e in entries if e.get('id')]
+            min_id = min(existing_ids) if existing_ids else 0
+            temp_id = min(min_id, 0) - 1  # Always negative: -1, -2, -3, etc.
             new_entry = {
-                'id': entry_id or (max([e.get('id', 0) for e in entries], default=0) + 1),
+                'id': entry_id or temp_id,
                 'category_id': int(category_id),
                 'date': entry_date_str,
                 'amount': float(amount),
@@ -7345,6 +7350,181 @@ def get_remainder():
         return jsonify({"status": "error", "message": "Internal Server Error"}), 500
 
 
+@app.route('/get_week_totals_batch', methods=['GET'])
+@login_required
+def get_week_totals_batch():
+    """
+    Batch endpoint to get all totals/remainders for multiple dates in a single request.
+    This replaces multiple calls to get_total_income, get_total_expenses, get_remainder, get_last_remainder.
+    
+    Query params:
+        dates: comma-separated list of dates (e.g., "2025-12-06,2025-12-13,2025-12-20,2025-12-27")
+        
+    Returns:
+        {
+            "status": "success",
+            "data": {
+                "2025-12-06": {"total_income": 100, "total_expenses": 50, "remainder": 50, "last_week_remainder": 0},
+                ...
+            }
+        }
+    """
+    dates_param = request.args.get('dates', '')
+    if not dates_param:
+        return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
+    
+    dates = [d.strip() for d in dates_param.split(',') if d.strip()]
+    
+    try:
+        result_data = {}
+        
+        # Get all totals from Redis (single call)
+        cached_data = _get_totals_remainders_from_redis('totals_remainders', current_user.id)
+        
+        if cached_data:
+            # Build a lookup dict for O(1) access
+            cached_lookup = {row.get('date'): row for row in cached_data}
+            
+            for date in dates:
+                if date in cached_lookup:
+                    row = cached_lookup[date]
+                    result_data[date] = {
+                        'total_income': float(row.get('total_income', 0) or 0),
+                        'total_expenses': float(row.get('total_expenses', 0) or 0),
+                        'remainder': float(row.get('remainder', 0) or 0),
+                        'last_week_remainder': float(row.get('last_week_remainder', 0) or 0)
+                    }
+                else:
+                    result_data[date] = {
+                        'total_income': 0,
+                        'total_expenses': 0,
+                        'remainder': 0,
+                        'last_week_remainder': 0
+                    }
+        else:
+            # Fallback to MySQL
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                placeholders = ','.join(['%s'] * len(dates))
+                cursor.execute(f"""
+                    SELECT date, total_income, total_expenses, remainder, last_week_remainder
+                    FROM totals_remainders
+                    WHERE user_id = %s AND date IN ({placeholders})
+                """, [current_user.id] + dates)
+                
+                rows = cursor.fetchall()
+                cursor.close()
+                
+                # Build result from MySQL data
+                mysql_lookup = {str(row['date']): row for row in rows}
+                for date in dates:
+                    if date in mysql_lookup:
+                        row = mysql_lookup[date]
+                        result_data[date] = {
+                            'total_income': float(row.get('total_income', 0) or 0),
+                            'total_expenses': float(row.get('total_expenses', 0) or 0),
+                            'remainder': float(row.get('remainder', 0) or 0),
+                            'last_week_remainder': float(row.get('last_week_remainder', 0) or 0)
+                        }
+                    else:
+                        result_data[date] = {
+                            'total_income': 0,
+                            'total_expenses': 0,
+                            'remainder': 0,
+                            'last_week_remainder': 0
+                        }
+        
+        return jsonify({'status': 'success', 'data': result_data})
+        
+    except Exception as e:
+        app.logger.error(f"[get_week_totals_batch] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
+
+
+@app.route('/get_ca_balances_batch', methods=['GET'])
+@login_required
+def get_ca_balances_batch():
+    """
+    Batch endpoint to get credit account balances for multiple dates and accounts.
+    
+    Query params:
+        dates: comma-separated list of dates
+        account_ids: comma-separated list of account IDs (optional, defaults to all user's accounts)
+        
+    Returns:
+        {
+            "status": "success",
+            "data": {
+                "account_id": {
+                    "date": balance,
+                    ...
+                },
+                ...
+            }
+        }
+    """
+    dates_param = request.args.get('dates', '')
+    account_ids_param = request.args.get('account_ids', '')
+    
+    if not dates_param:
+        return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
+    
+    dates = [d.strip() for d in dates_param.split(',') if d.strip()]
+    
+    try:
+        result_data = {}
+        
+        # Get all CA balances from Redis
+        cached_data = _get_ca_balances_from_redis('c_a_balances', current_user.id)
+        
+        if cached_data:
+            # Group by account_id
+            for row in cached_data:
+                account_id = str(row.get('account_id'))
+                date = row.get('date')
+                
+                if account_id not in result_data:
+                    result_data[account_id] = {}
+                
+                if date in dates:
+                    result_data[account_id][date] = float(row.get('balance', 0) or 0)
+            
+            # Fill in missing dates with 0
+            for account_id in result_data:
+                for date in dates:
+                    if date not in result_data[account_id]:
+                        result_data[account_id][date] = 0
+        else:
+            # Fallback to MySQL
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                placeholders = ','.join(['%s'] * len(dates))
+                cursor.execute(f"""
+                    SELECT cab.account_id, cab.date, cab.balance
+                    FROM c_a_balances cab
+                    JOIN credit_accounts ca ON cab.account_id = ca.id
+                    WHERE ca.user_id = %s AND cab.date IN ({placeholders})
+                """, [current_user.id] + dates)
+                
+                rows = cursor.fetchall()
+                cursor.close()
+                
+                for row in rows:
+                    account_id = str(row['account_id'])
+                    date = str(row['date'])
+                    
+                    if account_id not in result_data:
+                        result_data[account_id] = {}
+                    
+                    result_data[account_id][date] = float(row.get('balance', 0) or 0)
+        
+        return jsonify({'status': 'success', 'data': result_data})
+        
+    except Exception as e:
+        app.logger.error(f"[get_ca_balances_batch] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
+
+
 @app.route('/update_income_order', methods=['POST'])
 @login_required
 def update_income_order():
@@ -9086,6 +9266,180 @@ def get_remainder_3m():
         return jsonify({"status": "error", "message": "Internal Server Error"}), 500
     except Exception as e:
         return jsonify({"status": "error", "message": "Internal Server Error"}), 500
+
+
+@app.route('/get_month_totals_batch', methods=['GET'])
+@login_required
+def get_month_totals_batch():
+    """
+    Batch endpoint to get all monthly totals/remainders for multiple dates in a single request.
+    This replaces multiple calls to get_total_income_3m, get_total_expenses_3m, get_remainder_3m, get_last_remainder_3m.
+    
+    Query params:
+        dates: comma-separated list of dates (e.g., "2025-12-01,2025-11-01,2025-10-01")
+        
+    Returns:
+        {
+            "status": "success",
+            "data": {
+                "2025-12-01": {"total_income": 100, "total_expenses": 50, "remainder": 50, "last_month_remainder": 0},
+                ...
+            }
+        }
+    """
+    dates_param = request.args.get('dates', '')
+    if not dates_param:
+        return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
+    
+    dates = [d.strip() for d in dates_param.split(',') if d.strip()]
+    
+    try:
+        result_data = {}
+        
+        # Get all totals from Redis (single call)
+        cached_data = _get_totals_remainders_from_redis('totals_remainders_m', current_user.id)
+        
+        if cached_data:
+            # Build a lookup dict for O(1) access
+            cached_lookup = {row.get('date'): row for row in cached_data}
+            
+            for date in dates:
+                if date in cached_lookup:
+                    row = cached_lookup[date]
+                    result_data[date] = {
+                        'total_income': float(row.get('total_income', 0) or 0),
+                        'total_expenses': float(row.get('total_expenses', 0) or 0),
+                        'remainder': float(row.get('remainder', 0) or 0),
+                        'last_month_remainder': float(row.get('last_month_remainder', 0) or 0)
+                    }
+                else:
+                    result_data[date] = {
+                        'total_income': 0,
+                        'total_expenses': 0,
+                        'remainder': 0,
+                        'last_month_remainder': 0
+                    }
+        else:
+            # Fallback to MySQL
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                placeholders = ','.join(['%s'] * len(dates))
+                cursor.execute(f"""
+                    SELECT date, total_income, total_expenses, remainder, last_month_remainder
+                    FROM totals_remainders_m
+                    WHERE user_id = %s AND date IN ({placeholders})
+                """, [current_user.id] + dates)
+                
+                rows = cursor.fetchall()
+                cursor.close()
+                
+                # Build result from MySQL data
+                mysql_lookup = {str(row['date']): row for row in rows}
+                for date in dates:
+                    if date in mysql_lookup:
+                        row = mysql_lookup[date]
+                        result_data[date] = {
+                            'total_income': float(row.get('total_income', 0) or 0),
+                            'total_expenses': float(row.get('total_expenses', 0) or 0),
+                            'remainder': float(row.get('remainder', 0) or 0),
+                            'last_month_remainder': float(row.get('last_month_remainder', 0) or 0)
+                        }
+                    else:
+                        result_data[date] = {
+                            'total_income': 0,
+                            'total_expenses': 0,
+                            'remainder': 0,
+                            'last_month_remainder': 0
+                        }
+        
+        return jsonify({'status': 'success', 'data': result_data})
+        
+    except Exception as e:
+        app.logger.error(f"[get_month_totals_batch] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
+
+
+@app.route('/get_ca_balances_3m_batch', methods=['GET'])
+@login_required
+def get_ca_balances_3m_batch():
+    """
+    Batch endpoint to get monthly credit account balances for multiple dates and accounts.
+    
+    Query params:
+        dates: comma-separated list of dates
+        
+    Returns:
+        {
+            "status": "success",
+            "data": {
+                "account_id": {
+                    "date": balance,
+                    ...
+                },
+                ...
+            }
+        }
+    """
+    dates_param = request.args.get('dates', '')
+    
+    if not dates_param:
+        return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
+    
+    dates = [d.strip() for d in dates_param.split(',') if d.strip()]
+    
+    try:
+        result_data = {}
+        
+        # Get all CA balances from Redis (monthly table)
+        cached_data = _get_ca_balances_from_redis('c_a_balances_m', current_user.id)
+        
+        if cached_data:
+            # Group by account_id
+            for row in cached_data:
+                account_id = str(row.get('account_id'))
+                date = row.get('date')
+                
+                if account_id not in result_data:
+                    result_data[account_id] = {}
+                
+                if date in dates:
+                    result_data[account_id][date] = float(row.get('balance', 0) or 0)
+            
+            # Fill in missing dates with 0
+            for account_id in result_data:
+                for date in dates:
+                    if date not in result_data[account_id]:
+                        result_data[account_id][date] = 0
+        else:
+            # Fallback to MySQL
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                placeholders = ','.join(['%s'] * len(dates))
+                cursor.execute(f"""
+                    SELECT cab.account_id, cab.date, cab.balance
+                    FROM c_a_balances_m cab
+                    JOIN credit_accounts ca ON cab.account_id = ca.id
+                    WHERE ca.user_id = %s AND cab.date IN ({placeholders})
+                """, [current_user.id] + dates)
+                
+                rows = cursor.fetchall()
+                cursor.close()
+                
+                for row in rows:
+                    account_id = str(row['account_id'])
+                    date = str(row['date'])
+                    
+                    if account_id not in result_data:
+                        result_data[account_id] = {}
+                    
+                    result_data[account_id][date] = float(row.get('balance', 0) or 0)
+        
+        return jsonify({'status': 'success', 'data': result_data})
+        
+    except Exception as e:
+        app.logger.error(f"[get_ca_balances_3m_batch] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
+
 
 @app.route('/update-processed-status-month-range', methods=['POST'])
 @login_required
