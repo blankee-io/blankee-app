@@ -34,3 +34,6 @@ __pycache__/
 
 # Ignore Python virtual environment
 venv/
+
+# Copilot instructions (local only)
+.github/copilot-instructions.md
