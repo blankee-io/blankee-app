@@ -4073,6 +4073,85 @@ def _delete_buckets_in_redis(table_name, user_id, category_id):
     except Exception as e:
         app.logger.error(f"Error deleting buckets from {table_name} in Redis: {e}")
 
+
+def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=None):
+    """
+    Delete future bucket records for a category from Redis cache (from today onwards).
+    
+    Args:
+        table_name: 'recurring_income_buckets', 'recurring_expense_buckets', or 'recurring_c_expense_buckets'
+        user_id: User ID
+        category_id: ID of the category whose future buckets should be deleted
+        from_date: Date to start deleting from (defaults to today)
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    if from_date is None:
+        from_date = datetime.today().date()
+    elif isinstance(from_date, str):
+        from_date = datetime.strptime(from_date, '%Y-%m-%d').date()
+    
+    from_date_str = from_date.isoformat()
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        
+        # Get existing data
+        cached = _redis_client.get(redis_key)
+        if cached:
+            rows = json.loads(cached)
+            category_id_int = int(category_id)
+            original_count = len(rows)
+            
+            # Track deleted bucket IDs for pending_deletes
+            deleted_bucket_ids = []
+            kept_rows = []
+            
+            for row in rows:
+                bucket_category_id = int(row.get('category_id'))
+                bucket_date = row.get('bucket_date')
+                if isinstance(bucket_date, str):
+                    bucket_date_str = bucket_date
+                else:
+                    bucket_date_str = bucket_date.isoformat() if bucket_date else None
+                
+                # Keep bucket if it's for a different category OR if the date is before from_date
+                if bucket_category_id != category_id_int or (bucket_date_str and bucket_date_str < from_date_str):
+                    kept_rows.append(row)
+                else:
+                    # This bucket should be deleted
+                    bucket_id = row.get('id')
+                    if bucket_id and int(bucket_id) > 0:
+                        deleted_bucket_ids.append(str(bucket_id))
+            
+            deleted_count = original_count - len(kept_rows)
+            
+            if deleted_count > 0:
+                # Save back to Redis
+                _redis_client.setex(
+                    redis_key,
+                    PERSISTENT_CACHE_TTL,
+                    json.dumps(kept_rows, cls=DecimalEncoder)
+                )
+                
+                # Mark bucket IDs as pending deletion
+                if deleted_bucket_ids:
+                    pending_key = f"pending_deletes:{table_name}:{user_id}"
+                    _redis_client.sadd(pending_key, *deleted_bucket_ids)
+                    _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+                
+                # Mark as dirty
+                dirty_key = f"dirty_tables:{user_id}"
+                _redis_client.sadd(dirty_key, table_name)
+                _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                
+                app.logger.info(f"[REDIS] Deleted {deleted_count} future buckets for category {category_id} from {table_name} (from {from_date_str})")
+        
+    except Exception as e:
+        app.logger.error(f"Error deleting future buckets from {table_name} in Redis: {e}")
+
+
 def _add_category_to_redis(table_name, user_id, category_data):
     """
     Add a new category to Redis cache.
@@ -11757,6 +11836,9 @@ def update_recurring_income_inner(data, user_id):
 
             # Step 3: Delete old income entries for today and the future from Redis
             _delete_entry_in_redis('income_entries', user_id, category_id, today, date(9999, 12, 31))
+            
+            # Step 3b: Delete future bucket records for this category
+            _delete_future_buckets_in_redis('recurring_income_buckets', user_id, category_id, today)
 
             # Commit the category changes
             conn.commit()
@@ -12363,6 +12445,9 @@ def update_recurring_expense_inner(data, user_id):
 
             # Step 3: Delete old expense entries for today and the future from Redis
             _delete_entry_in_redis('expense_entries', user_id, category_id, today, date(9999, 12, 31))
+            
+            # Step 3b: Delete future bucket records for this category
+            _delete_future_buckets_in_redis('recurring_expense_buckets', user_id, category_id, today)
 
             # Commit the category changes
             conn.commit()
@@ -13033,6 +13118,9 @@ def update_recurring_ca_expense_inner(data, user_id):
 
             # Step 3: Delete old CA expense entries for today and the future from Redis
             _delete_entry_in_redis('c_expense_entries', user_id, category_id, today, date(9999, 12, 31))
+            
+            # Step 3b: Delete future bucket records for this category
+            _delete_future_buckets_in_redis('recurring_c_expense_buckets', user_id, category_id, today)
 
             conn.commit()
             cursor.close()
