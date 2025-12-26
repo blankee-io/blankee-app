@@ -2033,6 +2033,19 @@
             batchCaBalancesCache = {};
         }
 
+        // Invalidate specific date(s) from batch cache (call after entry updates)
+        function invalidateBatchCacheForDate(fridayDate) {
+            if (fridayDate && batchTotalsCache[fridayDate]) {
+                delete batchTotalsCache[fridayDate];
+            }
+            // Also clear CA balances cache for this date
+            Object.keys(batchCaBalancesCache).forEach(accountId => {
+                if (batchCaBalancesCache[accountId] && batchCaBalancesCache[accountId][fridayDate]) {
+                    delete batchCaBalancesCache[accountId][fridayDate];
+                }
+            });
+        }
+
         // Function to update the total income in the bottom row
         async function updateIncomeTotals() {
             const incomeBottomRow = document.getElementById('income-bottom-row');
@@ -2242,6 +2255,10 @@
 
                         // Optionally update other UI elements if needed
                         updateLocalTotalsRemainders(response.updated_totals_remainders, response.updated_savings_entries);
+                        
+                        // Invalidate all cached totals since recalculation may affect multiple weeks
+                        clearBatchCache();
+                        
                         updateView(["totals"]);
                         showDashboardSpinner(false);
                     } else {
@@ -2275,6 +2292,10 @@
                         // caBalancesDaily = response.updated_ca_balances_d;
                         // caBalancesWeekly = response.updated_ca_balances;
                         // caBalancesMonthly = response.updated_ca_balances_m;
+                        
+                        // Invalidate CA balances cache so fresh data is fetched
+                        batchCaBalancesCache = {};
+                        
                         // Optionally update the UI if needed
                         updateCaBalance();
                         showDashboardSpinner(false);
@@ -3762,6 +3783,8 @@
                             if (typeof refreshNotificationBadge === 'function') {
                                 refreshNotificationBadge();
                             }
+                            // Invalidate batch cache for the affected date so fresh data is fetched
+                            invalidateBatchCacheForDate(endDate);
                             // Defer updateView to next tick to avoid blocking
                             setTimeout(() => {
                                 updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
@@ -3914,6 +3937,8 @@
                             if (typeof refreshNotificationBadge === 'function') {
                                 refreshNotificationBadge();
                             }
+                            // Invalidate batch cache for the affected date so fresh data is fetched
+                            invalidateBatchCacheForDate(endDate);
                             // Defer updateView to next tick to avoid blocking
                             // Don't re-populate tables after immediate DOM update to avoid flickering
                             setTimeout(() => {
