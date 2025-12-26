@@ -1273,11 +1273,8 @@
                 
                 // Check if member_since is in this month
                 if (isMemberSinceMonth(monthObj.date)) {
-                    const badge = document.createElement('div');
-                    badge.className = 'member-since-badge';
-                    badge.title = 'Member Since';
-                    badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
-                    th.appendChild(badge);
+                    // Mark cell so we can position badge after DOM is ready
+                    th.classList.add('has-member-since-badge');
                 }
                 
                 th.addEventListener('click', function() {
@@ -4773,6 +4770,34 @@
                     if (!headerRow) return;
                     outlineCurrentWeekForTable(caTable.id, headerRow.id);
                 });
+                
+                // Position member-since badge outside the table
+                positionMemberSinceBadge();
+            }
+            
+            // Position member-since badge as child of table-container for proper z-index
+            function positionMemberSinceBadge() {
+                // Remove any existing badge
+                document.querySelectorAll('.member-since-badge').forEach(b => b.remove());
+                
+                const cell = document.querySelector('.has-member-since-badge');
+                if (!cell) return;
+                
+                const tableContainer = document.getElementById('table-container');
+                if (!tableContainer) return;
+                
+                const cellRect = cell.getBoundingClientRect();
+                const containerRect = tableContainer.getBoundingClientRect();
+                
+                const badge = document.createElement('div');
+                badge.className = 'member-since-badge';
+                badge.title = 'Member Since';
+                badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
+                
+                badge.style.top = `${cellRect.top - containerRect.top - 5}px`;
+                badge.style.left = `${cellRect.left - containerRect.left - 10}px`;
+                
+                tableContainer.appendChild(badge);
             }
 
             // Helper: outline for a single table
@@ -4811,15 +4836,11 @@
                 const outline = document.createElement('div');
                 outline.className = 'current-week-outline';
 
-                const container = document.getElementById('month-table-container');
-                const parentRect = (container && container.parentElement) ? container.parentElement.getBoundingClientRect() : {left:0,top:0};
-                if (container && container.parentElement) {
-                    container.parentElement.appendChild(outline);
-                } else if (container) {
-                    container.appendChild(outline);
-                } else {
-                    document.body.appendChild(outline);
-                }
+                const tableContainer = document.getElementById('table-container');
+                if (!tableContainer) return;
+                
+                const parentRect = tableContainer.getBoundingClientRect();
+                tableContainer.appendChild(outline);
 
                 outline.style.display = 'block';
                 outline.style.top = `${top - parentRect.top}px`;
@@ -4869,15 +4890,11 @@
                 const outline = document.createElement('div');
                 outline.className = 'current-week-outline';
 
-                const container = document.getElementById('month-table-container');
-                const parentRect = (container && container.parentElement) ? container.parentElement.getBoundingClientRect() : {left:0,top:0};
-                if (container && container.parentElement) {
-                    container.parentElement.appendChild(outline);
-                } else if (container) {
-                    container.appendChild(outline);
-                } else {
-                    document.body.appendChild(outline);
-                }
+                const tableContainer = document.getElementById('table-container');
+                if (!tableContainer) return;
+                
+                const parentRect = tableContainer.getBoundingClientRect();
+                tableContainer.appendChild(outline);
 
                 outline.style.display = 'block';
                 outline.style.top = `${top - parentRect.top}px`;
