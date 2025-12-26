@@ -3751,35 +3751,27 @@
                                 response.updated_buckets.forEach(bucket => {
                                     // Process all returned buckets (server returns only relevant ones)
                                     
-                                    // In dashboard.html, entries don't have id/is_bucket, match by category_id and date
+                                    // In dashboard.html, entries are AGGREGATED by week - find by category_id and week date
+                                    // The bucket.date is a Friday (week key), entries have date = Friday
                                     const bucketEntry = entriesArray.find(e => String(e.category_id) === String(categoryId) && e.date === bucket.date);
                                     if (bucketEntry) {
                                         if (bucket.amount > 0) {
-                                            // Update existing bucket
+                                            // Update existing aggregated entry - this IS the total for the week
+                                            bucketEntry.amount = bucket.amount;
                                             bucketEntry.total_amount = bucket.amount;
                                             bucketEntry.has_bucket = true;
                                             bucketEntry.bucket_amount = bucket.amount;
                                             bucketEntry.original_amount = bucket.original_amount;
                                         } else {
-                                            // Bucket depleted - remove from local state
-                                            const index = entriesArray.indexOf(bucketEntry);
-                                            if (index > -1) {
-                                                entriesArray.splice(index, 1);
-                                            }
+                                            // Bucket depleted - update to 0 (or remove if no manual entries)
+                                            bucketEntry.amount = 0;
+                                            bucketEntry.total_amount = 0;
+                                            bucketEntry.has_bucket = true;
+                                            bucketEntry.bucket_amount = 0;
                                         }
-                                    } else if (bucket.amount > 0) {
-                                        // Bucket was recreated - add it to local state
-                                        entriesArray.push({
-                                            id: bucket.id,
-                                            category_id: parseInt(categoryId),
-                                            date: bucket.date,
-                                            total_amount: bucket.amount,
-                                            is_bucket: 1,
-                                            has_bucket: true,
-                                            bucket_amount: bucket.amount,
-                                            original_amount: bucket.original_amount
-                                        });
                                     }
+                                    // NOTE: Do NOT push new entries for periods not yet in local state
+                                    // Navigation will reload from Redis with correct aggregated values
                                     
                                     // Immediately update the DOM for the bucket cell
                                     const table = type === 'income' ? document.getElementById('income-table') : document.getElementById('expenses-table');
@@ -3829,6 +3821,14 @@
                             }
                             // Invalidate batch cache for the affected date so fresh data is fetched
                             invalidateBatchCacheForDate(fridayDateStr);
+                            // Also invalidate cache for any bucket dates that were affected (may be in different months)
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    if (bucket.date) {
+                                        invalidateBatchCacheForDate(bucket.date);
+                                    }
+                                });
+                            }
                             // Defer updateView to next tick to avoid blocking
                             // Don't call populateIncome/populateExpense since we already updated the DOM
                             setTimeout(() => {
@@ -3903,41 +3903,30 @@
                                     console.log('[DEBUG] Processing bucket:', bucket);
                                     
                                     // Process ALL returned buckets - the server returns only relevant ones
-                                    // (removed the week filter - depleting an entry can affect buckets in other weeks)
-                                    
-                                    // In dashboard.html, entries don't have id/is_bucket, match by category_id and date
+                                    // In dashboard.html, entries are AGGREGATED by week - find by category_id and week date
                                     const bucketEntry = entriesArray.find(e => {
                                         return String(e.category_id) === String(categoryId) && e.date === bucket.date;
                                     });
                                     console.log('[DEBUG] Found bucketEntry:', bucketEntry);
                                     if (bucketEntry) {
                                         if (bucket.amount > 0) {
-                                            // Update existing bucket
+                                            // Update existing aggregated entry - this IS the total for the week
+                                            bucketEntry.amount = bucket.amount;
                                             bucketEntry.total_amount = bucket.amount;
                                             bucketEntry.has_bucket = true;
                                             bucketEntry.bucket_amount = bucket.amount;
                                             bucketEntry.original_amount = bucket.original_amount;
-                                            console.log('[DEBUG] Updated bucketEntry.total_amount to', bucket.amount);
+                                            console.log('[DEBUG] Updated bucketEntry.amount and total_amount to', bucket.amount);
                                         } else {
-                                            // Bucket depleted - remove from local state
-                                            const index = entriesArray.indexOf(bucketEntry);
-                                            if (index > -1) {
-                                                entriesArray.splice(index, 1);
-                                            }
+                                            // Bucket depleted - update to 0 (or remove if no manual entries)
+                                            bucketEntry.amount = 0;
+                                            bucketEntry.total_amount = 0;
+                                            bucketEntry.has_bucket = true;
+                                            bucketEntry.bucket_amount = 0;
                                         }
-                                    } else if (bucket.amount > 0) {
-                                        // Bucket was recreated - add it to local state
-                                        entriesArray.push({
-                                            id: bucket.id,
-                                            category_id: parseInt(categoryId),
-                                            date: bucket.date,
-                                            total_amount: bucket.amount,
-                                            is_bucket: 1,
-                                            has_bucket: true,
-                                            bucket_amount: bucket.amount,
-                                            original_amount: bucket.original_amount
-                                        });
                                     }
+                                    // NOTE: Do NOT push new entries for periods not yet in local state
+                                    // Navigation will reload from Redis with correct aggregated values
                                     
                                     // Immediately update the DOM for the bucket cell
                                     const table = type === 'income' ? document.getElementById('income-table') : document.getElementById('expenses-table');
@@ -3987,6 +3976,14 @@
                             }
                             // Invalidate batch cache for the affected date so fresh data is fetched
                             invalidateBatchCacheForDate(fridayDateStr);
+                            // Also invalidate cache for any bucket dates that were affected (may be in different months)
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    if (bucket.date) {
+                                        invalidateBatchCacheForDate(bucket.date);
+                                    }
+                                });
+                            }
                             // Defer updateView to next tick to avoid blocking
                             // Don't re-populate tables after immediate DOM update to avoid flickering
                             setTimeout(() => {
