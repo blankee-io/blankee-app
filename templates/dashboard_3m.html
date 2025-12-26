@@ -3698,7 +3698,42 @@
                                 response.updated_buckets.forEach(bucket => {
                                     // bucket.date is the period key (month-end date for dashboard_3m)
                                     // bucket.amount is the total for the period (bucket + manual entries)
-                                    // Update the DOM directly - no need to modify local arrays since they're already aggregated
+                                    
+                                    // In dashboard_3m, entries are AGGREGATED by month - find by category_id and month-end date
+                                    let entryList;
+                                    if (type === 'income') {
+                                        entryList = incomeEntries;
+                                    } else if (type === 'expense') {
+                                        entryList = expenseEntries;
+                                    } else if (type === 'ca') {
+                                        entryList = c_expense_entries;
+                                    }
+                                    
+                                    if (entryList) {
+                                        // Find existing aggregated entry for this category/month
+                                        const bucketEntry = entryList.find(e => String(e.category_id) === String(categoryId) && e.date === bucket.date);
+                                        
+                                        if (bucketEntry) {
+                                            if (bucket.amount > 0) {
+                                                // Update existing aggregated entry - this IS the total for the month
+                                                bucketEntry.amount = bucket.amount;
+                                                bucketEntry.total_amount = bucket.amount;
+                                                bucketEntry.has_bucket = true;
+                                                bucketEntry.bucket_amount = bucket.amount;
+                                                bucketEntry.original_amount = bucket.original_amount;
+                                            } else {
+                                                // Bucket depleted - update to 0
+                                                bucketEntry.amount = 0;
+                                                bucketEntry.total_amount = 0;
+                                                bucketEntry.has_bucket = true;
+                                                bucketEntry.bucket_amount = 0;
+                                            }
+                                        }
+                                        // NOTE: Do NOT push new entries for months not yet in local state
+                                        // Navigation will reload from Redis with correct aggregated values
+                                    }
+                                    
+                                    // Update the DOM directly
                                     let table;
                                     if (type === 'income') {
                                         table = document.getElementById('income-table');
@@ -3737,33 +3772,6 @@
                                                             original_amount: bucket.original_amount
                                                         });
                                                     }
-                                                    // Also update local state to remove bucket entries for this period
-                                                    // This ensures UI updates properly without page reload
-                                                    let entryList;
-                                                    if (type === 'income') {
-                                                        entryList = incomeEntries;
-                                                    } else if (type === 'expense') {
-                                                        entryList = expenseEntries;
-                                                    } else if (type === 'ca') {
-                                                        entryList = c_expense_entries;
-                                                    }
-                                                    if (entryList) {
-                                                        // Parse bucket.date to get month range
-                                                        const bucketDateObj = new Date(bucket.date + 'T00:00:00Z');
-                                                        const { startOfMonth, endOfMonth } = calculateMonthRange(bucketDateObj);
-                                                        // Remove all entries for this category in this month that are bucket entries
-                                                        for (let i = entryList.length - 1; i >= 0; i--) {
-                                                            const e = entryList[i];
-                                                            const entryDate = new Date(e.date + 'T00:00:00Z');
-                                                            if (
-                                                                String(e.category_id) === String(categoryId) &&
-                                                                entryDate >= startOfMonth && entryDate <= endOfMonth &&
-                                                                e.is_bucket === 1
-                                                            ) {
-                                                                entryList.splice(i, 1);
-                                                            }
-                                                        }
-                                                    }
                                                     // Clear processed state for the cell
                                                     bucketCell.removeAttribute('data-processed');
                                                     bucketCell.classList.remove('paid');
@@ -3785,6 +3793,14 @@
                             }
                             // Invalidate batch cache for the affected date so fresh data is fetched
                             invalidateBatchCacheForDate(endDate);
+                            // Also invalidate cache for any bucket dates that were affected (may be in different months)
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    if (bucket.date) {
+                                        invalidateBatchCacheForDate(bucket.date);
+                                    }
+                                });
+                            }
                             // Defer updateView to next tick to avoid blocking
                             setTimeout(() => {
                                 updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
@@ -3848,7 +3864,42 @@
                                 response.updated_buckets.forEach(bucket => {
                                     // bucket.date is the period key (month-end date for dashboard_3m)
                                     // bucket.amount is the total for the period (bucket + manual entries)
-                                    // Update the DOM directly - no need to modify local arrays since they're already aggregated
+                                    
+                                    // In dashboard_3m, entries are AGGREGATED by month - find by category_id and month-end date
+                                    let entryList;
+                                    if (type === 'income') {
+                                        entryList = incomeEntries;
+                                    } else if (type === 'expense') {
+                                        entryList = expenseEntries;
+                                    } else if (type === 'ca') {
+                                        entryList = c_expense_entries;
+                                    }
+                                    
+                                    if (entryList) {
+                                        // Find existing aggregated entry for this category/month
+                                        const bucketEntry = entryList.find(e => String(e.category_id) === String(categoryId) && e.date === bucket.date);
+                                        
+                                        if (bucketEntry) {
+                                            if (bucket.amount > 0) {
+                                                // Update existing aggregated entry - this IS the total for the month
+                                                bucketEntry.amount = bucket.amount;
+                                                bucketEntry.total_amount = bucket.amount;
+                                                bucketEntry.has_bucket = true;
+                                                bucketEntry.bucket_amount = bucket.amount;
+                                                bucketEntry.original_amount = bucket.original_amount;
+                                            } else {
+                                                // Bucket depleted - update to 0
+                                                bucketEntry.amount = 0;
+                                                bucketEntry.total_amount = 0;
+                                                bucketEntry.has_bucket = true;
+                                                bucketEntry.bucket_amount = 0;
+                                            }
+                                        }
+                                        // NOTE: Do NOT push new entries for months not yet in local state
+                                        // Navigation will reload from Redis with correct aggregated values
+                                    }
+                                    
+                                    // Update the DOM directly
                                     let table;
                                     if (type === 'income') {
                                         table = document.getElementById('income-table');
@@ -3891,33 +3942,6 @@
                                                         const existingBar = bucketCell.querySelector('.bucket-progress-container');
                                                         if (existingBar) existingBar.remove();
                                                     }
-                                                    // Also update local state to remove bucket entries for this period
-                                                    // This ensures UI updates properly without page reload
-                                                    let entryList;
-                                                    if (type === 'income') {
-                                                        entryList = incomeEntries;
-                                                    } else if (type === 'expense') {
-                                                        entryList = expenseEntries;
-                                                    } else if (type === 'ca') {
-                                                        entryList = c_expense_entries;
-                                                    }
-                                                    if (entryList) {
-                                                        // Parse bucket.date to get month range
-                                                        const bucketDateObj = new Date(bucket.date + 'T00:00:00Z');
-                                                        const { startOfMonth, endOfMonth } = calculateMonthRange(bucketDateObj);
-                                                        // Remove all entries for this category in this month that are bucket entries
-                                                        for (let i = entryList.length - 1; i >= 0; i--) {
-                                                            const e = entryList[i];
-                                                            const entryDate = new Date(e.date + 'T00:00:00Z');
-                                                            if (
-                                                                String(e.category_id) === String(categoryId) &&
-                                                                entryDate >= startOfMonth && entryDate <= endOfMonth &&
-                                                                e.is_bucket === 1
-                                                            ) {
-                                                                entryList.splice(i, 1);
-                                                            }
-                                                        }
-                                                    }
                                                     // Clear processed state for the cell
                                                     bucketCell.removeAttribute('data-processed');
                                                     bucketCell.classList.remove('paid');
@@ -3939,6 +3963,14 @@
                             }
                             // Invalidate batch cache for the affected date so fresh data is fetched
                             invalidateBatchCacheForDate(endDate);
+                            // Also invalidate cache for any bucket dates that were affected (may be in different months)
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    if (bucket.date) {
+                                        invalidateBatchCacheForDate(bucket.date);
+                                    }
+                                });
+                            }
                             // Defer updateView to next tick to avoid blocking
                             // Don't re-populate tables after immediate DOM update to avoid flickering
                             setTimeout(() => {
