@@ -2313,8 +2313,6 @@ input#setup-profile-starting-savings {
 /* Member Since badge on day header */
 .member-since-badge {
     position: absolute;
-    top: -5px;
-    left: -10px;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -2324,7 +2322,7 @@ input#setup-profile-starting-savings {
     border-radius: 50%;
     color: white;
     font-size: 10px;
-    z-index: 20;
+    z-index: 10;
 }
 
 /* Member Since badge positioning for dashboard_d */
@@ -2958,6 +2956,7 @@ td.before-member-since {
     display: flex;
     align-items: flex-start;
     max-width: 875px;
+    position: relative;
 
     /* This will center the container horizontally */
     margin: 10px auto 0; 
@@ -4183,10 +4182,12 @@ td:has(.bucket-progress-container) {
 }
 
 /* Ensure stacking context for outline and negative bubbles */
-#month-table-container,
+#month-table-container {
+    position: relative;
+}
+
 #month-table-container > * {
     position: relative;
-    z-index: 0;
 }
 
 .negative {
@@ -4199,7 +4200,7 @@ td:has(.bucket-progress-container) {
 
 .current-week-outline {
     position: absolute;
-    z-index: 5 !important;
+    z-index: 5;
     background: none;
     border: 4px solid #E45F1C;
     border-radius: 10px;
@@ -4221,7 +4222,7 @@ td:has(.bucket-progress-container) {
     table-layout: fixed; 
 
     /* Ensure borders are visible */
-    border-collapse: collapse; 
+    border-collapse: collapse;
 }
 
 #fridays-table th {
