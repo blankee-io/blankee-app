@@ -32,9 +32,10 @@
         <div class="calendarnavbuttonscontainer">   
             <!-- Single button with repeat icon -->
             <div class="nav-dash-container">
-                <!-- Dropdown toggle button -->
-                <a href="#" id="nav-dropdown-toggle" class="nav-button">
-                    <i id="nav-dropdown-arrow" class="fa-solid fa-caret-right"></i>
+                <!-- Link to Recurring Summary -->
+                <a href="{{ url_for('dashboard_summary') }}" class="nav-button">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Recurring Summary</span>
                 </a>
                 <!-- Inline nav buttons (icons only) -->
                 <div id="nav-inline-buttons">
@@ -59,8 +60,6 @@
                         <span class="nav-tooltip">Year Overview</span>
                     </a>
                 </div>
-                <!-- Dropdown menu (initially hidden) -->
-                <div id="nav-dropdown-menu"></div>
             </div>
             <div class="calendarnavbuttons"> 
                 <a id="previous-nav-btn" class="nav-button" href="javascript:previousWeek()"><i class="fa-solid fa-left"></i><span class="nav-tooltip">Previous Week</span></a>
