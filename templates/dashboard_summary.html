@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Blankee Summary</title>
+    <title>Blankee - Summary</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.css') }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
@@ -538,10 +538,10 @@
                 const lastVal = recentValues[recentValues.length - 1].remainder;
                 
                 if (lastVal > firstVal) {
-                    trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-up"></i>';
+                    trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-up fa-beat"></i>';
                     trendIndicator.className = 'trend-indicator trend-up';
                 } else if (lastVal < firstVal) {
-                    trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-down"></i>';
+                    trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-down fa-beat"></i>';
                     trendIndicator.className = 'trend-indicator trend-down';
                 } else {
                     trendIndicator.innerHTML = '<i class="fa-solid fa-minus"></i>';
