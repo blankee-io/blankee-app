@@ -10328,6 +10328,245 @@ def get_dashboard_y_data():
     }
 
 ############################################################################################
+############################### DASHBOARD SUMMARY ##########################################
+############################################################################################
+
+@app.route('/dashboard_summary')
+@login_required
+def dashboard_summary():
+    """Dashboard showing recurring expense and c_expense categories with bucket progress."""
+    
+    # Get user settings
+    user_data = None
+    redis_key = f"users:v1:{current_user.id}"
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+        except Exception as e:
+            app.logger.error(f"[REDIS ERROR] dashboard_summary user settings: {str(e)}")
+    
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT profile_picture, first_name, last_name, currency_type, landing_page, member_since
+                FROM users WHERE id = %s
+            """, (current_user.id,))
+            user_data = cursor.fetchone()
+            cursor.close()
+    
+    profile_picture = user_data.get('profile_picture') if user_data else None
+    first_name = user_data.get('first_name', '') if user_data else ''
+    last_name = user_data.get('last_name', '') if user_data else ''
+    currency_type = user_data.get('currency_type', 'USD') if user_data else 'USD'
+    landing_page = user_data.get('landing_page', 'dashboard_3m') if user_data else 'dashboard_3m'
+    member_since = user_data.get('member_since') if user_data else None
+    
+    # Get ALL expense categories (for footer)
+    all_expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+    if all_expense_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, name, is_recurring, hidden, is_bud
+                FROM expense_categories
+                WHERE user_id = %s
+                ORDER BY display_order DESC
+            """, (current_user.id,))
+            all_expense_categories = list(cursor.fetchall())
+            cursor.close()
+    
+    # Filter to only recurring ones for summary display
+    expense_categories = [c for c in all_expense_categories if c.get('is_recurring') == 1]
+    
+    # Get expense entries
+    expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
+    if expense_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.is_bucket, ee.original_amount
+                FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+            """, (current_user.id,))
+            expense_entries = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get expense bucket records
+    expense_bucket_records = _get_entries_from_redis('recurring_expense_buckets', current_user.id) or []
+    
+    # Get credit accounts
+    credit_accounts = _get_credit_accounts_from_redis(current_user.id)
+    if credit_accounts is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, name FROM credit_accounts WHERE user_id = %s
+            """, (current_user.id,))
+            credit_accounts = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get ALL c_expense categories (for footer)
+    all_c_expense_categories = _get_categories_from_redis('c_expense_categories', current_user.id)
+    if all_c_expense_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT cec.id, cec.account_id, cec.name, cec.is_recurring, cec.hidden, cec.is_bud, ca.name as account_name
+                FROM c_expense_categories cec
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+                ORDER BY cec.display_order ASC
+            """, (current_user.id,))
+            all_c_expense_categories = list(cursor.fetchall())
+            cursor.close()
+    else:
+        account_names = {a['id']: a['name'] for a in credit_accounts}
+        for cat in all_c_expense_categories:
+            cat['account_name'] = account_names.get(cat.get('account_id'), '')
+    
+    # Filter to only recurring ones for summary display
+    c_expense_categories = [c for c in all_c_expense_categories if c.get('is_recurring') == 1]
+    
+    # Get c_expense entries
+    c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+    if c_expense_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.is_bucket, cee.original_amount
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+            """, (current_user.id,))
+            c_expense_entries = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get c_expense bucket records
+    c_expense_bucket_records = _get_entries_from_redis('recurring_c_expense_buckets', current_user.id) or []
+    
+    # Get ALL income categories (for footer and finding next payday)
+    all_income_categories = _get_categories_from_redis('income_categories', current_user.id)
+    if all_income_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, name, is_recurring, hidden, is_bud
+                FROM income_categories
+                WHERE user_id = %s
+                ORDER BY display_order DESC
+            """, (current_user.id,))
+            all_income_categories = list(cursor.fetchall())
+            cursor.close()
+    
+    # income_categories keeps ALL for footer/payday logic (no filter needed here)
+    
+    # Get income entries
+    income_entries = _get_entries_from_redis('income_entries', current_user.id)
+    if income_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT ie.id, ie.category_id, ie.date, ie.amount
+                FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+            """, (current_user.id,))
+            income_entries = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get daily totals/remainders for current balance calculation
+    totals_remainders_d = _get_entries_from_redis('totals_remainders_d', current_user.id)
+    if totals_remainders_d is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT date, remainder
+                FROM totals_remainders_d
+                WHERE user_id = %s
+                ORDER BY date DESC
+                LIMIT 365
+            """, (current_user.id,))
+            totals_remainders_d = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get weekly totals/remainders for graph
+    totals_remainders_w = _get_entries_from_redis('totals_remainders', current_user.id)
+    if totals_remainders_w is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT date, remainder
+                FROM totals_remainders
+                WHERE user_id = %s
+                ORDER BY date DESC
+                LIMIT 104
+            """, (current_user.id,))
+            totals_remainders_w = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get monthly totals/remainders for graph
+    totals_remainders_m = _get_entries_from_redis('totals_remainders_m', current_user.id)
+    if totals_remainders_m is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT date, remainder
+                FROM totals_remainders_m
+                WHERE user_id = %s
+                ORDER BY date DESC
+                LIMIT 24
+            """, (current_user.id,))
+            totals_remainders_m = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get starting balance
+    starting_balance_data = _get_entries_from_redis('starting_balance', current_user.id)
+    if starting_balance_data is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT amount, date FROM starting_balance WHERE user_id = %s
+            """, (current_user.id,))
+            starting_balance_data = cursor.fetchone()
+            cursor.close()
+    elif isinstance(starting_balance_data, list) and len(starting_balance_data) > 0:
+        starting_balance_data = starting_balance_data[0]
+    
+    return render_template(
+        'dashboard_summary.html',
+        profile_picture=profile_picture,
+        first_name=first_name,
+        last_name=last_name,
+        currency_type=currency_type,
+        landing_page=landing_page,
+        member_since=member_since,
+        # For summary display (recurring only)
+        expense_categories=expense_categories,
+        c_expense_categories=c_expense_categories,
+        # For footer (all categories)
+        expenseCategories=all_expense_categories,
+        incomeCategories=all_income_categories,
+        c_expense_categories_all=all_c_expense_categories,
+        # Entries and other data
+        expense_entries=expense_entries,
+        expense_bucket_records=expense_bucket_records,
+        credit_accounts=credit_accounts,
+        c_expense_entries=c_expense_entries,
+        c_expense_bucket_records=c_expense_bucket_records,
+        income_entries=income_entries,
+        totals_remainders_d=totals_remainders_d,
+        totals_remainders_w=totals_remainders_w,
+        totals_remainders_m=totals_remainders_m,
+        starting_balance=starting_balance_data
+    )
+
+
+############################################################################################
 ############################### PROFILE PAGE ###############################################
 ############################################################################################
 
