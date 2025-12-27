@@ -10440,7 +10440,7 @@ html.modal-open {
 }
 
 #balance-graph-section .summary-section-header {
-    background: #2AAAA8;
+    background: #A9A9A9;
     justify-content: flex-start;
 }
 
@@ -10450,12 +10450,14 @@ html.modal-open {
     font-size: 16px;
 }
 
-.trend-indicator.trend-up {
-    color: #90EE90;
+.trend-indicator.trend-up,
+.trend-indicator.trend-up i {
+    color: #2AAAA8;
 }
 
-.trend-indicator.trend-down {
-    color: #FFB6C1;
+.trend-indicator.trend-down,
+.trend-indicator.trend-down i {
+    color: #E45F1C;
 }
 
 .trend-indicator.trend-flat {
