@@ -553,14 +553,26 @@
             const labels = sortedData.map(item => labelFormat(item.date));
             const values = sortedData.map(item => item.remainder);
             
-            // Find today's index
+            // Find today's index (for monthly view, match by month/year)
             const today = new Date();
             today.setHours(0, 0, 0, 0);
-            let todayIndex = sortedData.findIndex(item => {
-                const itemDate = new Date(item.date);
-                itemDate.setHours(0, 0, 0, 0);
-                return itemDate.getTime() === today.getTime();
-            });
+            let todayIndex = -1;
+            
+            if (view === 'month') {
+                // For monthly view, find the entry matching current month/year
+                const currentMonth = today.getMonth();
+                const currentYear = today.getFullYear();
+                todayIndex = sortedData.findIndex(item => {
+                    return item.date.getMonth() === currentMonth && item.date.getFullYear() === currentYear;
+                });
+            } else {
+                // For day/week views, find exact date match
+                todayIndex = sortedData.findIndex(item => {
+                    const itemDate = new Date(item.date);
+                    itemDate.setHours(0, 0, 0, 0);
+                    return itemDate.getTime() === today.getTime();
+                });
+            }
             
             // If no exact match, find closest date <= today
             if (todayIndex === -1) {
@@ -593,6 +605,44 @@
             const pointColors = values.map(v => v >= 0 ? '#2aaaa8' : '#E45F1C');
             const backgroundColors = values.map(v => v >= 0 ? 'rgba(42, 170, 168, 0.1)' : 'rgba(228, 95, 28, 0.1)');
             
+            // Create point background colors - highlight current month with orange fill
+            const pointBgColors = sortedData.map((item, idx) => {
+                if (idx === todayIndex) return '#E45F1C';
+                return '#fff';
+            });
+            
+            // Create point border colors - keep teal for all including current
+            const pointBorderColors = sortedData.map((item, idx) => {
+                return '#2AAAA8';
+            });
+            
+            // Create point radii - make current month slightly larger
+            const pointRadii = sortedData.map((item, idx) => {
+                if (idx === todayIndex) return 6;
+                return 4;
+            });
+            
+            // Custom plugin to draw "Today" label above current month point
+            const todayLabelPlugin = {
+                id: 'todayLabel',
+                afterDatasetsDraw: function(chart) {
+                    if (todayIndex === -1) return;
+                    
+                    const ctx = chart.ctx;
+                    const meta = chart.getDatasetMeta(0);
+                    const point = meta.data[todayIndex];
+                    
+                    if (point) {
+                        ctx.save();
+                        ctx.font = 'bold 10px sans-serif';
+                        ctx.fillStyle = '#E45F1C';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('Today', point.x, point.y - 12);
+                        ctx.restore();
+                    }
+                }
+            };
+            
             balanceChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -605,12 +655,13 @@
                         borderWidth: 2,
                         fill: true,
                         tension: 0.3,
-                        pointBackgroundColor: '#fff',
-                        pointBorderColor: '#2AAAA8',
-                        pointRadius: 4,
-                        pointHoverRadius: 6
+                        pointBackgroundColor: pointBgColors,
+                        pointBorderColor: pointBorderColors,
+                        pointRadius: pointRadii,
+                        pointHoverRadius: 8
                     }]
                 },
+                plugins: [todayLabelPlugin],
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
