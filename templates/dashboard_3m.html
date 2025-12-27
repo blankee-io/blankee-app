@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Month View</title>
+    <title>Blankee - Month View</title>
     <!-- Link to the custom stylesheet -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <!-- Include Font Awesome for icons -->
@@ -32,9 +32,10 @@
         <div class="calendarnavbuttonscontainer">   
             <!-- Single button with repeat icon -->
             <div class="nav-dash-container">
-                <!-- Dropdown toggle button -->
-                <a href="#" id="nav-dropdown-toggle" class="nav-button">
-                    <i id="nav-dropdown-arrow" class="fa-solid fa-caret-right"></i>
+                <!-- Link to Recurring Summary -->
+                <a href="{{ url_for('dashboard_summary') }}" class="nav-button">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Recurring Summary</span>
                 </a>
                 <!-- Inline nav buttons (icons only) -->
                 <div id="nav-inline-buttons">
@@ -59,8 +60,6 @@
                         <span class="nav-tooltip">Year Overview</span>
                     </a>
                 </div>
-                <!-- Dropdown menu (initially hidden) -->
-                <div id="nav-dropdown-menu"></div>
             </div>
             <div class="calendarnavbuttons" id="calendarnavbuttons"> 
                 <a id="previous-nav-btn" class="nav-button" href="javascript:previousCluster()">
@@ -480,6 +479,10 @@
 
     <!-- Include the recurring modal template -->
     {% include 'loading_modals.html' %}
+    <script>
+        // Show loading screen immediately on page load
+        document.getElementById('loading-screen').style.display = 'flex';
+    </script>
 
     <div id="dashboard-context-menu" class="dashboard-context-menu" style="display: none; position: absolute;">
         <ul>
@@ -570,6 +573,10 @@
 
         let lastFridayRemainder = 0;
 
+        // Batch cache for totals to reduce AJAX calls
+        let batchTotalsCache = {};
+        let batchCaBalancesCache = {};
+
         // Variables to keep track of touch positions
         let touchStartX = null;
         let touchEndX = null;
@@ -620,6 +627,39 @@
 
         // Add this near the other server-side variables
         let member_since = {{ member_since | tojson | safe }};
+
+        // Helper function to check if a month is before member_since
+        function isMonthBeforeMemberSince(monthDate) {
+            if (!member_since) return false;
+            
+            const memberSinceDate = new Date(member_since);
+            memberSinceDate.setUTCHours(0, 0, 0, 0);
+            
+            // Get the last day of the month
+            const dateParts = monthDate.split('-');
+            const year = parseInt(dateParts[0]);
+            const month = parseInt(dateParts[1]) - 1;
+            const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+            
+            return lastDayOfMonth < memberSinceDate;
+        }
+        
+        // Helper function to check if member_since falls within a month
+        function isMemberSinceMonth(monthDate) {
+            if (!member_since) return false;
+            
+            const memberSinceDate = new Date(member_since);
+            memberSinceDate.setUTCHours(0, 0, 0, 0);
+            
+            const dateParts = monthDate.split('-');
+            const year = parseInt(dateParts[0]);
+            const month = parseInt(dateParts[1]) - 1;
+            
+            const firstDayOfMonth = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+            const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+            
+            return memberSinceDate >= firstDayOfMonth && memberSinceDate <= lastDayOfMonth;
+        }
 
         let incomeHiddenActive = true;
         let expenseHiddenActive = true;
@@ -735,6 +775,7 @@
 
         // Function to go to the next month
         function nextCluster() {
+            clearBatchCache();
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-left');
@@ -763,6 +804,7 @@
         }
 
         function goToCurrentCluster() {
+            clearBatchCache();
             document.getElementById('loading-screen').style.display = 'flex';
             const today = new Date();
             const currentMonth = today.getUTCMonth(); // 0 = Jan, 1 = Feb, ..., 11 = Dec
@@ -782,6 +824,7 @@
 
         // Function to go to the previous month
         function previousCluster() {
+            clearBatchCache();
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-right');
@@ -1217,9 +1260,22 @@
             months.forEach(monthObj => {
                 const th = document.createElement('th');
                 th.setAttribute('data-date', monthObj.date);
+                th.style.position = 'relative';
                 th.textContent = monthObj.label;
                 th.style.cursor = 'pointer';
                 th.title = 'Click to view this month in weekly view';
+                
+                // Check if month is before member_since
+                if (isMonthBeforeMemberSince(monthObj.date)) {
+                    th.classList.add('before-member-since');
+                }
+                
+                // Check if member_since is in this month
+                if (isMemberSinceMonth(monthObj.date)) {
+                    // Mark cell so we can position badge after DOM is ready
+                    th.classList.add('has-member-since-badge');
+                }
+                
                 th.addEventListener('click', function() {
                     // Navigate to dashboard.html with the specific year and month
                     // Parse the date string properly to avoid timezone issues
@@ -1239,11 +1295,13 @@
                 const thIncome = document.createElement('th');
                 thIncome.setAttribute('data-date', monthObj.date);
                 thIncome.textContent = monthObj.label;
+                if (isMonthBeforeMemberSince(monthObj.date)) thIncome.classList.add('before-member-since');
                 incomeHeaderRow.appendChild(thIncome);
 
                 const thExpenses = document.createElement('th');
                 thExpenses.setAttribute('data-date', monthObj.date);
                 thExpenses.textContent = monthObj.label;
+                if (isMonthBeforeMemberSince(monthObj.date)) thExpenses.classList.add('before-member-since');
                 expensesHeaderRow.appendChild(thExpenses);
             });
 
@@ -1258,6 +1316,7 @@
                     const thCa = document.createElement('th');
                     thCa.setAttribute('data-date', monthObj.date);
                     thCa.textContent = ""; // Remove the number
+                    if (isMonthBeforeMemberSince(monthObj.date)) thCa.classList.add('before-member-since');
                     caHeaderRow.appendChild(thCa);
                 });
             });
@@ -1290,6 +1349,7 @@
             months.forEach(monthObj => {
                 const lastRemainderTd = document.createElement('td');
                 lastRemainderTd.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) lastRemainderTd.classList.add('before-member-since');
                 lastRemainderRowRight.appendChild(lastRemainderTd);
             });
         }
@@ -1306,6 +1366,7 @@
             months.forEach(monthObj => {
                 const remainderTdRight = document.createElement('td');
                 remainderTdRight.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) remainderTdRight.classList.add('before-member-since');
                 remainderRowRight.appendChild(remainderTdRight);
             });
         }
@@ -1318,6 +1379,7 @@
                 const monthDate = monthObj.date;
                 const savingsTd = document.createElement('td');
                 savingsTd.setAttribute('data-date', monthDate);
+                if (isMonthBeforeMemberSince(monthDate)) savingsTd.classList.add('before-member-since');
 
                 // Find the savings entry for this date
                 const entry = savingsEntries.find(e => {
@@ -1385,6 +1447,7 @@
                 months.forEach(monthObj => {
                     const td = document.createElement('td');
                     td.setAttribute('data-date', monthObj.date);
+                    if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
 
                     const input = document.createElement('input');
                     input.type = 'text';
@@ -1394,9 +1457,9 @@
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
-                    // If the date is older than the cutoff, disable the input
+                    // If the date is older than the cutoff OR before member_since, disable the input
                     const monthDate = new Date(monthObj.date);
-                    if (monthDate < cutoffDate) {
+                    if (monthDate < cutoffDate || isMonthBeforeMemberSince(monthObj.date)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
@@ -1447,6 +1510,7 @@
                 months.forEach(monthObj => {
                     const td = document.createElement('td');
                     td.setAttribute('data-date', monthObj.date);
+                    if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
 
                     const input = document.createElement('input');
                     input.type = 'text';
@@ -1456,9 +1520,9 @@
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
-                    // If the date is older than the cutoff, disable the input
+                    // If the date is older than the cutoff OR before member_since, disable the input
                     const monthDate = new Date(monthObj.date);
-                    if (monthDate < cutoffDate) {
+                    if (monthDate < cutoffDate || isMonthBeforeMemberSince(monthObj.date)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
@@ -1519,6 +1583,7 @@
                     months.forEach(monthObj => {
                         const td = document.createElement('td');
                         td.setAttribute('data-date', monthObj.date);
+                        if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
 
                         const input = document.createElement('input');
                         input.type = 'text';
@@ -1528,9 +1593,9 @@
                         input.style.width = '100%';
                         input.style.textAlign = 'right';
 
-                        // If the date is older than the cutoff, disable the input
+                        // If the date is older than the cutoff OR before member_since, disable the input
                         const monthDate = new Date(monthObj.date);
-                        if (monthDate < cutoffDate) {
+                        if (monthDate < cutoffDate || isMonthBeforeMemberSince(monthObj.date)) {
                             input.disabled = true;
                             input.classList.add('auto-disable');
                             td.classList.add('readonly-cell');
@@ -1568,6 +1633,7 @@
             months.forEach(monthObj => {
                 const td = document.createElement('td');
                 td.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
                 td.textContent = currencySymbol + '0.00';
                 incomeBottomRow.appendChild(td);
             });
@@ -1596,11 +1662,13 @@
             months.forEach(monthObj => {
                 const td = document.createElement('td');
                 td.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
                 td.textContent = currencySymbol + '0.00';
                 expensesBottomRow.appendChild(td);
 
                 const gapTd = document.createElement('td');
                 gapTd.setAttribute('data-date', monthObj.date);
+                if (isMonthBeforeMemberSince(monthObj.date)) gapTd.classList.add('before-member-since');
                 expenseGapRow.appendChild(gapTd);
             });
 
@@ -1625,6 +1693,7 @@
                 months.forEach(monthObj => {
                     const td = document.createElement('td');
                     td.setAttribute('data-date', monthObj.date);
+                    if (isMonthBeforeMemberSince(monthObj.date)) td.classList.add('before-member-since');
                     td.textContent = currencySymbol + '0.00';
                     caBottomRow.appendChild(td);
                 });
@@ -1872,73 +1941,151 @@
 
         /////////////////////////// Data Updates //////////////////////////////
 
+        // Helper function to collect all dates from visible cells
+        function collectAllDates() {
+            const dates = new Set();
+            
+            // Collect from income bottom row
+            const incomeBottomRow = document.getElementById('income-bottom-row');
+            if (incomeBottomRow) {
+                const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
+                if (lastRemainderRowRight) {
+                    for (let i = 0; i < incomeBottomRow.children.length; i++) {
+                        const cell = lastRemainderRowRight.children[i];
+                        const date = cell ? cell.getAttribute('data-date') : null;
+                        if (date && date !== 'null') dates.add(date);
+                    }
+                }
+            }
+            
+            // Collect from expense bottom row
+            const expensesBottomRow = document.getElementById('expenses-bottom-row');
+            if (expensesBottomRow) {
+                for (let i = 0; i < expensesBottomRow.children.length; i++) {
+                    const cell = expensesBottomRow.children[i];
+                    const date = cell ? cell.getAttribute('data-date') : null;
+                    if (date && date !== 'null') dates.add(date);
+                }
+            }
+            
+            // Collect from remainder row
+            const remainderRowRight = document.getElementById('remainder-row-right');
+            if (remainderRowRight) {
+                for (let i = 0; i < remainderRowRight.children.length; i++) {
+                    const cell = remainderRowRight.children[i];
+                    const date = cell ? cell.getAttribute('data-date') : null;
+                    if (date && date !== 'null') dates.add(date);
+                }
+            }
+            
+            return Array.from(dates);
+        }
+
+        // Batch fetch all monthly totals at once
+        async function fetchBatchTotals(dates) {
+            if (!dates || dates.length === 0) return;
+            
+            // Check if all dates are already cached
+            const uncachedDates = dates.filter(d => !batchTotalsCache[d]);
+            if (uncachedDates.length === 0) return;
+            
+            try {
+                const response = await $.ajax({
+                    url: '/get_month_totals_batch',
+                    method: 'GET',
+                    data: { dates: uncachedDates.join(',') }
+                });
+                
+                if (response && response.status === 'success' && response.data) {
+                    Object.assign(batchTotalsCache, response.data);
+                }
+            } catch (error) {
+                console.error('Error fetching batch totals:', error);
+            }
+        }
+
+        // Batch fetch all CA balances at once
+        async function fetchBatchCaBalances(dates) {
+            if (!dates || dates.length === 0) return;
+            
+            try {
+                const response = await $.ajax({
+                    url: '/get_ca_balances_3m_batch',
+                    method: 'GET',
+                    data: { dates: dates.join(',') }
+                });
+                
+                if (response && response.status === 'success' && response.data) {
+                    batchCaBalancesCache = response.data;
+                }
+            } catch (error) {
+                console.error('Error fetching batch CA balances:', error);
+            }
+        }
+
+        // Clear batch cache (call when navigating months)
+        function clearBatchCache() {
+            batchTotalsCache = {};
+            batchCaBalancesCache = {};
+        }
+
+        // Invalidate specific date(s) from batch cache (call after entry updates)
+        function invalidateBatchCacheForDate(fridayDate) {
+            if (fridayDate && batchTotalsCache[fridayDate]) {
+                delete batchTotalsCache[fridayDate];
+            }
+            // Also clear CA balances cache for this date
+            Object.keys(batchCaBalancesCache).forEach(accountId => {
+                if (batchCaBalancesCache[accountId] && batchCaBalancesCache[accountId][fridayDate]) {
+                    delete batchCaBalancesCache[accountId][fridayDate];
+                }
+            });
+        }
+
         // Function to update the total income in the bottom row
-        function updateIncomeTotals() {
-
-
+        async function updateIncomeTotals() {
             const incomeBottomRow = document.getElementById('income-bottom-row');
             const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
             
             if (!incomeBottomRow || !lastRemainderRowRight) {
-                console.warn('Income bottom row or last remainder row not found');
-                return Promise.resolve();
+                return;
             }
+            
+            // Collect all dates and fetch them in batch
+            const dates = collectAllDates();
+            await fetchBatchTotals(dates);
             
             const numberOfColumns = incomeBottomRow.children.length;
 
-            // Create array of promises for all AJAX requests
-            const promises = [];
             for (let i = 0; i < numberOfColumns; i++) {
                 const tdElement = incomeBottomRow.children[i];
                 const lastRemainderCell = lastRemainderRowRight.children[i];
                 const date = lastRemainderCell ? lastRemainderCell.getAttribute('data-date') : null;
 
-                if (!date) continue;
+                if (!date || date === 'null') continue;
 
-                // Fetch both income and last remainder
-                const incomePromise = $.ajax({
-                    url: '/get_total_income_3m',
-                    method: 'GET',
-                    data: { date: date }
-                });
-
-                const lastRemainderPromise = $.ajax({
-                    url: '/get_last_remainder_3m',
-                    method: 'GET',
-                    data: { date: date }
-                });
-
-                promises.push(
-                    Promise.all([incomePromise, lastRemainderPromise]).then(function([incomeResponse, lastRemainderResponse]) {
-                        const incomeTotal = (incomeResponse && incomeResponse.status === 'success') ? parseFloat(incomeResponse.total_income) || 0 : 0;
-                        const lastRemainder = (lastRemainderResponse && lastRemainderResponse.status === 'success') ? parseFloat(lastRemainderResponse.last_remainder) || 0 : 0;
-                        const displayIncome = incomeTotal - lastRemainder;
-                        tdElement.textContent = formatCurrency(displayIncome);
-                    }).catch(function(error) {
-                        console.error('Error fetching income total for date:', date, error);
-                        tdElement.textContent = formatCurrency(0);
-                    })
-                );
+                // Get from batch cache
+                const cached = batchTotalsCache[date] || {};
+                const incomeTotal = parseFloat(cached.total_income || 0);
+                const lastRemainder = parseFloat(cached.last_month_remainder || 0);
+                const displayIncome = incomeTotal - lastRemainder;
+                tdElement.textContent = formatCurrency(displayIncome);
             }
-            
-            // Wait for all requests to complete
-            return Promise.all(promises);
         }
 
-        function updateExpenseTotals() {
-
-
+        async function updateExpenseTotals() {
             const expensesBottomRow = document.getElementById('expenses-bottom-row');
             
             if (!expensesBottomRow) {
-                console.warn('Expenses bottom row not found');
-                return Promise.resolve();
+                return;
             }
+            
+            // Ensure batch cache is populated
+            const dates = collectAllDates();
+            await fetchBatchTotals(dates);
             
             const numberOfColumns = expensesBottomRow.children.length;
 
-            // Create array of promises for all AJAX requests
-            const promises = [];
             for (let i = 0; i < numberOfColumns; i++) {
                 const tdElement = expensesBottomRow.children[i];
                 const date = tdElement ? tdElement.getAttribute('data-date') : null;
@@ -1947,37 +2094,23 @@
                     continue;
                 }
 
-                promises.push(
-                    $.ajax({
-                        url: '/get_total_expenses_3m',
-                        method: 'GET',
-                        data: { date: date }
-                    }).then(function(response) {
-                        if (response && response.status === 'success') {
-                            const expenseTotal = parseFloat(response.total_expenses) || 0;
-                            tdElement.textContent = formatCurrency(expenseTotal);
-                        } else {
-                            tdElement.textContent = formatCurrency(0);
-                        }
-                    }).catch(function(error) {
-                        console.error('Error fetching expense total for date:', date, error);
-                        tdElement.textContent = formatCurrency(0);
-                    })
-                );
+                // Get from batch cache
+                const cached = batchTotalsCache[date] || {};
+                const expenseTotal = parseFloat(cached.total_expenses || 0);
+                tdElement.textContent = formatCurrency(expenseTotal);
             }
-            
-            // Wait for all requests to complete
-            return Promise.all(promises);
         }
 
-        function updateCaBalance() {
-            const allPromises = [];
-            
+        async function updateCaBalance() {
             const caTables = document.querySelectorAll('table[id^="cas-table-"]');
             
             if (caTables.length === 0) {
-                return Promise.resolve();
+                return;
             }
+            
+            // Collect all dates and fetch CA balances in batch
+            const dates = collectAllDates();
+            await fetchBatchCaBalances(dates);
             
             caTables.forEach(caTable => {
                 const accountId = caTable.id.replace('cas-table-', '');
@@ -1994,123 +2127,86 @@
                         continue;
                     }
 
-                    // Fetch the CA balance for this account and date from the server (monthly)
-                    allPromises.push(
-                        $.ajax({
-                            url: '/get_ca_balance_3m',
-                            method: 'GET',
-                            data: { account_id: accountId, date: date }
-                        }).then(function(response) {
-                            if (response && response.status === 'success') {
-                                const balance = parseFloat(response.balance) || 0;
-                                tdElement.textContent = formatCurrency(balance);
-                            } else {
-                                tdElement.textContent = currencySymbol + '0.00';
-                            }
-                        }).catch(function(error) {
-                            console.error('Error fetching CA balance for account:', accountId, 'date:', date, error);
-                            tdElement.textContent = currencySymbol + '0.00';
-                        })
-                    );
+                    // Get from batch cache
+                    const accountCache = batchCaBalancesCache[accountId] || {};
+                    const balance = parseFloat(accountCache[date] || 0);
+                    tdElement.textContent = formatCurrency(balance);
                 }
             });
-            
-            // Wait for all requests to complete
-            return Promise.all(allPromises);
         }
 
         // Function to update the remainder and last remainder rows
-        function updateRemainderRows() {
-
-
+        async function updateRemainderRows() {
             const remainderRowRight = document.getElementById('remainder-row-right');
             const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
+            
+            if (!remainderRowRight || !lastRemainderRowRight) {
+                return;
+            }
+            
+            // Ensure batch cache is populated
+            const dates = collectAllDates();
+            await fetchBatchTotals(dates);
+            
             const numberOfColumns = remainderRowRight.children.length;
 
-            // Create array of promises for all AJAX requests
-            const promises = [];
-            
             for (let i = 0; i < numberOfColumns; i++) {
                 const remainderCell = remainderRowRight.children[i];
                 const lastRemainderCell = lastRemainderRowRight.children[i];
                 const date = remainderCell.getAttribute('data-date');
 
-                // Fetch both last remainder and remainder for this date
-                const lastRemainderPromise = $.ajax({
-                    url: '/get_last_remainder_3m',
-                    method: 'GET',
-                    data: { date: date }
-                });
+                if (!date || date === 'null') continue;
 
-                const remainderPromise = $.ajax({
-                    url: '/get_remainder_3m',
-                    method: 'GET',
-                    data: { date: date }
-                });
+                // Get from batch cache
+                const cached = batchTotalsCache[date] || {};
+                const lastRemainder = parseFloat(cached.last_month_remainder || 0);
+                const remainder = parseFloat(cached.remainder || 0);
 
-                // Wait for both promises and update the cells
-                promises.push(
-                    Promise.all([lastRemainderPromise, remainderPromise]).then(function([lastRemainderResponse, remainderResponse]) {
-                        const lastRemainder = (lastRemainderResponse.status === 'success') 
-                            ? parseFloat(lastRemainderResponse.last_remainder) || 0 
-                            : 0;
-                        const remainder = (remainderResponse.status === 'success') 
-                            ? parseFloat(remainderResponse.remainder) || 0 
-                            : 0;
+                // Format values
+                const formattedLast = formatCurrency(lastRemainder);
+                const formattedRemainder = formatCurrency(remainder);
 
-                        // Format values
-                        const formattedLast = formatCurrency(lastRemainder);
-                        const formattedRemainder = formatCurrency(remainder);
+                // Determine threshold class
+                let thresholdClass = '';
+                let applyThresholdClass = true;
+                if (member_since) {
+                    const cellDate = new Date(remainderCell.getAttribute('data-date'));
+                    const memberSinceDate = new Date(member_since);
+                    if (cellDate < memberSinceDate) {
+                        applyThresholdClass = false;
+                    }
+                }
+                if (applyThresholdClass) {
+                    if (remainder < 0) {
+                        thresholdClass = 'negative';
+                    } else if (remainder < balance_threshold) {
+                        thresholdClass = 'below-threshold';
+                    } else {
+                        thresholdClass = 'above-threshold';
+                    }
+                }
 
-                        // Determine threshold class
-                        let thresholdClass = '';
-                        let applyThresholdClass = true;
-                        if (member_since) {
-                            const cellDate = new Date(remainderCell.getAttribute('data-date'));
-                            const memberSinceDate = new Date(member_since);
-                            if (cellDate < memberSinceDate) {
-                                applyThresholdClass = false;
-                            }
-                        }
-                        if (applyThresholdClass) {
-                            if (remainder < 0) {
-                                thresholdClass = 'negative';
-                            } else if (remainder < balance_threshold) {
-                                thresholdClass = 'below-threshold';
-                            } else {
-                                thresholdClass = 'above-threshold';
-                            }
-                        }
+                // Only update if values have changed
+                if (lastRemainderCell.textContent !== formattedLast) {
+                    lastRemainderCell.textContent = formattedLast;
+                }
 
-                        // Only update if values have changed
-                        if (lastRemainderCell.textContent !== formattedLast) {
-                            lastRemainderCell.textContent = formattedLast;
-                        }
+                if (remainderCell.textContent !== formattedRemainder) {
+                    remainderCell.textContent = formattedRemainder;
+                }
 
-                        if (remainderCell.textContent !== formattedRemainder) {
-                            remainderCell.textContent = formattedRemainder;
-                        }
-
-                        // Only update classes if needed
-                        const currentClass = remainderCell.classList.contains('negative') ? 'negative' 
-                            : remainderCell.classList.contains('below-threshold') ? 'below-threshold'
-                            : remainderCell.classList.contains('above-threshold') ? 'above-threshold' : '';
-                        
-                        if (currentClass !== thresholdClass) {
-                            remainderCell.classList.remove('below-threshold', 'negative', 'above-threshold');
-                            if (thresholdClass) {
-                                remainderCell.classList.add(thresholdClass);
-                            }
-                        }
-                    }).catch(function() {
-                        lastRemainderCell.textContent = formatCurrency(0);
-                        remainderCell.textContent = formatCurrency(0);
-                    })
-                );
+                // Only update classes if needed
+                const currentClass = remainderCell.classList.contains('negative') ? 'negative' 
+                    : remainderCell.classList.contains('below-threshold') ? 'below-threshold'
+                    : remainderCell.classList.contains('above-threshold') ? 'above-threshold' : '';
+                
+                if (currentClass !== thresholdClass) {
+                    remainderCell.classList.remove('below-threshold', 'negative', 'above-threshold');
+                    if (thresholdClass) {
+                        remainderCell.classList.add(thresholdClass);
+                    }
+                }
             }
-            
-            // Wait for all requests to complete
-            return Promise.all(promises);
         }
 
         function updateLocalTotalsRemainders(updatedData, updatedSavings = null) {
@@ -2155,6 +2251,10 @@
 
                         // Optionally update other UI elements if needed
                         updateLocalTotalsRemainders(response.updated_totals_remainders, response.updated_savings_entries);
+                        
+                        // Invalidate all cached totals since recalculation may affect multiple weeks
+                        clearBatchCache();
+                        
                         updateView(["totals"]);
                         showDashboardSpinner(false);
                     } else {
@@ -2188,6 +2288,10 @@
                         // caBalancesDaily = response.updated_ca_balances_d;
                         // caBalancesWeekly = response.updated_ca_balances;
                         // caBalancesMonthly = response.updated_ca_balances_m;
+                        
+                        // Invalidate CA balances cache so fresh data is fetched
+                        batchCaBalancesCache = {};
+                        
                         // Optionally update the UI if needed
                         updateCaBalance();
                         showDashboardSpinner(false);
@@ -2202,6 +2306,49 @@
             });
         }
 
+        // Helper function to update bucket progress bar in a cell
+        // Shows red (spent) on left and green (remaining) on right
+        function updateBucketProgressBar(cell, entry) {
+            // Remove any existing progress bar
+            const existingBar = cell.querySelector('.bucket-progress-container');
+            if (existingBar) {
+                existingBar.remove();
+            }
+            
+            // Only add progress bar if entry has bucket info
+            if (!entry || !entry.has_bucket) return;
+            
+            const remainingAmount = parseFloat(entry.bucket_amount || 0);
+            const originalAmount = parseFloat(entry.original_amount || 0);
+            
+            // Don't show if no original amount (avoid division by zero)
+            if (originalAmount <= 0) return;
+            
+            // Calculate spent amount and percentage
+            const spentAmount = originalAmount - remainingAmount;
+            const spentPercent = Math.min((spentAmount / originalAmount) * 100, 100);
+            
+            // Create container
+            const container = document.createElement('div');
+            container.className = 'bucket-progress-container';
+            
+            // Create spent (red) bar - what has been used
+            const spentBar = document.createElement('div');
+            spentBar.className = 'bucket-progress-spent';
+            spentBar.style.width = spentPercent + '%';
+            
+            // Create remaining (green) bar - what's left
+            const remainingBar = document.createElement('div');
+            remainingBar.className = 'bucket-progress-remaining';
+            
+            container.appendChild(spentBar);
+            container.appendChild(remainingBar);
+            
+            // Ensure cell has relative positioning
+            cell.style.position = 'relative';
+            cell.appendChild(container);
+        }
+
         function populateIncomeData() {
             const monthEntriesMap = {}; // Map to track entries for each month-category
 
@@ -2214,12 +2361,18 @@
                 const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                 if (!monthEntriesMap[monthKey]) {
-                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [] };
+                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                 // Convert processed to boolean and check if all entries are processed
                 const isEntryProcessed = Number(entry.processed) === 1;
                 monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
+                // Track bucket info
+                if (entry.has_bucket) {
+                    monthEntriesMap[monthKey].has_bucket = true;
+                    monthEntriesMap[monthKey].bucket_amount += parseFloat(entry.bucket_amount) || 0;
+                    monthEntriesMap[monthKey].original_amount = parseFloat(entry.original_amount) || 0;
+                }
             });
 
             // For each row in the income month table
@@ -2245,10 +2398,15 @@
                         } else {
                             td.classList.remove('paid');
                         }
+                        // Update bucket progress bar
+                        updateBucketProgressBar(td, monthEntriesMap[monthKey]);
                     } else {
                         if (input) input.value = '';
                         td.removeAttribute('data-processed');
                         td.classList.remove('paid');
+                        // Remove any existing progress bar
+                        const existingBar = td.querySelector('.bucket-progress-container');
+                        if (existingBar) existingBar.remove();
                     }
                 });
             });
@@ -2266,12 +2424,18 @@
                 const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                 if (!monthEntriesMap[monthKey]) {
-                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [] };
+                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                 // Convert processed to boolean and check if all entries are processed
                 const isEntryProcessed = Number(entry.processed) === 1;
                 monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
+                // Track bucket info
+                if (entry.has_bucket) {
+                    monthEntriesMap[monthKey].has_bucket = true;
+                    monthEntriesMap[monthKey].bucket_amount += parseFloat(entry.bucket_amount) || 0;
+                    monthEntriesMap[monthKey].original_amount = parseFloat(entry.original_amount) || 0;
+                }
             });
 
             // For each row in the expense month table
@@ -2297,10 +2461,15 @@
                         } else {
                             td.classList.remove('paid');
                         }
+                        // Update bucket progress bar
+                        updateBucketProgressBar(td, monthEntriesMap[monthKey]);
                     } else {
                         if (input) input.value = '';
                         td.removeAttribute('data-processed');
                         td.classList.remove('paid');
+                        // Remove any existing progress bar
+                        const existingBar = td.querySelector('.bucket-progress-container');
+                        if (existingBar) existingBar.remove();
                     }
                 });
             });
@@ -2322,12 +2491,18 @@
                     const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                     if (!monthEntriesMap[monthKey]) {
-                        monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [] };
+                        monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
                     }
                     monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                     // Convert processed to boolean and check if all entries are processed
                     const isEntryProcessed = Number(entry.processed) === 1;
                     monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
+                    // Track bucket info
+                    if (entry.has_bucket) {
+                        monthEntriesMap[monthKey].has_bucket = true;
+                        monthEntriesMap[monthKey].bucket_amount += parseFloat(entry.bucket_amount) || 0;
+                        monthEntriesMap[monthKey].original_amount = parseFloat(entry.original_amount) || 0;
+                    }
                 });
 
                 // For each row in the CA month table
@@ -2353,10 +2528,15 @@
                             } else {
                                 td.classList.remove('paid');
                             }
+                            // Update bucket progress bar
+                            updateBucketProgressBar(td, monthEntriesMap[monthKey]);
                         } else {
                             if (input) input.value = '';
                             td.removeAttribute('data-processed');
                             td.classList.remove('paid');
+                            // Remove any existing progress bar
+                            const existingBar = td.querySelector('.bucket-progress-container');
+                            if (existingBar) existingBar.remove();
                         }
                     });
                 });
@@ -3476,7 +3656,8 @@
             const td = input.parentElement;
             
             showDashboardSpinner(true);
-            const newValue = input.value.trim();
+            // Strip currency symbol if present (needed when called after blur reformats the value)
+            const newValue = input.value.trim().replace(currencySymbol, '').trim();
 
             const categoryId = td.closest('tr').getAttribute('data-category-id');
             const date = new Date(td.getAttribute('data-date'));
@@ -3489,7 +3670,8 @@
                     category_id: categoryId,
                     start_date: startDate,
                     end_date: endDate,
-                    type: type
+                    type: type,
+                    aggregation: 'month'
                 };
                 $.ajax({
                     url: "/delete-week-entry",
@@ -3506,19 +3688,124 @@
                             td.classList.remove('paid');
                             
                             updateLocalState(type, categoryId, startDate, 0, true, endDate);
+                            
+                            // Update bucket entries if returned from server
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    // bucket.date is the period key (month-end date for dashboard_3m)
+                                    // bucket.amount is the total for the period (bucket + manual entries)
+                                    
+                                    // In dashboard_3m, entries are AGGREGATED by month - find by category_id and month-end date
+                                    let entryList;
+                                    if (type === 'income') {
+                                        entryList = incomeEntries;
+                                    } else if (type === 'expense') {
+                                        entryList = expenseEntries;
+                                    } else if (type === 'ca') {
+                                        entryList = c_expense_entries;
+                                    }
+                                    
+                                    if (entryList) {
+                                        // Find existing aggregated entry for this category/month
+                                        const bucketEntry = entryList.find(e => String(e.category_id) === String(categoryId) && e.date === bucket.date);
+                                        
+                                        if (bucketEntry) {
+                                            if (bucket.amount > 0) {
+                                                // Update existing aggregated entry - this IS the total for the month
+                                                bucketEntry.amount = bucket.amount;
+                                                bucketEntry.total_amount = bucket.amount;
+                                                bucketEntry.has_bucket = true;
+                                                bucketEntry.bucket_amount = bucket.amount;
+                                                bucketEntry.original_amount = bucket.original_amount;
+                                            } else {
+                                                // Bucket depleted - update to 0
+                                                bucketEntry.amount = 0;
+                                                bucketEntry.total_amount = 0;
+                                                bucketEntry.has_bucket = true;
+                                                bucketEntry.bucket_amount = 0;
+                                            }
+                                        }
+                                        // NOTE: Do NOT push new entries for months not yet in local state
+                                        // Navigation will reload from Redis with correct aggregated values
+                                    }
+                                    
+                                    // Update the DOM directly
+                                    let table;
+                                    if (type === 'income') {
+                                        table = document.getElementById('income-table');
+                                    } else if (type === 'expense') {
+                                        table = document.getElementById('expenses-table');
+                                    } else if (type === 'ca') {
+                                        // For CA, get the table from the closest parent
+                                        const caTable = td.closest('table[id^="cas-table-"]');
+                                        table = caTable;
+                                    }
+                                    const bucketRow = table ? table.querySelector(`tr[data-category-id="${categoryId}"]`) : null;
+                                    if (bucketRow) {
+                                        const bucketCell = Array.from(bucketRow.querySelectorAll('td')).find(tdCell => {
+                                            const cellDate = tdCell.getAttribute('data-date');
+                                            return cellDate === bucket.date;
+                                        });
+                                        if (bucketCell) {
+                                            const bucketInput = bucketCell.querySelector('input');
+                                            if (bucketInput) {
+                                                if (bucket.amount > 0) {
+                                                    bucketInput.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    // Update progress bar
+                                                    updateBucketProgressBar(bucketCell, {
+                                                        has_bucket: true,
+                                                        bucket_amount: bucket.amount,
+                                                        original_amount: bucket.original_amount
+                                                    });
+                                                } else {
+                                                    // Bucket fully depleted - clear the value but keep progress bar at 100%
+                                                    bucketInput.value = '';
+                                                    // Show progress bar at 100% spent (all red)
+                                                    if (bucket.original_amount > 0) {
+                                                        updateBucketProgressBar(bucketCell, {
+                                                            has_bucket: true,
+                                                            bucket_amount: 0, // 0 remaining = 100% spent
+                                                            original_amount: bucket.original_amount
+                                                        });
+                                                    }
+                                                    // Clear processed state for the cell
+                                                    bucketCell.removeAttribute('data-processed');
+                                                    bucketCell.classList.remove('paid');
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
+                            // Refresh notification badge (bucket depletion may have created a notification)
+                            if (typeof refreshNotificationBadge === 'function') {
+                                refreshNotificationBadge();
+                            }
+                            // Invalidate batch cache for the affected date so fresh data is fetched
+                            invalidateBatchCacheForDate(endDate);
+                            // Also invalidate cache for any bucket dates that were affected (may be in different months)
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    if (bucket.date) {
+                                        invalidateBatchCacheForDate(bucket.date);
+                                    }
+                                });
+                            }
                             // Defer updateView to next tick to avoid blocking
                             setTimeout(() => {
                                 updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                             }, 0);
-                        } else {
                         }
+                        showDashboardSpinner(false);
                     },
                     error: function() {
+                        showDashboardSpinner(false);
                     }
                 });
             } else {
@@ -3539,7 +3826,8 @@
                     start_date: startDate,
                     end_date: endDate,
                     amount: amount,
-                    type: type
+                    type: type,
+                    aggregation: 'month'
                 };
                 $.ajax({
                     url: "/update-week-entry",
@@ -3566,19 +3854,129 @@
                                 }
                             }
                             updateLocalState(type, categoryId, endDate, amount, amount === 0, endDate);
+                            
+                            // Update bucket entries if returned from server
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    // bucket.date is the period key (month-end date for dashboard_3m)
+                                    // bucket.amount is the total for the period (bucket + manual entries)
+                                    
+                                    // In dashboard_3m, entries are AGGREGATED by month - find by category_id and month-end date
+                                    let entryList;
+                                    if (type === 'income') {
+                                        entryList = incomeEntries;
+                                    } else if (type === 'expense') {
+                                        entryList = expenseEntries;
+                                    } else if (type === 'ca') {
+                                        entryList = c_expense_entries;
+                                    }
+                                    
+                                    if (entryList) {
+                                        // Find existing aggregated entry for this category/month
+                                        const bucketEntry = entryList.find(e => String(e.category_id) === String(categoryId) && e.date === bucket.date);
+                                        
+                                        if (bucketEntry) {
+                                            if (bucket.amount > 0) {
+                                                // Update existing aggregated entry - this IS the total for the month
+                                                bucketEntry.amount = bucket.amount;
+                                                bucketEntry.total_amount = bucket.amount;
+                                                bucketEntry.has_bucket = true;
+                                                bucketEntry.bucket_amount = bucket.amount;
+                                                bucketEntry.original_amount = bucket.original_amount;
+                                            } else {
+                                                // Bucket depleted - update to 0
+                                                bucketEntry.amount = 0;
+                                                bucketEntry.total_amount = 0;
+                                                bucketEntry.has_bucket = true;
+                                                bucketEntry.bucket_amount = 0;
+                                            }
+                                        }
+                                        // NOTE: Do NOT push new entries for months not yet in local state
+                                        // Navigation will reload from Redis with correct aggregated values
+                                    }
+                                    
+                                    // Update the DOM directly
+                                    let table;
+                                    if (type === 'income') {
+                                        table = document.getElementById('income-table');
+                                    } else if (type === 'expense') {
+                                        table = document.getElementById('expenses-table');
+                                    } else if (type === 'ca') {
+                                        // For CA, get the table from the closest parent
+                                        const caTable = td.closest('table[id^="cas-table-"]');
+                                        table = caTable;
+                                    }
+                                    const bucketRow = table ? table.querySelector(`tr[data-category-id="${categoryId}"]`) : null;
+                                    if (bucketRow) {
+                                        const bucketCell = Array.from(bucketRow.querySelectorAll('td')).find(tdCell => {
+                                            const cellDate = tdCell.getAttribute('data-date');
+                                            return cellDate === bucket.date;
+                                        });
+                                        if (bucketCell) {
+                                            const bucketInput = bucketCell.querySelector('input');
+                                            if (bucketInput) {
+                                                if (bucket.amount > 0) {
+                                                    bucketInput.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    // Update progress bar
+                                                    updateBucketProgressBar(bucketCell, {
+                                                        has_bucket: true,
+                                                        bucket_amount: bucket.amount,
+                                                        original_amount: bucket.original_amount
+                                                    });
+                                                } else {
+                                                    // Clear the cell when bucket is depleted
+                                                    bucketInput.value = '';
+                                                    // Show progress bar at 100% spent (all red) if there was an original amount
+                                                    if (bucket.original_amount && bucket.original_amount > 0) {
+                                                        updateBucketProgressBar(bucketCell, {
+                                                            has_bucket: true,
+                                                            bucket_amount: 0, // 0 remaining = 100% spent
+                                                            original_amount: bucket.original_amount
+                                                        });
+                                                    } else {
+                                                        // Only remove if no original amount
+                                                        const existingBar = bucketCell.querySelector('.bucket-progress-container');
+                                                        if (existingBar) existingBar.remove();
+                                                    }
+                                                    // Clear processed state for the cell
+                                                    bucketCell.removeAttribute('data-processed');
+                                                    bucketCell.classList.remove('paid');
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
+                            // Refresh notification badge (bucket depletion may have created a notification)
+                            if (typeof refreshNotificationBadge === 'function') {
+                                refreshNotificationBadge();
+                            }
+                            // Invalidate batch cache for the affected date so fresh data is fetched
+                            invalidateBatchCacheForDate(endDate);
+                            // Also invalidate cache for any bucket dates that were affected (may be in different months)
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    if (bucket.date) {
+                                        invalidateBatchCacheForDate(bucket.date);
+                                    }
+                                });
+                            }
                             // Defer updateView to next tick to avoid blocking
+                            // Don't re-populate tables after immediate DOM update to avoid flickering
                             setTimeout(() => {
                                 updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                             }, 0);
-                        } else {
                         }
+                        showDashboardSpinner(false);
                     },
                     error: function() {
+                        showDashboardSpinner(false);
                     }
                 });
             }
@@ -4371,6 +4769,34 @@
                     if (!headerRow) return;
                     outlineCurrentWeekForTable(caTable.id, headerRow.id);
                 });
+                
+                // Position member-since badge outside the table
+                positionMemberSinceBadge();
+            }
+            
+            // Position member-since badge as child of table-container for proper z-index
+            function positionMemberSinceBadge() {
+                // Remove any existing badge
+                document.querySelectorAll('.member-since-badge').forEach(b => b.remove());
+                
+                const cell = document.querySelector('.has-member-since-badge');
+                if (!cell) return;
+                
+                const tableContainer = document.getElementById('table-container');
+                if (!tableContainer) return;
+                
+                const cellRect = cell.getBoundingClientRect();
+                const containerRect = tableContainer.getBoundingClientRect();
+                
+                const badge = document.createElement('div');
+                badge.className = 'member-since-badge';
+                badge.title = 'Member Since';
+                badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
+                
+                badge.style.top = `${cellRect.top - containerRect.top - 5}px`;
+                badge.style.left = `${cellRect.left - containerRect.left - 10}px`;
+                
+                tableContainer.appendChild(badge);
             }
 
             // Helper: outline for a single table
@@ -4409,15 +4835,11 @@
                 const outline = document.createElement('div');
                 outline.className = 'current-week-outline';
 
-                const container = document.getElementById('month-table-container');
-                const parentRect = (container && container.parentElement) ? container.parentElement.getBoundingClientRect() : {left:0,top:0};
-                if (container && container.parentElement) {
-                    container.parentElement.appendChild(outline);
-                } else if (container) {
-                    container.appendChild(outline);
-                } else {
-                    document.body.appendChild(outline);
-                }
+                const tableContainer = document.getElementById('table-container');
+                if (!tableContainer) return;
+                
+                const parentRect = tableContainer.getBoundingClientRect();
+                tableContainer.appendChild(outline);
 
                 outline.style.display = 'block';
                 outline.style.top = `${top - parentRect.top}px`;
@@ -4467,15 +4889,11 @@
                 const outline = document.createElement('div');
                 outline.className = 'current-week-outline';
 
-                const container = document.getElementById('month-table-container');
-                const parentRect = (container && container.parentElement) ? container.parentElement.getBoundingClientRect() : {left:0,top:0};
-                if (container && container.parentElement) {
-                    container.parentElement.appendChild(outline);
-                } else if (container) {
-                    container.appendChild(outline);
-                } else {
-                    document.body.appendChild(outline);
-                }
+                const tableContainer = document.getElementById('table-container');
+                if (!tableContainer) return;
+                
+                const parentRect = tableContainer.getBoundingClientRect();
+                tableContainer.appendChild(outline);
 
                 outline.style.display = 'block';
                 outline.style.top = `${top - parentRect.top}px`;

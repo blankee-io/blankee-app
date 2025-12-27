@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8"> <!-- Character encoding for the document -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Setup Profile</title>
+    <title>Blankee - Setup Profile</title>
     <!-- Link to the external stylesheet for styling the page -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <!-- Link to Font Awesome for icons -->
@@ -922,7 +922,11 @@
                     // Calculate the income_entry_date (for example, today minus one day)
                     const startingBalanceDate = new Date();
                     startingBalanceDate.setDate(startingBalanceDate.getDate() - 1);
-                    const incomeEntryDate = startingBalanceDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+                    // Format as YYYY-MM-DD using local time
+                    const year = startingBalanceDate.getFullYear();
+                    const month = String(startingBalanceDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(startingBalanceDate.getDate()).padStart(2, '0');
+                    const incomeEntryDate = `${year}-${month}-${day}`;
 
                     // Submit the data via AJAX to the backend (name already saved in Redis)
                     $.ajax({

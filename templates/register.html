@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8"> <!-- Character encoding for the document -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Register</title>
+    <title>Blankee - Register</title>
     <!-- Link to the external stylesheet for styling the page -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <!-- Link to Font Awesome for icons -->
@@ -141,8 +141,11 @@
 
             $('form').on('submit', function() {
                 const now = new Date();
-                // Format as YYYY-MM-DD
-                const localDate = now.toISOString().slice(0, 10);
+                // Format as YYYY-MM-DD using local time
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+                const localDate = `${year}-${month}-${day}`;
                 $('#member_since').val(localDate);
             });
 

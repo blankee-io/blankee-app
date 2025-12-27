@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Year Overview</title>
+    <title>Blankee - Year Overview</title>
     <!-- Link to the custom stylesheet -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <!-- Include Font Awesome for icons -->
@@ -32,9 +32,10 @@
         <div class="calendarnavbuttonscontainer">   
             <!-- Single button with repeat icon -->
             <div class="nav-dash-container">
-                <!-- Dropdown toggle button -->
-                <a href="#" id="nav-dropdown-toggle" class="nav-button">
-                    <i id="nav-dropdown-arrow" class="fa-solid fa-caret-right"></i>
+                <!-- Link to Recurring Summary -->
+                <a href="{{ url_for('dashboard_summary') }}" class="nav-button">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Recurring Summary</span>
                 </a>
                 <!-- Inline nav buttons (icons only) -->
                 <div id="nav-inline-buttons">
@@ -59,8 +60,6 @@
                         <span class="nav-tooltip">Year Overview</span>
                     </div>
                 </div>
-                <!-- Dropdown menu (initially hidden) -->
-                <div id="nav-dropdown-menu"></div>
             </div>
             <div class="calendarnavbuttons"> 
                 <a id="previous-nav-btn" class="nav-button" href="javascript:previousYear()"><i class="fa-solid fa-left"></i><span class="nav-tooltip">Previous Year</span></a>
@@ -285,6 +284,7 @@
                 const monthDiv = document.createElement('div');
                 monthDiv.classList.add('dashboard-y-month-container');
                 const monthTitle = document.createElement('h3');
+                monthTitle.classList.add('dashboard-y-month-title');
                 monthTitle.textContent = monthNames[month];
                 monthTitle.style.cursor = 'pointer';
                 monthTitle.title = 'Click to view this month in weekly view';
@@ -295,6 +295,28 @@
                     const m = this.getAttribute('data-month');
                     window.location.href = `{{ url_for('dashboard') }}?year=${y}&month=${m}`;
                 });
+                
+                // Add member_since badge to month title if member_since falls in this month
+                if (member_since) {
+                    let normalizedMemberSinceDate = member_since;
+                    if (member_since.length > 10 || member_since.includes('GMT')) {
+                        const msDate = new Date(member_since);
+                        if (!isNaN(msDate)) {
+                            normalizedMemberSinceDate = msDate.toISOString().split('T')[0];
+                        }
+                    }
+                    const msParts = normalizedMemberSinceDate.split('-');
+                    const msYear = parseInt(msParts[0]);
+                    const msMonth = parseInt(msParts[1]) - 1; // 0-indexed
+                    if (msYear === year && msMonth === month) {
+                        const badge = document.createElement('div');
+                        badge.className = 'member-since-badge';
+                        badge.title = 'Member Since';
+                        badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
+                        monthTitle.appendChild(badge);
+                    }
+                }
+                
                 monthDiv.appendChild(monthTitle);
 
                 // Create table structure for the month
@@ -335,11 +357,28 @@
                 while (dayCount <= lastDay.getDate()) {
                     const dayCell = document.createElement('td');
                     const dayContent = document.createElement('div'); // Create a div to hold the content
+                    dayContent.classList.add('dashboard-y-day-content');
 
                     dayContent.textContent = dayCount; // Set the day number
 
                     // Logic to determine the remainder and apply classes
                     const formattedDate = `${year}-${(month + 1).toString().padStart(2, '0')}-${dayCount.toString().padStart(2, '0')}`;
+                    
+                    // Check for dimming dates before member_since
+                    if (member_since) {
+                        let normalizedMemberSinceDate = member_since;
+                        if (member_since.length > 10 || member_since.includes('GMT')) {
+                            const msDate = new Date(member_since);
+                            if (!isNaN(msDate)) {
+                                normalizedMemberSinceDate = msDate.toISOString().split('T')[0];
+                            }
+                        }
+                        // Add dimming for dates before member_since
+                        if (formattedDate < normalizedMemberSinceDate) {
+                            dayCell.classList.add('before-member-since');
+                        }
+                    }
+                    
                     const remainderData = totals_remainders_d.find(data => {
                         const itemDate = new Date(data.date).toISOString().split('T')[0];
                         return itemDate === formattedDate;

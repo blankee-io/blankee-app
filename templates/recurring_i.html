@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Recurring Income</title>
+    <title>Blankee - Recurring Income</title>
     <!-- Link to the external stylesheet for styling the page -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <!-- Link to Font Awesome for icons -->
@@ -49,6 +49,7 @@
                             <th class="income-category-col">Category</th>
                             <th class="income-amount-col">Amount</th>
                             <th class="income-cadence-col">Cadence</th>
+                            <th class="income-bucket-col">Current Bucket</th>
                             <th class="income-start-date-col">Start Date</th>
                             <th class="income-end-date-col">End Date</th>
                             <th class="income-action-col"></th>
@@ -60,6 +61,22 @@
                             <td class="editable income-category" data-column="category_name">{{ record.category_name }}</td>
                             <td class="editable income-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
                             <td class="editable income-cadence" data-column="cadence">{{ record.cadence_description }}</td>
+                            <td class="income-bucket" data-column="bucket">
+                                {% if record.bucket_original is not none %}
+                                    <div class="bucket-status">
+                                        <div class="bucket-bar-container">
+                                            <div class="bucket-bar {% if record.bucket_spent > record.bucket_original %}bucket-bar-over{% else %}bucket-bar-income{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div>
+                                        </div>
+                                        <div class="bucket-text {% if record.bucket_spent > record.bucket_original %}bucket-over{% endif %}">
+                                            <span class="bucket-spent">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_spent) }}</span>
+                                            <span class="bucket-separator">/</span>
+                                            <span class="bucket-total">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_original) }}</span>
+                                        </div>
+                                    </div>
+                                {% else %}
+                                    <span class="bucket-none">—</span>
+                                {% endif %}
+                            </td>
                             <td class="editable income-start-date" data-column="start_date">{{ record.start_date }}</td>
                             <td class="editable income-end-date" data-column="end_date">
                                 {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}
@@ -79,7 +96,7 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="6" class="recurring-footer"></td>
+                            <td colspan="7" class="recurring-footer"></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -196,7 +213,7 @@
                 </div>
 
                 <br>
-                <button type="submit">Add Recurring Income</button>
+                <button type="submit">Submit</button>
             </form>            
         </div>        
     </div>    
@@ -230,7 +247,7 @@
                         </select>
                     </div>                <!-- Edit Weekly Options -->
                 <div id="edit-weekly-options" style="display:none;">
-                    <label>Repeat on:</label><br>
+                    <label>Repeat on:</label>
                     <div class="weekday"><input type="checkbox" name="edit_weekdays" value="monday"> Mo</div>
                     <div class="weekday"><input type="checkbox" name="edit_weekdays" value="tuesday"> Tu</div>
                     <div class="weekday"><input type="checkbox" name="edit_weekdays" value="wednesday"> We</div>
@@ -969,7 +986,7 @@
             document.getElementById('edit-yearly-options').style.display = 'none';
 
             if (cadenceUnit === 'weeks') {
-                document.getElementById('edit-weekly-options').style.display = 'block';
+                document.getElementById('edit-weekly-options').style.display = 'flex';
             } else if (cadenceUnit === 'months') {
                 document.getElementById('edit-monthly-options').style.display = 'block';
             } else if (cadenceUnit === 'years') {

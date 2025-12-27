@@ -1088,6 +1088,27 @@ body {
     transform: translateY(0);
 }
 
+/* Checkbox label styling for forms */
+.footer-form-group .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-color);
+}
+
+.footer-form-group .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #2aaaa8;
+}
+
+.footer-form-group .checkbox-label span {
+    user-select: none;
+}
+
 /* Submit button */
 button#autobalance-submit {
     width: 100%;
@@ -1314,6 +1335,13 @@ button#autobalance-submit:active {
 
     /* Centers the container horizontally */
     margin: 0 auto; 
+
+    min-height: 32px;
+}
+
+.nav-button-placeholder {
+    min-width: 250px !important;
+    min-height: 32px !important;
 }
 
 @media (width <=600px) {
@@ -2275,6 +2303,7 @@ input#setup-profile-starting-savings {
 
 /* Header for each day */
 .dashboard-d-day-header {
+    position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -2286,6 +2315,101 @@ input#setup-profile-starting-savings {
     color: white;
     font-size: clamp(14px, 2vw, 18px);
     text-align: center;
+}
+
+/* Member Since badge on day header */
+.member-since-badge {
+    position: absolute;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 20px;
+    height: 20px;
+    background-color: #2AAAA8;
+    border-radius: 50%;
+    color: white;
+    font-size: 10px;
+    z-index: 10;
+}
+
+/* Member Since badge positioning for dashboard_d */
+.dashboard-d-day-header .member-since-badge {
+    top: -40px;
+    left: 0;
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+}
+
+/* Dim dates before member_since */
+.before-member-since .dashboard-d-day-header,
+.before-member-since .dashboard-d-lastremainder,
+.before-member-since .dashboard-d-income-entries,
+.before-member-since .dashboard-d-income-total,
+.before-member-since .dashboard-d-expense-entries,
+.before-member-since .dashboard-d-expense-total,
+.before-member-since .dashboard-d-remainder,
+.before-member-since .dashboard-d-credit-accounts,
+.before-member-since .dashboard-d-credit-row,
+.before-member-since .dashboard-d-credit-divider,
+.before-member-since .dashboard-d-savings {
+    opacity: 0.5;
+}
+
+/* Dim columns before member_since in weekly dashboard */
+th.before-member-since,
+td.before-member-since {
+    opacity: 0.5;
+}
+
+/* Also dim cell inputs inside before-member-since cells */
+td.before-member-since .income-cell-input:disabled,
+td.before-member-since .expense-cell-input:disabled,
+td.before-member-since .ca-cell-input:disabled {
+    -webkit-text-fill-color: rgba(87, 87, 87, 0.5) !important;
+    color: rgba(87, 87, 87, 0.5) !important;
+}
+
+/* Add white overlay to dim the row background behind before-member-since cells */
+/* Exclude total rows, remainder, savings, and CA balance rows */
+tr[data-category-id] td.before-member-since {
+    background-color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Member Since badge positioning for dashboard_m day-label */
+.dashboard-m-day-label {
+    position: relative;
+}
+.dashboard-m-day-label .member-since-badge {
+    top: -5px;
+    left: -5px;
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+}
+
+/* Dim cells before member_since in dashboard_m */
+#dashboard-m-calendar td.before-member-since {
+    opacity: 0.5;
+}
+
+/* Member Since badge positioning for dashboard_y month title */
+.dashboard-y-month-title {
+    position: relative;
+}
+.dashboard-y-month-title .member-since-badge {
+    top: -5px;
+    left: -5px;
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+    background-color: #2AAAA8;
+    color: white;
+}
+
+/* Dim cells before member_since in dashboard_y */
+#year-calendar td.before-member-since {
+    opacity: 0.5;
 }
 
 /* Button for adding new entry */
@@ -2853,6 +2977,7 @@ input#setup-profile-starting-savings {
     display: flex;
     align-items: flex-start;
     max-width: 875px;
+    position: relative;
 
     /* This will center the container horizontally */
     margin: 10px auto 0; 
@@ -3494,6 +3619,32 @@ input#setup-profile-starting-savings {
     box-sizing: border-box;
 }
 
+/* Bucket Progress Bar - Shows spent (red) and remaining (green) */
+.bucket-progress-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    display: flex;
+}
+
+.bucket-progress-spent {
+    background-color: #e53935;
+    height: 100%;
+}
+
+.bucket-progress-remaining {
+    background-color: #4caf50;
+    height: 100%;
+    flex: 1;
+}
+
+/* Container needs relative positioning for progress bar */
+td:has(.bucket-progress-container) {
+    position: relative;
+}
+
 .category-edit-modal {
     position: fixed;
     top: 0;
@@ -4052,10 +4203,12 @@ input#setup-profile-starting-savings {
 }
 
 /* Ensure stacking context for outline and negative bubbles */
-#month-table-container,
+#month-table-container {
+    position: relative;
+}
+
 #month-table-container > * {
     position: relative;
-    z-index: 0;
 }
 
 .negative {
@@ -4068,7 +4221,7 @@ input#setup-profile-starting-savings {
 
 .current-week-outline {
     position: absolute;
-    z-index: 5 !important;
+    z-index: 5;
     background: none;
     border: 4px solid #E45F1C;
     border-radius: 10px;
@@ -4090,7 +4243,7 @@ input#setup-profile-starting-savings {
     table-layout: fixed; 
 
     /* Ensure borders are visible */
-    border-collapse: collapse; 
+    border-collapse: collapse;
 }
 
 #fridays-table th {
@@ -5613,7 +5766,7 @@ input#setup-profile-starting-savings {
     text-align: right;
     width: 100%;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
 }
 
 .profile-form {
@@ -6194,7 +6347,8 @@ input#setup-profile-starting-savings {
     transition: background-color 0.2s;
 }
 
-.notification-item.notification-read {
+.notification-item.notification-read .notification-date,
+.notification-item.notification-read .notification-message {
     opacity: 0.6;
 }
 
@@ -6283,7 +6437,54 @@ input#setup-profile-starting-savings {
 }
 
 .clear-read-button:hover {
-    color: #d63e1a;
+    color: #ff7f55 !important;
+}
+
+.mark-all-read-button {
+    color: #17a2b8;
+    background: none;
+    cursor: pointer;
+    border: none;
+    font-size: 18px;
+}
+
+.mark-all-read-button:hover {
+    color: #59d6d4;
+}
+
+.mark-all-read-button:hover .envelope-back {
+    color: #59d6d4;
+}
+
+/* Stacked envelope icons for Mark All Read button */
+.stacked-envelopes {
+    position: relative;
+    display: inline-block;
+    width: 24px;
+    height: 20px;
+}
+
+.stacked-envelopes .envelope-back {
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    font-size: 14px;
+    color: #17a2b8;
+}
+
+.stacked-envelopes .envelope-front {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    font-size: 14px;
+    background-color: #f2f7f7;
+    padding: 1px 3px;
+    border-radius: 3px;
+}
+
+/* Mark read button states */
+.mark-read-button.is-read {
+    background-color: #c9c9c9;
 }
 
 /* MFA QR Modal Styles */
@@ -6523,7 +6724,7 @@ input#setup-profile-starting-savings {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -6625,22 +6826,27 @@ input#setup-profile-starting-savings {
 
 .income-recurring-table th.income-cadence-col,
 .income-recurring-table td.income-cadence-col {
-    width: 30%;
+    width: 22%;
 }
 
 .income-recurring-table th.income-start-date-col,
 .income-recurring-table td.income-start-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .income-recurring-table th.income-end-date-col,
 .income-recurring-table td.income-end-date-col {
+    width: 12%;
+}
+
+.income-recurring-table th.income-bucket-col,
+.income-recurring-table td.income-bucket-col {
     width: 15%;
 }
 
 .income-recurring-table th.income-action-col,
 .income-recurring-table td.income-action-col {
-    width: 10%;
+    width: 8%;
 }
 
 .income-action-col {
@@ -6657,6 +6863,76 @@ input#setup-profile-starting-savings {
 
 .income-recurring-table tfoot tr {
     background-color: #A9A9A9;
+}
+
+/* Bucket status display for recurring tables */
+.bucket-status {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bucket-bar-container {
+    width: 100%;
+    height: 8px;
+    background-color: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.bucket-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.bucket-bar-income {
+    background-color: #4CAF50;
+}
+
+.bucket-bar-ok {
+    background-color: #4CAF50;
+}
+
+.bucket-bar-expense {
+    background-color: #f44336;
+}
+
+.bucket-bar-over {
+    background-color: #f44336;
+}
+
+.bucket-text {
+    font-size: 0.85em;
+    color: #666;
+    text-align: center;
+}
+
+.bucket-text.bucket-over {
+    color: #f44336;
+}
+
+.bucket-text.bucket-over .bucket-spent {
+    color: #f44336;
+}
+
+.bucket-spent {
+    font-weight: 600;
+    color: #333;
+}
+
+.bucket-separator {
+    margin: 0 2px;
+    color: #999;
+}
+
+.bucket-total {
+    color: #888;
+}
+
+.bucket-none {
+    color: #999;
+    font-style: italic;
 }
 
 .add-income-btn {
@@ -6794,8 +7070,7 @@ input#setup-profile-starting-savings {
 /* Form Container Styling */
 .expense-form-container,
 .income-form-container,
-.ca-form-container,
-.expense-form-container {
+.ca-form-container {
     width: 350px;
     margin: 15% auto;
     padding: 20px;
@@ -7358,7 +7633,7 @@ form button[type="submit"] {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -7440,22 +7715,27 @@ form button[type="submit"] {
 
 .expense-recurring-table th.expense-cadence-col,
 .expense-recurring-table td.expense-cadence-col {
-    width: 30%;
+    width: 22%;
+}
+
+.expense-recurring-table th.expense-bucket-col,
+.expense-recurring-table td.expense-bucket-col {
+    width: 15%;
 }
 
 .expense-recurring-table th.expense-start-date-col,
 .expense-recurring-table td.expense-start-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .expense-recurring-table th.expense-end-date-col,
 .expense-recurring-table td.expense-end-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .expense-recurring-table th.expense-action-col,
 .expense-recurring-table td.expense-action-col {
-    width: 10%;
+    width: 8%;
 }
 
 .expense-action-col {
@@ -7750,7 +8030,7 @@ form button[type="submit"] {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -7875,22 +8155,27 @@ form button[type="submit"] {
 
 .ca-recurring-table th.ca-cadence-col,
 .ca-recurring-table td.ca-cadence-col {
-    width: 30%;
+    width: 22%;
+}
+
+.ca-recurring-table th.ca-bucket-col,
+.ca-recurring-table td.ca-bucket-col {
+    width: 15%;
 }
 
 .ca-recurring-table th.ca-start-date-col,
 .ca-recurring-table td.ca-start-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .ca-recurring-table th.ca-end-date-col,
 .ca-recurring-table td.ca-end-date-col {
-    width: 15%;
+    width: 12%;
 }
 
 .ca-recurring-table th.ca-action-col,
 .ca-recurring-table td.ca-action-col {
-    width: 10%;
+    width: 8%;
 }
 
 .ca-action-col {
@@ -8094,7 +8379,7 @@ form button[type="submit"] {
     display: flex;
     width: 100%;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
 }
 
 /* Match the color of your table row (adjust as needed) */
@@ -8216,7 +8501,7 @@ form button[type="submit"] {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -8230,7 +8515,7 @@ form button[type="submit"] {
     justify-content: space-between;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 20px auto;
 }
 
@@ -8707,7 +8992,7 @@ form button[type="submit"] {
     justify-content: center;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
     border-radius: 10px;
@@ -8721,7 +9006,7 @@ form button[type="submit"] {
     justify-content: space-between;
     align-items: center;
     min-width: 350px;
-    max-width: 650px;
+    max-width: 875px;
     margin: 20px auto;
 }
 
@@ -8820,6 +9105,21 @@ form button[type="submit"] {
     width: 100%;
     height: 100%;
     box-sizing: border-box;
+}
+
+.edit-credit-account-btn {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    color: #2aaaa8;
+    cursor: pointer;
+    margin-right: 8px;
+}
+
+.edit-credit-account-btn:hover {
+    color: #575757;
 }
 
 .delete-credit-account-btn {
@@ -9790,4 +10090,747 @@ html.modal-open {
 
 .quiltt-save-btn:active {
     transform: scale(0.98);
+}
+
+/* ============================================================================
+   DASHBOARD SUMMARY STYLES
+   ============================================================================ */
+
+#dashboard-summary {
+    background: #f5f5f5;
+    min-height: 100vh;
+}
+
+/* Two-column layout */
+.summary-page-layout {
+    display: flex;
+    gap: 30px;
+    max-width: 860px;
+    margin: 30px auto;
+    padding: 0 20px;
+}
+
+.summary-left-column {
+    flex: 0 0 33%;
+    max-width: 400px;
+}
+
+.summary-right-column {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* Buffer Card Styles */
+.buffer-card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    padding: 28px;
+    text-align: center;
+}
+
+.buffer-card-header {
+    font-size: 18px;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 12px;
+}
+
+.buffer-amount {
+    font-size: 52px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    line-height: 1.1;
+}
+
+.buffer-amount.positive {
+    color: #2aaaa8;
+}
+
+.buffer-amount.negative {
+    color: #E45F1C;
+}
+
+.buffer-subtitle {
+    font-size: 14px;
+    color: #888;
+    margin-bottom: 20px;
+}
+
+.buffer-divider {
+    height: 1px;
+    background: #e5e5e5;
+    margin: 20px 0;
+}
+
+.projected-label {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.projected-amount {
+    font-size: 42px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    line-height: 1.1;
+}
+
+.projected-amount.positive {
+    color: #2aaaa8;
+}
+
+.projected-amount.negative {
+    color: #E45F1C;
+}
+
+.projected-subtitle {
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 20px;
+}
+
+.payday-info {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+    font-size: 13px;
+    color: #666;
+}
+
+.payday-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.payday-item i {
+    color: #2AAAA8;
+    font-size: 14px;
+}
+
+.payday-item strong {
+    color: #2AAAA8;
+    font-weight: 600;
+}
+
+.view-details-btn {
+    display: block;
+    background: #2AAAA8;
+    color: white;
+    text-decoration: none;
+    padding: 14px 32px;
+    border-radius: 30px;
+    font-size: 15px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.view-details-btn:hover {
+    background: #5554cc;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 101, 221, 0.3);
+}
+
+/* Summary container adjustments */
+.summary-container {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.summary-section {
+    background: #fff;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* Expense Buckets Section */
+#expense-buckets-section .summary-section-header {
+    background: #E45F1C;
+}
+
+/* Credit Account Expense Buckets Section */
+#c-expense-buckets-section .summary-section-header {
+    background: #575757;
+}
+
+.summary-section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 24px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+    padding-left: 10px;
+}
+
+.summary-section-header i {
+    font-size: 14px;
+    color: #fff;
+    width: 24px;
+    text-align: center;
+}
+
+.summary-list {
+    padding: 8px 0;
+}
+
+.summary-row {
+    display: flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-bottom: 1px solid #f0f0f0;
+    gap: 16px;
+}
+
+.summary-row:last-child {
+    border-bottom: none;
+}
+
+.summary-category-name {
+    flex: 0 0 200px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.summary-category-name .account-label {
+    display: inline-block;
+    background: #e8e8ff;
+    color: #2AAAA8;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-right: 6px;
+}
+
+.summary-progress-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.summary-week-label {
+    font-size: 11px;
+    color: #888;
+    font-weight: 500;
+}
+
+.summary-progress-bar {
+    height: 10px;
+    background: #e8e8e8;
+    border-radius: 5px;
+    overflow: hidden;
+    position: relative;
+}
+
+.summary-progress-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
+
+.summary-progress-fill.progress-green {
+    background: linear-gradient(90deg, #4CAF50, #66BB6A);
+}
+
+.summary-progress-fill.progress-yellow {
+    background: linear-gradient(90deg, #FFC107, #FFD54F);
+}
+
+.summary-progress-fill.progress-red {
+    background: linear-gradient(90deg, #F44336, #E57373);
+}
+
+.summary-amounts {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+}
+
+.spent-amount {
+    color: #666;
+}
+
+.remaining-amount {
+    color: #2aaaa8;
+    font-weight: bold;
+}
+
+.remaining-amount.overspent {
+    color: #E45F1C;
+}
+
+.summary-no-bucket {
+    color: #999;
+    font-size: 13px;
+    font-style: italic;
+}
+
+.summary-empty {
+    padding: 30px 20px;
+    text-align: center;
+    color: #999;
+    font-size: 14px;
+}
+
+/* Buffer Card Buttons */
+.buffer-card-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.test-purchase-open-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #E45F1C;;
+    background: #FDEEEE;
+    border: 2px solid #E45F1C;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.test-purchase-open-btn:hover {
+    background: #E45F1C;
+    color: #fff;
+}
+
+.view-details-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    background: #2aaaa8;
+    border-radius: 10px;
+    text-decoration: none;
+    transition: background-color 0.2s;
+}
+
+.view-details-btn:hover {
+    background: #2aaaa8;
+    color: #fff;
+}
+
+/* Balance Graph Section */
+#balance-graph-section {
+    background: #fff;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+#balance-graph-section .summary-section-header {
+    background: #A9A9A9;
+    justify-content: flex-start;
+}
+
+.trend-indicator {
+    margin-left: auto;
+    margin-right: 12px;
+    font-size: 16px;
+}
+
+.trend-indicator.trend-up,
+.trend-indicator.trend-up i {
+    color: #2AAAA8;
+}
+
+.trend-indicator.trend-down,
+.trend-indicator.trend-down i {
+    color: #E45F1C;
+}
+
+.trend-indicator.trend-flat {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.graph-controls {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #eee;
+}
+
+.graph-toggle-group {
+    display: flex;
+    gap: 8px;
+}
+
+.graph-toggle-btn {
+    padding: 6px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #666;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.graph-toggle-btn:hover {
+    background: #f0f0f0;
+}
+
+.graph-toggle-btn.active {
+    color: #fff;
+    background: #6665DD;
+    border-color: #6665DD;
+}
+
+.graph-container {
+    height: 200px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 16px;
+    background: #fff;
+    cursor: grab;
+    user-select: none;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.graph-container.grabbing {
+    cursor: grabbing;
+}
+
+.graph-container::-webkit-scrollbar {
+    height: 6px;
+}
+
+.graph-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.graph-container::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
+}
+
+.graph-container::-webkit-scrollbar-thumb:hover {
+    background: #999;
+}
+
+.graph-scroll-wrapper {
+    height: 100%;
+    min-width: 100%;
+}
+
+#balance-chart {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.graph-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #999;
+    font-size: 14px;
+}
+
+.graph-date-indicator {
+    padding: 10px 16px;
+    background: #f8f9fa;
+    border-top: 1px solid #eee;
+    text-align: center;
+    font-size: 13px;
+    color: #555;
+    font-weight: 500;
+}
+
+/* Test Purchase Modal */
+.test-purchase-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.test-purchase-modal-content {
+    background: #fff;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    animation: modalSlideIn 0.25s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.test-purchase-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid #eee;
+}
+
+.test-purchase-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.test-purchase-modal-header h3 i {
+    color: #2AAAA8;
+}
+
+.test-purchase-modal-close {
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: #999;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.test-purchase-modal-close:hover {
+    color: #333;
+}
+
+.test-purchase-modal-body {
+    padding: 24px;
+}
+
+.test-purchase-description {
+    margin: 0 0 20px;
+    font-size: 14px;
+    color: #666;
+    line-height: 1.5;
+}
+
+.test-purchase-input-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.test-purchase-input-row .currency-input-container {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.test-purchase-input-row .currency-input-container .f-currency-symbol {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    left: 12px;
+    color: #888;
+    font-size: 14px;
+    font-weight: bold;
+    pointer-events: none;
+}
+
+.test-purchase-input-row input {
+    width: 100%;
+    height: 38px;
+    padding: 8px 12px 8px 28px;
+    font-size: 14px;
+    background-color: #f9f9f9;
+    border: 1px solid #d1d1d6;
+    border-radius: 8px;
+    outline: none;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
+.test-purchase-input-row input:focus {
+    background-color: #fff;
+    border-color: #2aaaa8;
+    box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
+}
+
+.test-purchase-button {
+    padding: 12px 24px;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #fff;
+    background-color: #E45F1C;
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgb(228 95 28 / 30%);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.test-purchase-button:hover {
+    background-color: #EF9F77;
+    box-shadow: 0 4px 12px rgb(228 95 28 / 40%);
+    transform: translateY(-1px);
+}
+
+.test-purchase-button:active {
+    box-shadow: 0 1px 4px rgb(228 95 28 / 30%);
+    transform: translateY(0);
+}
+
+.test-purchase-result {
+    margin-top: 20px;
+    padding: 16px 18px;
+    border-radius: 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.test-purchase-result i {
+    font-size: 22px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.test-purchase-result.success {
+    background: #e8f8f5;
+    border: 1px solid #2aaaa8;
+    color: #1a6b6a;
+}
+
+.test-purchase-result.success i {
+    color: #2aaaa8;
+}
+
+.test-purchase-result.danger {
+    background: #fef3f0;
+    border: 1px solid #E45F1C;
+    color: #a33d0f;
+}
+
+.test-purchase-result.danger i {
+    color: #E45F1C;
+}
+
+.test-purchase-result.warning {
+    background: #fff9e6;
+    border: 1px solid #f0b429;
+    color: #8a6d1b;
+}
+
+.test-purchase-result.warning i {
+    color: #f0b429;
+}
+
+.test-result-message {
+    flex: 1;
+}
+
+.test-result-balance {
+    margin-top: 8px;
+    font-size: 13px;
+    opacity: 0.85;
+}
+
+@media (max-width: 900px) {
+    .summary-page-layout {
+        flex-direction: column;
+        gap: 20px;
+        padding: 0 15px;
+        margin: 20px auto;
+    }
+    
+    .summary-left-column {
+        flex: none;
+        max-width: none;
+    }
+    
+    .buffer-card {
+        padding: 24px 20px;
+    }
+    
+    .buffer-amount {
+        font-size: 42px;
+    }
+    
+    .projected-amount {
+        font-size: 34px;
+    }
+    
+    .payday-info {
+        flex-direction: column;
+        gap: 10px;
+    }
+}
+
+@media (max-width: 600px) {
+    .summary-page-layout {
+        margin: 15px auto;
+        padding: 0 10px;
+        gap: 15px;
+    }
+    
+    .buffer-card {
+        padding: 20px 16px;
+        border-radius: 12px;
+    }
+    
+    .buffer-amount {
+        font-size: 36px;
+    }
+    
+    .projected-amount {
+        font-size: 28px;
+    }
+    
+    .summary-row {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 12px 16px;
+        gap: 10px;
+    }
+    
+    .summary-category-name {
+        flex: none;
+        font-size: 13px;
+    }
+    
+    .summary-progress-container {
+        width: 100%;
+    }
 }

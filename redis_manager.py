@@ -24,6 +24,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any, Set
 from collections import defaultdict
 from db_connections import get_db_pool
+import pymysql.cursors
 
 # Configure logger to output to stderr (which Apache captures)
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ _shutdown_event = threading.Event()
 INACTIVITY_TIMEOUT = 300  # 5 minutes in seconds
 FLUSH_INTERVAL = 15  # 15 seconds (balanced flush interval)
 REDIS_KEY_VERSION = "v1"
+REDIS_TTL = 604800  # 7 days in seconds
 
 # Tables to hydrate for each user
 USER_TABLES = [
@@ -63,6 +65,9 @@ USER_TABLES = [
     'recurring_income',
     'recurring_expense',
     'recurring_c_expense',
+    'recurring_income_buckets',
+    'recurring_expense_buckets',
+    'recurring_c_expense_buckets',
     'starting_balance',
     'totals_remainders',
     'totals_remainders_d',
@@ -83,6 +88,9 @@ USER_TABLES = [
     'quiltt_accounts',
     'quiltt_transactions',
     'quiltt_category_mappings',
+    # Additional user tables
+    'notifications',
+    'password_resets',
 ]
 
 
@@ -325,6 +333,28 @@ def _hydrate_table(table: str, user_id: int):
                     INNER JOIN credit_accounts ca ON cec.account_id = ca.id
                     WHERE ca.user_id = %s
                 """
+            elif table == 'recurring_income_buckets':
+                # recurring_income_buckets -> income_categories -> users
+                query = """
+                    SELECT rib.* FROM recurring_income_buckets rib
+                    INNER JOIN income_categories ic ON rib.category_id = ic.id
+                    WHERE ic.user_id = %s
+                """
+            elif table == 'recurring_expense_buckets':
+                # recurring_expense_buckets -> expense_categories -> users
+                query = """
+                    SELECT reb.* FROM recurring_expense_buckets reb
+                    INNER JOIN expense_categories ec ON reb.category_id = ec.id
+                    WHERE ec.user_id = %s
+                """
+            elif table == 'recurring_c_expense_buckets':
+                # recurring_c_expense_buckets -> c_expense_categories -> credit_accounts -> users
+                query = """
+                    SELECT rceb.* FROM recurring_c_expense_buckets rceb
+                    INNER JOIN c_expense_categories cec ON rceb.category_id = cec.id
+                    INNER JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """
             else:
                 # Default: table has direct user_id column
                 query = f"SELECT * FROM {table} WHERE user_id = %s"
@@ -467,8 +497,15 @@ def _dehydrate_user_data(user_id: int):
                 'income_entries',
                 'expense_entries',
                 'c_expense_entries',
+                'recurring_income',
+                'recurring_expense',
+                'recurring_c_expense',
+                'recurring_income_buckets',  # Bucket state tracking - must flush before dehydration
+                'recurring_expense_buckets',
+                'recurring_c_expense_buckets',
                 'buds',  # Must flush before bud_items to resolve temp IDs
-                'bud_items'
+                'bud_items',
+                'users',  # User settings (goofy_week_mode, landing_page, etc.)
             ]
             
             flushed_count = 0
@@ -502,7 +539,8 @@ def _dehydrate_user_data(user_id: int):
             _redis_client.delete(*keys_to_delete)
             # Also clean up dirty_tables and pending_deletes keys
             _redis_client.delete(dirty_tables_key)
-            for table in ['income_entries', 'expense_entries', 'c_expense_entries']:
+            for table in ['income_entries', 'expense_entries', 'c_expense_entries', 
+                          'recurring_income_buckets', 'recurring_expense_buckets', 'recurring_c_expense_buckets']:
                 pending_key = f"pending_deletes:{table}:{user_id}"
                 _redis_client.delete(pending_key)
             
@@ -580,12 +618,23 @@ def _flush_redis_to_mysql():
             'totals_remainders_d', 
             'totals_remainders_m',
             'savings_entries',
+            'credit_accounts',  # MUST flush FIRST - other tables depend on this for foreign keys
             'c_a_balances',
             'c_a_balances_d',
             'c_a_balances_m',
+            'income_categories',  # Category definitions - flush before entries/recurring
+            'expense_categories',
+            'c_expense_categories',  # Depends on credit_accounts
             'income_entries',
             'expense_entries',
             'c_expense_entries',
+            'c_payment_entries',  # Credit account payment entries
+            'recurring_income',  # Recurring entry configurations - depend on categories
+            'recurring_expense',
+            'recurring_c_expense',  # Depends on c_expense_categories
+            'recurring_income_buckets',  # Bucket state tracking
+            'recurring_expense_buckets',
+            'recurring_c_expense_buckets',
             'buds',  # Must flush before bud_items to resolve temp IDs
             'bud_items',
             'users',  # User settings (balance_threshold, starting_savings)
@@ -632,22 +681,16 @@ def _flush_redis_to_mysql():
                 logger.debug(f"[FLUSH] Attempting to flush {table} for user {user_id}")
                 flushed_count = _flush_table_to_mysql(table, user_id)
                 
-                # Remove dirty flag if:
-                # 1. It's a deletion table (always clear after processing)
-                # 2. Rows were actually flushed (flushed_count > 0)
-                # 3. For Quiltt tables, also clear if no data exists (empty array or None)
-                should_clear = (
-                    table.endswith('_deleted') or 
-                    flushed_count > 0 or
-                    (table.startswith('quiltt_') and flushed_count == 0)  # Clear Quiltt tables even if empty
-                )
-                
-                if should_clear:
-                    if flushed_count > 0:
-                        table_stats[table] = flushed_count
-                    # Remove from dirty set after successful flush
-                    _redis_client.srem(dirty_tables_key, table)
+                # Always clear the dirty flag after processing to prevent infinite retry loops
+                # The table will be marked dirty again if new changes occur
+                if flushed_count > 0:
+                    table_stats[table] = flushed_count
                     logger.info(f"[FLUSH] Cleared dirty flag for {table} (flushed={flushed_count})")
+                else:
+                    logger.debug(f"[FLUSH] Cleared dirty flag for {table} (no data to flush)")
+                
+                # Remove from dirty set after processing
+                _redis_client.srem(dirty_tables_key, table)
                     
                 user_flushed += flushed_count
             
@@ -744,9 +787,32 @@ def _flush_table_to_mysql(table: str, user_id: int):
         logger.info(f"[FLUSH] Looking for Redis key: {redis_key}")
         redis_data = _redis_client.get(redis_key)
         
+        # Check for pending deletes even if Redis data doesn't exist
+        # This handles the case where data was deleted from Redis but pending_deletes still need processing
+        pending_key = f"pending_deletes:{table}:{user_id}"
+        pending_deletes = _redis_client.smembers(pending_key)
+        
         if not redis_data:
-            logger.info(f"[FLUSH] ⚠️ No Redis data found for key: {redis_key} - returning 0 (dirty flag will NOT be cleared)")
-            return 0
+            # Even with no Redis data, we may have pending deletes to process
+            if pending_deletes:
+                logger.info(f"[FLUSH] No Redis data but found {len(pending_deletes)} pending deletes for {table}")
+                delete_ids = [int(id_str) for id_str in pending_deletes]
+                
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor()
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    cursor.execute(f"""
+                        DELETE FROM {table} WHERE id IN ({placeholders}) AND user_id = %s
+                    """, delete_ids + [user_id])
+                    conn.commit()
+                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} {table} from MySQL via pending_deletes (no Redis data)")
+                
+                # Clear the pending deletes set
+                _redis_client.delete(pending_key)
+                return len(delete_ids)
+            else:
+                logger.info(f"[FLUSH] ⚠️ No Redis data found for key: {redis_key} - returning 0 (dirty flag will NOT be cleared)")
+                return 0
         
         logger.info(f"[FLUSH] Found Redis data for {table}, length: {len(redis_data)} bytes")
         rows = json.loads(redis_data)
@@ -822,23 +888,36 @@ def _flush_table_to_mysql(table: str, user_id: int):
             elif table in ['c_a_balances', 'c_a_balances_d', 'c_a_balances_m']:
                 # Credit account balance tables
                 batch_data = []
+                skipped_temp_accounts = 0
+                
                 for row in rows:
+                    account_id = row.get('account_id')
+                    
+                    # Skip rows with temp negative account_id - account hasn't been flushed yet
+                    if account_id and int(account_id) < 0:
+                        skipped_temp_accounts += 1
+                        continue
+                    
                     batch_data.append((
-                        row.get('account_id'),
+                        account_id,
                         row.get('date'),
                         float(row.get('total_expenses', 0)),
                         float(row.get('total_payments', 0)) if 'total_payments' in row else 0.0,
                         float(row.get('balance', 0))
                     ))
                 
-                cursor.executemany(f"""
-                    INSERT INTO {table} (account_id, date, total_expenses, total_payments, balance)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        total_expenses = VALUES(total_expenses),
-                        total_payments = VALUES(total_payments),
-                        balance = VALUES(balance)
-                """, batch_data)
+                if skipped_temp_accounts > 0:
+                    logger.info(f"[FLUSH] Skipped {skipped_temp_accounts} {table} rows with temp account_id")
+                
+                if batch_data:
+                    cursor.executemany(f"""
+                        INSERT INTO {table} (account_id, date, total_expenses, total_payments, balance)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            total_expenses = VALUES(total_expenses),
+                            total_payments = VALUES(total_payments),
+                            balance = VALUES(balance)
+                    """, batch_data)
                 
                 conn.commit()
                 cursor.close()
@@ -859,28 +938,151 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         DELETE FROM income_entries WHERE id IN ({placeholders})
                     """, delete_ids)
                     logger.info(f"[FLUSH] Deleted {len(delete_ids)} income_entries from MySQL")
+                    # Filter out pending deletes from rows to prevent re-upsert
+                    delete_ids_set = set(delete_ids)
+                    rows = [r for r in rows if r.get('id') not in delete_ids_set]
+                    logger.info(f"[FLUSH] Filtered out {len(delete_ids)} pending deletes from income_entries rows")
                 
                 # Now UPSERT the current state from Redis
+                logger.info(f"[FLUSH DEBUG] Starting income_entries batch preparation for {len(rows)} rows")
+                
+                # Get valid category IDs to filter out entries for deleted categories
+                cursor.execute("SELECT id FROM income_categories WHERE user_id = %s", (user_id,))
+                valid_category_ids = {row[0] for row in cursor.fetchall()}
+                logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid income categories for user {user_id}")
+                
                 batch_data = []
+                temp_id_entries = []  # Entries with temp negative IDs that need INSERT
+                skipped_count = 0
+                skipped_temp_category = 0
+                redis_needs_update = False  # Track if we need to update Redis with new IDs
+                
                 for row in rows:
+                    entry_id = row.get('id')
+                    category_id = row.get('category_id')
+                    
+                    # Skip entries with temp negative category_id - category hasn't been flushed yet
+                    if category_id and category_id < 0:
+                        skipped_temp_category += 1
+                        continue
+                    
+                    # Skip entries for categories that don't exist (were deleted)
+                    if category_id not in valid_category_ids:
+                        skipped_count += 1
+                        logger.warning(f"[FLUSH] Skipping entry for deleted category {category_id}, entry_id={row.get('id')}")
+                        continue
+                    
+                    recurring_id = row.get('recurring_id')
+                    logger.info(f"[FLUSH DEBUG] Row recurring_id RAW: {recurring_id}, type: {type(recurring_id)}")
+                    if recurring_id is not None:
+                        try:
+                            recurring_id = int(recurring_id)
+                            # Validate it's within MySQL INT range
+                            if recurring_id < -2147483648 or recurring_id > 2147483647:
+                                logger.warning(f"[FLUSH] recurring_id {recurring_id} out of range, setting to NULL")
+                                recurring_id = None
+                            else:
+                                logger.info(f"[FLUSH DEBUG] Row recurring_id CONVERTED: {recurring_id}")
+                        except (ValueError, TypeError) as e:
+                            logger.error(f"[FLUSH] Invalid recurring_id value: {recurring_id}, type: {type(recurring_id)}, row: {row}")
+                            recurring_id = None
+                    
+                    # Handle entries with no ID or temp negative ID - need to INSERT and get real ID
+                    if entry_id is None or entry_id < 0:
+                        temp_id_entries.append({
+                            'temp_id': entry_id,  # Will be None for new entries, negative for temp
+                            'category_id': category_id,
+                            'date': row.get('date'),
+                            'amount': float(row.get('amount', 0)),
+                            'recurring_id': recurring_id,
+                            'is_bucket': int(row.get('is_bucket', 0)),
+                            'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                            'processed': int(row.get('processed', 0))
+                        })
+                        continue
+                    
                     batch_data.append((
                         row.get('id'),
-                        row.get('category_id'),
+                        category_id,
                         row.get('date'),
                         float(row.get('amount', 0)),
-                        row.get('recurring_id'),
+                        recurring_id,
+                        int(row.get('is_bucket', 0)),
+                        float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                         int(row.get('processed', 0))
                     ))
                 
+                if skipped_count > 0:
+                    logger.info(f"[FLUSH] Skipped {skipped_count} entries for deleted categories")
+                
+                if skipped_temp_category > 0:
+                    logger.info(f"[FLUSH] Skipped {skipped_temp_category} income_entries with temp category_ids - will retry next flush")
+                
+                # Handle entries with no ID or temp negative IDs - INSERT them and update Redis with real IDs
+                if temp_id_entries:
+                    logger.info(f"[FLUSH] Processing {len(temp_id_entries)} income_entries with no ID or temp negative IDs")
+                    id_mapping = {}  # temp_id -> real_id (for negative IDs)
+                    none_id_updates = []  # List of (category_id, date, new_id) for None ID entries
+                    
+                    for entry in temp_id_entries:
+                        cursor.execute("""
+                            INSERT INTO income_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            entry['category_id'],
+                            entry['date'],
+                            entry['amount'],
+                            entry['recurring_id'],
+                            entry['is_bucket'],
+                            entry['original_amount'],
+                            entry['processed']
+                        ))
+                        new_id = cursor.lastrowid
+                        if entry['temp_id'] is None:
+                            # Track by category_id and date for None ID entries
+                            none_id_updates.append((entry['category_id'], entry['date'], new_id))
+                        else:
+                            id_mapping[entry['temp_id']] = new_id
+                        logger.info(f"[FLUSH] Inserted income_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
+                    
+                    # Update Redis entries with new real IDs
+                    if id_mapping or none_id_updates:
+                        for row in rows:
+                            row_id = row.get('id')
+                            if row_id is not None and row_id in id_mapping:
+                                row['id'] = id_mapping[row_id]
+                            elif row_id is None:
+                                # Match by category_id and date for None ID entries
+                                for cat_id, entry_date, new_id in none_id_updates:
+                                    row_date = row.get('date')
+                                    if row.get('category_id') == cat_id and (row_date == entry_date or (hasattr(row_date, 'isoformat') and row_date.isoformat() == entry_date)):
+                                        row['id'] = new_id
+                                        none_id_updates.remove((cat_id, entry_date, new_id))
+                                        break
+                        redis_needs_update = True
+                        logger.info(f"[FLUSH] Updated entries in rows list with real IDs")
+                
                 if batch_data:
+                    # Log the first few rows for debugging
+                    for i, data in enumerate(batch_data[:5]):
+                        logger.info(f"[FLUSH DEBUG] income_entries row {i}: id={data[0]}, category={data[1]}, date={data[2]}, amount={data[3]}, recurring_id={data[4]} (type: {type(data[4])}), is_bucket={data[5]}, original_amount={data[6]}, processed={data[7]}")
+                    
                     cursor.executemany("""
-                        INSERT INTO income_entries (id, category_id, date, amount, recurring_id, processed)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        INSERT INTO income_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             amount = VALUES(amount),
                             processed = VALUES(processed),
-                            recurring_id = VALUES(recurring_id)
+                            recurring_id = VALUES(recurring_id),
+                            is_bucket = VALUES(is_bucket),
+                            original_amount = VALUES(original_amount)
                     """, batch_data)
+                
+                # Update Redis with real IDs if we inserted temp entries
+                if redis_needs_update:
+                    redis_key = f"income_entries:v1:{user_id}"
+                    _redis_client.setex(redis_key, 604800, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Updated Redis with real IDs for income_entries")
                 
                 conn.commit()
                 cursor.close()
@@ -905,30 +1107,136 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         DELETE FROM expense_entries WHERE id IN ({placeholders})
                     """, delete_ids)
                     logger.info(f"[FLUSH] Deleted {len(delete_ids)} expense_entries from MySQL")
+                    # Filter out pending deletes from rows to prevent re-upsert
+                    delete_ids_set = set(delete_ids)
+                    rows = [r for r in rows if r.get('id') not in delete_ids_set]
+                    logger.info(f"[FLUSH] Filtered out {len(delete_ids)} pending deletes from expense_entries rows")
                 
                 # Now UPSERT the current state from Redis
+                # Get valid category IDs to filter out entries for deleted categories
+                cursor.execute("SELECT id FROM expense_categories WHERE user_id = %s", (user_id,))
+                valid_category_ids = {row[0] for row in cursor.fetchall()}
+                logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid expense categories for user {user_id}")
+                
                 batch_data = []
+                temp_id_entries = []  # Entries with temp negative IDs that need INSERT
+                skipped_count = 0
+                skipped_temp_category = 0
+                redis_needs_update = False  # Track if we need to update Redis with new IDs
+                
                 for row in rows:
+                    entry_id = row.get('id')
+                    category_id = row.get('category_id')
+                    
+                    # Skip entries with temp negative category_id - category hasn't been flushed yet
+                    if category_id and category_id < 0:
+                        skipped_temp_category += 1
+                        continue
+                    
+                    # Skip entries for categories that don't exist (were deleted)
+                    if category_id not in valid_category_ids:
+                        skipped_count += 1
+                        logger.warning(f"[FLUSH] Skipping expense entry for deleted category {category_id}, entry_id={row.get('id')}")
+                        continue
+                    
+                    recurring_id = row.get('recurring_id')
+                    if recurring_id is not None:
+                        recurring_id = int(recurring_id)
+                    
+                    # Handle entries with no ID or temp negative ID - need to INSERT and get real ID
+                    if entry_id is None or entry_id < 0:
+                        temp_id_entries.append({
+                            'temp_id': entry_id,  # Will be None for new entries, negative for temp
+                            'category_id': category_id,
+                            'date': row.get('date'),
+                            'amount': float(row.get('amount', 0)),
+                            'recurring_id': recurring_id,
+                            'is_bucket': int(row.get('is_bucket', 0)),
+                            'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                            'processed': int(row.get('processed', 0)),
+                            'bud_item_id': row.get('bud_item_id')
+                        })
+                        continue
+                    
                     batch_data.append((
                         row.get('id'),
                         row.get('category_id'),
                         row.get('date'),
                         float(row.get('amount', 0)),
-                        row.get('recurring_id'),
+                        recurring_id,
+                        int(row.get('is_bucket', 0)),
+                        float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                         int(row.get('processed', 0)),
                         row.get('bud_item_id')
                     ))
                 
+                if skipped_count > 0:
+                    logger.info(f"[FLUSH] Skipped {skipped_count} expense entries for deleted categories")
+                
+                if skipped_temp_category > 0:
+                    logger.info(f"[FLUSH] Skipped {skipped_temp_category} expense_entries with temp category_ids - will retry next flush")
+                
+                # Handle entries with no ID or temp negative IDs - INSERT them and update Redis with real IDs
+                if temp_id_entries:
+                    logger.info(f"[FLUSH] Processing {len(temp_id_entries)} expense_entries with no ID or temp negative IDs")
+                    id_mapping = {}  # temp_id -> real_id (for negative IDs)
+                    none_id_updates = []  # List of (category_id, date, new_id) for None ID entries
+                    
+                    for entry in temp_id_entries:
+                        cursor.execute("""
+                            INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            entry['category_id'],
+                            entry['date'],
+                            entry['amount'],
+                            entry['recurring_id'],
+                            entry['is_bucket'],
+                            entry['original_amount'],
+                            entry['processed'],
+                            entry['bud_item_id']
+                        ))
+                        new_id = cursor.lastrowid
+                        if entry['temp_id'] is None:
+                            none_id_updates.append((entry['category_id'], entry['date'], new_id))
+                        else:
+                            id_mapping[entry['temp_id']] = new_id
+                        logger.info(f"[FLUSH] Inserted expense_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
+                    
+                    # Update Redis entries with new real IDs
+                    if id_mapping or none_id_updates:
+                        for row in rows:
+                            row_id = row.get('id')
+                            if row_id is not None and row_id in id_mapping:
+                                row['id'] = id_mapping[row_id]
+                            elif row_id is None:
+                                for cat_id, entry_date, new_id in none_id_updates:
+                                    row_date = row.get('date')
+                                    if row.get('category_id') == cat_id and (row_date == entry_date or (hasattr(row_date, 'isoformat') and row_date.isoformat() == entry_date)):
+                                        row['id'] = new_id
+                                        none_id_updates.remove((cat_id, entry_date, new_id))
+                                        break
+                        redis_needs_update = True
+                        logger.info(f"[FLUSH] Updated entries in rows list with real IDs")
+                
                 if batch_data:
                     cursor.executemany("""
-                        INSERT INTO expense_entries (id, category_id, date, amount, recurring_id, processed, bud_item_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             amount = VALUES(amount),
                             processed = VALUES(processed),
                             recurring_id = VALUES(recurring_id),
+                            is_bucket = VALUES(is_bucket),
+                            original_amount = VALUES(original_amount),
                             bud_item_id = VALUES(bud_item_id)
                     """, batch_data)
+                
+                # Update Redis with real IDs if we inserted temp entries
+                if redis_needs_update:
+                    redis_key = f"expense_entries:v1:{user_id}"
+                    _redis_client.setex(redis_key, 604800, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Updated Redis with real IDs for expense_entries")
                 
                 conn.commit()
                 cursor.close()
@@ -953,30 +1261,141 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         DELETE FROM c_expense_entries WHERE id IN ({placeholders})
                     """, delete_ids)
                     logger.info(f"[FLUSH] Deleted {len(delete_ids)} c_expense_entries from MySQL")
+                    # Filter out pending deletes from rows to prevent re-upsert
+                    delete_ids_set = set(delete_ids)
+                    rows = [r for r in rows if r.get('id') not in delete_ids_set]
+                    logger.info(f"[FLUSH] Filtered out {len(delete_ids)} pending deletes from c_expense_entries rows")
                 
                 # Now UPSERT the current state from Redis
+                # Get valid category IDs to filter out entries for deleted categories
+                # c_expense_categories links to credit_accounts via account_id, not directly to users
+                cursor.execute("""
+                    SELECT cec.id FROM c_expense_categories cec
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                valid_category_ids = {row[0] for row in cursor.fetchall()}
+                logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid credit expense categories for user {user_id}")
+                
                 batch_data = []
+                temp_id_entries = []  # Entries with temp negative IDs that need INSERT
+                skipped_count = 0
+                skipped_temp_category = 0
+                redis_needs_update = False  # Track if we need to update Redis with new IDs
+                
                 for row in rows:
+                    entry_id = row.get('id')
+                    category_id = row.get('category_id')
+                    
+                    # Skip entries with temp negative category_id - category hasn't been flushed yet
+                    if category_id and category_id < 0:
+                        skipped_temp_category += 1
+                        continue
+                    
+                    # Skip entries for categories that don't exist (were deleted)
+                    if category_id not in valid_category_ids:
+                        skipped_count += 1
+                        logger.warning(f"[FLUSH] Skipping credit expense entry for deleted category {category_id}, entry_id={row.get('id')}")
+                        continue
+                    
+                    recurring_id = row.get('recurring_id')
+                    if recurring_id is not None:
+                        recurring_id = int(recurring_id)
+                    
+                    # Handle entries with no ID or temp negative ID - need to INSERT and get real ID
+                    if entry_id is None or entry_id < 0:
+                        temp_id_entries.append({
+                            'temp_id': entry_id,
+                            'category_id': category_id,
+                            'date': row.get('date'),
+                            'amount': float(row.get('amount', 0)),
+                            'recurring_id': recurring_id,
+                            'is_bucket': int(row.get('is_bucket', 0)),
+                            'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                            'processed': int(row.get('processed', 0)),
+                            'bud_item_id': row.get('bud_item_id')
+                        })
+                        continue
+                    
                     batch_data.append((
                         row.get('id'),
-                        row.get('category_id'),
+                        category_id,
                         row.get('date'),
                         float(row.get('amount', 0)),
-                        row.get('recurring_id'),
+                        recurring_id,
+                        int(row.get('is_bucket', 0)),
+                        float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                         int(row.get('processed', 0)),
                         row.get('bud_item_id')
                     ))
                 
+                if skipped_count > 0:
+                    logger.info(f"[FLUSH] Skipped {skipped_count} credit expense entries for deleted categories")
+                
+                if skipped_temp_category > 0:
+                    logger.info(f"[FLUSH] Skipped {skipped_temp_category} c_expense_entries with temp category_ids - will retry next flush")
+                
+                # Handle entries with no ID or temp negative IDs - INSERT them and update Redis with real IDs
+                if temp_id_entries:
+                    logger.info(f"[FLUSH] Processing {len(temp_id_entries)} c_expense_entries with no ID or temp negative IDs")
+                    id_mapping = {}  # temp_id -> real_id (for negative IDs)
+                    none_id_updates = []  # List of (category_id, date, new_id) for None ID entries
+                    
+                    for entry in temp_id_entries:
+                        cursor.execute("""
+                            INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            entry['category_id'],
+                            entry['date'],
+                            entry['amount'],
+                            entry['recurring_id'],
+                            entry['is_bucket'],
+                            entry['original_amount'],
+                            entry['processed'],
+                            entry['bud_item_id']
+                        ))
+                        new_id = cursor.lastrowid
+                        if entry['temp_id'] is None:
+                            none_id_updates.append((entry['category_id'], entry['date'], new_id))
+                        else:
+                            id_mapping[entry['temp_id']] = new_id
+                        logger.info(f"[FLUSH] Inserted c_expense_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
+                    
+                    # Update Redis entries with new real IDs
+                    if id_mapping or none_id_updates:
+                        for row in rows:
+                            row_id = row.get('id')
+                            if row_id is not None and row_id in id_mapping:
+                                row['id'] = id_mapping[row_id]
+                            elif row_id is None:
+                                for cat_id, entry_date, new_id in none_id_updates:
+                                    row_date = row.get('date')
+                                    if row.get('category_id') == cat_id and (row_date == entry_date or (hasattr(row_date, 'isoformat') and row_date.isoformat() == entry_date)):
+                                        row['id'] = new_id
+                                        none_id_updates.remove((cat_id, entry_date, new_id))
+                                        break
+                        redis_needs_update = True
+                        logger.info(f"[FLUSH] Updated entries in rows list with real IDs")
+                
                 if batch_data:
                     cursor.executemany("""
-                        INSERT INTO c_expense_entries (id, category_id, date, amount, recurring_id, processed, bud_item_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO c_expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             amount = VALUES(amount),
                             processed = VALUES(processed),
                             recurring_id = VALUES(recurring_id),
+                            is_bucket = VALUES(is_bucket),
+                            original_amount = VALUES(original_amount),
                             bud_item_id = VALUES(bud_item_id)
                     """, batch_data)
+                
+                # Update Redis with real IDs if we inserted temp entries
+                if redis_needs_update:
+                    redis_key = f"c_expense_entries:v1:{user_id}"
+                    _redis_client.setex(redis_key, 604800, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Updated Redis with real IDs for c_expense_entries")
                 
                 conn.commit()
                 cursor.close()
@@ -990,7 +1409,27 @@ def _flush_table_to_mysql(table: str, user_id: int):
             elif table == 'c_payment_entries':
                 # Credit account payment entries table
                 
-                # First, delete any entries marked for deletion
+                # First, compare Redis IDs with MySQL IDs and delete orphans
+                redis_ids = set(int(row.get('id')) for row in rows if row.get('id') and int(row.get('id')) > 0)
+                
+                # Get all IDs from MySQL for this user's credit accounts
+                cursor.execute("""
+                    SELECT cpe.id FROM c_payment_entries cpe
+                    JOIN credit_accounts ca ON cpe.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                mysql_ids = set(row[0] for row in cursor.fetchall())
+                
+                # Delete records that exist in MySQL but not in Redis (orphan detection)
+                ids_to_delete = mysql_ids - redis_ids
+                if ids_to_delete:
+                    placeholders = ','.join(['%s'] * len(ids_to_delete))
+                    cursor.execute(f"""
+                        DELETE FROM c_payment_entries WHERE id IN ({placeholders})
+                    """, list(ids_to_delete))
+                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} c_payment_entries orphans from MySQL")
+                
+                # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:c_payment_entries:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
                 
@@ -1000,19 +1439,44 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM c_payment_entries WHERE id IN ({placeholders})
                     """, delete_ids)
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} c_payment_entries from MySQL")
+                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} c_payment_entries from pending set")
+                    
+                    # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
+                    delete_ids_set = set(delete_ids)
+                    rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
+                    # Save filtered data back to Redis
+                    _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted c_payment_entries from Redis")
+                    # Clear the pending deletes set
+                    _redis_client.delete(pending_key)
                 
                 # Now UPSERT the current state from Redis
                 batch_data = []
                 for row in rows:
-                    batch_data.append((
-                        row.get('id'),
-                        row.get('account_id'),
-                        row.get('date'),
-                        float(row.get('amount', 0)),
-                        row.get('recurring_id'),
-                        int(row.get('processed', 0))
-                    ))
+                    row_id = int(row.get('id', 0))
+                    recurring_id = row.get('recurring_id')
+                    if recurring_id is not None:
+                        recurring_id = int(recurring_id)
+                    
+                    # Handle negative IDs (new entries not yet in MySQL)
+                    if row_id < 0:
+                        batch_data.append((
+                            None,  # Let MySQL auto-generate ID
+                            row.get('account_id'),
+                            row.get('date'),
+                            float(row.get('amount', 0)),
+                            recurring_id,
+                            int(row.get('processed', 0))
+                        ))
+                    else:
+                        batch_data.append((
+                            row_id,
+                            row.get('account_id'),
+                            row.get('date'),
+                            float(row.get('amount', 0)),
+                            recurring_id,
+                            int(row.get('processed', 0))
+                        ))
                 
                 if batch_data:
                     cursor.executemany("""
@@ -1036,7 +1500,23 @@ def _flush_table_to_mysql(table: str, user_id: int):
             elif table == 'recurring_income':
                 # Recurring income table
                 
-                # First, delete any records marked for deletion
+                # First, compare Redis IDs with MySQL IDs and delete orphans
+                redis_ids = set(int(row.get('id')) for row in rows if row.get('id') and int(row.get('id')) > 0)
+                
+                # Get all IDs from MySQL for this user
+                cursor.execute("SELECT id FROM recurring_income WHERE user_id = %s", (user_id,))
+                mysql_ids = set(row[0] for row in cursor.fetchall())
+                
+                # Delete records that exist in MySQL but not in Redis
+                ids_to_delete = mysql_ids - redis_ids
+                if ids_to_delete:
+                    placeholders = ','.join(['%s'] * len(ids_to_delete))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_income WHERE id IN ({placeholders}) AND user_id = %s
+                    """, list(ids_to_delete) + [user_id])
+                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_income from MySQL (removed from Redis)")
+                
+                # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:recurring_income:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
                 
@@ -1046,13 +1526,27 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_income WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_income from MySQL")
+                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_income from pending set")
+                    
+                    # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
+                    delete_ids_set = set(delete_ids)
+                    rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
+                    # Save filtered data back to Redis
+                    _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_income from Redis")
+                    # Clear the pending deletes set
+                    _redis_client.delete(pending_key)
                 
                 # Now UPSERT the current state from Redis
+                # Track temp IDs for later resolution
+                temp_id_to_row = {}  # temp_id -> row data for resolving after insert
                 batch_data = []
                 for row in rows:
                     # Skip temporary negative IDs - they'll be handled as INSERTs
-                    if row.get('id', 0) < 0:
+                    row_id = int(row.get('id', 0))  # Convert to int for comparison
+                    if row_id < 0:
+                        # Track this temp ID for later resolution
+                        temp_id_to_row[row_id] = row
                         batch_data.append((
                             None,  # Let MySQL auto-generate
                             user_id,
@@ -1102,6 +1596,75 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     """, batch_data)
                 
                 conn.commit()
+                
+                # CRITICAL: Resolve temp IDs to real MySQL IDs
+                if temp_id_to_row:
+                    logger.info(f"[FLUSH] Resolving {len(temp_id_to_row)} temp recurring_income IDs")
+                    
+                    # Query MySQL to find newly inserted records by matching category_id + start_date
+                    for temp_id, row_data in temp_id_to_row.items():
+                        category_id = row_data.get('category_id')
+                        start_date = row_data.get('start_date')
+                        amount = row_data.get('amount')
+                        
+                        cursor.execute("""
+                            SELECT id FROM recurring_income 
+                            WHERE user_id = %s AND category_id = %s AND start_date = %s AND amount = %s
+                            ORDER BY id DESC LIMIT 1
+                        """, (user_id, category_id, start_date, float(amount) if amount else 0))
+                        
+                        result = cursor.fetchone()
+                        if result:
+                            new_mysql_id = result[0]
+                            logger.info(f"[FLUSH] Resolved recurring_income temp_id {temp_id} -> MySQL id {new_mysql_id}")
+                            
+                            # Update income_entries in Redis to use the new ID
+                            entries_key = f"income_entries:v1:{user_id}"
+                            entries_data = _redis_client.get(entries_key)
+                            if entries_data:
+                                entries = json.loads(entries_data)
+                                updated_count = 0
+                                for entry in entries:
+                                    if entry.get('recurring_id') == temp_id:
+                                        entry['recurring_id'] = new_mysql_id
+                                        updated_count += 1
+                                if updated_count > 0:
+                                    _redis_client.setex(entries_key, 604800, json.dumps(entries))
+                                    # Mark income_entries as dirty so they get re-flushed with correct recurring_id
+                                    _redis_client.sadd(f"dirty_tables:{user_id}", 'income_entries')
+                                    _redis_client.expire(f"dirty_tables:{user_id}", 604800)
+                                    logger.info(f"[FLUSH] Updated {updated_count} income_entries with new recurring_id {new_mysql_id}")
+                            
+                            # Update recurring_income_buckets in Redis to use the new ID
+                            buckets_key = f"recurring_income_buckets:v1:{user_id}"
+                            buckets_data = _redis_client.get(buckets_key)
+                            if buckets_data:
+                                buckets = json.loads(buckets_data)
+                                bucket_updated_count = 0
+                                for bucket in buckets:
+                                    if bucket.get('recurring_id') == temp_id:
+                                        bucket['recurring_id'] = new_mysql_id
+                                        bucket_updated_count += 1
+                                if bucket_updated_count > 0:
+                                    _redis_client.setex(buckets_key, 604800, json.dumps(buckets))
+                                    _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_income_buckets')
+                                    _redis_client.expire(f"dirty_tables:{user_id}", 604800)
+                                    logger.info(f"[FLUSH] Updated {bucket_updated_count} recurring_income_buckets with new recurring_id {new_mysql_id}")
+                            
+                            # Also update the recurring record in Redis with the new ID
+                            recurring_key = f"recurring_income:v1:{user_id}"
+                            recurring_data = _redis_client.get(recurring_key)
+                            if recurring_data:
+                                recurring_records = json.loads(recurring_data)
+                                for rec in recurring_records:
+                                    if rec.get('id') == temp_id:
+                                        rec['id'] = new_mysql_id
+                                        logger.info(f"[FLUSH] Updated recurring_income record id from {temp_id} to {new_mysql_id}")
+                                        break
+                                _redis_client.setex(recurring_key, 604800, json.dumps(recurring_records))
+                        else:
+                            logger.warning(f"[FLUSH] Could not find MySQL id for temp recurring_income {temp_id}")
+                
                 cursor.close()
                 
                 # Clear pending deletions set after successful flush
@@ -1113,7 +1676,23 @@ def _flush_table_to_mysql(table: str, user_id: int):
             elif table == 'recurring_expense':
                 # Recurring expense table
                 
-                # First, delete any records marked for deletion
+                # First, compare Redis IDs with MySQL IDs and delete orphans
+                redis_ids = set(int(row.get('id')) for row in rows if row.get('id') and int(row.get('id')) > 0)
+                
+                # Get all IDs from MySQL for this user
+                cursor.execute("SELECT id FROM recurring_expense WHERE user_id = %s", (user_id,))
+                mysql_ids = set(row[0] for row in cursor.fetchall())
+                
+                # Delete records that exist in MySQL but not in Redis
+                ids_to_delete = mysql_ids - redis_ids
+                if ids_to_delete:
+                    placeholders = ','.join(['%s'] * len(ids_to_delete))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_expense WHERE id IN ({placeholders}) AND user_id = %s
+                    """, list(ids_to_delete) + [user_id])
+                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_expense from MySQL (removed from Redis)")
+                
+                # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:recurring_expense:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
                 
@@ -1123,13 +1702,31 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_expense WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_expense from MySQL")
+                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_expense from pending set")
+                    
+                    # CRITICAL: Also remove from Redis rows (may have been rehydrated from MySQL)
+                    delete_ids_set = set(delete_ids)
+                    original_count = len(rows)
+                    rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
+                    if len(rows) < original_count:
+                        # Save filtered data back to Redis
+                        redis_key = _get_redis_key(table, user_id)
+                        if rows:
+                            _redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(rows, cls=DecimalEncoder))
+                        else:
+                            _redis_client.delete(redis_key)
+                        logger.info(f"[FLUSH] Also removed {original_count - len(rows)} pending-delete records from Redis")
                 
                 # Now UPSERT the current state from Redis
+                # Track temp IDs for later resolution
+                temp_id_to_row = {}  # temp_id -> row data for resolving after insert
                 batch_data = []
                 for row in rows:
                     # Skip temporary negative IDs - they'll be handled as INSERTs
-                    if row.get('id', 0) < 0:
+                    row_id = int(row.get('id', 0))  # Convert to int for comparison
+                    if row_id < 0:
+                        # Track this temp ID for later resolution
+                        temp_id_to_row[row_id] = row
                         batch_data.append((
                             None,  # Let MySQL auto-generate
                             user_id,
@@ -1179,6 +1776,91 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     """, batch_data)
                 
                 conn.commit()
+                
+                # CRITICAL: Resolve temp IDs to real MySQL IDs
+                if temp_id_to_row:
+                    logger.info(f"[FLUSH] Resolving {len(temp_id_to_row)} temp recurring_expense IDs")
+                    
+                    # Query MySQL to find newly inserted records by matching category_id + start_date
+                    for temp_id, row_data in temp_id_to_row.items():
+                        category_id = row_data.get('category_id')
+                        start_date = row_data.get('start_date')
+                        amount = row_data.get('amount')
+                        
+                        cursor.execute("""
+                            SELECT id FROM recurring_expense 
+                            WHERE user_id = %s AND category_id = %s AND start_date = %s AND amount = %s
+                            ORDER BY id DESC LIMIT 1
+                        """, (user_id, category_id, start_date, float(amount) if amount else 0))
+                        
+                        result = cursor.fetchone()
+                        if result:
+                            new_mysql_id = result[0]
+                            logger.info(f"[FLUSH] Resolved recurring_expense temp_id {temp_id} -> MySQL id {new_mysql_id}")
+                            
+                            # Update expense_entries in Redis to use the new ID
+                            entries_key = f"expense_entries:v1:{user_id}"
+                            entries_data = _redis_client.get(entries_key)
+                            if entries_data:
+                                entries = json.loads(entries_data)
+                                updated_count = 0
+                                for entry in entries:
+                                    if entry.get('recurring_id') == temp_id:
+                                        entry['recurring_id'] = new_mysql_id
+                                        updated_count += 1
+                                if updated_count > 0:
+                                    _redis_client.setex(entries_key, 604800, json.dumps(entries))
+                                    # Mark expense_entries as dirty so they get re-flushed with correct recurring_id
+                                    _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_entries')
+                                    _redis_client.expire(f"dirty_tables:{user_id}", 604800)
+                                    logger.info(f"[FLUSH] Updated {updated_count} expense_entries with new recurring_id {new_mysql_id}")
+                            
+                            # Update recurring_expense_buckets in Redis to use the new ID
+                            buckets_key = f"recurring_expense_buckets:v1:{user_id}"
+                            buckets_data = _redis_client.get(buckets_key)
+                            if buckets_data:
+                                buckets = json.loads(buckets_data)
+                                bucket_updated_count = 0
+                                for bucket in buckets:
+                                    if bucket.get('recurring_id') == temp_id:
+                                        bucket['recurring_id'] = new_mysql_id
+                                        bucket_updated_count += 1
+                                if bucket_updated_count > 0:
+                                    _redis_client.setex(buckets_key, 604800, json.dumps(buckets))
+                                    _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_expense_buckets')
+                                    _redis_client.expire(f"dirty_tables:{user_id}", 604800)
+                                    logger.info(f"[FLUSH] Updated {bucket_updated_count} recurring_expense_buckets with new recurring_id {new_mysql_id}")
+                            
+                            # Update c_payment_entries in Redis to use the new recurring_id
+                            payments_key = f"c_payment_entries:v1:{user_id}"
+                            payments_data = _redis_client.get(payments_key)
+                            if payments_data:
+                                payments = json.loads(payments_data)
+                                payment_updated_count = 0
+                                for payment in payments:
+                                    if payment.get('recurring_id') == temp_id:
+                                        payment['recurring_id'] = new_mysql_id
+                                        payment_updated_count += 1
+                                if payment_updated_count > 0:
+                                    _redis_client.setex(payments_key, 604800, json.dumps(payments))
+                                    _redis_client.sadd(f"dirty_tables:{user_id}", 'c_payment_entries')
+                                    _redis_client.expire(f"dirty_tables:{user_id}", 604800)
+                                    logger.info(f"[FLUSH] Updated {payment_updated_count} c_payment_entries with new recurring_id {new_mysql_id}")
+                            
+                            # Also update the recurring record in Redis with the new ID
+                            recurring_key = f"recurring_expense:v1:{user_id}"
+                            recurring_data = _redis_client.get(recurring_key)
+                            if recurring_data:
+                                recurring_records = json.loads(recurring_data)
+                                for rec in recurring_records:
+                                    if rec.get('id') == temp_id:
+                                        rec['id'] = new_mysql_id
+                                        logger.info(f"[FLUSH] Updated recurring_expense record id from {temp_id} to {new_mysql_id}")
+                                        break
+                                _redis_client.setex(recurring_key, 604800, json.dumps(recurring_records))
+                        else:
+                            logger.warning(f"[FLUSH] Could not find MySQL id for temp recurring_expense {temp_id}")
+                
                 cursor.close()
                 
                 # Clear pending deletions set after successful flush
@@ -1190,7 +1872,23 @@ def _flush_table_to_mysql(table: str, user_id: int):
             elif table == 'recurring_c_expense':
                 # Recurring credit account expense table
                 
-                # First, delete any records marked for deletion
+                # First, compare Redis IDs with MySQL IDs and delete orphans
+                redis_ids = set(int(row.get('id')) for row in rows if row.get('id') and int(row.get('id')) > 0)
+                
+                # Get all IDs from MySQL for this user
+                cursor.execute("SELECT id FROM recurring_c_expense WHERE user_id = %s", (user_id,))
+                mysql_ids = set(row[0] for row in cursor.fetchall())
+                
+                # Delete records that exist in MySQL but not in Redis
+                ids_to_delete = mysql_ids - redis_ids
+                if ids_to_delete:
+                    placeholders = ','.join(['%s'] * len(ids_to_delete))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_c_expense WHERE id IN ({placeholders}) AND user_id = %s
+                    """, list(ids_to_delete) + [user_id])
+                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_c_expense from MySQL (removed from Redis)")
+                
+                # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:recurring_c_expense:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
                 
@@ -1200,17 +1898,58 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_c_expense WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_c_expense from MySQL")
+                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_c_expense from pending set")
+                    
+                    # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
+                    delete_ids_set = set(delete_ids)
+                    rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
+                    # Save filtered data back to Redis
+                    _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_c_expense from Redis")
+                    # Clear the pending deletes set
+                    _redis_client.delete(pending_key)
                 
-                # Now UPSERT the current state from Redis
+                # Get valid category IDs from MySQL to filter out entries for deleted categories
+                cursor.execute("""
+                    SELECT cec.id 
+                    FROM c_expense_categories cec
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                valid_category_ids = set(row[0] for row in cursor.fetchall())
+                logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid credit expense categories for user {user_id}")
+
+                # Track rows with negative IDs for later mapping
+                temp_id_to_row_idx = {}  # Map temp negative ID to row index
                 batch_data = []
-                for row in rows:
+                skipped_temp_category = 0
+                skipped_deleted_category = 0
+                
+                for idx, row in enumerate(rows):
                     # Skip temporary negative IDs - they'll be handled as INSERTs
-                    if row.get('id', 0) < 0:
+                    row_id = int(row.get('id', 0))  # Convert to int for comparison
+                    category_id = row.get('category_id')
+                    
+                    # Skip rows with temp negative category_id - category hasn't been flushed yet
+                    if category_id and int(category_id) < 0:
+                        skipped_temp_category += 1
+                        continue
+                    
+                    # Skip rows with deleted category_id - category was deleted
+                    if category_id and int(category_id) not in valid_category_ids:
+                        skipped_deleted_category += 1
+                        logger.info(f"[FLUSH] Skipping recurring_c_expense for deleted category {category_id}, recurring_id={row_id}")
+                        continue
+                    
+                    # Track temp IDs for mapping later
+                    if row_id < 0:
+                        temp_id_to_row_idx[row_id] = idx
+                    
+                    if row_id < 0:
                         batch_data.append((
                             None,  # Let MySQL auto-generate
                             user_id,
-                            row.get('category_id'),
+                            category_id,
                             float(row.get('amount', 0)),
                             row.get('cadence_interval', 1),
                             row.get('cadence_unit', 'days'),
@@ -1225,7 +1964,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         batch_data.append((
                             row.get('id'),
                             user_id,
-                            row.get('category_id'),
+                            category_id,
                             float(row.get('amount', 0)),
                             row.get('cadence_interval', 1),
                             row.get('cadence_unit', 'days'),
@@ -1236,6 +1975,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('start_date'),
                             row.get('end_date')
                         ))
+                
+                if skipped_temp_category > 0:
+                    logger.info(f"[FLUSH] Skipped {skipped_temp_category} recurring_c_expense with temp category_id")
+                
+                if skipped_deleted_category > 0:
+                    logger.info(f"[FLUSH] Skipped {skipped_deleted_category} recurring_c_expense with deleted category_id")
                 
                 if batch_data:
                     cursor.executemany("""
@@ -1254,6 +1999,88 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             start_date = VALUES(start_date),
                             end_date = VALUES(end_date)
                     """, batch_data)
+                    
+                    # If we had temp IDs, fetch the real MySQL IDs and update Redis
+                    if temp_id_to_row_idx:
+                        # Query all recurring_c_expense for this user to get the ID mappings
+                        cursor.execute("""
+                            SELECT rce.id, rce.category_id, rce.amount, rce.start_date, rce.end_date
+                            FROM recurring_c_expense rce
+                            WHERE rce.user_id = %s
+                        """, (user_id,))
+                        
+                        mysql_records = cursor.fetchall()
+                        
+                        # Match MySQL records to Redis rows by unique attributes
+                        for mysql_id, cat_id, amt, start_dt, end_dt in mysql_records:
+                            # Find matching row in Redis with negative ID
+                            for temp_id, row_idx in temp_id_to_row_idx.items():
+                                row = rows[row_idx]
+                                # Match by category_id, amount, start_date, end_date
+                                if (int(row.get('category_id', 0)) == cat_id and
+                                    float(row.get('amount', 0)) == float(amt) and
+                                    str(row.get('start_date', '')) == str(start_dt) and
+                                    str(row.get('end_date', '')) == str(end_dt)):
+                                    
+                                    old_id = row.get('id')
+                                    rows[row_idx]['id'] = mysql_id
+                                    logger.info(f"[FLUSH] Updated recurring_c_expense Redis ID: {old_id} -> {mysql_id}")
+                                    break
+                        
+                        # Write updated rows back to Redis with real IDs
+                        redis_key = _get_redis_key(table, user_id)
+                        _redis_client.setex(
+                            redis_key,
+                            INACTIVITY_TIMEOUT + 60,
+                            json.dumps(rows, cls=DecimalEncoder)
+                        )
+                        logger.info(f"[FLUSH] Updated Redis cache for recurring_c_expense with real MySQL IDs")
+                        
+                        # CRITICAL: Also update c_expense_entries with new recurring_id
+                        entries_key = f"c_expense_entries:v1:{user_id}"
+                        entries_data = _redis_client.get(entries_key)
+                        if entries_data:
+                            entries = json.loads(entries_data)
+                            entries_updated = False
+                            # Build mapping of old temp_id -> new mysql_id
+                            for temp_id, row_idx in temp_id_to_row_idx.items():
+                                new_id = rows[row_idx].get('id')
+                                if new_id and new_id != temp_id:
+                                    updated_count = 0
+                                    for entry in entries:
+                                        if entry.get('recurring_id') == temp_id:
+                                            entry['recurring_id'] = new_id
+                                            updated_count += 1
+                                    if updated_count > 0:
+                                        entries_updated = True
+                                        logger.info(f"[FLUSH] Updated {updated_count} c_expense_entries recurring_id from {temp_id} to {new_id}")
+                            _redis_client.setex(entries_key, 604800, json.dumps(entries))
+                            if entries_updated:
+                                # Mark c_expense_entries as dirty so they get re-flushed with correct recurring_id
+                                _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_entries')
+                                _redis_client.expire(f"dirty_tables:{user_id}", 604800)
+                        
+                        # Also update recurring_c_expense_buckets with new recurring_id
+                        buckets_key = f"recurring_c_expense_buckets:v1:{user_id}"
+                        buckets_data = _redis_client.get(buckets_key)
+                        if buckets_data:
+                            buckets = json.loads(buckets_data)
+                            buckets_updated = False
+                            for temp_id, row_idx in temp_id_to_row_idx.items():
+                                new_id = rows[row_idx].get('id')
+                                if new_id and new_id != temp_id:
+                                    bucket_updated_count = 0
+                                    for bucket in buckets:
+                                        if bucket.get('recurring_id') == temp_id:
+                                            bucket['recurring_id'] = new_id
+                                            bucket_updated_count += 1
+                                    if bucket_updated_count > 0:
+                                        buckets_updated = True
+                                        logger.info(f"[FLUSH] Updated {bucket_updated_count} recurring_c_expense_buckets recurring_id from {temp_id} to {new_id}")
+                            _redis_client.setex(buckets_key, 604800, json.dumps(buckets))
+                            if buckets_updated:
+                                _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense_buckets')
+                                _redis_client.expire(f"dirty_tables:{user_id}", 604800)
                 
                 conn.commit()
                 cursor.close()
@@ -1263,6 +2090,326 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 logger.debug(f"[FLUSH] → recurring_c_expense: {len(batch_data)} rows")
                 return len(batch_data)
+                
+            elif table == 'recurring_income_buckets':
+                # Recurring income buckets table
+                
+                # First, compare Redis IDs with MySQL IDs and delete orphans
+                redis_ids = set(int(row.get('id')) for row in rows if row.get('id') and int(row.get('id')) > 0)
+                
+                # Get all IDs from MySQL for this user
+                cursor.execute("SELECT id FROM recurring_income_buckets WHERE user_id = %s", (user_id,))
+                mysql_ids = set(row[0] for row in cursor.fetchall())
+                
+                # Delete records that exist in MySQL but not in Redis
+                ids_to_delete = mysql_ids - redis_ids
+                if ids_to_delete:
+                    placeholders = ','.join(['%s'] * len(ids_to_delete))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_income_buckets WHERE id IN ({placeholders}) AND user_id = %s
+                    """, list(ids_to_delete) + [user_id])
+                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_income_buckets from MySQL (removed from Redis)")
+                
+                # Also handle pending deletions from the set (if any)
+                pending_key = f"pending_deletes:recurring_income_buckets:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    delete_ids = [int(id_str) for id_str in pending_deletes]
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_income_buckets WHERE id IN ({placeholders}) AND user_id = %s
+                    """, delete_ids + [user_id])
+                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_income_buckets from pending set")
+                    
+                    # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
+                    delete_ids_set = set(delete_ids)
+                    rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
+                    # Save filtered data back to Redis
+                    _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_income_buckets from Redis")
+                    # Clear the pending deletes set
+                    _redis_client.delete(pending_key)
+                
+                # Now UPSERT the current state from Redis
+                # Split into updates (positive IDs) and inserts (negative IDs)
+                update_data = []
+                insert_data = []
+                skipped_rows = []
+                
+                for row in rows:
+                    category_id = row.get('category_id')
+                    
+                    # Skip rows with temporary negative category_id - category hasn't been flushed yet
+                    if category_id and category_id < 0:
+                        skipped_rows.append(row)
+                        continue
+                    
+                    row_id = row.get('id')
+                    if row_id and row_id > 0:
+                        # Existing record with real ID - update
+                        update_data.append((
+                            row_id,
+                            user_id,
+                            category_id,
+                            row.get('bucket_date'),
+                            float(row.get('amount', 0)),
+                            float(row.get('original_amount', 0))
+                        ))
+                    else:
+                        # New record with temp negative ID - insert without ID
+                        insert_data.append((
+                            user_id,
+                            category_id,
+                            row.get('bucket_date'),
+                            float(row.get('amount', 0)),
+                            float(row.get('original_amount', 0))
+                        ))
+                
+                if skipped_rows:
+                    logger.info(f"[FLUSH] Skipped {len(skipped_rows)} recurring_income_buckets with temp category_ids - will retry next flush")
+                
+                if update_data:
+                    cursor.executemany("""
+                        INSERT INTO recurring_income_buckets (id, user_id, category_id, bucket_date, amount, original_amount)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            amount = VALUES(amount),
+                            original_amount = VALUES(original_amount)
+                    """, update_data)
+                
+                if insert_data:
+                    cursor.executemany("""
+                        INSERT INTO recurring_income_buckets (user_id, category_id, bucket_date, amount, original_amount)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            amount = VALUES(amount),
+                            original_amount = VALUES(original_amount)
+                    """, insert_data)
+                
+                conn.commit()
+                cursor.close()
+                
+                # Clear pending deletions set after successful flush
+                _redis_client.delete(pending_key)
+                
+                total_rows = len(update_data) + len(insert_data)
+                logger.debug(f"[FLUSH] → recurring_income_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
+                return total_rows
+                
+            elif table == 'recurring_expense_buckets':
+                # Recurring expense buckets table
+                
+                # First, compare Redis IDs with MySQL IDs and delete orphans
+                redis_ids = set(int(row.get('id')) for row in rows if row.get('id') and int(row.get('id')) > 0)
+                
+                # Get all IDs from MySQL for this user
+                cursor.execute("SELECT id FROM recurring_expense_buckets WHERE user_id = %s", (user_id,))
+                mysql_ids = set(row[0] for row in cursor.fetchall())
+                
+                # Delete records that exist in MySQL but not in Redis
+                ids_to_delete = mysql_ids - redis_ids
+                if ids_to_delete:
+                    placeholders = ','.join(['%s'] * len(ids_to_delete))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_expense_buckets WHERE id IN ({placeholders}) AND user_id = %s
+                    """, list(ids_to_delete) + [user_id])
+                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_expense_buckets from MySQL (removed from Redis)")
+                
+                # Also handle pending deletions from the set (if any)
+                pending_key = f"pending_deletes:recurring_expense_buckets:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    delete_ids = [int(id_str) for id_str in pending_deletes]
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_expense_buckets WHERE id IN ({placeholders}) AND user_id = %s
+                    """, delete_ids + [user_id])
+                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_expense_buckets from pending set")
+                    
+                    # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
+                    delete_ids_set = set(delete_ids)
+                    rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
+                    # Save filtered data back to Redis
+                    _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_expense_buckets from Redis")
+                    # Clear the pending deletes set
+                    _redis_client.delete(pending_key)
+                
+                # Now UPSERT the current state from Redis
+                # Split into updates (positive IDs) and inserts (negative IDs)
+                update_data = []
+                insert_data = []
+                skipped_rows = []
+                
+                for row in rows:
+                    category_id = row.get('category_id')
+                    
+                    # Skip rows with temporary negative category_id - category hasn't been flushed yet
+                    if category_id and category_id < 0:
+                        skipped_rows.append(row)
+                        continue
+                    
+                    row_id = row.get('id')
+                    if row_id and row_id > 0:
+                        # Existing record with real ID - update
+                        update_data.append((
+                            row_id,
+                            user_id,
+                            category_id,
+                            row.get('bucket_date'),
+                            float(row.get('amount', 0)),
+                            float(row.get('original_amount', 0))
+                        ))
+                    else:
+                        # New record with temp negative ID - insert without ID
+                        insert_data.append((
+                            user_id,
+                            category_id,
+                            row.get('bucket_date'),
+                            float(row.get('amount', 0)),
+                            float(row.get('original_amount', 0))
+                        ))
+                
+                if skipped_rows:
+                    logger.info(f"[FLUSH] Skipped {len(skipped_rows)} recurring_expense_buckets with temp category_ids - will retry next flush")
+                
+                if update_data:
+                    cursor.executemany("""
+                        INSERT INTO recurring_expense_buckets (id, user_id, category_id, bucket_date, amount, original_amount)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            amount = VALUES(amount),
+                            original_amount = VALUES(original_amount)
+                    """, update_data)
+                
+                if insert_data:
+                    cursor.executemany("""
+                        INSERT INTO recurring_expense_buckets (user_id, category_id, bucket_date, amount, original_amount)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            amount = VALUES(amount),
+                            original_amount = VALUES(original_amount)
+                    """, insert_data)
+                
+                conn.commit()
+                cursor.close()
+                
+                # Clear pending deletions set after successful flush
+                _redis_client.delete(pending_key)
+                
+                total_rows = len(update_data) + len(insert_data)
+                logger.debug(f"[FLUSH] → recurring_expense_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
+                return total_rows
+                
+            elif table == 'recurring_c_expense_buckets':
+                # Recurring credit account expense buckets table
+                
+                # First, compare Redis IDs with MySQL IDs and delete orphans
+                redis_ids = set(int(row.get('id')) for row in rows if row.get('id') and int(row.get('id')) > 0)
+                
+                # Get all IDs from MySQL for this user
+                cursor.execute("SELECT id FROM recurring_c_expense_buckets WHERE user_id = %s", (user_id,))
+                mysql_ids = set(row[0] for row in cursor.fetchall())
+                
+                # Delete records that exist in MySQL but not in Redis
+                ids_to_delete = mysql_ids - redis_ids
+                if ids_to_delete:
+                    placeholders = ','.join(['%s'] * len(ids_to_delete))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_c_expense_buckets WHERE id IN ({placeholders}) AND user_id = %s
+                    """, list(ids_to_delete) + [user_id])
+                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_c_expense_buckets from MySQL (removed from Redis)")
+                
+                # Also handle pending deletions from the set (if any)
+                pending_key = f"pending_deletes:recurring_c_expense_buckets:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    delete_ids = [int(id_str) for id_str in pending_deletes]
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_c_expense_buckets WHERE id IN ({placeholders}) AND user_id = %s
+                    """, delete_ids + [user_id])
+                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_c_expense_buckets from pending set")
+                    
+                    # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
+                    delete_ids_set = set(delete_ids)
+                    rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
+                    # Save filtered data back to Redis
+                    _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
+                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_c_expense_buckets from Redis")
+                    # Clear the pending deletes set
+                    _redis_client.delete(pending_key)
+                
+                # Now UPSERT the current state from Redis
+                # Split into updates (positive IDs) and inserts (negative IDs)
+                update_data = []
+                insert_data = []
+                skipped_rows = []
+                
+                for row in rows:
+                    category_id = row.get('category_id')
+                    
+                    # Skip rows with temporary negative category_id - category hasn't been flushed yet
+                    if category_id and category_id < 0:
+                        skipped_rows.append(row)
+                        continue
+                    
+                    row_id = row.get('id')
+                    if row_id and row_id > 0:
+                        # Existing record with real ID - update
+                        update_data.append((
+                            row_id,
+                            user_id,
+                            row.get('account_id'),
+                            category_id,
+                            row.get('bucket_date'),
+                            float(row.get('amount', 0)),
+                            float(row.get('original_amount', 0))
+                        ))
+                    else:
+                        # New record with temp negative ID - insert without ID
+                        insert_data.append((
+                            user_id,
+                            row.get('account_id'),
+                            category_id,
+                            row.get('bucket_date'),
+                            float(row.get('amount', 0)),
+                            float(row.get('original_amount', 0))
+                        ))
+                
+                if skipped_rows:
+                    logger.info(f"[FLUSH] Skipped {len(skipped_rows)} recurring_c_expense_buckets with temp category_ids - will retry next flush")
+                
+                if update_data:
+                    cursor.executemany("""
+                        INSERT INTO recurring_c_expense_buckets (id, user_id, account_id, category_id, bucket_date, amount, original_amount)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            amount = VALUES(amount),
+                            original_amount = VALUES(original_amount)
+                    """, update_data)
+                
+                if insert_data:
+                    cursor.executemany("""
+                        INSERT INTO recurring_c_expense_buckets (user_id, account_id, category_id, bucket_date, amount, original_amount)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            amount = VALUES(amount),
+                            original_amount = VALUES(original_amount)
+                    """, insert_data)
+                
+                conn.commit()
+                cursor.close()
+                
+                # Clear pending deletions set after successful flush
+                _redis_client.delete(pending_key)
+                
+                total_rows = len(update_data) + len(insert_data)
+                logger.debug(f"[FLUSH] → recurring_c_expense_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
+                return total_rows
                 
             elif table == 'buds':
                 # Buds table
@@ -1479,7 +2626,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 return len(rows)
                 
             elif table == 'users':
-                # Users table - for user settings like balance_threshold, starting_savings, first_name, last_name
+                # Users table - for ALL user settings
                 
                 if not rows:
                     return 0
@@ -1497,7 +2644,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             mfa_secret = %s,
                             email_notifications = %s,
                             first_name = %s,
-                            last_name = %s
+                            last_name = %s,
+                            goofy_week_mode = %s,
+                            landing_page = %s,
+                            profile_picture = %s,
+                            currency_type = %s,
+                            quiltt_enabled = %s,
+                            quiltt_auto_import = %s
                         WHERE id = %s
                     """, (
                         float(user_data.get('balance_threshold', 0)),
@@ -1508,12 +2661,18 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         int(user_data.get('email_notifications', 0)),
                         user_data.get('first_name'),
                         user_data.get('last_name'),
+                        int(user_data.get('goofy_week_mode', 0)),
+                        user_data.get('landing_page', 'dashboard_3m'),
+                        user_data.get('profile_picture'),
+                        user_data.get('currency_type', 'USD'),
+                        int(user_data.get('quiltt_enabled', 0)),
+                        int(user_data.get('quiltt_auto_import', 1)),
                         user_id
                     ))
                     
                     conn.commit()
                     cursor.close()
-                    logger.debug(f"[FLUSH] → users: Updated user {user_id} settings")
+                    logger.debug(f"[FLUSH] → users: Updated user {user_id} settings (including goofy_week_mode, landing_page, etc.)")
                     return 1
                 
                 return 0
@@ -1810,12 +2969,1104 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 logger.debug(f"[FLUSH] → quiltt_category_mappings: {len(batch_data)} rows")
                 return len(batch_data)
                 
+            elif table == 'income_categories':
+                # Income categories table
+                
+                # First, delete any categories marked for deletion
+                pending_key = f"pending_deletes:income_categories:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    delete_ids = [int(id_str) for id_str in pending_deletes]
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    cursor.execute(f"""
+                        DELETE FROM income_categories WHERE id IN ({placeholders}) AND user_id = %s
+                    """, delete_ids + [user_id])
+                    deleted_count = cursor.rowcount
+                    logger.info(f"[FLUSH] Deleted {deleted_count} income_categories from MySQL (removed from Redis)")
+                
+                # Track temp ID to real ID mappings
+                temp_id_mappings = {}
+                
+                # Process categories one at a time to get auto-generated IDs for temp IDs
+                for row in rows:
+                    old_id = row.get('id')
+                    is_temp = old_id and int(old_id) < 0
+                    
+                    if is_temp:
+                        # INSERT with NULL id to get auto-generated ID
+                        cursor.execute("""
+                            INSERT INTO income_categories (id, user_id, name, display_order, group_id,
+                                is_recurring, is_auto_adjustment, no_end_date, hidden)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            user_id,
+                            row.get('name'),
+                            int(row.get('display_order', 0)),
+                            row.get('group_id'),
+                            int(row.get('is_recurring', 0)),
+                            int(row.get('is_auto_adjustment', 0)),
+                            int(row.get('no_end_date', 0)),
+                            int(row.get('hidden', 0))
+                        ))
+                        new_id = cursor.lastrowid
+                        temp_id_mappings[int(old_id)] = new_id
+                        logger.info(f"[FLUSH] Income category temp ID {old_id} → real ID {new_id}")
+                    else:
+                        # Regular UPSERT for existing IDs
+                        cursor.execute("""
+                            INSERT INTO income_categories (id, user_id, name, display_order, group_id,
+                                is_recurring, is_auto_adjustment, no_end_date, hidden)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                name = VALUES(name),
+                                display_order = VALUES(display_order),
+                                group_id = VALUES(group_id),
+                                is_recurring = VALUES(is_recurring),
+                                is_auto_adjustment = VALUES(is_auto_adjustment),
+                                no_end_date = VALUES(no_end_date),
+                                hidden = VALUES(hidden)
+                        """, (
+                            old_id,
+                            user_id,
+                            row.get('name'),
+                            int(row.get('display_order', 0)),
+                            row.get('group_id'),
+                            int(row.get('is_recurring', 0)),
+                            int(row.get('is_auto_adjustment', 0)),
+                            int(row.get('no_end_date', 0)),
+                            int(row.get('hidden', 0))
+                        ))
+                
+                conn.commit()
+                
+                # Update Redis with new IDs if any temp IDs were replaced
+                if temp_id_mappings:
+                    for i, row in enumerate(rows):
+                        old_id = row.get('id')
+                        if old_id and int(old_id) in temp_id_mappings:
+                            rows[i]['id'] = temp_id_mappings[int(old_id)]
+                    
+                    # Save updated categories back to Redis
+                    redis_key = _get_redis_key('income_categories', user_id)
+                    _redis_client.setex(
+                        redis_key,
+                        INACTIVITY_TIMEOUT + 60,
+                        json.dumps(rows, cls=DecimalEncoder)
+                    )
+                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} income_category temp IDs in Redis")
+                    
+                    # Also update category_id in income_entries that reference the temp IDs
+                    entries_key = _get_redis_key('income_entries', user_id)
+                    entries_data = _redis_client.get(entries_key)
+                    if entries_data:
+                        entries = json.loads(entries_data)
+                        entries_updated = 0
+                        for entry in entries:
+                            old_cat_id = entry.get('category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                entry['category_id'] = temp_id_mappings[int(old_cat_id)]
+                                entries_updated += 1
+                        if entries_updated > 0:
+                            _redis_client.setex(
+                                entries_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(entries, cls=DecimalEncoder)
+                            )
+                            # Mark as dirty so entries get flushed in this cycle
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'income_entries')
+                            logger.info(f"[FLUSH] Updated {entries_updated} income_entries with new category IDs")
+                    
+                    # Also update category_id in recurring_income_buckets
+                    buckets_key = _get_redis_key('recurring_income_buckets', user_id)
+                    buckets_data = _redis_client.get(buckets_key)
+                    if buckets_data:
+                        buckets = json.loads(buckets_data)
+                        buckets_updated = 0
+                        for bucket in buckets:
+                            old_cat_id = bucket.get('category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                bucket['category_id'] = temp_id_mappings[int(old_cat_id)]
+                                buckets_updated += 1
+                        if buckets_updated > 0:
+                            _redis_client.setex(
+                                buckets_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(buckets, cls=DecimalEncoder)
+                            )
+                            # Mark as dirty so buckets get flushed in this cycle
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_income_buckets')
+                            logger.info(f"[FLUSH] Updated {buckets_updated} recurring_income_buckets with new category IDs")
+                    
+                    # CRITICAL: Also update category_id in recurring_income records
+                    recurring_key = _get_redis_key('recurring_income', user_id)
+                    recurring_data = _redis_client.get(recurring_key)
+                    if recurring_data:
+                        recurring_records = json.loads(recurring_data)
+                        recurring_updated = 0
+                        for rec in recurring_records:
+                            old_cat_id = rec.get('category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                rec['category_id'] = temp_id_mappings[int(old_cat_id)]
+                                recurring_updated += 1
+                        if recurring_updated > 0:
+                            _redis_client.setex(
+                                recurring_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(recurring_records, cls=DecimalEncoder)
+                            )
+                            # Mark as dirty so recurring_income gets flushed in this cycle
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_income')
+                            logger.info(f"[FLUSH] Updated {recurring_updated} recurring_income records with new category IDs")
+                
+                # Clear pending deletions
+                _redis_client.delete(pending_key)
+                
+                cursor.close()
+                logger.debug(f"[FLUSH] → income_categories: {len(rows)} rows")
+                return len(rows)
+                
+            elif table == 'expense_categories':
+                # Expense categories table
+                
+                # First, delete any categories marked for deletion
+                pending_key = f"pending_deletes:expense_categories:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    delete_ids = [int(id_str) for id_str in pending_deletes]
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    cursor.execute(f"""
+                        DELETE FROM expense_categories WHERE id IN ({placeholders}) AND user_id = %s
+                    """, delete_ids + [user_id])
+                    deleted_count = cursor.rowcount
+                    logger.info(f"[FLUSH] Deleted {deleted_count} expense_categories from MySQL (removed from Redis)")
+                
+                # Track temp ID to real ID mappings
+                temp_id_mappings = {}
+                
+                # Process categories one at a time to get auto-generated IDs for temp IDs
+                for row in rows:
+                    old_id = row.get('id')
+                    is_temp = old_id and int(old_id) < 0
+                    
+                    if is_temp:
+                        # INSERT with NULL id to get auto-generated ID
+                        cursor.execute("""
+                            INSERT INTO expense_categories (id, user_id, name, display_order, group_id,
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            user_id,
+                            row.get('name'),
+                            int(row.get('display_order', 0)),
+                            row.get('group_id'),
+                            int(row.get('is_recurring', 0)),
+                            int(row.get('is_auto_adjustment', 0)),
+                            int(row.get('no_end_date', 0)),
+                            int(row.get('hidden', 0)),
+                            int(row.get('is_bud', 0)),
+                            int(row.get('is_credit_account', 0))
+                        ))
+                        new_id = cursor.lastrowid
+                        temp_id_mappings[int(old_id)] = new_id
+                        logger.info(f"[FLUSH] Expense category temp ID {old_id} → real ID {new_id}")
+                    else:
+                        # Regular UPSERT for existing IDs
+                        cursor.execute("""
+                            INSERT INTO expense_categories (id, user_id, name, display_order, group_id,
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                name = VALUES(name),
+                                display_order = VALUES(display_order),
+                                group_id = VALUES(group_id),
+                                is_recurring = VALUES(is_recurring),
+                                is_auto_adjustment = VALUES(is_auto_adjustment),
+                                no_end_date = VALUES(no_end_date),
+                                hidden = VALUES(hidden),
+                                is_bud = VALUES(is_bud),
+                                is_credit_account = VALUES(is_credit_account)
+                        """, (
+                            old_id,
+                            user_id,
+                            row.get('name'),
+                            int(row.get('display_order', 0)),
+                            row.get('group_id'),
+                            int(row.get('is_recurring', 0)),
+                            int(row.get('is_auto_adjustment', 0)),
+                            int(row.get('no_end_date', 0)),
+                            int(row.get('hidden', 0)),
+                            int(row.get('is_bud', 0)),
+                            int(row.get('is_credit_account', 0))
+                        ))
+                
+                conn.commit()
+                
+                # Update Redis with new IDs if any temp IDs were replaced
+                if temp_id_mappings:
+                    for i, row in enumerate(rows):
+                        old_id = row.get('id')
+                        if old_id and int(old_id) in temp_id_mappings:
+                            rows[i]['id'] = temp_id_mappings[int(old_id)]
+                    
+                    # Save updated categories back to Redis
+                    redis_key = _get_redis_key('expense_categories', user_id)
+                    _redis_client.setex(
+                        redis_key,
+                        INACTIVITY_TIMEOUT + 60,
+                        json.dumps(rows, cls=DecimalEncoder)
+                    )
+                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} expense_category temp IDs in Redis")
+                    
+                    # Also update category_id in expense_entries that reference the temp IDs
+                    entries_key = _get_redis_key('expense_entries', user_id)
+                    entries_data = _redis_client.get(entries_key)
+                    if entries_data:
+                        entries = json.loads(entries_data)
+                        entries_updated = 0
+                        for entry in entries:
+                            old_cat_id = entry.get('category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                entry['category_id'] = temp_id_mappings[int(old_cat_id)]
+                                entries_updated += 1
+                        if entries_updated > 0:
+                            _redis_client.setex(
+                                entries_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(entries, cls=DecimalEncoder)
+                            )
+                            # Mark as dirty so entries get flushed in this cycle
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_entries')
+                            logger.info(f"[FLUSH] Updated {entries_updated} expense_entries with new category IDs")
+                    
+                    # Also update category_id in recurring_expense_buckets
+                    buckets_key = _get_redis_key('recurring_expense_buckets', user_id)
+                    buckets_data = _redis_client.get(buckets_key)
+                    if buckets_data:
+                        buckets = json.loads(buckets_data)
+                        buckets_updated = 0
+                        for bucket in buckets:
+                            old_cat_id = bucket.get('category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                bucket['category_id'] = temp_id_mappings[int(old_cat_id)]
+                                buckets_updated += 1
+                        if buckets_updated > 0:
+                            _redis_client.setex(
+                                buckets_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(buckets, cls=DecimalEncoder)
+                            )
+                            # Mark as dirty so buckets get flushed in this cycle
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_expense_buckets')
+                            logger.info(f"[FLUSH] Updated {buckets_updated} recurring_expense_buckets with new category IDs")
+                    
+                    # CRITICAL: Also update category_id in recurring_expense records
+                    recurring_key = _get_redis_key('recurring_expense', user_id)
+                    recurring_data = _redis_client.get(recurring_key)
+                    if recurring_data:
+                        recurring_records = json.loads(recurring_data)
+                        recurring_updated = 0
+                        for rec in recurring_records:
+                            old_cat_id = rec.get('category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                rec['category_id'] = temp_id_mappings[int(old_cat_id)]
+                                recurring_updated += 1
+                        if recurring_updated > 0:
+                            _redis_client.setex(
+                                recurring_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(recurring_records, cls=DecimalEncoder)
+                            )
+                            # Mark as dirty so recurring_expense gets flushed in this cycle
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_expense')
+                            logger.info(f"[FLUSH] Updated {recurring_updated} recurring_expense records with new category IDs")
+                
+                # Clear pending deletions
+                _redis_client.delete(pending_key)
+                
+                cursor.close()
+                logger.debug(f"[FLUSH] → expense_categories: {len(rows)} rows")
+                return len(rows)
+                
+            elif table == 'c_expense_categories':
+                # Credit account expense categories table
+                # Now uses user_id for Redis key (c_expense_categories:v1:{user_id})
+                # Categories contain account_id field to identify which account they belong to
+                
+                # rows variable already contains data from c_expense_categories:v1:{user_id}
+                # (fetched by _get_redis_key at the top of this function)
+                
+                if not rows:
+                    # Still need to handle pending deletions even if Redis data is empty
+                    pending_key = f"pending_deletes:c_expense_categories:{user_id}"
+                    pending_deletes = _redis_client.smembers(pending_key)
+                    
+                    if pending_deletes:
+                        delete_ids = [int(id_str) for id_str in pending_deletes]
+                        placeholders = ','.join(['%s'] * len(delete_ids))
+                        # Delete categories by ID (they have user association via account_id FK)
+                        cursor.execute(f"""
+                            DELETE cec FROM c_expense_categories cec
+                            INNER JOIN credit_accounts ca ON cec.account_id = ca.id
+                            WHERE cec.id IN ({placeholders}) AND ca.user_id = %s
+                        """, delete_ids + [user_id])
+                        deleted_count = cursor.rowcount
+                        logger.info(f"[FLUSH] Deleted {deleted_count} c_expense_categories for user {user_id} from MySQL")
+                        conn.commit()
+                    
+                    _redis_client.delete(pending_key)
+                    cursor.close()
+                    return 0
+                
+                # First, delete any categories marked for deletion
+                pending_key = f"pending_deletes:c_expense_categories:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    delete_ids = [int(id_str) for id_str in pending_deletes]
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    # Delete categories by ID (they have user association via account_id FK)
+                    cursor.execute(f"""
+                        DELETE cec FROM c_expense_categories cec
+                        INNER JOIN credit_accounts ca ON cec.account_id = ca.id
+                        WHERE cec.id IN ({placeholders}) AND ca.user_id = %s
+                    """, delete_ids + [user_id])
+                    deleted_count = cursor.rowcount
+                    logger.info(f"[FLUSH] Deleted {deleted_count} c_expense_categories for user {user_id} from MySQL")
+                
+                # Track temp ID to real ID mappings
+                temp_id_mappings = {}
+                
+                # Process categories one at a time to get auto-generated IDs for temp IDs
+                for row in rows:
+                    old_id = row.get('id')
+                    is_temp = old_id and int(old_id) < 0
+                    
+                    if is_temp:
+                        # INSERT with NULL id to get auto-generated ID
+                        cursor.execute("""
+                            INSERT INTO c_expense_categories (id, account_id, name, display_order, group_id,
+                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            row.get('account_id'),
+                            row.get('name'),
+                            int(row.get('display_order', 0)),
+                            row.get('group_id'),
+                            int(row.get('is_recurring', 0)),
+                            int(row.get('no_end_date', 0)),
+                            int(row.get('hidden', 0)),
+                            int(row.get('is_bud', 0)),
+                            int(row.get('is_interest', 0)),
+                            int(row.get('is_auto_adjustment', 0))
+                        ))
+                        new_id = cursor.lastrowid
+                        temp_id_mappings[int(old_id)] = new_id
+                        logger.info(f"[FLUSH] C_expense category temp ID {old_id} → real ID {new_id} for user {user_id}")
+                    else:
+                        # Regular UPSERT for existing IDs
+                        cursor.execute("""
+                            INSERT INTO c_expense_categories (id, account_id, name, display_order, group_id,
+                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                name = VALUES(name),
+                                display_order = VALUES(display_order),
+                                group_id = VALUES(group_id),
+                                is_recurring = VALUES(is_recurring),
+                                no_end_date = VALUES(no_end_date),
+                                hidden = VALUES(hidden),
+                                is_bud = VALUES(is_bud),
+                                is_interest = VALUES(is_interest),
+                                is_auto_adjustment = VALUES(is_auto_adjustment)
+                        """, (
+                            old_id,
+                            row.get('account_id'),
+                            row.get('name'),
+                            int(row.get('display_order', 0)),
+                            row.get('group_id'),
+                            int(row.get('is_recurring', 0)),
+                            int(row.get('no_end_date', 0)),
+                            int(row.get('hidden', 0)),
+                            int(row.get('is_bud', 0)),
+                            int(row.get('is_interest', 0)),
+                            int(row.get('is_auto_adjustment', 0))
+                        ))
+                
+                conn.commit()
+                
+                # Update Redis with new IDs if any temp IDs were replaced
+                if temp_id_mappings:
+                    for i, row in enumerate(rows):
+                        old_id = row.get('id')
+                        if old_id and int(old_id) in temp_id_mappings:
+                            rows[i]['id'] = temp_id_mappings[int(old_id)]
+                    
+                    # Save updated categories back to Redis (using user_id key)
+                    _redis_client.setex(
+                        redis_key,
+                        INACTIVITY_TIMEOUT + 60,
+                        json.dumps(rows, cls=DecimalEncoder)
+                    )
+                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} c_expense_category temp IDs in Redis for user {user_id}")
+                    
+                    # Also update c_expense_entries that reference these temp category IDs
+                    entries_redis_key = f"c_expense_entries:v1:{user_id}"
+                    cached_entries = _redis_client.get(entries_redis_key)
+                    if cached_entries:
+                        entries = json.loads(cached_entries)
+                        updated_count = 0
+                        for entry in entries:
+                            old_cat_id = entry.get('category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                entry['category_id'] = temp_id_mappings[int(old_cat_id)]
+                                updated_count += 1
+                        
+                        if updated_count > 0:
+                            _redis_client.setex(
+                                entries_redis_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(entries, cls=DecimalEncoder)
+                            )
+                            logger.info(f"[FLUSH] Updated {updated_count} c_expense_entries with new category IDs for user {user_id}")
+                            # Mark entries as dirty so they get flushed with real IDs
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_entries')
+                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                    
+                    # Also update recurring_c_expense_buckets that reference these temp category IDs
+                    # Now using user_id key instead of account_id
+                    buckets_redis_key = f"recurring_c_expense_buckets:v1:{user_id}"
+                    cached_buckets = _redis_client.get(buckets_redis_key)
+                    if cached_buckets:
+                        buckets = json.loads(cached_buckets)
+                        updated_count = 0
+                        for bucket in buckets:
+                            old_cat_id = bucket.get('category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                bucket['category_id'] = temp_id_mappings[int(old_cat_id)]
+                                updated_count += 1
+                        
+                        if updated_count > 0:
+                            _redis_client.setex(
+                                buckets_redis_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(buckets, cls=DecimalEncoder)
+                            )
+                            logger.info(f"[FLUSH] Updated {updated_count} recurring_c_expense_buckets with new category IDs for user {user_id}")
+                            # Mark buckets as dirty so they get flushed with real IDs
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense_buckets')
+                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                    
+                    # Also update category_id in recurring_c_expense records
+                    recurring_key = f"recurring_c_expense:v1:{user_id}"
+                    recurring_data = _redis_client.get(recurring_key)
+                    if recurring_data:
+                        recurring_records = json.loads(recurring_data)
+                        recurring_updated = 0
+                        for rec in recurring_records:
+                            old_cat_id = rec.get('category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                rec['category_id'] = temp_id_mappings[int(old_cat_id)]
+                                recurring_updated += 1
+                        if recurring_updated > 0:
+                            _redis_client.setex(
+                                recurring_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(recurring_records, cls=DecimalEncoder)
+                            )
+                            # Mark as dirty so recurring_c_expense gets flushed in this cycle
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense')
+                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                            logger.info(f"[FLUSH] Updated {recurring_updated} recurring_c_expense records with new category IDs for user {user_id}")
+                
+                # Clear pending deletions
+                _redis_client.delete(pending_key)
+                
+                cursor.close()
+                logger.debug(f"[FLUSH] → c_expense_categories: {len(rows)} rows for user {user_id}")
+                return len(rows)
+                
+            elif table in ['income_category_groups', 'expense_category_groups']:
+                # Category groups tables
+                if not rows:
+                    return 0
+                
+                batch_data = []
+                for row in rows:
+                    batch_data.append((
+                        row.get('id'),
+                        user_id,
+                        row.get('name'),
+                        int(row.get('display_order', 0))
+                    ))
+                
+                cursor.executemany(f"""
+                    INSERT INTO {table} (id, user_id, name, display_order)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        name = VALUES(name),
+                        display_order = VALUES(display_order)
+                """, batch_data)
+                
+                conn.commit()
+                cursor.close()
+                logger.debug(f"[FLUSH] → {table}: {len(batch_data)} rows")
+                return len(batch_data)
+                
+            elif table == 'credit_accounts':
+                # Credit accounts table
+                
+                # Handle pending deletes FIRST (before checking if rows exist)
+                pending_key = f"pending_deletes:credit_accounts:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    for account_id_bytes in pending_deletes:
+                        account_id = account_id_bytes.decode('utf-8') if isinstance(account_id_bytes, bytes) else account_id_bytes
+                        cursor.execute(
+                            "DELETE FROM credit_accounts WHERE id = %s AND user_id = %s",
+                            (account_id, user_id)
+                        )
+                    conn.commit()
+                    _redis_client.delete(pending_key)
+                    logger.info(f"[FLUSH] Deleted {len(pending_deletes)} credit accounts from MySQL")
+                
+                # If no rows to insert/update, we're done
+                if not rows:
+                    cursor.close()
+                    return 0
+                
+                # Track temp ID to real ID mappings
+                temp_id_mappings = {}
+                
+                # Process accounts one at a time to get auto-generated IDs for temp IDs
+                for row in rows:
+                    old_id = row.get('id')
+                    is_temp = old_id and int(old_id) < 0
+                    
+                    if is_temp:
+                        # INSERT with NULL id to get auto-generated ID
+                        cursor.execute("""
+                            INSERT INTO credit_accounts (id, user_id, name, interest_rate, starting_balance, is_card, is_line)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            user_id,
+                            row.get('name'),
+                            float(row.get('interest_rate', 0)) if row.get('interest_rate') else None,
+                            float(row.get('starting_balance', 0)),
+                            int(row.get('is_card', 0)),
+                            int(row.get('is_line', 0))
+                        ))
+                        new_id = cursor.lastrowid
+                        temp_id_mappings[int(old_id)] = new_id
+                        logger.info(f"[FLUSH] Credit account temp ID {old_id} → real ID {new_id}")
+                    else:
+                        # Regular UPSERT for existing IDs
+                        cursor.execute("""
+                            INSERT INTO credit_accounts (id, user_id, name, interest_rate, starting_balance, is_card, is_line)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                name = VALUES(name),
+                                interest_rate = VALUES(interest_rate),
+                                starting_balance = VALUES(starting_balance),
+                                is_card = VALUES(is_card),
+                                is_line = VALUES(is_line)
+                        """, (
+                            old_id,
+                            user_id,
+                            row.get('name'),
+                            float(row.get('interest_rate', 0)) if row.get('interest_rate') else None,
+                            float(row.get('starting_balance', 0)),
+                            int(row.get('is_card', 0)),
+                            int(row.get('is_line', 0))
+                        ))
+                
+                conn.commit()
+                
+                # Update Redis with new IDs if any temp IDs were replaced
+                if temp_id_mappings:
+                    for i, row in enumerate(rows):
+                        old_id = row.get('id')
+                        if old_id and int(old_id) in temp_id_mappings:
+                            rows[i]['id'] = temp_id_mappings[int(old_id)]
+                    
+                    # Save updated accounts back to Redis
+                    redis_key = f"credit_accounts:v1:{user_id}"
+                    _redis_client.setex(
+                        redis_key,
+                        INACTIVITY_TIMEOUT + 60,
+                        json.dumps(rows, cls=DecimalEncoder)
+                    )
+                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} credit_account temp IDs in Redis")
+                    
+                    # c_expense_categories are now stored at c_expense_categories:v1:{user_id}
+                    # We need to update the account_id field WITHIN the categories, not move to different key
+                    cat_redis_key = f"c_expense_categories:v1:{user_id}"
+                    cached_cats = _redis_client.get(cat_redis_key)
+                    if cached_cats:
+                        categories = json.loads(cached_cats)
+                        updated_count = 0
+                        for cat in categories:
+                            old_acct_id = cat.get('account_id')
+                            if old_acct_id in temp_id_mappings:
+                                cat['account_id'] = temp_id_mappings[old_acct_id]
+                                updated_count += 1
+                        
+                        if updated_count > 0:
+                            # Save back to same key with updated account_ids
+                            _redis_client.setex(
+                                cat_redis_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(categories, cls=DecimalEncoder)
+                            )
+                            logger.info(f"[FLUSH] Updated account_id in {updated_count} c_expense_categories")
+                            # Mark categories as dirty so they get flushed to MySQL
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                    
+                    # c_payment_entries are stored at c_payment_entries:v1:{user_id}
+                    # We need to update the account_id field WITHIN the entries
+                    payment_redis_key = f"c_payment_entries:v1:{user_id}"
+                    cached_payments = _redis_client.get(payment_redis_key)
+                    if cached_payments:
+                        payments = json.loads(cached_payments)
+                        payment_updated_count = 0
+                        for payment in payments:
+                            old_acct_id = payment.get('account_id')
+                            if old_acct_id in temp_id_mappings:
+                                payment['account_id'] = temp_id_mappings[old_acct_id]
+                                payment_updated_count += 1
+                        
+                        if payment_updated_count > 0:
+                            # Save back to same key with updated account_ids
+                            _redis_client.setex(
+                                payment_redis_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(payments, cls=DecimalEncoder)
+                            )
+                            logger.info(f"[FLUSH] Updated account_id in {payment_updated_count} c_payment_entries")
+                            # Mark payments as dirty so they get flushed to MySQL
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_payment_entries')
+                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                    
+                    # c_expense_entries are also stored at c_expense_entries:v1:{user_id}
+                    # They reference categories by category_id, not account_id directly
+                    # But we still need to check if there are any entries keyed by old temp account_id
+                    # and move them to the user_id key
+                    for old_account_id, new_account_id in temp_id_mappings.items():
+                        old_entries_redis_key = f"c_expense_entries:v1:{old_account_id}"
+                        cached_entries = _redis_client.get(old_entries_redis_key)
+                        if cached_entries:
+                            entries = json.loads(cached_entries)
+                            # Merge into user-level key
+                            user_entries_key = f"c_expense_entries:v1:{user_id}"
+                            user_entries_cached = _redis_client.get(user_entries_key)
+                            user_entries = json.loads(user_entries_cached) if user_entries_cached else []
+                            user_entries.extend(entries)
+                            _redis_client.setex(
+                                user_entries_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(user_entries, cls=DecimalEncoder)
+                            )
+                            # Delete old key
+                            _redis_client.delete(old_entries_redis_key)
+                            logger.info(f"[FLUSH] Moved {len(entries)} c_expense_entries from account {old_account_id} to user {user_id}")
+                            # Mark entries as dirty
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_entries')
+                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                        
+                        # Initialize balance records for new account
+                        _initialize_ca_balances_for_account(cursor, conn, new_account_id)
+                
+                cursor.close()
+                logger.debug(f"[FLUSH] → credit_accounts: {len(rows)} rows")
+                return len(rows)
+                
+            elif table == 'starting_balance':
+                # Starting balance table
+                if not rows:
+                    return 0
+                
+                # Should only be one row per user
+                row = rows[0]
+                cursor.execute("""
+                    INSERT INTO starting_balance (user_id, amount, date)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        amount = VALUES(amount),
+                        date = VALUES(date)
+                """, (
+                    user_id,
+                    float(row.get('amount', 0)),
+                    row.get('date')
+                ))
+                
+                conn.commit()
+                cursor.close()
+                logger.debug(f"[FLUSH] → starting_balance: 1 row")
+                return 1
+                
             else:
                 # Table not configured for flushing
                 return 0
         
     except Exception as e:
         logger.error(f"[FLUSH] Error flushing {table} to MySQL for user {user_id}: {e}", exc_info=True)
+        return 0
+
+
+def _initialize_ca_balances_for_account(cursor, conn, account_id):
+    """
+    Initialize balance records for a newly created credit account.
+    Creates daily, weekly, and monthly balance records from previous year to 3 years in future.
+    
+    Args:
+        cursor: Database cursor
+        conn: Database connection
+        account_id: The credit account ID to initialize balances for
+    """
+    from datetime import date, timedelta
+    import calendar as cal
+    
+    try:
+        today = date.today()
+        start_year = today.year - 1
+        end_year = today.year + 3
+
+        # Daily: every day from Jan 1 of previous year to Dec 31 of year+3
+        start_date = date(start_year, 1, 1)
+        end_date = date(end_year, 12, 31)
+
+        # Insert daily balances
+        current = start_date
+        while current <= end_date:
+            cursor.execute("""
+                INSERT IGNORE INTO c_a_balances_d (account_id, date, total_expenses, balance, total_payments)
+                VALUES (%s, %s, 0, 0, 0)
+            """, (account_id, current))
+            current += timedelta(days=1)
+        
+        # Weekly: every Friday from Jan 1 of previous year to Dec 31 of year+3
+        current = start_date
+        # Find first Friday
+        while current.weekday() != 4:  # 4 = Friday
+            current += timedelta(days=1)
+        
+        while current <= end_date:
+            cursor.execute("""
+                INSERT IGNORE INTO c_a_balances (account_id, date, total_expenses, balance, total_payments)
+                VALUES (%s, %s, 0, 0, 0)
+            """, (account_id, current))
+            current += timedelta(weeks=1)
+        
+        # Monthly: last day of each month
+        for year in range(start_year, end_year + 1):
+            for month in range(1, 13):
+                last_day = date(year, month, cal.monthrange(year, month)[1])
+                cursor.execute("""
+                    INSERT IGNORE INTO c_a_balances_m (account_id, date, total_expenses, balance, total_payments)
+                    VALUES (%s, %s, 0, 0, 0)
+                """, (account_id, last_day))
+        
+        conn.commit()
+        logger.info(f"[FLUSH] Initialized balance records for credit account {account_id}")
+        
+    except Exception as e:
+        logger.error(f"[FLUSH] Error initializing balances for account {account_id}: {e}", exc_info=True)
+
+
+def _recalculate_ca_balances_for_user(user_id):
+    """
+    Recalculate all CA balances (daily, weekly, monthly) for a user after entries/payments are flushed.
+    This ensures balances are up-to-date with the latest MySQL data.
+    
+    Args:
+        user_id: The user ID to recalculate balances for
+    """
+    try:
+        from datetime import date, timedelta
+        import calendar as cal
+        
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # Get all credit accounts for this user
+            cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
+            account_rows = cursor.fetchall()
+            
+            if not account_rows:
+                logger.debug(f"[FLUSH] No credit accounts found for user {user_id}, skipping balance recalculation")
+                return
+            
+            # Determine date range to recalculate (from earliest entry to latest balance record)
+            # Get the earliest entry date across all accounts
+            cursor.execute("""
+                SELECT MIN(cee.date) as min_date
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+            """, (user_id,))
+            result = cursor.fetchone()
+            start_date = result['min_date'] if result and result['min_date'] else date.today()
+            
+            # Recalculate each account
+            for account_row in account_rows:
+                account_id = account_row['id']
+                _recalculate_ca_balances_for_account(cursor, conn, account_id, start_date)
+            
+            cursor.close()
+            logger.info(f"[FLUSH] Recalculated CA balances for user {user_id}")
+            
+    except Exception as e:
+        logger.error(f"[FLUSH] Error recalculating CA balances for user {user_id}: {e}", exc_info=True)
+
+
+def _recalculate_ca_balances_for_account(cursor, conn, account_id, start_date):
+    """
+    Recalculate balances for a specific credit account from a given start date.
+    
+    Args:
+        cursor: Database cursor
+        conn: Database connection
+        account_id: The credit account ID
+        start_date: Date to start recalculation from
+    """
+    from datetime import timedelta
+    import calendar as cal
+    
+    try:
+        # === DAILY BALANCES ===
+        # Get all daily balance dates for this account starting from start_date
+        cursor.execute("""
+            SELECT date FROM c_a_balances_d
+            WHERE account_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (account_id, start_date))
+        daily_dates = [row['date'] for row in cursor.fetchall()]
+        
+        if daily_dates:
+            # Get previous day's balance
+            prev_date = start_date - timedelta(days=1)
+            cursor.execute("""
+                SELECT balance FROM c_a_balances_d
+                WHERE account_id = %s AND date = %s
+            """, (account_id, prev_date))
+            prev_row = cursor.fetchone()
+            running_balance = float(prev_row['balance']) if prev_row and prev_row['balance'] else 0.0
+            
+            # Get all expenses and payments for this account
+            cursor.execute("""
+                SELECT cee.date, cee.amount
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                WHERE cec.account_id = %s AND cee.date >= %s
+                ORDER BY cee.date ASC
+            """, (account_id, start_date))
+            expenses_by_date = {}
+            for row in cursor.fetchall():
+                date_key = row['date']
+                expenses_by_date[date_key] = expenses_by_date.get(date_key, 0) + float(row['amount'])
+            
+            cursor.execute("""
+                SELECT date, amount
+                FROM c_payment_entries
+                WHERE account_id = %s AND date >= %s
+                ORDER BY date ASC
+            """, (account_id, start_date))
+            payments_by_date = {}
+            for row in cursor.fetchall():
+                date_key = row['date']
+                payments_by_date[date_key] = payments_by_date.get(date_key, 0) + float(row['amount'])
+            
+            # Update each date
+            updates = []
+            for date_val in daily_dates:
+                day_expenses = expenses_by_date.get(date_val, 0)
+                day_payments = payments_by_date.get(date_val, 0)
+                running_balance = running_balance + day_expenses - day_payments
+                updates.append((day_expenses, running_balance, day_payments, account_id, date_val))
+            
+            if updates:
+                cursor.executemany("""
+                    UPDATE c_a_balances_d
+                    SET total_expenses = %s, balance = %s, total_payments = %s
+                    WHERE account_id = %s AND date = %s
+                """, updates)
+        
+        # === WEEKLY BALANCES (Saturdays) ===
+        cursor.execute("""
+            SELECT date FROM c_a_balances
+            WHERE account_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (account_id, start_date))
+        weekly_dates = [row['date'] for row in cursor.fetchall()]
+        
+        if weekly_dates:
+            updates = []
+            for date_val in weekly_dates:
+                # Sum up daily balances for the week ending on this Saturday
+                week_start = date_val - timedelta(days=6)
+                cursor.execute("""
+                    SELECT SUM(total_expenses) as total_exp, SUM(total_payments) as total_pay
+                    FROM c_a_balances_d
+                    WHERE account_id = %s AND date BETWEEN %s AND %s
+                """, (account_id, week_start, date_val))
+                row = cursor.fetchone()
+                week_expenses = float(row['total_exp']) if row and row['total_exp'] else 0.0
+                week_payments = float(row['total_pay']) if row and row['total_pay'] else 0.0
+                
+                # Get balance at end of week
+                cursor.execute("""
+                    SELECT balance FROM c_a_balances_d
+                    WHERE account_id = %s AND date = %s
+                """, (account_id, date_val))
+                row = cursor.fetchone()
+                week_balance = float(row['balance']) if row and row['balance'] else 0.0
+                
+                updates.append((week_expenses, week_balance, week_payments, account_id, date_val))
+            
+            if updates:
+                cursor.executemany("""
+                    UPDATE c_a_balances
+                    SET total_expenses = %s, balance = %s, total_payments = %s
+                    WHERE account_id = %s AND date = %s
+                """, updates)
+        
+        # === MONTHLY BALANCES ===
+        cursor.execute("""
+            SELECT date FROM c_a_balances_m
+            WHERE account_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (account_id, start_date))
+        monthly_dates = [row['date'] for row in cursor.fetchall()]
+        
+        if monthly_dates:
+            updates = []
+            for date_val in monthly_dates:
+                # Get the last day of this month
+                import calendar
+                last_day = calendar.monthrange(date_val.year, date_val.month)[1]
+                month_end = date_val.replace(day=last_day)
+                
+                # Sum up daily balances for the entire month
+                cursor.execute("""
+                    SELECT SUM(total_expenses) as total_exp, SUM(total_payments) as total_pay
+                    FROM c_a_balances_d
+                    WHERE account_id = %s AND date BETWEEN %s AND %s
+                """, (account_id, date_val, month_end))
+                row = cursor.fetchone()
+                month_expenses = float(row['total_exp']) if row and row['total_exp'] else 0.0
+                month_payments = float(row['total_pay']) if row and row['total_pay'] else 0.0
+                
+                # Get balance at end of month
+                cursor.execute("""
+                    SELECT balance FROM c_a_balances_d
+                    WHERE account_id = %s AND date = %s
+                """, (account_id, month_end))
+                row = cursor.fetchone()
+                month_balance = float(row['balance']) if row and row['balance'] else 0.0
+                
+                updates.append((month_expenses, month_balance, month_payments, account_id, date_val))
+            
+            if updates:
+                cursor.executemany("""
+                    UPDATE c_a_balances_m
+                    SET total_expenses = %s, balance = %s, total_payments = %s
+                    WHERE account_id = %s AND date = %s
+                """, updates)
+        
+        conn.commit()
+        logger.debug(f"[FLUSH] Recalculated balances for account {account_id}")
+        
+    except Exception as e:
+        logger.error(f"[FLUSH] Error recalculating balances for account {account_id}: {e}", exc_info=True)
+
+
+def flush_dirty_tables_for_user(user_id: int):
+    """
+    Synchronously flush all dirty tables for a specific user.
+    
+    This is used when we need immediate MySQL synchronization (e.g., to get real IDs
+    or ensure balance records exist before updating them).
+    
+    Args:
+        user_id: User ID to flush
+        
+    Returns:
+        Total number of rows flushed
+    """
+    try:
+        logger.info(f"[FLUSH] Forcing immediate flush for user {user_id}")
+        
+        tables_to_flush = [
+            'totals_remainders',
+            'totals_remainders_d', 
+            'totals_remainders_m',
+            'savings_entries',
+            'credit_accounts',  # Must flush FIRST - c_a_balances tables depend on this!
+            'c_a_balances',
+            'c_a_balances_d',
+            'c_a_balances_m',
+            'income_categories',  # Category definitions
+            'expense_categories',
+            'c_expense_categories',
+            'income_entries',
+            'expense_entries',
+            'c_expense_entries',
+            'recurring_income',  # Recurring entry configurations
+            'recurring_expense',
+            'recurring_c_expense',
+            'recurring_income_buckets',  # Bucket state tracking
+            'recurring_expense_buckets',
+            'recurring_c_expense_buckets',
+            'buds',  # Must flush before bud_items to resolve temp IDs
+            'bud_items',
+            'users',  # User settings (balance_threshold, starting_savings)
+        ]
+        
+        # Get dirty tables for this user
+        dirty_tables_key = f"dirty_tables:{user_id}"
+        dirty_tables_raw = _redis_client.smembers(dirty_tables_key)
+        
+        # Decode bytes to strings
+        dirty_tables = set()
+        for dt in dirty_tables_raw:
+            if isinstance(dt, bytes):
+                dirty_tables.add(dt.decode('utf-8'))
+            else:
+                dirty_tables.add(dt)
+        
+        if not dirty_tables:
+            logger.info(f"[FLUSH] No dirty tables for user {user_id}")
+            return 0
+        
+        logger.info(f"[FLUSH] User {user_id} has {len(dirty_tables)} dirty tables: {', '.join(dirty_tables)}")
+        
+        total_flushed = 0
+        
+        # Flush only dirty tables
+        for table in tables_to_flush:
+            # Skip if table is not dirty
+            if table not in dirty_tables:
+                continue
+            
+            logger.info(f"[FLUSH] Processing dirty table: {table} for user {user_id}")
+            flushed_count = _flush_table_to_mysql(table, user_id)
+            
+            if flushed_count > 0:
+                total_flushed += flushed_count
+                logger.info(f"[FLUSH] Cleared dirty flag for {table} (flushed={flushed_count})")
+            
+            # Remove from dirty set after processing
+            _redis_client.srem(dirty_tables_key, table)
+        
+        logger.info(f"[FLUSH] Forced flush complete for user {user_id}: {total_flushed} rows")
+        return total_flushed
+        
+    except Exception as e:
+        logger.error(f"[FLUSH] Error in forced flush for user {user_id}: {e}", exc_info=True)
         return 0
 
 

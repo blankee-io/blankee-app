@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Week View</title>
+    <title>Blankee - Week View</title>
     <!-- Link to the custom stylesheet -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <!-- Include Font Awesome for icons -->
@@ -32,9 +32,10 @@
         <div class="calendarnavbuttonscontainer">   
             <!-- Single button with repeat icon -->
             <div class="nav-dash-container" id="nav-dash-container">
-                <!-- Dropdown toggle button -->
-                <a href="#" id="nav-dropdown-toggle" class="nav-button">
-                    <i id="nav-dropdown-arrow" class="fa-solid fa-caret-right"></i>
+                <!-- Link to Recurring Summary -->
+                <a href="{{ url_for('dashboard_summary') }}" class="nav-button">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Recurring Summary</span>
                 </a>
                 <!-- Inline nav buttons (icons only) -->
                 <div id="nav-inline-buttons">
@@ -59,8 +60,6 @@
                         <span class="nav-tooltip">Year Overview</span>
                     </a>
                 </div>
-                <!-- Dropdown menu (initially hidden) -->
-                <div id="nav-dropdown-menu"></div>
             </div>
             <div class="calendarnavbuttons" id="calendarnavbuttons"> 
                 <a id="previous-nav-btn" class="nav-button" href="javascript:previousMonth()">
@@ -480,6 +479,10 @@
 
     <!-- Include the recurring modal template -->
     {% include 'loading_modals.html' %}
+    <script>
+        // Show loading screen immediately on page load
+        document.getElementById('loading-screen').style.display = 'flex';
+    </script>
 
     <div id="dashboard-context-menu" class="dashboard-context-menu" style="display: none; position: absolute;">
         <ul>
@@ -572,6 +575,10 @@
 
         let lastFridayRemainder = 0;
 
+        // Batch cache for totals to reduce AJAX calls
+        let batchTotalsCache = {};
+        let batchCaBalancesCache = {};
+
         // Variables to keep track of touch positions
         let touchStartX = null;
         let touchEndX = null;
@@ -619,6 +626,27 @@
 
         // Add this near the other server-side variables
         let member_since = {{ member_since | tojson | safe }};
+
+        // Helper function to check if a Friday's week is before member_since
+        function isWeekBeforeMemberSince(friday) {
+            if (!member_since) return false;
+            
+            const memberSinceDate = new Date(member_since);
+            memberSinceDate.setUTCHours(0, 0, 0, 0);
+            
+            let weekEnd;
+            if (goofyWeekMode) {
+                // Goofy mode: Friday to Thursday
+                weekEnd = new Date(friday);
+                weekEnd.setUTCDate(friday.getUTCDate() + 6); // Thursday
+            } else {
+                // Normal mode: Saturday to Friday
+                weekEnd = new Date(friday); // Friday
+            }
+            weekEnd.setUTCHours(23, 59, 59, 999);
+            
+            return weekEnd < memberSinceDate;
+        }
 
         let incomeHiddenActive = true;
         let expenseHiddenActive = true;
@@ -734,6 +762,7 @@
 
         // Function to go to the next month
         function nextMonth() {
+            clearBatchCache();
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-left');
@@ -749,6 +778,7 @@
         }
 
         function goToCurrentMonth() {
+            clearBatchCache();
             document.getElementById('loading-screen').style.display = 'flex';
             const today = new Date();
             const currentDay = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
@@ -783,6 +813,7 @@
 
         // Function to go to the previous month
         function previousMonth() {
+            clearBatchCache();
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
             mainContainer.classList.add('slide-right');
@@ -1198,18 +1229,55 @@
                 // Create and append header cells for Fridays
                 const thFriday = document.createElement('th');
                 thFriday.setAttribute('data-date', fridayDate);
+                thFriday.style.position = 'relative';
                 thFriday.textContent = friday.getUTCDate(); // Show the day number (e.g., 5, 12, 19, 26)
+                
+                // Check if member_since falls within or after this week's range
+                let isBeforeMemberSince = false;
+                if (member_since) {
+                    const memberSinceDate = new Date(member_since);
+                    memberSinceDate.setUTCHours(0, 0, 0, 0);
+                    
+                    let weekStart, weekEnd;
+                    if (goofyWeekMode) {
+                        // Goofy mode: Friday to Thursday
+                        weekStart = new Date(friday);
+                        weekEnd = new Date(friday);
+                        weekEnd.setUTCDate(friday.getUTCDate() + 6); // Thursday
+                    } else {
+                        // Normal mode: Saturday to Friday
+                        weekStart = new Date(friday);
+                        weekStart.setUTCDate(friday.getUTCDate() - 6); // Saturday
+                        weekEnd = new Date(friday); // Friday
+                    }
+                    weekStart.setUTCHours(0, 0, 0, 0);
+                    weekEnd.setUTCHours(23, 59, 59, 999);
+                    
+                    // Check if entire week is before member_since
+                    if (weekEnd < memberSinceDate) {
+                        isBeforeMemberSince = true;
+                        thFriday.classList.add('before-member-since');
+                    }
+                    
+                    if (memberSinceDate >= weekStart && memberSinceDate <= weekEnd) {
+                        // Mark cell so we can position badge after DOM is ready
+                        thFriday.classList.add('has-member-since-badge');
+                    }
+                }
+                
                 fridayDatesRow.appendChild(thFriday);
 
                 // Create <th> elements for the income and expense tables
                 const thIncome = document.createElement('th');
                 thIncome.setAttribute('data-date', fridayDate);
                 thIncome.textContent = ""; // Remove the number
+                if (isBeforeMemberSince) thIncome.classList.add('before-member-since');
                 incomeHeaderRow.appendChild(thIncome);
 
                 const thExpenses = document.createElement('th');
                 thExpenses.setAttribute('data-date', fridayDate);
                 thExpenses.textContent = ""; // Remove the number
+                if (isBeforeMemberSince) thExpenses.classList.add('before-member-since');
                 expensesHeaderRow.appendChild(thExpenses);
 
                 // Create <th> elements for each CA table header row
@@ -1217,6 +1285,7 @@
                     const thCa = document.createElement('th');
                     thCa.setAttribute('data-date', fridayDate);
                     thCa.textContent = ""; // Remove the number
+                    if (isBeforeMemberSince) thCa.classList.add('before-member-since');
                     caHeaderRow.appendChild(thCa);
                 });
             });
@@ -1247,6 +1316,7 @@
                 const fridayDate = friday.toISOString().split('T')[0];
                 const lastRemainderTd = document.createElement('td');
                 lastRemainderTd.setAttribute('data-date', fridayDate);
+                if (isWeekBeforeMemberSince(friday)) lastRemainderTd.classList.add('before-member-since');
                 lastRemainderRowRight.appendChild(lastRemainderTd);
             });
         }
@@ -1268,6 +1338,7 @@
                 const fridayDate = friday.toISOString().split('T')[0];
                 const remainderTdRight = document.createElement('td');
                 remainderTdRight.setAttribute('data-date', fridayDate);
+                if (isWeekBeforeMemberSince(friday)) remainderTdRight.classList.add('before-member-since');
                 remainderRowRight.appendChild(remainderTdRight);
             });
         }
@@ -1280,6 +1351,7 @@
                 const fridayDate = friday.toISOString().split('T')[0];
                 const savingsTd = document.createElement('td');
                 savingsTd.setAttribute('data-date', fridayDate);
+                if (isWeekBeforeMemberSince(friday)) savingsTd.classList.add('before-member-since');
 
                 let targetDate = fridayDate;
                 if (goofyWeekMode) {
@@ -1353,6 +1425,7 @@
                     const td = document.createElement('td');
                     const fridayDate = new Date(friday);
                     td.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                    if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
 
                     // Instead of contentEditable, use an input
                     const input = document.createElement('input');
@@ -1363,8 +1436,8 @@
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
-                    // If the date is older than the cutoff, disable the input
-                    if (fridayDate < cutoffDate) {
+                    // If the date is older than the cutoff OR before member_since, disable the input
+                    if (fridayDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
@@ -1411,6 +1484,7 @@
                     const td = document.createElement('td');
                     const fridayDate = new Date(friday);
                     td.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                    if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
 
                     const input = document.createElement('input');
                     input.type = 'text';
@@ -1420,8 +1494,8 @@
                     input.style.width = '100%';
                     input.style.textAlign = 'right';
 
-                    // Disable input if date is older than cutoff
-                    if (fridayDate < cutoffDate) {
+                    // Disable input if date is older than cutoff OR before member_since
+                    if (fridayDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
@@ -1480,6 +1554,7 @@
                         const td = document.createElement('td');
                         const fridayDate = new Date(friday);
                         td.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                        if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
 
                         const input = document.createElement('input');
                         input.type = 'text';
@@ -1489,8 +1564,8 @@
                         input.style.width = '100%';
                         input.style.textAlign = 'right';
 
-                        // Disable input if date is older than cutoff
-                        if (fridayDate < cutoffDate) {
+                        // Disable input if date is older than cutoff OR before member_since
+                        if (fridayDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
                             input.disabled = true;
                             input.classList.add('auto-disable');
                             td.classList.add('readonly-cell');
@@ -1526,6 +1601,7 @@
                 const td = document.createElement('td');
                 const dateISOString = friday.toISOString().split('T')[0];
                 td.setAttribute('data-date', dateISOString); // Assign data-date attribute
+                if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
                 td.textContent = currencySymbol + '0.00'; // Placeholder for total income data
                 incomeBottomRow.appendChild(td);
             });
@@ -1553,12 +1629,14 @@
                 const td = document.createElement('td');
                 const dateISOString = friday.toISOString().split('T')[0];
                 td.setAttribute('data-date', dateISOString); // Assign data-date attribute
+                if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
                 td.textContent = currencySymbol + '0.00'; // Placeholder for total expense data
                 expensesBottomRow.appendChild(td);
 
                 // Create and append the gap row cells
                 const gapTd = document.createElement('td');
                 gapTd.setAttribute('data-date', dateISOString); // Assign data-date attribute for the gap row
+                if (isWeekBeforeMemberSince(friday)) gapTd.classList.add('before-member-since');
                 expenseGapRow.appendChild(gapTd);
             });
 
@@ -1581,6 +1659,7 @@
                     const td = document.createElement('td');
                     const dateISOString = friday.toISOString().split('T')[0];
                     td.setAttribute('data-date', dateISOString); // Assign data-date attribute
+                    if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
                     td.textContent = currencySymbol + '0.00'; // Placeholder for total CA data
                     caBottomRow.appendChild(td);
                 });
@@ -1828,92 +1907,173 @@
 
         /////////////////////////// Data Updates //////////////////////////////
 
-        // Function to update the total income in the bottom row
-        function updateIncomeTotals() {
-
-
+        // Helper function to collect all dates from visible week cells
+        function collectAllDates() {
+            const dates = new Set();
+            
+            // Collect from income bottom row
             const incomeBottomRow = document.getElementById('income-bottom-row');
-            const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
-            const numberOfColumns = incomeBottomRow.children.length;
-
-            // Create array of promises for all AJAX requests
-            const promises = [];
-            for (let i = 0; i < numberOfColumns; i++) {
-                const tdElement = incomeBottomRow.children[i];
-                const lastRemainderCell = lastRemainderRowRight.children[i];
-                const date = lastRemainderCell.getAttribute('data-date');
-
-                // Fetch both income and last remainder
-                const incomePromise = $.ajax({
-                    url: '/get_total_income',
-                    method: 'GET',
-                    data: { date: date }
-                });
-
-                const lastRemainderPromise = $.ajax({
-                    url: '/get_last_remainder',
-                    method: 'GET',
-                    data: { date: date }
-                });
-
-                promises.push(
-                    Promise.all([incomePromise, lastRemainderPromise]).then(function([incomeResponse, lastRemainderResponse]) {
-                        const incomeTotal = (incomeResponse.status === 'success') ? parseFloat(incomeResponse.total_income) || 0 : 0;
-                        const lastRemainder = (lastRemainderResponse.status === 'success') ? parseFloat(lastRemainderResponse.last_remainder) || 0 : 0;
-                        const displayIncome = incomeTotal - lastRemainder;
-                        tdElement.textContent = formatCurrency(displayIncome);
-                    }).catch(function() {
-                        tdElement.textContent = formatCurrency(0);
-                    })
-                );
+            if (incomeBottomRow) {
+                for (let i = 0; i < incomeBottomRow.children.length; i++) {
+                    const cell = incomeBottomRow.children[i];
+                    const date = cell ? cell.getAttribute('data-date') : null;
+                    if (date && date !== 'null') dates.add(date);
+                }
             }
             
-            // Wait for all requests to complete
-            return Promise.all(promises);
+            // Collect from expense bottom row
+            const expensesBottomRow = document.getElementById('expenses-bottom-row');
+            if (expensesBottomRow) {
+                for (let i = 0; i < expensesBottomRow.children.length; i++) {
+                    const cell = expensesBottomRow.children[i];
+                    const date = cell ? cell.getAttribute('data-date') : null;
+                    if (date && date !== 'null') dates.add(date);
+                }
+            }
+            
+            // Collect from remainder row
+            const remainderRowRight = document.getElementById('remainder-row-right');
+            if (remainderRowRight) {
+                for (let i = 0; i < remainderRowRight.children.length; i++) {
+                    const cell = remainderRowRight.children[i];
+                    const date = cell ? cell.getAttribute('data-date') : null;
+                    if (date && date !== 'null') dates.add(date);
+                }
+            }
+            
+            return Array.from(dates);
         }
 
-        function updateExpenseTotals() {
+        // Batch fetch all totals at once
+        async function fetchBatchTotals(dates) {
+            if (!dates || dates.length === 0) return;
+            
+            // Check if all dates are already cached
+            const uncachedDates = dates.filter(d => !batchTotalsCache[d]);
+            if (uncachedDates.length === 0) return;
+            
+            try {
+                const response = await $.ajax({
+                    url: '/get_week_totals_batch',
+                    method: 'GET',
+                    data: { dates: uncachedDates.join(',') }
+                });
+                
+                if (response && response.status === 'success' && response.data) {
+                    Object.assign(batchTotalsCache, response.data);
+                }
+            } catch (error) {
+                console.error('Error fetching batch totals:', error);
+            }
+        }
 
+        // Batch fetch all CA balances at once
+        async function fetchBatchCaBalances(dates) {
+            if (!dates || dates.length === 0) return;
+            
+            try {
+                const response = await $.ajax({
+                    url: '/get_ca_balances_batch',
+                    method: 'GET',
+                    data: { dates: dates.join(',') }
+                });
+                
+                if (response && response.status === 'success' && response.data) {
+                    batchCaBalancesCache = response.data;
+                }
+            } catch (error) {
+                console.error('Error fetching batch CA balances:', error);
+            }
+        }
 
+        // Clear batch cache (call when navigating months)
+        function clearBatchCache() {
+            batchTotalsCache = {};
+            batchCaBalancesCache = {};
+        }
+
+        // Invalidate specific date(s) from batch cache (call after entry updates)
+        function invalidateBatchCacheForDate(fridayDate) {
+            if (fridayDate && batchTotalsCache[fridayDate]) {
+                delete batchTotalsCache[fridayDate];
+            }
+            // Also clear CA balances cache for this date
+            Object.keys(batchCaBalancesCache).forEach(accountId => {
+                if (batchCaBalancesCache[accountId] && batchCaBalancesCache[accountId][fridayDate]) {
+                    delete batchCaBalancesCache[accountId][fridayDate];
+                }
+            });
+        }
+
+        // Function to update the total income in the bottom row
+        async function updateIncomeTotals() {
+            const incomeBottomRow = document.getElementById('income-bottom-row');
+            
+            if (!incomeBottomRow) {
+                return;
+            }
+            
+            // Collect all dates and fetch them in batch
+            const dates = collectAllDates();
+            await fetchBatchTotals(dates);
+            
+            const numberOfColumns = incomeBottomRow.children.length;
+
+            for (let i = 0; i < numberOfColumns; i++) {
+                const tdElement = incomeBottomRow.children[i];
+                const date = tdElement ? tdElement.getAttribute('data-date') : null;
+
+                if (!date || date === 'null') continue;
+
+                // Get from batch cache
+                const cached = batchTotalsCache[date] || {};
+                const incomeTotal = parseFloat(cached.total_income || 0);
+                const lastRemainder = parseFloat(cached.last_week_remainder || 0);
+                const displayIncome = incomeTotal - lastRemainder;
+                tdElement.textContent = formatCurrency(displayIncome);
+            }
+        }
+
+        async function updateExpenseTotals() {
             const expensesBottomRow = document.getElementById('expenses-bottom-row');
+            
+            if (!expensesBottomRow) {
+                return;
+            }
+            
+            // Ensure batch cache is populated
+            const dates = collectAllDates();
+            await fetchBatchTotals(dates);
+            
             const numberOfColumns = expensesBottomRow.children.length;
 
-            // Create array of promises for all AJAX requests
-            const promises = [];
             for (let i = 0; i < numberOfColumns; i++) {
                 const tdElement = expensesBottomRow.children[i];
-                const date = tdElement.getAttribute('data-date');
+                const date = tdElement ? tdElement.getAttribute('data-date') : null;
 
                 if (!date || date === 'null') {
                     continue;
                 }
 
-                promises.push(
-                    $.ajax({
-                        url: '/get_total_expenses',
-                        method: 'GET',
-                        data: { date: date }
-                    }).then(function(response) {
-                        if (response.status === 'success') {
-                            const expenseTotal = parseFloat(response.total_expenses) || 0;
-                            tdElement.textContent = formatCurrency(expenseTotal);
-                        } else {
-                            tdElement.textContent = formatCurrency(0);
-                        }
-                    }).catch(function() {
-                        tdElement.textContent = formatCurrency(0);
-                    })
-                );
+                // Get from batch cache
+                const cached = batchTotalsCache[date] || {};
+                const expenseTotal = parseFloat(cached.total_expenses || 0);
+                tdElement.textContent = formatCurrency(expenseTotal);
             }
-            
-            // Wait for all requests to complete
-            return Promise.all(promises);
         }
 
-        function updateCaBalance() {
-            const allPromises = [];
+        async function updateCaBalance() {
+            const caTables = document.querySelectorAll('table[id^="cas-table-"]');
             
-            document.querySelectorAll('table[id^="cas-table-"]').forEach(caTable => {
+            if (caTables.length === 0) {
+                return;
+            }
+            
+            // Collect all dates and fetch CA balances in batch
+            const dates = collectAllDates();
+            await fetchBatchCaBalances(dates);
+            
+            caTables.forEach(caTable => {
                 const accountId = caTable.id.replace('cas-table-', '');
                 const caBottomRow = document.getElementById(`cas-bottom-row-${accountId}`);
                 if (!caBottomRow) return;
@@ -1922,128 +2082,92 @@
 
                 for (let i = 0; i < numberOfColumns; i++) {
                     const tdElement = caBottomRow.children[i];
-                    const date = tdElement.getAttribute('data-date');
+                    const date = tdElement ? tdElement.getAttribute('data-date') : null;
                     if (!date || date === 'null') {
-                        tdElement.textContent = currencySymbol + '0.00';
+                        if (tdElement) tdElement.textContent = currencySymbol + '0.00';
                         continue;
                     }
 
-                    // Fetch the CA balance for this account and date from the server
-                    allPromises.push(
-                        $.ajax({
-                            url: '/get_ca_balance',
-                            method: 'GET',
-                            data: { account_id: accountId, date: date }
-                        }).then(function(response) {
-                            if (response.status === 'success') {
-                                const balance = parseFloat(response.balance) || 0;
-                                tdElement.textContent = formatCurrency(balance);
-                            } else {
-                                tdElement.textContent = currencySymbol + '0.00';
-                            }
-                        }).catch(function() {
-                            tdElement.textContent = currencySymbol + '0.00';
-                        })
-                    );
+                    // Get from batch cache
+                    const accountCache = batchCaBalancesCache[accountId] || {};
+                    const balance = parseFloat(accountCache[date] || 0);
+                    tdElement.textContent = formatCurrency(balance);
                 }
             });
-            
-            // Wait for all requests to complete
-            return Promise.all(allPromises);
         }
 
         // Function to update the remainder and last remainder rows
-        function updateRemainderRows() {
-
-
+        async function updateRemainderRows() {
             const remainderRowRight = document.getElementById('remainder-row-right');
             const lastRemainderRowRight = document.getElementById('last-remainder-row-right');
+            
+            if (!remainderRowRight || !lastRemainderRowRight) {
+                return;
+            }
+            
+            // Ensure batch cache is populated
+            const dates = collectAllDates();
+            await fetchBatchTotals(dates);
+            
             const numberOfColumns = remainderRowRight.children.length;
 
-            // Create array of promises for all AJAX requests
-            const promises = [];
-            
             for (let i = 0; i < numberOfColumns; i++) {
                 const remainderCell = remainderRowRight.children[i];
                 const lastRemainderCell = lastRemainderRowRight.children[i];
                 const date = remainderCell.getAttribute('data-date');
 
-                // Fetch both last remainder and remainder for this date
-                const lastRemainderPromise = $.ajax({
-                    url: '/get_last_remainder',
-                    method: 'GET',
-                    data: { date: date }
-                });
+                if (!date || date === 'null') continue;
 
-                const remainderPromise = $.ajax({
-                    url: '/get_remainder',
-                    method: 'GET',
-                    data: { date: date }
-                });
+                // Get from batch cache
+                const cached = batchTotalsCache[date] || {};
+                const lastRemainder = parseFloat(cached.last_week_remainder || 0);
+                const remainder = parseFloat(cached.remainder || 0);
 
-                // Wait for both promises and update the cells
-                promises.push(
-                    Promise.all([lastRemainderPromise, remainderPromise]).then(function([lastRemainderResponse, remainderResponse]) {
-                        const lastRemainder = (lastRemainderResponse.status === 'success') 
-                            ? parseFloat(lastRemainderResponse.last_remainder) || 0 
-                            : 0;
-                        const remainder = (remainderResponse.status === 'success') 
-                            ? parseFloat(remainderResponse.remainder) || 0 
-                            : 0;
+                // Format values
+                const formattedLast = formatCurrency(lastRemainder);
+                const formattedRemainder = formatCurrency(remainder);
 
-                        // Format values
-                        const formattedLast = formatCurrency(lastRemainder);
-                        const formattedRemainder = formatCurrency(remainder);
+                // Determine threshold class
+                let thresholdClass = '';
+                let applyThresholdClass = true;
+                if (member_since) {
+                    const cellDate = new Date(remainderCell.getAttribute('data-date'));
+                    const memberSinceDate = new Date(member_since);
+                    if (cellDate < memberSinceDate) {
+                        applyThresholdClass = false;
+                    }
+                }
+                if (applyThresholdClass) {
+                    if (remainder < 0) {
+                        thresholdClass = 'negative';
+                    } else if (remainder < balance_threshold) {
+                        thresholdClass = 'below-threshold';
+                    } else {
+                        thresholdClass = 'above-threshold';
+                    }
+                }
 
-                        // Determine threshold class
-                        let thresholdClass = '';
-                        let applyThresholdClass = true;
-                        if (member_since) {
-                            const cellDate = new Date(remainderCell.getAttribute('data-date'));
-                            const memberSinceDate = new Date(member_since);
-                            if (cellDate < memberSinceDate) {
-                                applyThresholdClass = false;
-                            }
-                        }
-                        if (applyThresholdClass) {
-                            if (remainder < 0) {
-                                thresholdClass = 'negative';
-                            } else if (remainder < balance_threshold) {
-                                thresholdClass = 'below-threshold';
-                            } else {
-                                thresholdClass = 'above-threshold';
-                            }
-                        }
+                // Only update if values have changed
+                if (lastRemainderCell.textContent !== formattedLast) {
+                    lastRemainderCell.textContent = formattedLast;
+                }
 
-                        // Only update if values have changed
-                        if (lastRemainderCell.textContent !== formattedLast) {
-                            lastRemainderCell.textContent = formattedLast;
-                        }
+                if (remainderCell.textContent !== formattedRemainder) {
+                    remainderCell.textContent = formattedRemainder;
+                }
 
-                        if (remainderCell.textContent !== formattedRemainder) {
-                            remainderCell.textContent = formattedRemainder;
-                        }
-
-                        // Only update classes if needed
-                        const currentClass = remainderCell.classList.contains('negative') ? 'negative' 
-                            : remainderCell.classList.contains('below-threshold') ? 'below-threshold'
-                            : remainderCell.classList.contains('above-threshold') ? 'above-threshold' : '';
-                        
-                        if (currentClass !== thresholdClass) {
-                            remainderCell.classList.remove('below-threshold', 'negative', 'above-threshold');
-                            if (thresholdClass) {
-                                remainderCell.classList.add(thresholdClass);
-                            }
-                        }
-                    }).catch(function() {
-                        lastRemainderCell.textContent = formatCurrency(0);
-                        remainderCell.textContent = formatCurrency(0);
-                    })
-                );
+                // Only update classes if needed
+                const currentClass = remainderCell.classList.contains('negative') ? 'negative' 
+                    : remainderCell.classList.contains('below-threshold') ? 'below-threshold'
+                    : remainderCell.classList.contains('above-threshold') ? 'above-threshold' : '';
+                
+                if (currentClass !== thresholdClass) {
+                    remainderCell.classList.remove('below-threshold', 'negative', 'above-threshold');
+                    if (thresholdClass) {
+                        remainderCell.classList.add(thresholdClass);
+                    }
+                }
             }
-            
-            // Wait for all requests to complete
-            return Promise.all(promises);
         }
 
         function updateLocalTotalsRemainders(updatedData, updatedSavings = null) {
@@ -2088,6 +2212,10 @@
 
                         // Optionally update other UI elements if needed
                         updateLocalTotalsRemainders(response.updated_totals_remainders, response.updated_savings_entries);
+                        
+                        // Invalidate all cached totals since recalculation may affect multiple weeks
+                        clearBatchCache();
+                        
                         updateView(["totals"]);
                         showDashboardSpinner(false);
                     } else {
@@ -2121,6 +2249,10 @@
                         // caBalancesDaily = response.updated_ca_balances_d;
                         // caBalancesWeekly = response.updated_ca_balances;
                         // caBalancesMonthly = response.updated_ca_balances_m;
+                        
+                        // Invalidate CA balances cache so fresh data is fetched
+                        batchCaBalancesCache = {};
+                        
                         // Optionally update the UI if needed
                         updateCaBalance();
                         showDashboardSpinner(false);
@@ -2135,11 +2267,55 @@
             });
         }
 
+        // Helper function to update bucket progress bar in a cell
+        // Shows red (spent) on left and green (remaining) on right
+        function updateBucketProgressBar(cell, entry) {
+            // Remove any existing progress bar
+            const existingBar = cell.querySelector('.bucket-progress-container');
+            if (existingBar) {
+                existingBar.remove();
+            }
+            
+            // Only add progress bar if entry has bucket info
+            if (!entry.has_bucket) return;
+            
+            const remainingAmount = parseFloat(entry.bucket_amount || 0);
+            const originalAmount = parseFloat(entry.original_amount || 0);
+            
+            // Don't show if no original amount (avoid division by zero)
+            if (originalAmount <= 0) return;
+            
+            // Calculate spent amount and percentage
+            const spentAmount = originalAmount - remainingAmount;
+            const spentPercent = Math.min((spentAmount / originalAmount) * 100, 100);
+            
+            // Create container
+            const container = document.createElement('div');
+            container.className = 'bucket-progress-container';
+            
+            // Create spent (red) bar - what has been used
+            const spentBar = document.createElement('div');
+            spentBar.className = 'bucket-progress-spent';
+            spentBar.style.width = spentPercent + '%';
+            
+            // Create remaining (green) bar - what's left
+            const remainingBar = document.createElement('div');
+            remainingBar.className = 'bucket-progress-remaining';
+            
+            container.appendChild(spentBar);
+            container.appendChild(remainingBar);
+            
+            // Ensure cell has relative positioning
+            cell.style.position = 'relative';
+            cell.appendChild(container);
+        }
+
         function populateIncomeData() {
             const weekEntriesMap = {}; // Map to track entries for each week
             const allCells = new Set(); // Track all cells to identify empty ones
 
             incomeEntries.forEach(entry => {
+                
                 const entryDate = new Date(entry.date); // Date of the income entry
 
                 // Find the row with the matching data-category-id
@@ -2155,15 +2331,6 @@
 
                         // Get the start and end of the week for the current cell's Friday
                         const { startOfWeek, endOfWeek } = calculateWeekRange(cellDate);
-
-                        // ...inside populateIncomeData, inside cells.forEach(td => { ... })...
-                        const matchingEntries = incomeEntries.filter(e => {
-                            const d = new Date(e.date);
-                            const isMatch = String(e.category_id) === String(entry.category_id) && d >= startOfWeek && d <= endOfWeek;
-                            if (isMatch) {
-                            }
-                            return isMatch;
-                        });
 
                         // Check if entryDate falls between startOfWeek and endOfWeek (inclusive)
                         if (entryDate >= startOfWeek && entryDate <= endOfWeek) {
@@ -2184,10 +2351,13 @@
 
                     if (matchedCell) {
                         const input = matchedCell.querySelector('input');
-                        const amount = parseFloat(entry.total_amount);
+                        // Use 'amount' for raw entries (from API) or 'total_amount' for aggregated entries (from page load)
+                        const amount = parseFloat(entry.amount || entry.total_amount || 0);
                         if (input && !isNaN(amount)) {
                             input.value = currencySymbol + amount.toFixed(2);
                         }
+                        // Update bucket progress bar if applicable
+                        updateBucketProgressBar(matchedCell, entry);
                     }
                 }
             });
@@ -2223,6 +2393,9 @@
                             td.removeAttribute('data-processed');
                             td.setAttribute('data-processed', '0');
                             td.classList.remove('paid');
+                            // Remove any existing progress bar
+                            const existingBar = td.querySelector('.bucket-progress-container');
+                            if (existingBar) existingBar.remove();
                         }
                     }
                 });
@@ -2234,6 +2407,7 @@
             const allCells = new Set(); // Track all cells to identify empty ones
 
             expenseEntries.forEach(entry => {
+                
                 const entryDate = new Date(entry.date); // Date of the expense entry
 
                 // Find the row with the matching data-category-id
@@ -2249,11 +2423,6 @@
 
                         // Get the start and end of the week for the current cell's Friday
                         const { startOfWeek, endOfWeek } = calculateWeekRange(cellDate);
-
-                        const matchingEntries = expenseEntries.filter(e => {
-                            const d = new Date(e.date);
-                            return String(e.category_id) === String(entry.category_id) && d >= startOfWeek && d <= endOfWeek;
-                        });
 
                         // Check if entryDate falls between startOfWeek and endOfWeek (inclusive)
                         if (entryDate >= startOfWeek && entryDate <= endOfWeek) {
@@ -2274,10 +2443,13 @@
 
                     if (matchedCell) {
                         const input = matchedCell.querySelector('input');
-                        const amount = parseFloat(entry.total_amount);
+                        // Use 'amount' for raw entries (from API) or 'total_amount' for aggregated entries (from page load)
+                        const amount = parseFloat(entry.amount || entry.total_amount || 0);
                         if (input && !isNaN(amount)) {
                             input.value = currencySymbol + amount.toFixed(2);
                         }
+                        // Update bucket progress bar if applicable
+                        updateBucketProgressBar(matchedCell, entry);
                     }
                 }
             });
@@ -2313,6 +2485,9 @@
                             td.removeAttribute('data-processed');
                             td.setAttribute('data-processed', '0');
                             td.classList.remove('paid');
+                            // Remove any existing progress bar
+                            const existingBar = td.querySelector('.bucket-progress-container');
+                            if (existingBar) existingBar.remove();
                         }
                     }
                 });
@@ -2349,12 +2524,17 @@
                         if (input) {
                             if (entry && entry.total_amount !== undefined) {
                                 input.value = currencySymbol + parseFloat(entry.total_amount).toFixed(2);
+                                // Update bucket progress bar if applicable
+                                updateBucketProgressBar(td, entry);
                             } else {
                                 input.value = '';
                                 // Clear processed status when no entry exists
                                 td.removeAttribute('data-processed');
                                 td.setAttribute('data-processed', '0');
                                 td.classList.remove('paid');
+                                // Remove any existing progress bar
+                                const existingBar = td.querySelector('.bucket-progress-container');
+                                if (existingBar) existingBar.remove();
                             }
                         }
 
@@ -3525,10 +3705,12 @@
             const td = input.parentElement;
             
             showDashboardSpinner(true);
-            const newValue = input.value.trim();
+            // Strip currency symbol if present (needed when called after blur reformats the value)
+            const newValue = input.value.trim().replace(currencySymbol, '').trim();
 
             const categoryId = td.closest('tr').getAttribute('data-category-id');
             const date = new Date(td.getAttribute('data-date'));
+            const fridayDateStr = td.getAttribute('data-date'); // The Friday date string (always Friday regardless of goofy mode)
             const { startOfWeek, endOfWeek } = calculateWeekRange(date);
             const startDate = startOfWeek.toISOString().split('T')[0];
             const endDate = endOfWeek.toISOString().split('T')[0];
@@ -3554,20 +3736,105 @@
                             td.setAttribute('data-processed', '0');
                             td.classList.remove('paid');
                             
-                            updateLocalState(type, categoryId, startDate, 0, true, endDate);
+                            // Use fridayDateStr (the cell's data-date) since entries are keyed by Friday
+                            updateLocalState(type, categoryId, fridayDateStr, 0, true, fridayDateStr);
+                            
+                            // Update bucket entries if returned from server
+                            // Process ALL returned buckets - depleting an entry can affect buckets in other weeks
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                let entriesArray = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
+                                
+                                response.updated_buckets.forEach(bucket => {
+                                    // Process all returned buckets (server returns only relevant ones)
+                                    
+                                    // In dashboard.html, entries are AGGREGATED by week - find by category_id and week date
+                                    // The bucket.date is a Friday (week key), entries have date = Friday
+                                    const bucketEntry = entriesArray.find(e => String(e.category_id) === String(categoryId) && e.date === bucket.date);
+                                    if (bucketEntry) {
+                                        if (bucket.amount > 0) {
+                                            // Update existing aggregated entry - this IS the total for the week
+                                            bucketEntry.amount = bucket.amount;
+                                            bucketEntry.total_amount = bucket.amount;
+                                            bucketEntry.has_bucket = true;
+                                            bucketEntry.bucket_amount = bucket.amount;
+                                            bucketEntry.original_amount = bucket.original_amount;
+                                        } else {
+                                            // Bucket depleted - update to 0 (or remove if no manual entries)
+                                            bucketEntry.amount = 0;
+                                            bucketEntry.total_amount = 0;
+                                            bucketEntry.has_bucket = true;
+                                            bucketEntry.bucket_amount = 0;
+                                        }
+                                    }
+                                    // NOTE: Do NOT push new entries for periods not yet in local state
+                                    // Navigation will reload from Redis with correct aggregated values
+                                    
+                                    // Immediately update the DOM for the bucket cell
+                                    const table = type === 'income' ? document.getElementById('income-table') : document.getElementById('expenses-table');
+                                    const bucketRow = table ? table.querySelector(`tr[data-category-id="${categoryId}"]`) : null;
+                                    if (bucketRow) {
+                                        const bucketCell = Array.from(bucketRow.querySelectorAll('td')).find(td => {
+                                            const cellDate = td.getAttribute('data-date');
+                                            return cellDate === bucket.date;
+                                        });
+                                        if (bucketCell) {
+                                            const input = bucketCell.querySelector('input');
+                                            if (input) {
+                                                if (bucket.amount > 0) {
+                                                    input.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    // Update progress bar
+                                                    updateBucketProgressBar(bucketCell, {
+                                                        has_bucket: true,
+                                                        bucket_amount: bucket.amount,
+                                                        original_amount: bucket.original_amount
+                                                    });
+                                                } else {
+                                                    // Bucket fully depleted - clear the value but keep progress bar at 100%
+                                                    input.value = '';
+                                                    // Show progress bar at 100% spent (all red)
+                                                    if (bucket.original_amount > 0) {
+                                                        updateBucketProgressBar(bucketCell, {
+                                                            has_bucket: true,
+                                                            bucket_amount: 0, // 0 remaining = 100% spent
+                                                            original_amount: bucket.original_amount
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
+                            // Refresh notification badge (bucket depletion may have created a notification)
+                            if (typeof refreshNotificationBadge === 'function') {
+                                refreshNotificationBadge();
+                            }
+                            // Invalidate batch cache for the affected date so fresh data is fetched
+                            invalidateBatchCacheForDate(fridayDateStr);
+                            // Also invalidate cache for any bucket dates that were affected (may be in different months)
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    if (bucket.date) {
+                                        invalidateBatchCacheForDate(bucket.date);
+                                    }
+                                });
+                            }
                             // Defer updateView to next tick to avoid blocking
+                            // Don't call populateIncome/populateExpense since we already updated the DOM
                             setTimeout(() => {
                                 updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
                             }, 0);
-                        } else {
                         }
+                        showDashboardSpinner(false);
                     },
                     error: function() {
+                        showDashboardSpinner(false);
                     }
                 });
             } else {
@@ -3581,10 +3848,9 @@
                     input.value = '';
                     return;
                 }
-                const fridayDate = endDate;
                 const data = {
                     category_id: categoryId,
-                    friday_date: fridayDate,
+                    friday_date: fridayDateStr,
                     start_date: startDate,
                     end_date: endDate,
                     amount: amount,
@@ -3595,9 +3861,13 @@
                     method: "POST",
                     contentType: "application/json",
                     data: JSON.stringify(data),
-                    success: function(response) {
+                    success: async function(response) {
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
+                            console.log('[DEBUG] update-week-entry success, goofyWeekMode=', goofyWeekMode);
+                            console.log('[DEBUG] fridayDateStr=', fridayDateStr, 'startDate=', startDate, 'endDate=', endDate);
+                            console.log('[DEBUG] updated_buckets=', response.updated_buckets);
+                            
                             // If amount is 0, clear the input immediately (entry was deleted)
                             if (amount === 0) {
                                 input.value = '';
@@ -3614,20 +3884,112 @@
                                     input.value = rounded;
                                 }
                             }
-                            updateLocalState(type, categoryId, endDate, amount, amount === 0, endDate);
+                            // Use fridayDateStr (the cell's data-date) since entries are keyed by Friday
+                            updateLocalState(type, categoryId, fridayDateStr, amount, amount === 0, fridayDateStr);
+                            
+                            // Update bucket entries if returned from server
+                            // IMPORTANT: Only process the bucket for the current week being edited
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                let entriesArray = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
+                                console.log('[DEBUG] Before bucket update, entriesArray for category', categoryId, '=', 
+                                    entriesArray.filter(e => String(e.category_id) === String(categoryId)));
+                                console.log('[DEBUG] Current week being edited: fridayDateStr=', fridayDateStr);
+                                
+                                response.updated_buckets.forEach(bucket => {
+                                    console.log('[DEBUG] Processing bucket:', bucket);
+                                    
+                                    // Process ALL returned buckets - the server returns only relevant ones
+                                    // In dashboard.html, entries are AGGREGATED by week - find by category_id and week date
+                                    const bucketEntry = entriesArray.find(e => {
+                                        return String(e.category_id) === String(categoryId) && e.date === bucket.date;
+                                    });
+                                    console.log('[DEBUG] Found bucketEntry:', bucketEntry);
+                                    if (bucketEntry) {
+                                        if (bucket.amount > 0) {
+                                            // Update existing aggregated entry - this IS the total for the week
+                                            bucketEntry.amount = bucket.amount;
+                                            bucketEntry.total_amount = bucket.amount;
+                                            bucketEntry.has_bucket = true;
+                                            bucketEntry.bucket_amount = bucket.amount;
+                                            bucketEntry.original_amount = bucket.original_amount;
+                                            console.log('[DEBUG] Updated bucketEntry.amount and total_amount to', bucket.amount);
+                                        } else {
+                                            // Bucket depleted - update to 0 (or remove if no manual entries)
+                                            bucketEntry.amount = 0;
+                                            bucketEntry.total_amount = 0;
+                                            bucketEntry.has_bucket = true;
+                                            bucketEntry.bucket_amount = 0;
+                                        }
+                                    }
+                                    // NOTE: Do NOT push new entries for periods not yet in local state
+                                    // Navigation will reload from Redis with correct aggregated values
+                                    
+                                    // Immediately update the DOM for the bucket cell
+                                    const table = type === 'income' ? document.getElementById('income-table') : document.getElementById('expenses-table');
+                                    const bucketRow = table ? table.querySelector(`tr[data-category-id="${categoryId}"]`) : null;
+                                    if (bucketRow) {
+                                        const bucketCell = Array.from(bucketRow.querySelectorAll('td')).find(td => {
+                                            const cellDate = td.getAttribute('data-date');
+                                            return cellDate === bucket.date;
+                                        });
+                                        if (bucketCell) {
+                                            const input = bucketCell.querySelector('input');
+                                            if (input) {
+                                                if (bucket.amount > 0) {
+                                                    input.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    // Update progress bar
+                                                    updateBucketProgressBar(bucketCell, {
+                                                        has_bucket: true,
+                                                        bucket_amount: bucket.amount,
+                                                        original_amount: bucket.original_amount
+                                                    });
+                                                } else {
+                                                    // Bucket fully depleted - clear the value but keep progress bar at 100%
+                                                    input.value = '';
+                                                    // Show progress bar at 100% spent (all red)
+                                                    if (bucket.original_amount > 0) {
+                                                        updateBucketProgressBar(bucketCell, {
+                                                            has_bucket: true,
+                                                            bucket_amount: 0, // 0 remaining = 100% spent
+                                                            original_amount: bucket.original_amount
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            
                             if (type === 'ca') {
                                 saveCaDailyBalance(startDate);
                             } else {
                                 saveDailyTotalsAndRemainders(startDate);
                             }
+                            // Refresh notification badge (bucket depletion may have created a notification)
+                            if (typeof refreshNotificationBadge === 'function') {
+                                refreshNotificationBadge();
+                            }
+                            // Invalidate batch cache for the affected date so fresh data is fetched
+                            invalidateBatchCacheForDate(fridayDateStr);
+                            // Also invalidate cache for any bucket dates that were affected (may be in different months)
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    if (bucket.date) {
+                                        invalidateBatchCacheForDate(bucket.date);
+                                    }
+                                });
+                            }
                             // Defer updateView to next tick to avoid blocking
+                            // Don't re-populate tables after immediate DOM update to avoid flickering
                             setTimeout(() => {
-                                updateView(["updateRemainderRows", "updateIncomeTotals", "updateExpenseTotals", "updateCaBalance"]);
+                                updateView(["updateIncomeTotals", "updateExpenseTotals", "updateCaBalance", "updateRemainderRows"]);
                             }, 0);
-                        } else {
                         }
+                        showDashboardSpinner(false);
                     },
                     error: function() {
+                        showDashboardSpinner(false);
                     }
                 });
             }
@@ -3675,16 +4037,8 @@
             const entryDateObj = new Date(entryDate);
             entryDateObj.setUTCHours(0, 0, 0, 0);
 
-            // Find the Saturday on or before entryDate (week start)
-            let startOfWeek = new Date(entryDateObj);
-            let day = startOfWeek.getUTCDay();
-            startOfWeek.setUTCDate(entryDateObj.getUTCDate() - ((day + 1) % 7));
-            startOfWeek.setUTCHours(0, 0, 0, 0);
-
-            // End of week is the next Friday (6 days after Saturday)
-            let endOfWeek = new Date(startOfWeek);
-            endOfWeek.setUTCDate(startOfWeek.getUTCDate() + 6);
-            endOfWeek.setUTCHours(0, 0, 0, 0);
+            // Use calculateWeekRange which respects goofyWeekMode
+            const { startOfWeek, endOfWeek } = calculateWeekRange(entryDateObj);
 
             // 1. Add/substitute/delete for the specific date
             let entry = entryList.find(e => {
@@ -3749,7 +4103,7 @@
                 }
             }
 
-            // 2. Calculate the week sum (Saturday–Friday)
+            // 2. Calculate the week sum (respects goofyWeekMode via calculateWeekRange)
             const weekSum = entryList
                 .filter(e => {
                     const entryDate = new Date(e.date);
@@ -4417,6 +4771,34 @@
                     if (!headerRow) return;
                     outlineCurrentWeekForTable(caTable.id, headerRow.id);
                 });
+                
+                // Position member-since badge outside the table
+                positionMemberSinceBadge();
+            }
+            
+            // Position member-since badge as child of table-container for proper z-index
+            function positionMemberSinceBadge() {
+                // Remove any existing badge
+                document.querySelectorAll('.member-since-badge').forEach(b => b.remove());
+                
+                const cell = document.querySelector('.has-member-since-badge');
+                if (!cell) return;
+                
+                const tableContainer = document.getElementById('table-container');
+                if (!tableContainer) return;
+                
+                const cellRect = cell.getBoundingClientRect();
+                const containerRect = tableContainer.getBoundingClientRect();
+                
+                const badge = document.createElement('div');
+                badge.className = 'member-since-badge';
+                badge.title = 'Member Since';
+                badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
+                
+                badge.style.top = `${cellRect.top - containerRect.top - 5}px`;
+                badge.style.left = `${cellRect.left - containerRect.left - 10}px`;
+                
+                tableContainer.appendChild(badge);
             }
 
             // Helper: outline for a single table
@@ -4455,15 +4837,11 @@
                 const outline = document.createElement('div');
                 outline.className = 'current-week-outline';
 
-                const container = document.getElementById('month-table-container');
-                const parentRect = (container && container.parentElement) ? container.parentElement.getBoundingClientRect() : {left:0,top:0};
-                if (container && container.parentElement) {
-                    container.parentElement.appendChild(outline);
-                } else if (container) {
-                    container.appendChild(outline);
-                } else {
-                    document.body.appendChild(outline);
-                }
+                const tableContainer = document.getElementById('table-container');
+                if (!tableContainer) return;
+                
+                const parentRect = tableContainer.getBoundingClientRect();
+                tableContainer.appendChild(outline);
 
                 outline.style.display = 'block';
                 outline.style.top = `${top - parentRect.top}px`;
@@ -4513,15 +4891,11 @@
                 const outline = document.createElement('div');
                 outline.className = 'current-week-outline';
 
-                const container = document.getElementById('month-table-container');
-                const parentRect = (container && container.parentElement) ? container.parentElement.getBoundingClientRect() : {left:0,top:0};
-                if (container && container.parentElement) {
-                    container.parentElement.appendChild(outline);
-                } else if (container) {
-                    container.appendChild(outline);
-                } else {
-                    document.body.appendChild(outline);
-                }
+                const tableContainer = document.getElementById('table-container');
+                if (!tableContainer) return;
+                
+                const parentRect = tableContainer.getBoundingClientRect();
+                tableContainer.appendChild(outline);
 
                 outline.style.display = 'block';
                 outline.style.top = `${top - parentRect.top}px`;
