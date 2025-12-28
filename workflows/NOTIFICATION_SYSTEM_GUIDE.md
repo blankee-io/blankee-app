@@ -33,6 +33,15 @@ This guide explains how to create notifications and update the notification badg
 3. **Database (MySQL)**
    - `notifications` table with user_id, date, message, is_read fields
 
+### APNs Push for iOS WebView
+
+- Backend stores device tokens in `device_tokens` (see migrations/add_device_tokens.sql).
+- Env vars required: `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC`, `APNS_USE_SANDBOX` (true for dev).
+- Register token: `POST /api/notifications/register` with JSON `{ "deviceToken": "<token>", "platform": "ios", "deviceInfo": {...} }` while authenticated in the webview.
+- Unregister token: `POST /api/notifications/unregister` with JSON `{ "deviceToken": "<token>" }`.
+- Delivery: `add_notification()` now sends APNs pushes (badge = unread count) and prunes invalid tokens automatically.
+- The lock-screen text uses the notification message and the title "Blankee".
+
 ---
 
 ## Creating Notifications

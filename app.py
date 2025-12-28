@@ -33,6 +33,7 @@ from quiltt_redis import (
     delete_quiltt_connection, get_quiltt_transactions, upsert_quiltt_transaction
 )
 from bucket_utils import process_manual_entry_with_bucket
+from push_notifications import apns_enabled, send_apns_notification
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
@@ -10700,6 +10701,46 @@ def profile():
         connector_id=connector_id
     )
 
+
+@app.route('/api/notifications/register', methods=['POST'])
+@login_required
+def register_device_token():
+    """Register or update a device token for the current user."""
+    payload = request.get_json(silent=True) or {}
+    device_token = (payload.get('deviceToken') or payload.get('device_token') or '').strip()
+    platform = (payload.get('platform') or 'ios').lower()
+    device_info = payload.get('deviceInfo') or payload.get('device_info')
+
+    if not device_token:
+        return jsonify({'success': False, 'error': 'deviceToken required'}), 400
+
+    try:
+        upsert_device_token(current_user.id, device_token, platform, device_info)
+    except Exception as exc:
+        app.logger.error(f"Failed to register device token for user {current_user.id}: {exc}")
+        return jsonify({'success': False, 'error': 'server_error'}), 500
+
+    return jsonify({'success': True})
+
+
+@app.route('/api/notifications/unregister', methods=['POST'])
+@login_required
+def unregister_device_token():
+    """Remove a device token for the current user."""
+    payload = request.get_json(silent=True) or {}
+    device_token = (payload.get('deviceToken') or payload.get('device_token') or '').strip()
+
+    if not device_token:
+        return jsonify({'success': False, 'error': 'deviceToken required'}), 400
+
+    try:
+        remove_device_token(current_user.id, device_token)
+    except Exception as exc:
+        app.logger.error(f"Failed to unregister device token for user {current_user.id}: {exc}")
+        return jsonify({'success': False, 'error': 'server_error'}), 500
+
+    return jsonify({'success': True})
+
 @app.route('/notifications', methods=['GET'])
 @login_required
 def notifications():
@@ -13909,6 +13950,75 @@ def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
                 # Create new entry
                 _update_entry_in_redis('c_expense_entries', current_user.id, category_id, date_val, float(value), bud_item_id=bud_item_id)
 
+
+def upsert_device_token(user_id, device_token, platform='ios', device_info=None):
+    """Store or update a device token for push notifications."""
+    serialized_info = None
+    if device_info is not None:
+        try:
+            serialized_info = json.dumps(device_info)
+        except TypeError:
+            serialized_info = None
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute(
+            """
+            INSERT INTO device_tokens (user_id, device_token, platform, device_info)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                user_id = VALUES(user_id),
+                platform = VALUES(platform),
+                device_info = VALUES(device_info),
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, device_token, platform, serialized_info)
+        )
+        conn.commit()
+        cursor.close()
+
+
+def remove_device_token(user_id, device_token):
+    """Remove a device token for a user."""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM device_tokens
+            WHERE device_token = %s AND user_id = %s
+            """,
+            (device_token, user_id)
+        )
+        conn.commit()
+        cursor.close()
+
+
+def get_user_device_tokens(user_id, platform=None):
+    """Fetch all device tokens for a user (optionally filtered by platform)."""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        if platform:
+            cursor.execute(
+                """
+                SELECT device_token, platform
+                FROM device_tokens
+                WHERE user_id = %s AND platform = %s
+                """,
+                (user_id, platform)
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT device_token, platform
+                FROM device_tokens
+                WHERE user_id = %s
+                """,
+                (user_id,)
+            )
+        tokens = cursor.fetchall()
+        cursor.close()
+        return tokens or []
+
+
 def add_notification(user_id, message, notification_date=None):
     """
     Create a new notification for a user and optionally send via email.
@@ -13923,6 +14033,8 @@ def add_notification(user_id, message, notification_date=None):
     """
     if notification_date is None:
         notification_date = datetime.now()
+    user = None
+    unread_count = 0
     
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -13939,6 +14051,17 @@ def add_notification(user_id, message, notification_date=None):
             WHERE id = %s
         """, (user_id,))
         user = cursor.fetchone()
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM notifications
+            WHERE user_id = %s AND is_read = 0
+            """,
+            (user_id,)
+        )
+        unread_row = cursor.fetchone() or {}
+        unread_count = unread_row.get('total', 0)
         
         conn.commit()
         cursor.close()
@@ -13951,6 +14074,29 @@ def add_notification(user_id, message, notification_date=None):
             send_notification_email(user['email'], user_name, message, notification_date)
         except Exception as e:
             app.logger.error(f"Failed to send notification email to user {user_id}: {str(e)}")
+
+    # Send APNs push notification if configured
+    if apns_enabled():
+        try:
+            tokens = get_user_device_tokens(user_id, platform='ios')
+            if tokens:
+                for token_row in tokens:
+                    token_value = token_row.get('device_token')
+                    if not token_value:
+                        continue
+                    result = send_apns_notification(
+                        device_token=token_value,
+                        title="Blankee",
+                        body=message,
+                        badge=unread_count
+                    )
+                    if not result.get('sent') and result.get('reason') == 'invalid_token':
+                        try:
+                            remove_device_token(user_id, token_value)
+                        except Exception as cleanup_err:
+                            app.logger.warning(f"Failed to prune invalid token for user {user_id}: {cleanup_err}")
+        except Exception as push_err:
+            app.logger.warning(f"APNs push failed for user {user_id}: {push_err}")
     
     return notification_id
 
