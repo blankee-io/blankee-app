@@ -81,7 +81,7 @@ def init_redis():
         _redis_client.ping()
         app.config['REDIS_OK'] = True
     except Exception as e:
-        app.logger.warning(f"Redis unavailable: {e}")
+        pass
         app.config['REDIS_OK'] = False
     return _redis_client
 
@@ -96,7 +96,6 @@ _redis_warmup_on_import()
 # Initialize database connection pool at startup
 try:
     init_db_pool()
-    app.logger.info("Database connection pool initialized")
 except Exception as e:
     app.logger.error(f"Failed to initialize database pool: {e}")
     raise
@@ -104,14 +103,12 @@ except Exception as e:
 # Initialize Redis manager with hydration/dehydration workers
 if _redis_client:
     init_redis_manager(_redis_client)
-    app.logger.info("Redis manager initialized with hydration/dehydration workers")
     
     # Initialize Redis middleware and routes
     init_redis_middleware(app)
     init_redis_routes(app)
-    app.logger.info("Redis middleware and routes initialized")
 else:
-    app.logger.warning("Redis manager not initialized - Redis unavailable")
+    pass
 
 @app.route('/health/redis', methods=['GET'])
 def health_redis():
@@ -885,7 +882,7 @@ def _cache_get_user(user_id):
         if raw:
             return json.loads(raw)
     except Exception as e:
-        app.logger.warning(f"[CACHE][USER] GET error user={user_id}: {e}")
+        pass
     return None
 
 def _cache_set_user(user_id, user_data):
@@ -896,7 +893,7 @@ def _cache_set_user(user_id, user_data):
         key = f"user:v1:{user_id}"
         init_redis().setex(key, DASHBOARD_CACHE_TTL, json.dumps(user_data))
     except Exception as e:
-        app.logger.warning(f"[CACHE][USER] SET error user={user_id}: {e}")
+        pass
 
 def get_user_profile(user_id):
     """Cache-aside: Try cache, then DB, then update cache."""
@@ -1652,7 +1649,6 @@ def dashboard_d():
                 cached = _redis_client.get(redis_key)
                 if cached:
                     user_data = json.loads(cached)
-                    app.logger.debug(f"[REDIS HIT] dashboard_d user settings for user {current_user.id}")
             except Exception as e:
                 app.logger.error(f"[REDIS ERROR] dashboard_d user settings: {str(e)}")
         
@@ -1664,7 +1660,6 @@ def dashboard_d():
                 WHERE id = %s
             """, (current_user.id,))
             user_data = cursor.fetchone()
-            app.logger.debug(f"[MYSQL] dashboard_d user settings for user {current_user.id}")
 
         # Extract goofy_week_mode value (defaults to False if not set)
         profile_picture = user_data['profile_picture'] if user_data else None
@@ -1687,9 +1682,8 @@ def dashboard_d():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             income_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_d income_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_d income_categories for user {current_user.id}")
+            pass
 
         # Fetch expense categories - try Redis first
         expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -1702,9 +1696,8 @@ def dashboard_d():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_d expense_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_d expense_categories for user {current_user.id}")
+            pass
 
         # Convert the selected date to a proper datetime object
         try:
@@ -1726,7 +1719,6 @@ def dashboard_d():
         income_entries = _get_entries_from_redis('income_entries', current_user.id)
         if income_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_d income_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
                 FROM income_entries ie
@@ -1739,7 +1731,7 @@ def dashboard_d():
             # Update Redis cache
             _set_entries_to_redis('income_entries', current_user.id, income_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_d income_entries for user {current_user.id}")
+            pass
             # Enrich with category names from income_categories
             # Build maps with both int and string keys to handle JSON type variations
             income_cat_map = {}
@@ -1755,7 +1747,6 @@ def dashboard_d():
         expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
         if expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_d expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
                 FROM expense_entries ee
@@ -1768,7 +1759,7 @@ def dashboard_d():
             # Update Redis cache
             _set_entries_to_redis('expense_entries', current_user.id, expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_d expense_entries for user {current_user.id}")
+            pass
             # Enrich with category names from expense_categories
             expense_cat_map = {cat['id']: cat['name'] for cat in expense_categories}
             for entry in expense_entries:
@@ -1779,7 +1770,6 @@ def dashboard_d():
         totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', current_user.id)
         if totals_remainders_d is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_d totals_remainders_d for user {current_user.id}")
             cursor.execute("""
                 SELECT * FROM totals_remainders_d
                 WHERE user_id = %s
@@ -1789,13 +1779,12 @@ def dashboard_d():
             # Update Redis cache
             _set_totals_remainders_to_redis('totals_remainders_d', current_user.id, totals_remainders_d)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_d totals_remainders_d for user {current_user.id}")
+            pass
 
         # Try Redis first for savings entries
         savings_entries = _get_savings_entries_from_redis(current_user.id)
         if savings_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_d savings_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT date, amount FROM savings_entries
                 WHERE user_id = %s
@@ -1805,7 +1794,7 @@ def dashboard_d():
             # Update Redis cache
             _set_savings_entries_to_redis(current_user.id, savings_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_d savings_entries for user {current_user.id}")
+            pass
 
         # Fetch credit accounts - try Redis first
         credit_accounts = _get_credit_accounts_from_redis(current_user.id)
@@ -1817,9 +1806,8 @@ def dashboard_d():
                 ORDER BY id ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_d credit_accounts for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_d credit_accounts for user {current_user.id}")
+            pass
 
         # Fetch c_expense_categories - try Redis first (all categories for user)
         c_expense_categories = []
@@ -1834,20 +1822,17 @@ def dashboard_d():
                 ORDER BY cec.display_order ASC, cec.id ASC
             """, (current_user.id,))
             c_expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_d c_expense_categories for user {current_user.id}")
         else:
             # Add account_name to each category from Redis
             account_names = {a['id']: a['name'] for a in credit_accounts}
             for cat in all_ca_categories:
                 cat['account_name'] = account_names.get(cat.get('account_id'), '')
             c_expense_categories = all_ca_categories
-            app.logger.debug(f"[REDIS HIT] dashboard_d c_expense_categories for user {current_user.id}")
 
         # Try Redis first for c_expense_entries
         c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
         if c_expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_d c_expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT cee.*, cec.name AS category_name
                 FROM c_expense_entries cee
@@ -1861,7 +1846,7 @@ def dashboard_d():
             # Update Redis cache
             _set_entries_to_redis('c_expense_entries', current_user.id, c_expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_d c_expense_entries for user {current_user.id}")
+            pass
             # Enrich with category names from c_expense_categories
             c_expense_cat_map = {cat['id']: cat['name'] for cat in c_expense_categories}
             for entry in c_expense_entries:
@@ -1872,7 +1857,6 @@ def dashboard_d():
         c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', current_user.id)
         if c_a_balances_d is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_d c_a_balances_d for user {current_user.id}")
             cursor.execute("""
                 SELECT * FROM c_a_balances_d
                 WHERE account_id IN (
@@ -1884,7 +1868,7 @@ def dashboard_d():
             # Update Redis cache
             _set_ca_balances_to_redis('c_a_balances_d', current_user.id, c_a_balances_d)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_d c_a_balances_d for user {current_user.id}")
+            pass
         cursor.close()
 
     # Render the template, passing necessary data including selected date, goofy_week_mode, entries, and totals/remainders
@@ -1919,7 +1903,6 @@ def dashboard_d_add_entry():
     amount = data.get('amount')
     entry_date = data.get('date')
     
-    app.logger.info(f"[ADD ENTRY] User {current_user.id}: type={entry_type}, category={category_id}, amount={amount}, date={entry_date}")
 
     if not all([entry_type, category_id, amount, entry_date]):
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
@@ -1966,7 +1949,6 @@ def dashboard_d_add_entry():
         
         # Make a copy of cat_row data before closing cursor
         cat_data = dict(cat_row) if cat_row else {}
-        app.logger.info(f"[ADD ENTRY] Category data for category {category_id}: name='{cat_data.get('name')}', is_credit_account={cat_data.get('is_credit_account', 'MISSING')}")
         cursor.close()
 
     # Add to Redis only - flush worker will persist to MySQL
@@ -2001,7 +1983,6 @@ def dashboard_d_add_entry():
             cursor2.close()
         # Filter out entries marked for deletion
         existing_data = _filter_pending_deletions(table_name, current_user.id, existing_data)
-        app.logger.info(f"[REDIS][{table_name}] Loaded {len(existing_data)} entries from MySQL (after filtering pending deletions)")
     
     existing_entry = None
     
@@ -2012,7 +1993,6 @@ def dashboard_d_add_entry():
                 break
     
     # Check for bucket entries and deplete them before adding manual entry
-    app.logger.info(f"[BUCKET CHECK] Starting bucket check for entry_type={entry_type}, category_id={category_id}, entry_date={entry_date}")
     try:
         # Get recurring info for this category to determine cadence from Redis
         if entry_type == 'income':
@@ -2024,18 +2004,15 @@ def dashboard_d_add_entry():
         else:
             recurring_info = None
         
-        app.logger.info(f"[BUCKET CHECK] recurring_info found: {recurring_info is not None}, value: {recurring_info}")
         
         if recurring_info:
             # Process bucket depletion
-            app.logger.info(f"[BUCKET CHECK] About to call process_manual_entry_with_bucket")
             process_manual_entry_with_bucket(
                 table_name, category_id, entry_date, 
                 float(amount), current_user.id, recurring_info
             )
-            app.logger.info(f"[BUCKET] Processed bucket depletion for {table_name}, category {category_id}, date {entry_date}, amount {amount}")
         else:
-            app.logger.info(f"[BUCKET CHECK] No recurring_info found for category {category_id}")
+            pass
     except Exception as e:
         app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
         app.logger.exception(e)
@@ -2053,29 +2030,22 @@ def dashboard_d_add_entry():
         is_savings_category = True
 
     # If this is an expense category and is_credit_account=1, add payment entry and trigger CA balance update
-    app.logger.info(f"[CA PAYMENT DEBUG] entry_type={entry_type}, cat_data={cat_data}")
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        app.logger.info(f"[CA PAYMENT] Detected payment category for user {current_user.id}, category {category_id}")
         # Find the credit account by matching category name
         category_name = cat_data.get('name', '')
-        app.logger.info(f"[CA PAYMENT] Category name: '{category_name}'")
         if category_name.endswith(' payment'):
             account_name = category_name[:-8]  # Remove ' payment' suffix
-            app.logger.info(f"[CA PAYMENT] Looking for credit account with name: '{account_name}'")
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute("""
                     SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
                 """, (current_user.id, account_name))
                 account_row = cursor.fetchone()
-                app.logger.info(f"[CA PAYMENT] Credit account query result: {account_row}")
                 if account_row:
                     account_id = account_row['id']
-                    app.logger.info(f"[CA PAYMENT] Found credit account_id={account_id}, adding payment entry for date={entry_date}, amount={amount}")
                     # Add or update payment entry in Redis
                     payment_entries = _get_entries_from_redis('c_payment_entries', current_user.id)
-                    app.logger.info(f"[CA PAYMENT] Current payment_entries from Redis: {len(payment_entries) if payment_entries else 'None'}")
                     if payment_entries is None:
                         # Load from MySQL first
                         cursor.execute("""
@@ -2085,7 +2055,6 @@ def dashboard_d_add_entry():
                         """, (current_user.id,))
                         payment_entries = list(cursor.fetchall())
                         payment_entries = _filter_pending_deletions('c_payment_entries', current_user.id, payment_entries)
-                        app.logger.info(f"[CA PAYMENT] Loaded {len(payment_entries)} payment_entries from MySQL")
                     
                     # Check if payment entry already exists for this date/account
                     existing_payment = None
@@ -2096,19 +2065,17 @@ def dashboard_d_add_entry():
                     
                     if existing_payment:
                         new_payment_amount = Decimal(existing_payment.get('amount', 0)) + Decimal(amount)
-                        app.logger.info(f"[CA PAYMENT] Updating existing payment: {existing_payment.get('amount')} + {amount} = {new_payment_amount}")
                         _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(new_payment_amount))
                     else:
-                        app.logger.info(f"[CA PAYMENT] Creating new payment entry: account_id={account_id}, date={entry_date}, amount={amount}")
+                        pass
                         _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
-                    app.logger.info(f"[CA PAYMENT] Payment entry operation completed")
                 else:
-                    app.logger.warning(f"[CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
+                    pass
                 cursor.close()
         else:
-            app.logger.warning(f"[CA PAYMENT] Category name '{category_name}' does not end with ' payment'")
+            pass
     else:
-        app.logger.info(f"[CA PAYMENT] Not a payment category: entry_type={entry_type}, is_credit_account={cat_data.get('is_credit_account', 0)}")
+        pass
 
     if entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()
@@ -2181,7 +2148,7 @@ def get_totals_for_day():
             for row in cached_daily:
                 row_date = datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']
                 if row_date == selected_date_obj:
-                    app.logger.debug(f"[REDIS HIT] get_totals_for_day for user {current_user.id}, date {selected_date}")
+                    pass
                     return jsonify({
                         'status': 'success',
                         'total_income': float(row.get('total_income', 0)),
@@ -2190,7 +2157,6 @@ def get_totals_for_day():
                     })
         
         # Redis miss - fallback to MySQL
-        app.logger.debug(f"[REDIS MISS] get_totals_for_day for user {current_user.id}, date {selected_date}")
         
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -2284,7 +2250,6 @@ def update_totals_for_day():
             'total_expenses': float(total_expenses),
             'remainder': float(remainder)
         }])
-        app.logger.debug(f"[REDIS UPDATE] update_totals_for_day for user {current_user.id}, date {selected_date}")
 
         return jsonify({'status': 'success', 'remainder': remainder})
 
@@ -2320,7 +2285,6 @@ def update_processed_status_d_entry():
         # Get all entries for this category (Redis-first)
         all_entries = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
         
-        app.logger.info(f"[UPDATE PROCESSED D] User {current_user.id}, category {category_id}, date {entry_date}, found {len(all_entries)} total entries")
         
         # Normalize the target date
         target_date = datetime.strptime(entry_date, '%Y-%m-%d').date() if isinstance(entry_date, str) else entry_date
@@ -2335,7 +2299,6 @@ def update_processed_status_d_entry():
             if entry_date_obj == target_date:
                 entries.append(entry)
         
-        app.logger.info(f"[UPDATE PROCESSED D] Found {len(entries)} entries matching date {target_date}")
         
         if not entries:
             return jsonify({'status': 'success', 'message': 'No entries found for this date'})
@@ -2347,7 +2310,7 @@ def update_processed_status_d_entry():
         success = bulk_update_entries(table_name, updates, user_id=current_user.id)
         
         if success:
-            app.logger.info(f"[UPDATE PROCESSED D] Successfully updated {len(updates)} entries")
+            pass
             return jsonify({'status': 'success'})
         else:
             return jsonify({'status': 'error', 'message': 'Failed to update processed status'}), 500
@@ -2467,7 +2430,7 @@ def get_dashboard_d_data():
     
     # Fetch missing data from MySQL
     if need_mysql:
-        app.logger.info(f"[REDIS PARTIAL] get_dashboard_d_data for user {user_id}, hits={redis_hits}, misses={redis_misses}")
+        pass
         
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -2552,7 +2515,7 @@ def get_dashboard_d_data():
 
             cursor.close()
     else:
-        app.logger.info(f"[REDIS HIT] get_dashboard_d_data for user {user_id} - all data from Redis")
+        pass
 
     return jsonify({
         "status": "success",
@@ -2597,7 +2560,7 @@ def _get_totals_remainders_from_redis(table_name, user_id, start_date=None):
             return data
         return None
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] GET error user={user_id}: {e}")
+        pass
         return None
 
 def _set_totals_remainders_to_redis(table_name, user_id, data):
@@ -2627,9 +2590,8 @@ def _set_totals_remainders_to_redis(table_name, user_id, data):
             serializable_data.append(row_copy)
         
         _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(serializable_data))
-        app.logger.debug(f"[REDIS][{table_name}] SET user={user_id}, rows={len(data)}")
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] SET error user={user_id}: {e}")
+        pass
 
 def _update_totals_remainders_in_redis(table_name, user_id, updates):
     """Update specific totals/remainders rows in Redis cache."""
@@ -2672,7 +2634,6 @@ def _update_totals_remainders_in_redis(table_name, user_id, updates):
             dirty_key = f"dirty_tables:{user_id}"
             _redis_client.sadd(dirty_key, table_name)
             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-            app.logger.info(f"[REDIS][{table_name}] UPDATE user={user_id}, rows={len(updates)}")
         else:
             # Cache doesn't exist - create it with the updates
             serializable_updates = []
@@ -2691,9 +2652,8 @@ def _update_totals_remainders_in_redis(table_name, user_id, updates):
             dirty_key = f"dirty_tables:{user_id}"
             _redis_client.sadd(dirty_key, table_name)
             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-            app.logger.info(f"[REDIS][{table_name}] CREATE user={user_id}, rows={len(updates)}")
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] UPDATE error user={user_id}: {e}")
+        pass
 
 
 def _update_ca_balances_in_redis(table_name, user_id, account_id, entry_date, amount_delta, is_payment=False):
@@ -2718,7 +2678,6 @@ def _update_ca_balances_in_redis(table_name, user_id, account_id, entry_date, am
         
         if not cached:
             # No cache - will be loaded from MySQL on next read
-            app.logger.debug(f"[REDIS][{table_name}] No cache for user {user_id}, skipping balance update")
             return
         
         data = json.loads(cached)
@@ -2758,7 +2717,7 @@ def _update_ca_balances_in_redis(table_name, user_id, account_id, entry_date, am
                         affected_indices.append(i)
         
         if not affected_indices:
-            app.logger.debug(f"[REDIS][{table_name}] No balance records found for account {account_id} after {entry_date_str}")
+            pass
             return
         
         # Sort by date to process in order
@@ -2768,7 +2727,6 @@ def _update_ca_balances_in_redis(table_name, user_id, account_id, entry_date, am
         from datetime import datetime as dt
         entry_dt = dt.fromisoformat(entry_date_str) if isinstance(entry_date_str, str) else entry_date
         
-        app.logger.info(f"[REDIS][{table_name}] Processing {len(affected_indices)} records, entry_date={entry_date_str}")
         
         # Update balances for affected dates
         for idx in affected_indices:
@@ -2789,7 +2747,6 @@ def _update_ca_balances_in_redis(table_name, user_id, account_id, entry_date, am
             elif table_name == 'c_a_balances_m':
                 # Monthly: same year and month
                 is_matching_period = (row_dt.year == entry_dt.year and row_dt.month == entry_dt.month)
-                app.logger.info(f"[REDIS][{table_name}] Monthly check: row_date={row_date_str}, entry_date={entry_date_str}, row_month={row_dt.year}-{row_dt.month}, entry_month={entry_dt.year}-{entry_dt.month}, match={is_matching_period}")
             
             # On the matching period, update total_expenses/total_payments
             if is_matching_period:
@@ -2799,7 +2756,6 @@ def _update_ca_balances_in_redis(table_name, user_id, account_id, entry_date, am
                     data[idx]['total_payments'] = float(old_payments) + float(amount_delta)
                 else:
                     data[idx]['total_expenses'] = float(old_expenses) + float(amount_delta)
-                app.logger.info(f"[REDIS][{table_name}] Updated totals for {row_date_str}: expenses {old_expenses} -> {data[idx].get('total_expenses')}, payments {old_payments} -> {data[idx].get('total_payments')}")
             
             # Update running balance for this date and all future dates
             current_balance = float(data[idx].get('balance', 0))
@@ -2817,7 +2773,6 @@ def _update_ca_balances_in_redis(table_name, user_id, account_id, entry_date, am
         _redis_client.sadd(dirty_key, table_name)
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
-        app.logger.info(f"[REDIS][{table_name}] Updated CA balances for account {account_id}, date {entry_date_str}, delta {amount_delta}, affected {len(affected_indices)} records")
         
     except Exception as e:
         app.logger.error(f"[REDIS][{table_name}] CA balance update error user={user_id}: {e}")
@@ -2867,7 +2822,7 @@ def _get_ca_balances_from_redis(table_name, user_id, account_id=None, start_date
             return data
         return None
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] GET error user={user_id}: {e}")
+        pass
         return None
 
 def _set_ca_balances_to_redis(table_name, user_id, data):
@@ -2922,9 +2877,8 @@ def _set_ca_balances_to_redis(table_name, user_id, data):
         dirty_key = f"dirty_tables:{user_id}"
         _redis_client.sadd(dirty_key, table_name)
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        app.logger.debug(f"[REDIS][{table_name}] MERGED user={user_id}, new_rows={len(data)}, total_rows={len(merged_data)}")
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] SET error user={user_id}: {e}")
+        pass
 
 def _get_savings_entries_from_redis(user_id, start_date=None):
     """
@@ -2951,7 +2905,7 @@ def _get_savings_entries_from_redis(user_id, start_date=None):
             return data
         return None
     except Exception as e:
-        app.logger.warning(f"[REDIS][savings_entries] GET error user={user_id}: {e}")
+        pass
         return None
 
 def _set_savings_entries_to_redis(user_id, data):
@@ -2982,9 +2936,8 @@ def _set_savings_entries_to_redis(user_id, data):
         dirty_key = f"dirty_tables:{user_id}"
         _redis_client.sadd(dirty_key, "savings_entries")
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        app.logger.debug(f"[REDIS][savings_entries] SET user={user_id}, rows={len(data)}")
     except Exception as e:
-        app.logger.warning(f"[REDIS][savings_entries] SET error user={user_id}: {e}")
+        pass
 
 # Redis helper functions for user settings
 
@@ -2997,10 +2950,9 @@ def _update_user_setting_in_redis(user_id, field, value):
         field: Field name (e.g., 'balance_threshold', 'starting_savings')
         value: New value for the field
     """
-    app.logger.info(f"[REDIS][user_settings] CALLED: user_id={user_id}, field={field}, value={value}")
     
     if not app.config.get('REDIS_OK'):
-        app.logger.warning(f"[REDIS][user_settings] REDIS_OK is False, skipping Redis update")
+        pass
         return
     
     try:
@@ -3008,14 +2960,11 @@ def _update_user_setting_in_redis(user_id, field, value):
         redis_key = f"users:v1:{user_id}"
         cached = _redis_client.get(redis_key)
         
-        app.logger.info(f"[REDIS][user_settings] Redis key: {redis_key}, cached exists: {cached is not None}")
         
         if cached:
             user_data = json.loads(cached)
-            app.logger.info(f"[REDIS][user_settings] Loaded from Redis, keys: {list(user_data.keys())}")
         else:
             # Load from MySQL
-            app.logger.info(f"[REDIS][user_settings] Not in Redis, loading from MySQL")
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
@@ -3023,17 +2972,15 @@ def _update_user_setting_in_redis(user_id, field, value):
                 cursor.close()
             
             if not user_data:
-                app.logger.warning(f"[REDIS][user_settings] User {user_id} not found in MySQL")
+                pass
                 return
             
             # Convert to dict if needed
             user_data = dict(user_data)
-            app.logger.info(f"[REDIS][user_settings] Loaded from MySQL, keys: {list(user_data.keys())}")
         
         # Update the field
         old_value = user_data.get(field, 'NOT_SET')
         user_data[field] = value
-        app.logger.info(f"[REDIS][user_settings] Updated field '{field}': {old_value} -> {value}")
         
         # Serialize data
         serializable_data = user_data.copy()
@@ -3045,15 +2992,12 @@ def _update_user_setting_in_redis(user_id, field, value):
         
         # Save to Redis
         _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(serializable_data))
-        app.logger.info(f"[REDIS][user_settings] Saved to Redis key: {redis_key}")
         
         # Mark as dirty for flush
         dirty_key = f"dirty_tables:{user_id}"
         _redis_client.sadd(dirty_key, "users")
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        app.logger.info(f"[REDIS][user_settings] Marked 'users' as dirty for user {user_id}")
         
-        app.logger.info(f"[REDIS][user_settings] SUCCESS: Updated {field}={value} for user={user_id}")
     except Exception as e:
         app.logger.error(f"[REDIS][user_settings] UPDATE ERROR user={user_id}, field={field}: {e}", exc_info=True)
 
@@ -3081,7 +3025,7 @@ def _get_entries_from_redis(table_name, user_id):
             return json.loads(cached)
         return None
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] GET error user={user_id}: {e}")
+        pass
         return None
 
 def _get_recurring_info_from_redis(table_name, user_id, category_id):
@@ -3111,7 +3055,7 @@ def _get_recurring_info_from_redis(table_name, user_id, category_id):
                     return recurring
         return None
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] GET recurring error user={user_id}, category={category_id}: {e}")
+        pass
         return None
 
 def _filter_pending_deletions(table_name, user_id, entries):
@@ -3144,12 +3088,12 @@ def _filter_pending_deletions(table_name, user_id, entries):
         filtered = [entry for entry in entries if entry.get('id') not in pending_delete_ids]
         
         if len(filtered) < len(entries):
-            app.logger.debug(f"[REDIS][{table_name}] Filtered {len(entries) - len(filtered)} pending deletions for user {user_id}")
+            pass
         
         return filtered
         
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] Error filtering pending deletions: {e}")
+        pass
         return entries
 
 def _set_entries_to_redis(table_name, user_id, data):
@@ -3182,9 +3126,8 @@ def _set_entries_to_redis(table_name, user_id, data):
         dirty_key = f"dirty_tables:{user_id}"
         _redis_client.sadd(dirty_key, table_name)
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        app.logger.debug(f"[REDIS][{table_name}] SET user={user_id}, rows={len(data)}")
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] SET error user={user_id}: {e}")
+        pass
 
 def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount, processed=0, entry_id=None, bud_item_id=None, is_bucket=False, original_amount=None, recurring_id=None):
     """
@@ -3239,7 +3182,6 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
             
             # Filter out any entries pending deletion
             entries = _filter_pending_deletions(table_name, user_id, entries)
-            app.logger.info(f"[REDIS][{table_name}] Loaded {len(entries)} entries from MySQL for user {user_id}")
         
         # Convert entry_date to string for comparison
         if isinstance(entry_date, date):
@@ -3254,7 +3196,6 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
                 entry.get('date') == entry_date_str and
                 bool(entry.get('is_bucket', 0)) == bool(is_bucket)):
                 # Update existing entry
-                app.logger.info(f"[REDIS UPDATE] Found existing entry id={entry.get('id')}, is_bucket={entry.get('is_bucket')}, updating amount from {entry.get('amount')} to {amount}")
                 entry['amount'] = float(amount)
                 entry['processed'] = int(processed)
                 if bud_item_id is not None:
@@ -3264,7 +3205,6 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
         
         if not found:
             # Create new entry
-            app.logger.info(f"[REDIS CREATE] Creating entry: recurring_id param={recurring_id}, type={type(recurring_id)}")
             # Generate a NEGATIVE temp ID to avoid collision with MySQL IDs
             # The flush worker will replace this with the real auto-increment ID
             existing_ids = [e.get('id', 0) for e in entries if e.get('id')]
@@ -3284,14 +3224,12 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
             if table_name in ['expense_entries', 'c_expense_entries']:
                 new_entry['bud_item_id'] = int(bud_item_id) if bud_item_id is not None else None
             entries.append(new_entry)
-            app.logger.info(f"[REDIS CREATE] Created new entry: id={new_entry['id']}, category={category_id}, date={entry_date_str}, amount={amount}, is_bucket={is_bucket}, recurring_id={new_entry['recurring_id']}")
         
         # Write back to Redis
         _set_entries_to_redis(table_name, user_id, entries)
-        app.logger.info(f"[REDIS WRITE] Wrote {len(entries)} entries to Redis for user {user_id}, table {table_name}")
         
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] UPDATE error user={user_id}: {e}")
+        pass
 
 
 def _create_bucket_entry_and_record(table_name, user_id, category_id, entry_date, amount, recurring_id, account_id=None):
@@ -3307,20 +3245,17 @@ def _create_bucket_entry_and_record(table_name, user_id, category_id, entry_date
         recurring_id: Recurring entry ID
         account_id: Account ID (required for c_expense_entries)
     """
-    app.logger.info(f"[BUCKET CREATION] Called _create_bucket_entry_and_record: table={table_name}, user={user_id}, category={category_id}, date={entry_date}, amount={amount}")
     
     # Create bucket entry in Redis
     _update_entry_in_redis(table_name, user_id, category_id, entry_date, float(amount),
                           processed=0, entry_id=None, is_bucket=True, 
                           original_amount=float(amount), recurring_id=recurring_id)
     
-    app.logger.info(f"[BUCKET CREATION] Created bucket entry in Redis, now creating bucket record")
     
     # Create bucket record
     from recurring_bucket_manager import create_bucket_record
     bucket_id = create_bucket_record(table_name, user_id, category_id, entry_date, float(amount), account_id=account_id)
     
-    app.logger.info(f"[BUCKET CREATION] Bucket record created with ID: {bucket_id}")
 
 
 def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_date):
@@ -3373,7 +3308,6 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
             
             # Filter out any entries pending deletion (in case cache was cleared)
             entries = _filter_pending_deletions(table_name, user_id, entries)
-            app.logger.info(f"[REDIS][{table_name}] Loaded {len(entries)} entries from MySQL for user {user_id}")
         
         # Convert dates to strings for comparison
         if isinstance(start_date, date):
@@ -3391,7 +3325,7 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
         
         # For temp IDs (negative), check Redis first
         if category_id < 0:
-            app.logger.info(f"[DELETE ENTRY] Temp category {category_id}, checking Redis for recurring info")
+            pass
             
             if table_name == 'income_entries':
                 recurring_table = 'recurring_income'
@@ -3411,7 +3345,6 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
                     category_is_recurring = True
                     # Get recurring info from Redis
                     recurring_info = _get_recurring_info_from_redis(recurring_table, user_id, category_id)
-                    app.logger.info(f"[DELETE ENTRY] Found recurring info in Redis: {recurring_info}")
         else:
             # Real ID - check MySQL
             with get_db_pool().get_connection() as conn:
@@ -3445,14 +3378,12 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
                     recurring_info = result
                 cursor.close()
         
-        app.logger.info(f"[DELETE ENTRY] Category {category_id} is_recurring={category_is_recurring}, has recurring_info={recurring_info is not None}")
         
         # Filter out entries in the date range for this category
         # Also track which entry IDs are being deleted
         deleted_ids = []
         deleted_entries_for_bucket_restore = []  # Track entries that need bucket restoration
         filtered_entries = []
-        app.logger.info(f"[DELETE ENTRY] Scanning {len(entries)} total entries, looking for category={category_id}, date range {start_date_str} to {end_date_str}")
         for entry in entries:
             entry_cat = int(entry.get('category_id', 0))
             entry_date = entry.get('date', '')
@@ -3462,15 +3393,14 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
                     deleted_ids.append(entry['id'])
                     # If category is recurring and this is NOT a bucket entry, track for restoration
                     if category_is_recurring and not entry.get('is_bucket'):
-                        app.logger.info(f"[DELETE ENTRY] Entry {entry.get('id')} marked for bucket restoration: amount={entry.get('amount')}, date={entry.get('date')}, is_bucket={entry.get('is_bucket')}")
+                        pass
                         deleted_entries_for_bucket_restore.append(entry)
                     else:
-                        app.logger.info(f"[DELETE ENTRY] Entry {entry.get('id')} NOT marked for restoration: is_recurring={category_is_recurring}, is_bucket={entry.get('is_bucket')}")
+                        pass
             else:
                 # Keep this entry
                 filtered_entries.append(entry)
         
-        app.logger.info(f"[DELETE ENTRY] Found {len(deleted_entries_for_bucket_restore)} entries to restore buckets for")
         
         # Restore bucket amounts for deleted entries in recurring categories
         updated_bucket_ids = set()  # Track which buckets were updated
@@ -3505,27 +3435,24 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
                     if restored and bucket:
                         # Track that this bucket was updated so we can refresh entries
                         updated_bucket_ids.add(bucket.get('id'))
-                        app.logger.info(f"[BUCKET RESTORE] Successfully restored/recreated bucket {bucket.get('id')} for deleted entry {entry.get('id')}")
                     elif restored:
                         # Bucket was restored but couldn't find it (might have been recreated with temp ID)
                         # Still need to refresh entries
-                        app.logger.info(f"[BUCKET RESTORE] Bucket was restored but not found via find_bucket_for_entry for entry {entry.get('id')}")
                         # Force a refresh by adding a dummy ID
                         updated_bucket_ids.add(-1)
                     else:
-                        app.logger.info(f"[BUCKET RESTORE] Bucket not restored (outside period or amount <=0) for entry {entry.get('id')}")
+                        pass
                 except Exception as e:
-                    app.logger.warning(f"[BUCKET RESTORE] Error restoring bucket for entry {entry.get('id')}: {e}")
+                    pass
         
         # If buckets were updated, refresh the filtered_entries list from Redis to get updated bucket amounts
         if updated_bucket_ids:
-            app.logger.info(f"[DELETE ENTRY] Refreshing entries from Redis after bucket restoration for {len(updated_bucket_ids)} bucket(s)")
+            pass
             refreshed_entries = _get_entries_from_redis(table_name, user_id)
             if refreshed_entries:
                 # Rebuild filtered_entries with updated bucket amounts
                 deleted_ids_set = set(deleted_ids)
                 filtered_entries = [entry for entry in refreshed_entries if entry.get('id') not in deleted_ids_set]
-                app.logger.info(f"[DELETE ENTRY] Refreshed filtered_entries, now has {len(filtered_entries)} entries")
         
         # Write filtered entries back to Redis
         _set_entries_to_redis(table_name, user_id, filtered_entries)
@@ -3535,10 +3462,9 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
             pending_key = f"pending_deletes:{table_name}:{user_id}"
             _redis_client.sadd(pending_key, *deleted_ids)
             _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)  # Expire after flush would complete
-            app.logger.debug(f"[REDIS][{table_name}] Marked {len(deleted_ids)} entries as pending deletion for user {user_id}")
         
     except Exception as e:
-        app.logger.warning(f"[REDIS][{table_name}] DELETE error user={user_id}: {e}")
+        pass
 
 def _update_payment_entry_in_redis(user_id, account_id, entry_date, amount):
     """
@@ -3573,7 +3499,6 @@ def _update_payment_entry_in_redis(user_id, account_id, entry_date, amount):
             
             # Filter out any entries pending deletion
             entries = _filter_pending_deletions(table_name, user_id, entries)
-            app.logger.info(f"[REDIS][{table_name}] Loaded {len(entries)} entries from MySQL for user {user_id}")
         
         # Convert entry_date to string for comparison
         if isinstance(entry_date, date):
@@ -3608,10 +3533,9 @@ def _update_payment_entry_in_redis(user_id, account_id, entry_date, amount):
         
         # Save back to Redis
         _set_entries_to_redis(table_name, user_id, entries)
-        app.logger.debug(f"[REDIS][{table_name}] Updated payment entry for account={account_id}, date={entry_date_str}, amount={amount}")
         
     except Exception as e:
-        app.logger.warning(f"[REDIS][c_payment_entries] UPDATE error user={user_id}: {e}")
+        pass
 
 def _delete_payment_entry_in_redis(user_id, account_id, start_date, end_date):
     """
@@ -3643,7 +3567,6 @@ def _delete_payment_entry_in_redis(user_id, account_id, start_date, end_date):
                 """, (user_id,))
                 entries = list(cursor.fetchall())
                 cursor.close()
-            app.logger.info(f"[REDIS][{table_name}] Loaded {len(entries)} entries from MySQL for user {user_id}")
         
         # Convert dates to strings for comparison
         if isinstance(start_date, date):
@@ -3672,17 +3595,15 @@ def _delete_payment_entry_in_redis(user_id, account_id, start_date, end_date):
         
         # Save filtered entries back to Redis
         _set_entries_to_redis(table_name, user_id, filtered_entries)
-        app.logger.debug(f"[REDIS][{table_name}] Deleted {len(entries) - len(filtered_entries)} payment entries for account={account_id}, dates={start_date_str} to {end_date_str}")
         
         # Track pending deletions to prevent MySQL fallback from resurrecting them
         if deleted_ids:
             pending_key = f"pending_deletes:{table_name}:{user_id}"
             _redis_client.sadd(pending_key, *deleted_ids)
             _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
-            app.logger.debug(f"[REDIS][{table_name}] Marked {len(deleted_ids)} payment entries as pending deletion for user {user_id}")
         
     except Exception as e:
-        app.logger.warning(f"[REDIS][c_payment_entries] DELETE error user={user_id}: {e}")
+        pass
 
 def _get_payment_entries_from_redis(user_id):
     """
@@ -3800,13 +3721,11 @@ def _update_recurring_in_redis(table_name, user_id, recurring_data):
             if not found:
                 # Record not in cache, add it
                 rows.append(recurring_data)
-                app.logger.info(f"[REDIS] Added recurring record (existing ID) to {table_name}: id={recurring_id}, category={recurring_data.get('category_id')}")
         else:
             # New record - generate a temporary negative ID (will be replaced by MySQL on flush)
             temp_id = -int(time.time() * 1000000)  # Use negative timestamp to avoid collisions
             recurring_data['id'] = temp_id
             rows.append(recurring_data)
-            app.logger.info(f"[REDIS] Added NEW recurring record to {table_name}: temp_id={temp_id}, category={recurring_data.get('category_id')}")
         
         # Save back to Redis
         _redis_client.setex(
@@ -3820,7 +3739,6 @@ def _update_recurring_in_redis(table_name, user_id, recurring_data):
         _redis_client.sadd(dirty_key, table_name)
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
-        app.logger.info(f"[REDIS] ✓ Saved {len(rows)} recurring records to {table_name}:v1:{user_id}")
         
     except Exception as e:
         app.logger.error(f"Error updating {table_name} in Redis: {e}")
@@ -3861,9 +3779,8 @@ def _delete_recurring_in_redis(table_name, user_id, recurring_id):
             pending_key = f"pending_deletes:{table_name}:{user_id}"
             _redis_client.sadd(pending_key, str(recurring_id))
             _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
-            app.logger.info(f"[REDIS] Added recurring {recurring_id} to {pending_key}")
         else:
-            app.logger.info(f"[REDIS] Skipping pending_deletes for temp recurring ID {recurring_id} (not in MySQL yet)")
+            pass
         
         # Mark as dirty
         dirty_key = f"dirty_tables:{user_id}"
@@ -3936,7 +3853,6 @@ def _delete_category_in_redis(table_name, user_id, category_id):
                     pending_entries_key = f"pending_deletes:{entries_table}:{pending_user_id}"
                     _redis_client.sadd(pending_entries_key, *deleted_entry_ids)
                     _redis_client.expire(pending_entries_key, PERSISTENT_CACHE_TTL)
-                    app.logger.info(f"[REDIS] Deleted {len(deleted_entry_ids)} entries for category {category_id} from {entries_table}")
                     
                     # Mark entries table as dirty
                     dirty_key = f"dirty_tables:{pending_user_id}"
@@ -3973,7 +3889,6 @@ def _delete_category_in_redis(table_name, user_id, category_id):
                     pending_buckets_key = f"pending_deletes:{buckets_table}:{pending_user_id}"
                     _redis_client.sadd(pending_buckets_key, *deleted_bucket_ids)
                     _redis_client.expire(pending_buckets_key, PERSISTENT_CACHE_TTL)
-                    app.logger.info(f"[REDIS] Deleted {len(deleted_bucket_ids)} buckets for category {category_id} from {buckets_table}")
                     
                     # Mark buckets table as dirty
                     dirty_key = f"dirty_tables:{pending_user_id}"
@@ -3996,22 +3911,19 @@ def _delete_category_in_redis(table_name, user_id, category_id):
                 json.dumps(rows, cls=DecimalEncoder)
             )
             
-            app.logger.info(f"[REDIS] Deleted {deleted_count} category {category_id} from {table_name} in Redis")
         
         # Track pending category deletion (only for real MySQL IDs, not temp negative IDs)
         if category_id_int > 0:
             pending_key = f"pending_deletes:{table_name}:{pending_user_id}"
             _redis_client.sadd(pending_key, str(category_id))
             _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
-            app.logger.info(f"[REDIS] Added category {category_id} to {pending_key}")
         else:
-            app.logger.info(f"[REDIS] Skipping pending_deletes for temp category ID {category_id} (not in MySQL yet)")
+            pass
         
         # Mark category table as dirty
         dirty_key = f"dirty_tables:{pending_user_id}"
         _redis_client.sadd(dirty_key, table_name)
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        app.logger.info(f"[REDIS] Marked {table_name} as dirty for user {pending_user_id}")
         
     except Exception as e:
         app.logger.error(f"Error deleting category from {table_name} in Redis: {e}")
@@ -4068,7 +3980,6 @@ def _delete_buckets_in_redis(table_name, user_id, category_id):
                 _redis_client.sadd(dirty_key, table_name)
                 _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                 
-                app.logger.info(f"[REDIS] Deleted {deleted_count} buckets for category {category_id} from {table_name}")
         
     except Exception as e:
         app.logger.error(f"Error deleting buckets from {table_name} in Redis: {e}")
@@ -4146,7 +4057,6 @@ def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=
                 _redis_client.sadd(dirty_key, table_name)
                 _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                 
-                app.logger.info(f"[REDIS] Deleted {deleted_count} future buckets for category {category_id} from {table_name} (from {from_date_str})")
         
     except Exception as e:
         app.logger.error(f"Error deleting future buckets from {table_name} in Redis: {e}")
@@ -4199,7 +4109,6 @@ def _add_category_to_redis(table_name, user_id, category_data):
         _redis_client.sadd(dirty_key, table_name)
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
-        app.logger.info(f"[REDIS] Added category to {table_name} with temp ID {new_id}")
         return new_id
         
     except Exception as e:
@@ -4225,7 +4134,7 @@ def _update_category_in_redis(table_name, user_id, category_id, updates):
         # Get existing data
         cached = _redis_client.get(redis_key)
         if not cached:
-            app.logger.warning(f"[REDIS] No cached data for {table_name}:{user_id}")
+            pass
             return
         
         rows = json.loads(cached)
@@ -4240,7 +4149,7 @@ def _update_category_in_redis(table_name, user_id, category_id, updates):
                 break
         
         if not updated:
-            app.logger.warning(f"[REDIS] Category {category_id} not found in {table_name}")
+            pass
             return
         
         # Save back to Redis
@@ -4256,7 +4165,6 @@ def _update_category_in_redis(table_name, user_id, category_id, updates):
         _redis_client.sadd(dirty_key, table_name)
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
-        app.logger.info(f"[REDIS] Updated category {category_id} in {table_name}")
         
     except Exception as e:
         app.logger.error(f"Error updating category in {table_name} in Redis: {e}")
@@ -4421,7 +4329,6 @@ def _add_credit_account_to_redis(user_id, account_data):
         _redis_client.sadd(dirty_key, 'credit_accounts')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
-        app.logger.info(f"[REDIS] Added credit account with temp ID {new_id}")
         return new_id
         
     except Exception as e:
@@ -4580,7 +4487,6 @@ def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
                 WHERE ic.user_id = %s
             """, (user_id,))
             income_entries = list(cursor.fetchall())
-            app.logger.debug(f"[REDIS MISS] Loaded {len(income_entries)} income entries from MySQL")
         
         if expense_entries is None:
             cursor.execute("""
@@ -4589,7 +4495,6 @@ def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
                 WHERE ec.user_id = %s
             """, (user_id,))
             expense_entries = list(cursor.fetchall())
-            app.logger.debug(f"[REDIS MISS] Loaded {len(expense_entries)} expense entries from MySQL")
         
         # Aggregate income by date (filter >= start_date)
         income_by_date = {}
@@ -4633,7 +4538,6 @@ def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
         # Update Redis cache only - flush workers will persist to MySQL
         if redis_updates:
             _update_totals_remainders_in_redis('totals_remainders_d', user_id, redis_updates)
-            app.logger.info(f"[REDIS ONLY] Daily totals for user {user_id}: {len(redis_updates)} rows updated in Redis")
 
 def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
     with get_db_pool().get_connection() as conn:
@@ -4681,7 +4585,6 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
                 WHERE ic.user_id = %s
             """, (user_id,))
             income_entries = list(cursor.fetchall())
-            app.logger.debug(f"[REDIS MISS] Loaded {len(income_entries)} income entries from MySQL")
         
         if expense_entries is None:
             cursor.execute("""
@@ -4690,7 +4593,6 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
                 WHERE ec.user_id = %s
             """, (user_id,))
             expense_entries = list(cursor.fetchall())
-            app.logger.debug(f"[REDIS MISS] Loaded {len(expense_entries)} expense entries from MySQL")
         
         # Aggregate income by date (filter by date range)
         income_by_date = {}
@@ -4754,7 +4656,6 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
         # Update Redis cache only - flush workers will persist to MySQL
         if redis_updates:
             _update_totals_remainders_in_redis('totals_remainders', user_id, redis_updates)
-            app.logger.info(f"[REDIS ONLY] Weekly totals for user {user_id}: {len(redis_updates)} rows updated in Redis")
 
 def update_monthly_totals(user_id, start_date, date_to_remainder):
     with get_db_pool().get_connection() as conn:
@@ -4820,7 +4721,6 @@ def update_monthly_totals(user_id, start_date, date_to_remainder):
                 WHERE ic.user_id = %s
             """, (user_id,))
             income_entries = list(cursor.fetchall())
-            app.logger.debug(f"[REDIS MISS] Loaded {len(income_entries)} income entries from MySQL")
         
         if expense_entries is None:
             cursor.execute("""
@@ -4829,7 +4729,6 @@ def update_monthly_totals(user_id, start_date, date_to_remainder):
                 WHERE ec.user_id = %s
             """, (user_id,))
             expense_entries = list(cursor.fetchall())
-            app.logger.debug(f"[REDIS MISS] Loaded {len(expense_entries)} expense entries from MySQL")
         
         # Aggregate income by month (filter by date range)
         income_by_month = {}
@@ -4905,7 +4804,6 @@ def update_monthly_totals(user_id, start_date, date_to_remainder):
         # Update Redis cache only - flush workers will persist to MySQL
         if redis_updates:
             _update_totals_remainders_in_redis('totals_remainders_m', user_id, redis_updates)
-            app.logger.info(f"[REDIS ONLY] Monthly totals for user {user_id}: {len(redis_updates)} rows updated in Redis")
 
 def update_daily_savings_for_savings_category(user_id, start_date):
     with get_db_pool().get_connection() as conn:
@@ -4981,7 +4879,6 @@ def update_daily_savings_for_savings_category(user_id, start_date):
                 WHERE ic.user_id = %s
             """, (user_id,))
             income_entries = list(cursor.fetchall())
-            app.logger.debug(f"[REDIS MISS] Loaded {len(income_entries)} income entries from MySQL for savings")
         
         if expense_entries is None:
             cursor.execute("""
@@ -4990,7 +4887,6 @@ def update_daily_savings_for_savings_category(user_id, start_date):
                 WHERE ec.user_id = %s
             """, (user_id,))
             expense_entries = list(cursor.fetchall())
-            app.logger.debug(f"[REDIS MISS] Loaded {len(expense_entries)} expense entries from MySQL for savings")
         
         # Filter and aggregate income by date
         income_by_date = {}
@@ -5040,7 +4936,6 @@ def update_daily_savings_for_savings_category(user_id, start_date):
         if redis_updates:
             # For savings, we need to update the full cache
             _set_savings_entries_to_redis(user_id, redis_updates)
-            app.logger.info(f"[REDIS ONLY] Savings entries for user {user_id}: {len(redis_updates)} rows updated in Redis")
 
 def update_daily_ca_totals(user_id, start_date):
     with get_db_pool().get_connection() as conn:
@@ -5095,7 +4990,6 @@ def update_daily_ca_totals(user_id, start_date):
                         bal_date = datetime.strptime(bal_date, '%Y-%m-%d').date()
                     if bal_date == prev_date:
                         last_day_balance = float(bal.get('balance', 0))
-                        app.logger.debug(f"[REDIS HIT] Previous balance for {prev_date}: {last_day_balance}")
                         break
                 else:
                     # Not found in Redis, try MySQL
@@ -5105,7 +4999,6 @@ def update_daily_ca_totals(user_id, start_date):
                     """, (account_id, prev_date))
                     prev_balance_row = cursor.fetchone()
                     last_day_balance = float(prev_balance_row['balance']) if prev_balance_row and prev_balance_row['balance'] is not None else 0.0
-                    app.logger.debug(f"[MYSQL] Previous balance for {prev_date}: {last_day_balance}")
             else:
                 # Redis miss, query MySQL
                 cursor.execute("""
@@ -5114,14 +5007,12 @@ def update_daily_ca_totals(user_id, start_date):
                 """, (account_id, prev_date))
                 prev_balance_row = cursor.fetchone()
                 last_day_balance = float(prev_balance_row['balance']) if prev_balance_row and prev_balance_row['balance'] is not None else 0.0
-                app.logger.debug(f"[MYSQL FALLBACK] Previous balance for {prev_date}: {last_day_balance}")
 
             # Try to get expenses from Redis first
             c_expense_entries = _get_entries_from_redis('c_expense_entries', user_id)
             
             if c_expense_entries is None:
                 # Redis miss - fallback to MySQL
-                app.logger.debug(f"[REDIS MISS] update_daily_ca_totals c_expense_entries for user {user_id}")
                 cursor.execute("""
                     SELECT cee.* FROM c_expense_entries cee
                     JOIN c_expense_categories cec ON cee.category_id = cec.id
@@ -5130,7 +5021,7 @@ def update_daily_ca_totals(user_id, start_date):
                 """, (user_id,))
                 c_expense_entries = list(cursor.fetchall())
             else:
-                app.logger.debug(f"[REDIS HIT] update_daily_ca_totals c_expense_entries for user {user_id}")
+                pass
             
             # Filter and aggregate expenses by date for this account
             expense_by_date = {}
@@ -5152,7 +5043,6 @@ def update_daily_ca_totals(user_id, start_date):
             
             if c_payment_entries is None:
                 # Redis miss - fallback to MySQL
-                app.logger.debug(f"[REDIS MISS] update_daily_ca_totals c_payment_entries for user {user_id}")
                 cursor.execute("""
                     SELECT date, SUM(amount) as daily_total 
                     FROM c_payment_entries
@@ -5162,7 +5052,7 @@ def update_daily_ca_totals(user_id, start_date):
                 """, (account_id, min_date, max_date))
                 payments_by_date = {row['date']: float(row['daily_total']) for row in cursor.fetchall()}
             else:
-                app.logger.debug(f"[REDIS HIT] update_daily_ca_totals c_payment_entries for user {user_id}")
+                pass
                 # Filter and aggregate payments by date for this account
                 payments_by_date = {}
                 for entry in c_payment_entries:
@@ -5201,7 +5091,6 @@ def update_daily_ca_totals(user_id, start_date):
         # Update Redis cache only - flush workers will persist to MySQL
         if all_redis_updates:
             _set_ca_balances_to_redis('c_a_balances_d', user_id, all_redis_updates)
-            app.logger.info(f"[REDIS ONLY] CA daily balances for user {user_id}: {len(all_redis_updates)} rows updated in Redis")
 
 def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
     with get_db_pool().get_connection() as conn:
@@ -5257,7 +5146,6 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
             
             if c_expense_entries is None:
                 # Redis miss - fallback to MySQL
-                app.logger.debug(f"[REDIS MISS] update_weekly_ca_totals c_expense_entries for user {user_id}")
                 cursor.execute("""
                     SELECT cee.* FROM c_expense_entries cee
                     JOIN c_expense_categories cec ON cee.category_id = cec.id
@@ -5266,7 +5154,7 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
                 """, (user_id,))
                 c_expense_entries = list(cursor.fetchall())
             else:
-                app.logger.debug(f"[REDIS HIT] update_weekly_ca_totals c_expense_entries for user {user_id}")
+                pass
             
             # Filter and aggregate expenses by date for this account
             expenses_by_date = {}
@@ -5288,7 +5176,6 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
             
             if c_payment_entries is None:
                 # Redis miss - fallback to MySQL
-                app.logger.debug(f"[REDIS MISS] update_weekly_ca_totals c_payment_entries for user {user_id}")
                 cursor.execute("""
                     SELECT date, SUM(amount) as daily_payment
                     FROM c_payment_entries
@@ -5298,7 +5185,7 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
                 """, (account_id, earliest_start, latest_end))
                 payments_by_date = {row['date']: float(row['daily_payment']) for row in cursor.fetchall()}
             else:
-                app.logger.debug(f"[REDIS HIT] update_weekly_ca_totals c_payment_entries for user {user_id}")
+                pass
                 # Filter and aggregate payments by date for this account
                 payments_by_date = {}
                 for entry in c_payment_entries:
@@ -5388,7 +5275,6 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
         # Update Redis cache only - flush workers will persist to MySQL
         if all_redis_updates:
             _set_ca_balances_to_redis('c_a_balances', user_id, all_redis_updates)
-            app.logger.info(f"[REDIS ONLY] CA weekly balances for user {user_id}: {len(all_redis_updates)} rows updated in Redis")
 
 def update_monthly_ca_totals(user_id, start_date):
     with get_db_pool().get_connection() as conn:
@@ -5450,7 +5336,6 @@ def update_monthly_ca_totals(user_id, start_date):
             
             if c_expense_entries is None:
                 # Redis miss - fallback to MySQL
-                app.logger.debug(f"[REDIS MISS] update_monthly_ca_totals c_expense_entries for user {user_id}")
                 cursor.execute("""
                     SELECT cee.* FROM c_expense_entries cee
                     JOIN c_expense_categories cec ON cee.category_id = cec.id
@@ -5459,7 +5344,7 @@ def update_monthly_ca_totals(user_id, start_date):
                 """, (user_id,))
                 c_expense_entries = list(cursor.fetchall())
             else:
-                app.logger.debug(f"[REDIS HIT] update_monthly_ca_totals c_expense_entries for user {user_id}")
+                pass
             
             # Filter and aggregate expenses by month for this account
             expenses_by_month = {}
@@ -5482,7 +5367,6 @@ def update_monthly_ca_totals(user_id, start_date):
             
             if c_payment_entries is None:
                 # Redis miss - fallback to MySQL
-                app.logger.debug(f"[REDIS MISS] update_monthly_ca_totals c_payment_entries for user {user_id}")
                 cursor.execute("""
                     SELECT YEAR(date) as year, MONTH(date) as month, SUM(amount) as month_total
                     FROM c_payment_entries
@@ -5491,7 +5375,7 @@ def update_monthly_ca_totals(user_id, start_date):
                 """, (account_id, earliest_start, latest_end))
                 payments_by_month = {(row['year'], row['month']): float(row['month_total']) for row in cursor.fetchall()}
             else:
-                app.logger.debug(f"[REDIS HIT] update_monthly_ca_totals c_payment_entries for user {user_id}")
+                pass
                 # Filter and aggregate payments by month for this account
                 payments_by_month = {}
                 for entry in c_payment_entries:
@@ -5595,7 +5479,6 @@ def update_monthly_ca_totals(user_id, start_date):
         # Update Redis cache only - flush workers will persist to MySQL
         if all_redis_updates:
             _set_ca_balances_to_redis('c_a_balances_m', user_id, all_redis_updates)
-            app.logger.info(f"[REDIS ONLY] CA monthly balances for user {user_id}: {len(all_redis_updates)} rows updated in Redis")
 
 @app.route('/save_totals_remainders_d', methods=['POST'])
 @login_required
@@ -5642,7 +5525,6 @@ def save_totals_remainders_d():
         
         if cached_daily and cached_weekly and cached_monthly and cached_savings:
             # Redis hit - use cached data
-            app.logger.info(f"[REDIS HIT] save_totals_remainders_d for user {user_id}")
             
             # Enrich daily totals with last_week_remainder
             results = []
@@ -5702,7 +5584,6 @@ def save_totals_remainders_d():
             })
         
         # Redis miss - fallback to MySQL
-        app.logger.info(f"[REDIS MISS] save_totals_remainders_d for user {user_id}, falling back to MySQL")
         
         # Prepare the response: for each date, fetch last_week_remainder from totals_remainders table
         with get_db_pool().get_connection() as conn:
@@ -5837,7 +5718,6 @@ def save_ca_daily_balance():
         
         if cached_daily and cached_weekly and cached_monthly:
             # Redis hit - use cached data
-            app.logger.info(f"[REDIS HIT] save_ca_daily_balance for user {user_id}")
             
             # Format daily balances
             ca_balances_d = [
@@ -5883,7 +5763,6 @@ def save_ca_daily_balance():
             })
         
         # Redis miss - fallback to MySQL
-        app.logger.info(f"[REDIS MISS] save_ca_daily_balance for user {user_id}, falling back to MySQL")
         
         # Fetch updated daily CA balances
         with get_db_pool().get_connection() as conn:
@@ -5987,7 +5866,6 @@ def move_entry_d():
                         WHERE ic.user_id = %s
                     """, (current_user.id,))
                     entries = list(cursor.fetchall())
-                    app.logger.info(f"[REDIS][income_entries] Loaded {len(entries)} entries from MySQL")
                 
                 # Find the entry to move in Redis first
                 entry_to_move = None
@@ -6046,7 +5924,6 @@ def move_entry_d():
                         WHERE ec.user_id = %s
                     """, (current_user.id,))
                     entries = list(cursor.fetchall())
-                    app.logger.info(f"[REDIS][expense_entries] Loaded {len(entries)} entries from MySQL")
                 
                 # Find the entry to move in Redis first
                 entry_to_move = None
@@ -6113,7 +5990,6 @@ def move_entry_d():
                         WHERE ca.user_id = %s
                     """, (current_user.id,))
                     entries = list(cursor.fetchall())
-                    app.logger.info(f"[REDIS][c_expense_entries] Loaded {len(entries)} entries from MySQL")
                 
                 # Find the entry to move in Redis first
                 entry_to_move = None
@@ -6209,7 +6085,6 @@ def move_entry_d():
 def delete_income_category():
     category_id = request.form['id']
     
-    app.logger.info(f"[DELETE CATEGORY] Starting deletion of income category {category_id} for user {current_user.id}")
 
     try:
         with get_db_pool().get_connection() as conn:
@@ -6294,42 +6169,34 @@ def delete_income_category():
                             else:
                                 _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring))
                             _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_income')
-                            app.logger.info(f"[REDIS] Removed {len(recurring_list) - len(filtered_recurring)} recurring income records for category {category_id}")
                     
                     # Remove bucket records for this category from Redis
                     bucket_redis_key = f"recurring_income_buckets:v1:{current_user.id}"
                     bucket_data = _redis_client.get(bucket_redis_key)
-                    app.logger.info(f"[DELETE CATEGORY] Deleting category_id={category_id}, bucket_data exists: {bucket_data is not None}")
                     if bucket_data:
                         buckets = json.loads(bucket_data)
-                        app.logger.info(f"[DELETE CATEGORY] Found {len(buckets)} total buckets in Redis")
                         for b in buckets:
-                            app.logger.info(f"[DELETE CATEGORY]   Bucket: id={b.get('id')}, category_id={b.get('category_id')}, date={b.get('bucket_date')}")
+                            pass
                         
                         # Remove buckets for this category (including negative IDs that haven't been flushed)
                         category_id_int = int(category_id)
                         filtered_buckets = [b for b in buckets if b.get('category_id') != category_id_int]
-                        app.logger.info(f"[DELETE CATEGORY] After filtering category_id={category_id_int}: {len(filtered_buckets)} buckets remain")
                         
                         if len(filtered_buckets) < len(buckets):
                             if len(filtered_buckets) == 0:
                                 # No buckets left, delete the entire key
                                 _redis_client.delete(bucket_redis_key)
-                                app.logger.info(f"[DELETE CATEGORY] ✓ Deleted entire bucket key (all buckets removed)")
                             else:
                                 # Update with remaining buckets
                                 _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets))
-                                app.logger.info(f"[DELETE CATEGORY] ✓ Updated bucket key with {len(filtered_buckets)} remaining buckets")
                             
                             # Mark as dirty so flush can handle any positive IDs that need MySQL deletion
                             _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_income_buckets')
-                            app.logger.info(f"[DELETE CATEGORY] ✓ Removed {len(buckets) - len(filtered_buckets)} bucket records for category {category_id}")
                         else:
-                            app.logger.warning(f"[DELETE CATEGORY] No buckets found matching category_id={category_id_int}")
+                            pass
                     
-                    app.logger.debug(f"[REDIS] Invalidated income_entries cache and removed buckets for user {current_user.id} after category deletion")
                 except Exception as e:
-                    app.logger.warning(f"[REDIS] Error invalidating cache: {e}")
+                    pass
             
             # Now delete the category from MySQL (after Redis cleanup)
             with get_db_pool().get_connection() as conn:
@@ -6337,7 +6204,6 @@ def delete_income_category():
                 cursor.execute("DELETE FROM income_categories WHERE user_id = %s AND id = %s", (current_user.id, category_id))
                 conn.commit()
                 cursor.close()
-                app.logger.info(f"[DELETE CATEGORY] Deleted income category {category_id} from MySQL")
             
             # Also delete from Redis cache
             if app.config.get('REDIS_OK'):
@@ -6438,7 +6304,6 @@ def delete_expense_category():
                             else:
                                 _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring))
                             _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_expense')
-                            app.logger.info(f"[REDIS] Removed {len(recurring_list) - len(filtered_recurring)} recurring expense records for category {category_id}")
                     
                     # Remove bucket records for this category from Redis
                     bucket_redis_key = f"recurring_expense_buckets:v1:{current_user.id}"
@@ -6454,11 +6319,9 @@ def delete_expense_category():
                             else:
                                 _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets))
                             _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_expense_buckets')
-                            app.logger.info(f"[REDIS] Removed {len(buckets) - len(filtered_buckets)} bucket records for category {category_id}")
                     
-                    app.logger.debug(f"[REDIS] Invalidated expense_entries cache and removed buckets for user {current_user.id} after category deletion")
                 except Exception as e:
-                    app.logger.warning(f"[REDIS] Error invalidating cache: {e}")
+                    pass
             
             # Now delete the category from MySQL (after Redis cleanup)
             with get_db_pool().get_connection() as conn:
@@ -6466,7 +6329,6 @@ def delete_expense_category():
                 cursor.execute("DELETE FROM expense_categories WHERE user_id = %s AND id = %s", (current_user.id, category_id))
                 conn.commit()
                 cursor.close()
-                app.logger.info(f"[DELETE CATEGORY] Deleted expense category {category_id} from MySQL")
             
             # Also delete from Redis cache
             if app.config.get('REDIS_OK'):
@@ -6560,7 +6422,6 @@ def delete_ca_category():
             # The flush worker will handle MySQL deletion
             if app.config.get('REDIS_OK'):
                 _delete_category_in_redis('c_expense_categories', current_user.id, category_id)
-                app.logger.info(f"[DELETE CATEGORY] Deleted CA category {category_id} from Redis")
             
             # Remove recurring c_expense and bucket records from Redis for this category
             if app.config.get('REDIS_OK'):
@@ -6582,7 +6443,6 @@ def delete_ca_category():
                             else:
                                 _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring))
                             _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_c_expense')
-                            app.logger.info(f"[REDIS] Removed {len(recurring_list) - len(filtered_recurring)} recurring c_expense records for category {category_id}")
                     
                     # Remove bucket records for this category from Redis (keyed by user_id)
                     bucket_redis_key = f"recurring_c_expense_buckets:v1:{current_user.id}"
@@ -6598,11 +6458,9 @@ def delete_ca_category():
                             else:
                                 _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets))
                             _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_c_expense_buckets')
-                            app.logger.info(f"[REDIS] Removed {len(buckets) - len(filtered_buckets)} bucket records for category {category_id}")
                     
-                    app.logger.debug(f"[REDIS] Invalidated c_expense_entries cache and removed buckets for user {current_user.id} after CA category deletion")
                 except Exception as e:
-                    app.logger.warning(f"[REDIS] Error invalidating cache: {e}")
+                    pass
             
             return jsonify({'status': 'success'})
 
@@ -6842,7 +6700,6 @@ def dashboard():
                 cached = _redis_client.get(redis_key)
                 if cached:
                     user_data = json.loads(cached)
-                    app.logger.debug(f"[REDIS HIT] dashboard user settings for user {current_user.id}")
             except Exception as e:
                 app.logger.error(f"[REDIS ERROR] dashboard user settings: {str(e)}")
         
@@ -6854,7 +6711,6 @@ def dashboard():
                 WHERE id = %s
             """, (current_user.id,))
             user_data = cursor.fetchone()
-            app.logger.debug(f"[MYSQL] dashboard user settings for user {current_user.id}")
 
         goofy_week_mode = bool(user_data.get('goofy_week_mode', False)) if user_data else False
 
@@ -6883,9 +6739,8 @@ def dashboard():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             income_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard income_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard income_categories for user {current_user.id}")
+            pass
 
         # Fetch expense categories - try Redis first
         expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -6898,9 +6753,8 @@ def dashboard():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard expense_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard expense_categories for user {current_user.id}")
+            pass
 
         # Helper to get week key (start of week for goofy, end of week for normal)
         def get_week_key(date_val, goofy_week_mode):
@@ -6926,7 +6780,6 @@ def dashboard():
         raw_income_entries = _get_entries_from_redis('income_entries', current_user.id)
         if raw_income_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard income_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT id, category_id, date, amount, processed
                 FROM income_entries
@@ -6937,7 +6790,7 @@ def dashboard():
             # Update Redis cache
             _set_entries_to_redis('income_entries', current_user.id, raw_income_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard income_entries for user {current_user.id}")
+            pass
 
         # Get bucket records for tracking bucket vs non-bucket amounts
         income_bucket_records = _get_entries_from_redis('recurring_income_buckets', current_user.id) or []
@@ -6994,7 +6847,6 @@ def dashboard():
         raw_expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT id, category_id, date, amount, processed
                 FROM expense_entries
@@ -7005,7 +6857,7 @@ def dashboard():
             # Update Redis cache
             _set_entries_to_redis('expense_entries', current_user.id, raw_expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard expense_entries for user {current_user.id}")
+            pass
 
         expense_map = {}
         expense_processed_map = {}
@@ -7050,7 +6902,6 @@ def dashboard():
         raw_c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
         if raw_c_expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard c_expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed
                 FROM c_expense_entries cee
@@ -7063,7 +6914,7 @@ def dashboard():
             # Update Redis cache
             _set_entries_to_redis('c_expense_entries', current_user.id, raw_c_expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard c_expense_entries for user {current_user.id}")
+            pass
 
         c_expense_map = {}
         c_expense_processed_map = {}
@@ -7108,7 +6959,6 @@ def dashboard():
         totals_remainders = _get_totals_remainders_from_redis('totals_remainders', current_user.id)
         if totals_remainders is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard totals_remainders for user {current_user.id}")
             cursor.execute("""
                 SELECT date, total_income, total_expenses, remainder, last_week_remainder
                 FROM totals_remainders
@@ -7118,14 +6968,13 @@ def dashboard():
             # Update Redis cache
             _set_totals_remainders_to_redis('totals_remainders', current_user.id, totals_remainders)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard totals_remainders for user {current_user.id}")
+            pass
 
         # Fetch all savings entries for the user
         # Try Redis first
         savings_entries = _get_savings_entries_from_redis(current_user.id)
         if savings_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard savings_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT date, amount FROM savings_entries
                 WHERE user_id = %s
@@ -7135,7 +6984,7 @@ def dashboard():
             # Update Redis cache
             _set_savings_entries_to_redis(current_user.id, savings_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard savings_entries for user {current_user.id}")
+            pass
 
         # Fetch buds
         cursor.execute("""
@@ -7155,9 +7004,8 @@ def dashboard():
                 ORDER BY id ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard credit_accounts for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard credit_accounts for user {current_user.id}")
+            pass
 
         # Fetch c_expense_categories - try Redis first (all categories for user)
         c_expense_categories = []
@@ -7172,20 +7020,17 @@ def dashboard():
                 ORDER BY cec.display_order DESC, cec.id DESC
             """, (current_user.id,))
             c_expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard c_expense_categories for user {current_user.id}")
         else:
             # Add account_name to each category from Redis
             account_names = {a['id']: a['name'] for a in credit_accounts}
             for cat in all_ca_categories:
                 cat['account_name'] = account_names.get(cat.get('account_id'), '')
             c_expense_categories = all_ca_categories
-            app.logger.debug(f"[REDIS HIT] dashboard c_expense_categories for user {current_user.id}")
 
         # Try Redis first for CA balances
         c_a_balances = _get_ca_balances_from_redis('c_a_balances', current_user.id)
         if c_a_balances is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard c_a_balances for user {current_user.id}")
             cursor.execute("""
                 SELECT * FROM c_a_balances
                 WHERE account_id IN (
@@ -7197,7 +7042,7 @@ def dashboard():
             # Update Redis cache
             _set_ca_balances_to_redis('c_a_balances', current_user.id, c_a_balances)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard c_a_balances for user {current_user.id}")
+            pass
 
         cursor.close()
 
@@ -7737,7 +7582,6 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
         bucket_ids = {}
         bucket_original_amounts = {}
         
-        app.logger.info(f"[GET BUCKETS] Processing {len(entries)} total entries for category {category_id}")
         
         for entry in entries:
             if entry.get('category_id') == int(category_id):
@@ -7753,7 +7597,6 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                 if entry.get('is_bucket') == 1:
                     bucket_ids[period_key] = entry.get('id')
                     bucket_original_amounts[period_key] = float(entry.get('original_amount') or 0)
-                    app.logger.info(f"[GET BUCKETS] Found bucket entry: id={entry.get('id')}, date={entry_date}, period_key={period_key}, amount={amount}, original_amount={entry.get('original_amount')}, is_bucket={entry.get('is_bucket')}")
         
         # Return aggregated period totals (only for periods that have a bucket)
         buckets = []
@@ -7780,13 +7623,10 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                         # If bucket record exists but has amount <= 0 and no bucket entry exists
                         if record_amount <= 0 and period_key not in bucket_ids:
                             deleted_bucket_periods[period_key] = record_original_amount
-                            app.logger.info(f"[GET BUCKETS] Found deleted bucket record: period={period_key}, amount={record_amount}, original_amount={record_original_amount}")
         
         # If specific_date is provided, only return the bucket for that period
         if specific_date:
             target_period_key = get_period_key(specific_date)
-            app.logger.info(f"[GET BUCKETS] Looking for bucket with specific_date={specific_date}, target_period_key={target_period_key}")
-            app.logger.info(f"[GET BUCKETS] Available bucket_ids keys: {list(bucket_ids.keys())}")
             if target_period_key in bucket_ids:
                 buckets.append({
                     'id': bucket_ids[target_period_key],
@@ -7795,7 +7635,6 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                     'original_amount': bucket_original_amounts.get(target_period_key, 0),
                     'date': target_period_key
                 })
-                app.logger.info(f"[GET BUCKETS] Found bucket for period {target_period_key}: amount={period_totals[target_period_key]}, original_amount={bucket_original_amounts.get(target_period_key, 0)}")
             elif target_period_key in deleted_bucket_periods:
                 # Return bucket with amount=0 to signal deletion, but preserve original_amount for progress bar
                 buckets.append({
@@ -7805,9 +7644,8 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                     'original_amount': deleted_bucket_periods[target_period_key],
                     'date': target_period_key
                 })
-                app.logger.info(f"[GET BUCKETS] Found deleted bucket for period {target_period_key}, original_amount={deleted_bucket_periods[target_period_key]}")
             else:
-                app.logger.info(f"[GET BUCKETS] No bucket found for period {target_period_key}")
+                pass
         else:
             # Return all buckets (both existing and deleted)
             for period_key in bucket_ids.keys():
@@ -7829,7 +7667,6 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                     'date': period_key
                 })
         
-        app.logger.info(f"[GET BUCKETS] Returning {len(buckets)} aggregated {aggregation} totals for category {category_id}")
         return buckets
         
     except Exception as e:
@@ -7846,7 +7683,6 @@ def update_entry():
     amount = data.get('amount')
     entry_type = data.get('type')
     
-    app.logger.info(f"[UPDATE ENTRY] User {current_user.id}: type={entry_type}, category={category_id}, amount={amount}, date={date}")
 
     if not category_id or not date or amount is None:
         return jsonify({"status": "error", "message": "Missing required parameters"}), 400
@@ -7892,15 +7728,12 @@ def update_entry():
         
         # Make a copy of cat_row data before closing cursor
         cat_data = dict(cat_row) if cat_row else {}
-        app.logger.info(f"[UPDATE ENTRY] Category data for category {category_id}: name='{cat_data.get('name')}', is_credit_account={cat_data.get('is_credit_account', 'MISSING')}")
         cursor.close()
     
     # Write to Redis only - flush worker will persist to MySQL
     # If amount is 0, delete the entry instead of updating
-    app.logger.info(f"[UPDATE ENTRY] Checking amount: value={amount}, type={type(amount)}, float={float(amount)}, is_zero={float(amount) == 0}")
     if float(amount) == 0:
         # Before deleting, get the current amount from Redis to restore bucket properly
-        app.logger.info(f"[UPDATE ENTRY] Amount is 0, checking for existing entry in Redis to restore bucket before deletion")
         old_entry_amount = None
         
         # Get entries from Redis
@@ -7937,7 +7770,6 @@ def update_entry():
         for entry in existing_data:
             if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(date):
                 old_entry_amount = entry.get('amount')
-                app.logger.info(f"[UPDATE ENTRY] Found existing entry in Redis with amount {old_entry_amount} to restore")
                 break
         
         # If there's an old entry in a recurring category, restore its bucket before deleting
@@ -7972,7 +7804,6 @@ def update_entry():
                 
                 if recurring_info:
                     from bucket_utils import restore_bucket_for_deleted_entry
-                    app.logger.info(f"[BUCKET RESTORE DELETE] Found recurring info, using smart restore for amount {old_entry_amount}")
                     
                     entry_date = date
                     if isinstance(entry_date, str):
@@ -7988,16 +7819,14 @@ def update_entry():
                     )
                     
                     if restored:
-                        app.logger.info(f"[BUCKET RESTORE DELETE] Successfully restored/recreated bucket")
+                        pass
                     else:
-                        app.logger.info(f"[BUCKET RESTORE DELETE] Bucket not restored (outside period or amount <=0)")
+                        pass
             except Exception as e:
                 app.logger.error(f"[BUCKET RESTORE DELETE] Error restoring bucket: {e}")
                 app.logger.exception(e)
         
-        app.logger.info(f"[UPDATE ENTRY] Deleting entry for category {category_id} on {date}")
         _delete_entry_in_redis(table_name, current_user.id, category_id, date, date)
-        app.logger.info(f"[UPDATE ENTRY] Delete completed for category {category_id} on {date}")
     else:
         # When modifying an existing entry, we need to:
         # 1. Restore the old amount to the bucket (if it was depleting a bucket)
@@ -8040,7 +7869,6 @@ def update_entry():
                 break
         
         # Check for bucket entries and deplete them
-        app.logger.info(f"[BUCKET CHECK UPDATE] Starting bucket check for entry_type={entry_type}, category_id={category_id}, date={date}")
         try:
             # Get recurring info for this category to determine cadence from Redis
             if entry_type == 'income':
@@ -8052,14 +7880,12 @@ def update_entry():
             else:
                 recurring_info = None
             
-            app.logger.info(f"[BUCKET CHECK UPDATE] recurring_info found: {recurring_info is not None}, value: {recurring_info}")
             
             if recurring_info:
                 # If there's an existing entry, restore its old amount first using smart restore
                 if existing_entry and not existing_entry.get('is_bucket'):
                     from bucket_utils import restore_bucket_for_deleted_entry
                     old_amount = Decimal(str(existing_entry.get('amount', 0)))
-                    app.logger.info(f"[BUCKET CHECK UPDATE] Found existing entry with amount {old_amount}, using smart restore before depleting new amount")
                     
                     entry_date = date
                     if isinstance(entry_date, str):
@@ -8076,65 +7902,53 @@ def update_entry():
                     )
                     
                     if restored:
-                        app.logger.info(f"[BUCKET RESTORE UPDATE] Successfully restored/recreated bucket")
+                        pass
                     else:
-                        app.logger.info(f"[BUCKET RESTORE UPDATE] Bucket not restored (outside period or amount <=0)")
+                        pass
                 
                 # Now deplete the new amount
-                app.logger.info(f"[BUCKET CHECK UPDATE] About to call process_manual_entry_with_bucket with new amount")
                 process_manual_entry_with_bucket(
                     table_name, category_id, date, 
                     float(amount), current_user.id, recurring_info
                 )
-                app.logger.info(f"[BUCKET] Processed bucket depletion for {table_name}, category {category_id}, date {date}, amount {amount}")
             else:
-                app.logger.info(f"[BUCKET CHECK UPDATE] No recurring_info found for category {category_id}")
+                pass
         except Exception as e:
             app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
             app.logger.exception(e)
             # Continue with normal entry creation even if bucket processing fails
         
-        app.logger.info(f"[UPDATE ENTRY] Amount is non-zero, updating entry for category {category_id} on {date}")
         _update_entry_in_redis(table_name, current_user.id, category_id, date, amount)
-        app.logger.info(f"[UPDATE ENTRY] Update completed for category {category_id} on {date}")
     
     # If this is an expense category and is_credit_account=1, update payment entry and trigger CA balance update
-    app.logger.info(f"[UPDATE CA PAYMENT DEBUG] entry_type={entry_type}, cat_data={cat_data}")
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        app.logger.info(f"[UPDATE CA PAYMENT] Detected payment category for user {current_user.id}, category {category_id}")
         # Find the credit account by matching category name
         category_name = cat_data.get('name', '')
-        app.logger.info(f"[UPDATE CA PAYMENT] Category name: '{category_name}'")
         if category_name.endswith(' payment'):
             account_name = category_name[:-8]  # Remove ' payment' suffix
-            app.logger.info(f"[UPDATE CA PAYMENT] Looking for credit account with name: '{account_name}'")
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute("""
                     SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
                 """, (current_user.id, account_name))
                 account_row = cursor.fetchone()
-                app.logger.info(f"[UPDATE CA PAYMENT] Credit account query result: {account_row}")
                 if account_row:
                     account_id = account_row['id']
-                    app.logger.info(f"[UPDATE CA PAYMENT] Found credit account_id={account_id}, amount={amount}, checking if zero")
                     # Update or delete payment entry in Redis based on amount
                     if float(amount) == 0:
-                        app.logger.info(f"[UPDATE CA PAYMENT] Amount is 0, deleting payment entry for account {account_id} on {date}")
+                        pass
                         _delete_payment_entry_in_redis(current_user.id, account_id, date, date)
-                        app.logger.info(f"[UPDATE CA PAYMENT] Payment entry deletion completed")
                     else:
-                        app.logger.info(f"[UPDATE CA PAYMENT] Amount is non-zero, updating payment entry")
+                        pass
                         _update_payment_entry_in_redis(current_user.id, account_id, date, float(amount))
-                        app.logger.info(f"[UPDATE CA PAYMENT] Payment entry update completed")
                 else:
-                    app.logger.warning(f"[UPDATE CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
+                    pass
                 cursor.close()
         else:
-            app.logger.warning(f"[UPDATE CA PAYMENT] Category name '{category_name}' does not end with ' payment'")
+            pass
     else:
-        app.logger.info(f"[UPDATE CA PAYMENT] Not a payment category: entry_type={entry_type}, is_credit_account={cat_data.get('is_credit_account', 0)}")
+        pass
 
     if entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()
@@ -8173,7 +7987,6 @@ def delete_entry():
     cat_data = {}
     if isinstance(category_id, int) and category_id < 0:
         # Temp ID - check Redis
-        app.logger.info(f"[DELETE ENTRY] Temp category_id {category_id}, checking Redis")
         cats = _get_categories_from_redis(category_table, current_user.id)
         if cats:
             cat_data = next((cat for cat in cats if cat.get('id') == category_id), None)
@@ -8325,7 +8138,6 @@ def update_processed_status_week_range():
         # Get all entries for this category (Redis-first)
         all_entries = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
         
-        app.logger.info(f"[UPDATE PROCESSED WEEK] User {current_user.id}, category {category_id}, date range {start_date} to {end_date}, found {len(all_entries)} total entries")
         
         # Filter entries within date range
         entries_to_update = []
@@ -8338,7 +8150,6 @@ def update_processed_status_week_range():
             if start_date_obj <= entry_date <= end_date_obj:
                 entries_to_update.append(entry)
         
-        app.logger.info(f"[UPDATE PROCESSED WEEK] Found {len(entries_to_update)} entries in date range")
         
         if not entries_to_update:
             return jsonify({'status': 'success', 'message': 'No entries found in date range'})
@@ -8351,7 +8162,7 @@ def update_processed_status_week_range():
         success = bulk_update_entries(table_name, updates, user_id=current_user.id)
         
         if success:
-            app.logger.info(f"[UPDATE PROCESSED WEEK] Successfully updated {len(updates)} entries")
+            pass
             
             # Calculate if all entries in this date range for this category are now processed
             all_entries_in_range = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
@@ -8497,7 +8308,6 @@ def update_week_entry():
     start_date = data.get('start_date')
     end_date = data.get('end_date')
 
-    app.logger.info(f"[UPDATE WEEK ENTRY] Received: type={entry_type}, category_id={category_id}, amount={amount}, friday_date={friday_date}, start_date={start_date}, end_date={end_date}")
 
     if category_id is None or not friday_date or amount is None or not entry_type or not start_date or not end_date:
         missing = []
@@ -8531,47 +8341,39 @@ def update_week_entry():
             # For credit accounts, need to find which account this category belongs to
             # Get all credit accounts and check each one for this category
             credit_accounts = _get_credit_accounts_from_redis(current_user.id)
-            app.logger.info(f"[UPDATE WEEK ENTRY] Credit accounts from Redis: {credit_accounts}")
             
             if credit_accounts is None:
                 with get_db_pool().get_connection() as conn:
                     cursor = conn.cursor(pymysql.cursors.DictCursor)
                     cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (current_user.id,))
                     credit_accounts = cursor.fetchall()
-                    app.logger.info(f"[UPDATE WEEK ENTRY] Credit accounts from MySQL: {credit_accounts}")
                     cursor.close()
             
             # Get all c_expense_categories for user (keyed by user_id)
             category_found = False
             cats = _get_categories_from_redis('c_expense_categories', current_user.id)
-            app.logger.info(f"[UPDATE WEEK ENTRY] All CA categories for user: {cats}")
             
             if cats:
                 # Log all category IDs to see what we're comparing
                 cat_ids = [cat.get('id') for cat in cats]
-                app.logger.info(f"[UPDATE WEEK ENTRY] Category IDs: {cat_ids}, looking for: {category_id} (type: {type(category_id)})")
                 
                 matching_cat = next((cat for cat in cats if cat.get('id') == category_id), None)
                 if matching_cat:
                     cat_data = matching_cat
                     category_found = True
-                    app.logger.info(f"[UPDATE WEEK ENTRY] Found matching category")
             
             if not category_found:
                 app.logger.error(f"[UPDATE WEEK ENTRY] Invalid temp category_id {category_id} for CA - not found")
                 return jsonify({"status": "error", "message": "Invalid category_id - category not found"}), 400
         else:
             # For income/expense, check Redis
-            app.logger.info(f"[UPDATE WEEK ENTRY] Checking Redis for {entry_type} category_id={category_id}")
             cats = _get_categories_from_redis(category_table, current_user.id)
-            app.logger.info(f"[UPDATE WEEK ENTRY] Got categories from Redis: {cats}")
             
             if cats:
                 cat_data = next((cat for cat in cats if cat.get('id') == category_id), None)
                 if not cat_data:
                     app.logger.error(f"[UPDATE WEEK ENTRY] Category {category_id} not found in {len(cats)} categories")
                     return jsonify({"status": "error", "message": "Invalid category_id for this entry type"}), 400
-                app.logger.info(f"[UPDATE WEEK ENTRY] Found category: {cat_data}")
             else:
                 app.logger.error(f"[UPDATE WEEK ENTRY] No categories found in Redis for {category_table}")
                 return jsonify({"status": "error", "message": "Invalid category_id for this entry type"}), 400
@@ -8598,17 +8400,14 @@ def update_week_entry():
                 if (int(entry.get('category_id', 0)) == int(category_id) and 
                     entry.get('date') == friday_date_str):
                     old_ca_amount = float(entry.get('amount', 0))
-                    app.logger.info(f"[UPDATE WEEK ENTRY] Found old CA entry amount: {old_ca_amount}")
                     break
 
     # Delete old entries and add new entry to Redis only - flush worker will persist
-    app.logger.info(f"[UPDATE WEEK ENTRY] Deleting entries from {start_date} to {end_date} for category {category_id}")
     _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
-    app.logger.info(f"[UPDATE WEEK ENTRY] Delete completed. Checking amount: value={amount}, type={type(amount)}, float={float(amount)}, is_zero={float(amount) == 0}")
     
     # Check for bucket entries and deplete them if this is a recurring category
     if float(amount) != 0:
-        app.logger.info(f"[BUCKET CHECK WEEKLY] Starting bucket check for entry_type={entry_type}, category_id={category_id}, friday_date={friday_date}")
+        pass
         try:
             # Get recurring info for this category to determine cadence from Redis
             if entry_type == 'income':
@@ -8625,7 +8424,6 @@ def update_week_entry():
                         matching_cat = next((cat for cat in cats if cat.get('id') == category_id), None)
                         if matching_cat:
                             account_id_for_recurring = matching_cat.get('account_id')
-                            app.logger.info(f"[BUCKET CHECK WEEKLY] Found account_id={account_id_for_recurring} for temp category {category_id}")
                 else:
                     # Real category - query MySQL
                     with get_db_pool().get_connection() as conn:
@@ -8633,30 +8431,24 @@ def update_week_entry():
                         cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (category_id,))
                         result = cursor.fetchone()
                         account_id_for_recurring = result['account_id'] if result else None
-                        app.logger.info(f"[BUCKET CHECK WEEKLY] MySQL query for category {category_id} returned account_id={account_id_for_recurring}")
                         cursor.close()
                 
-                app.logger.info(f"[BUCKET CHECK WEEKLY] About to call _get_recurring_info_from_redis with user_id={current_user.id}, category_id={category_id} (account_id={account_id_for_recurring})")
                 
                 # Note: _get_recurring_info_from_redis uses user_id, not account_id, because 
                 # recurring_c_expense:v1:{user_id} stores ALL recurring CA expenses for a user
                 recurring_info = _get_recurring_info_from_redis('recurring_c_expense', current_user.id, category_id)
-                app.logger.info(f"[BUCKET CHECK WEEKLY] _get_recurring_info_from_redis returned: {recurring_info}")
             else:
                 recurring_info = None
             
-            app.logger.info(f"[BUCKET CHECK WEEKLY] recurring_info found: {recurring_info is not None}, value: {recurring_info}")
             
             if recurring_info:
                 # Process bucket depletion for the weekly aggregate amount
-                app.logger.info(f"[BUCKET CHECK WEEKLY] About to call process_manual_entry_with_bucket")
                 process_manual_entry_with_bucket(
                     table_name, category_id, friday_date, 
                     float(amount), current_user.id, recurring_info
                 )
-                app.logger.info(f"[BUCKET] Processed bucket depletion for {table_name}, category {category_id}, date {friday_date}, amount {amount}")
             else:
-                app.logger.info(f"[BUCKET CHECK WEEKLY] No recurring_info found for category {category_id}")
+                pass
         except Exception as e:
             app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
             app.logger.exception(e)
@@ -8665,14 +8457,14 @@ def update_week_entry():
     # Update CA balances in Redis immediately if this is a credit account entry
     # Do this BEFORE creating the new entry, so we can calculate the delta
     if entry_type == 'ca':
-        app.logger.info(f"[UPDATE WEEK ENTRY][CA] Processing CA entry type, category_id={category_id}")
+        pass
         # Get account_id for this category
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
             # For temp categories, try to find account_id from Redis
             if category_id < 0:
-                app.logger.info(f"[UPDATE WEEK ENTRY][CA] Temp category {category_id}, searching accounts")
+                pass
                 # Check all credit accounts to find which one has this category
                 credit_accounts = _get_credit_accounts_from_redis(current_user.id)
                 if credit_accounts is None:
@@ -8686,73 +8478,61 @@ def update_week_entry():
                     matching_cat = next((cat for cat in cats if cat.get('id') == category_id), None)
                     if matching_cat:
                         account_id_for_balance = matching_cat.get('account_id')
-                        app.logger.info(f"[UPDATE WEEK ENTRY][CA] Found account {account_id_for_balance} for temp category")
             else:
-                app.logger.info(f"[UPDATE WEEK ENTRY][CA] Real category {category_id}, querying MySQL")
+                pass
                 # Real category ID - query MySQL
                 cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (category_id,))
                 result = cursor.fetchone()
                 account_id_for_balance = result['account_id'] if result else None
-                app.logger.info(f"[UPDATE WEEK ENTRY][CA] MySQL returned account_id={account_id_for_balance}")
             cursor.close()
         
         if account_id_for_balance:
             # Calculate the net change: new_amount - old_amount
             amount_delta = float(amount) - old_ca_amount
             
-            app.logger.info(f"[UPDATE WEEK ENTRY][CA] Balance update: account={account_id_for_balance}, old={old_ca_amount}, new={amount}, delta={amount_delta}")
             
             # Update all three balance tables in Redis
             _update_ca_balances_in_redis('c_a_balances_d', current_user.id, account_id_for_balance, friday_date, amount_delta, is_payment=False)
             _update_ca_balances_in_redis('c_a_balances', current_user.id, account_id_for_balance, friday_date, amount_delta, is_payment=False)
             _update_ca_balances_in_redis('c_a_balances_m', current_user.id, account_id_for_balance, friday_date, amount_delta, is_payment=False)
-            app.logger.info(f"[UPDATE WEEK ENTRY][CA] Updated CA balances for account {account_id_for_balance}, date {friday_date}, delta {amount_delta}")
         else:
-            app.logger.warning(f"[UPDATE WEEK ENTRY][CA] Could not find account_id for category {category_id}")
+            pass
     
     # If amount is 0, don't create a new entry (just delete old ones)
     if float(amount) != 0:
-        app.logger.info(f"[UPDATE WEEK ENTRY] Amount is non-zero, creating new entry for {friday_date}")
+        pass
         _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, float(amount))
-        app.logger.info(f"[UPDATE WEEK ENTRY] New entry created for {friday_date}")
     else:
-        app.logger.info(f"[UPDATE WEEK ENTRY] Amount is 0, skipping entry creation (entries deleted only)")
+        pass
 
     # If this is an expense category and is_credit_account=1, create/update payment entry and trigger CA balance update
     ca_triggered = False
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Detected payment category for user {current_user.id}, category {category_id}")
         # Find the credit account by matching category name
         category_name = cat_data.get('name', '')
-        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Category name: '{category_name}'")
         if category_name.endswith(' payment'):
             account_name = category_name[:-8]  # Remove ' payment' suffix
-            app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Looking for credit account with name: '{account_name}'")
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute("""
                     SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
                 """, (current_user.id, account_name))
                 account_row = cursor.fetchone()
-                app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Credit account query result: {account_row}")
                 if account_row:
                     account_id = account_row['id']
-                    app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Found credit account_id={account_id}, amount={amount}, checking if zero")
                     # Update or delete payment entry in Redis based on amount
                     if float(amount) == 0:
-                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Amount is 0, deleting payment entry for account {account_id} on {friday_date}")
+                        pass
                         _delete_payment_entry_in_redis(current_user.id, account_id, friday_date, friday_date)
-                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Payment entry deletion completed")
                     else:
-                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Amount is non-zero, updating payment entry")
+                        pass
                         _update_payment_entry_in_redis(current_user.id, account_id, friday_date, float(amount))
-                        app.logger.info(f"[UPDATE WEEK ENTRY - CA PAYMENT] Payment entry update completed")
                 else:
-                    app.logger.warning(f"[UPDATE WEEK ENTRY - CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
+                    pass
                 cursor.close()
         else:
-            app.logger.warning(f"[UPDATE WEEK ENTRY - CA PAYMENT] Category name '{category_name}' does not end with ' payment'")
+            pass
 
     if entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()
@@ -8788,7 +8568,6 @@ def dashboard_3m():
                 cached = _redis_client.get(redis_key)
                 if cached:
                     user_data = json.loads(cached)
-                    app.logger.debug(f"[REDIS HIT] dashboard_3m user settings for user {current_user.id}")
             except Exception as e:
                 app.logger.error(f"[REDIS ERROR] dashboard_3m user settings: {str(e)}")
         
@@ -8800,7 +8579,6 @@ def dashboard_3m():
                 WHERE id = %s
             """, (current_user.id,))
             user_data = cursor.fetchone()
-            app.logger.debug(f"[MYSQL] dashboard_3m user settings for user {current_user.id}")
         
         goofy_week_mode = bool(user_data.get('goofy_week_mode', False)) if user_data else False
 
@@ -8830,9 +8608,8 @@ def dashboard_3m():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             income_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_3m income_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_3m income_categories for user {current_user.id}")
+            pass
 
         # Fetch expense categories - try Redis first
         expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -8845,9 +8622,8 @@ def dashboard_3m():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_3m expense_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_3m expense_categories for user {current_user.id}")
+            pass
 
         # Helper: get last day of month string
         def get_month_end_str(date_val):
@@ -8866,7 +8642,6 @@ def dashboard_3m():
         raw_income_entries = _get_entries_from_redis('income_entries', current_user.id)
         if raw_income_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_3m income_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT id, category_id, date, amount, processed
                 FROM income_entries
@@ -8877,7 +8652,7 @@ def dashboard_3m():
             # Update Redis cache
             _set_entries_to_redis('income_entries', current_user.id, raw_income_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_3m income_entries for user {current_user.id}")
+            pass
         income_map = {}
         processed_map = {}
         bucket_info_map = {}  # Track bucket info per cell
@@ -8920,7 +8695,6 @@ def dashboard_3m():
         raw_expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_3m expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT id, category_id, date, amount, processed, is_bucket, original_amount
                 FROM expense_entries
@@ -8931,7 +8705,7 @@ def dashboard_3m():
             # Update Redis cache
             _set_entries_to_redis('expense_entries', current_user.id, raw_expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_3m expense_entries for user {current_user.id}")
+            pass
         expense_map = {}
         expense_processed_map = {}
         expense_bucket_info_map = {}
@@ -8973,7 +8747,6 @@ def dashboard_3m():
         raw_c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
         if raw_c_expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_3m c_expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount
                 FROM c_expense_entries cee
@@ -8986,7 +8759,7 @@ def dashboard_3m():
             # Update Redis cache
             _set_entries_to_redis('c_expense_entries', current_user.id, raw_c_expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_3m c_expense_entries for user {current_user.id}")
+            pass
         c_expense_map = {}
         c_expense_processed_map = {}
         c_expense_bucket_info_map = {}
@@ -9028,7 +8801,6 @@ def dashboard_3m():
         totals_remainders = _get_totals_remainders_from_redis('totals_remainders_m', current_user.id)
         if totals_remainders is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_3m totals_remainders_m for user {current_user.id}")
             cursor.execute("""
                 SELECT date, total_income, total_expenses, remainder, last_month_remainder
                 FROM totals_remainders_m
@@ -9038,14 +8810,13 @@ def dashboard_3m():
             # Update Redis cache
             _set_totals_remainders_to_redis('totals_remainders_m', current_user.id, totals_remainders)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_3m totals_remainders_m for user {current_user.id}")
+            pass
 
         # Fetch all savings entries for the user
         # Try Redis first
         savings_entries = _get_savings_entries_from_redis(current_user.id)
         if savings_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_3m savings_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT date, amount FROM savings_entries
                 WHERE user_id = %s
@@ -9055,7 +8826,7 @@ def dashboard_3m():
             # Update Redis cache
             _set_savings_entries_to_redis(current_user.id, savings_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_3m savings_entries for user {current_user.id}")
+            pass
 
         # Fetch Buds
         cursor.execute("""
@@ -9075,9 +8846,8 @@ def dashboard_3m():
                 ORDER BY id ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_3m credit_accounts for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_3m credit_accounts for user {current_user.id}")
+            pass
 
         # Fetch c_expense_categories - try Redis first (all categories for user)
         c_expense_categories = []
@@ -9092,20 +8862,17 @@ def dashboard_3m():
                 ORDER BY cec.display_order DESC, cec.id ASC
             """, (current_user.id,))
             c_expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_3m c_expense_categories for user {current_user.id}")
         else:
             # Add account_name to each category from Redis
             account_names = {a['id']: a['name'] for a in credit_accounts}
             for cat in all_ca_categories:
                 cat['account_name'] = account_names.get(cat.get('account_id'), '')
             c_expense_categories = all_ca_categories
-            app.logger.debug(f"[REDIS HIT] dashboard_3m c_expense_categories for user {current_user.id}")
 
         # Try Redis first for CA balances
         c_a_balances_m = _get_ca_balances_from_redis('c_a_balances_m', current_user.id)
         if c_a_balances_m is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_3m c_a_balances_m for user {current_user.id}")
             cursor.execute("""
                 SELECT * FROM c_a_balances_m
                 WHERE account_id IN (
@@ -9117,7 +8884,7 @@ def dashboard_3m():
             # Update Redis cache
             _set_ca_balances_to_redis('c_a_balances_m', current_user.id, c_a_balances_m)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_3m c_a_balances_m for user {current_user.id}")
+            pass
         cursor.close()
 
     profile_picture = user_data['profile_picture'] if user_data else None
@@ -9552,7 +9319,6 @@ def update_processed_status_month_range():
         # Get all entries for this category (Redis-first)
         all_entries = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
         
-        app.logger.info(f"[UPDATE PROCESSED MONTH] User {current_user.id}, category {category_id}, date range {start_date} to {end_date}, found {len(all_entries)} total entries")
         
         # Filter entries within date range
         entries_to_update = []
@@ -9565,7 +9331,6 @@ def update_processed_status_month_range():
             if start_date_obj <= entry_date <= end_date_obj:
                 entries_to_update.append(entry)
         
-        app.logger.info(f"[UPDATE PROCESSED MONTH] Found {len(entries_to_update)} entries in date range")
         
         if not entries_to_update:
             return jsonify({'status': 'success', 'message': 'No entries found in date range'})
@@ -9578,7 +9343,7 @@ def update_processed_status_month_range():
         success = bulk_update_entries(table_name, updates, user_id=current_user.id)
         
         if success:
-            app.logger.info(f"[UPDATE PROCESSED MONTH] Successfully updated {len(updates)} entries")
+            pass
             
             # Calculate if all entries in this date range for this category are now processed
             all_entries_in_range = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
@@ -9627,7 +9392,6 @@ def dashboard_m():
                 cached = _redis_client.get(redis_key)
                 if cached:
                     user_data = json.loads(cached)
-                    app.logger.debug(f"[REDIS HIT] dashboard_m user settings for user {current_user.id}")
             except Exception as e:
                 app.logger.error(f"[REDIS ERROR] dashboard_m user settings: {str(e)}")
         
@@ -9639,7 +9403,6 @@ def dashboard_m():
                 WHERE id = %s
             """, (current_user.id,))
             user_data = cursor.fetchone()
-            app.logger.debug(f"[MYSQL] dashboard_m user settings for user {current_user.id}")
 
         profile_picture = user_data['profile_picture'] if user_data else None
         first_name = user_data['first_name'] if user_data else ''
@@ -9661,9 +9424,8 @@ def dashboard_m():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             income_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_m income_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_m income_categories for user {current_user.id}")
+            pass
 
         # Fetch expense categories - try Redis first (dashboard_m specific)
         expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -9676,16 +9438,14 @@ def dashboard_m():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_m expense_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_m expense_categories for user {current_user.id}")
+            pass
 
         # Entries
         # Try Redis first for income entries
         income_entries = _get_entries_from_redis('income_entries', current_user.id)
         if income_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_m income_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
                 FROM income_entries ie
@@ -9698,7 +9458,7 @@ def dashboard_m():
             # Update Redis cache
             _set_entries_to_redis('income_entries', current_user.id, income_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_m income_entries for user {current_user.id}")
+            pass
             # Enrich with category names from income_categories
             income_cat_map = {cat['id']: cat['name'] for cat in income_categories}
             for entry in income_entries:
@@ -9709,7 +9469,6 @@ def dashboard_m():
         expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
         if expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_m expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
                 FROM expense_entries ee
@@ -9722,7 +9481,7 @@ def dashboard_m():
             # Update Redis cache
             _set_entries_to_redis('expense_entries', current_user.id, expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_m expense_entries for user {current_user.id}")
+            pass
             # Enrich with category names from expense_categories
             expense_cat_map = {cat['id']: cat['name'] for cat in expense_categories}
             for entry in expense_entries:
@@ -9734,7 +9493,6 @@ def dashboard_m():
         totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', current_user.id)
         if totals_remainders_d is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_m totals_remainders_d for user {current_user.id}")
             cursor.execute("""
                 SELECT * FROM totals_remainders_d
                 WHERE user_id = %s
@@ -9744,14 +9502,13 @@ def dashboard_m():
             # Update Redis cache
             _set_totals_remainders_to_redis('totals_remainders_d', current_user.id, totals_remainders_d)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_m totals_remainders_d for user {current_user.id}")
+            pass
 
         # Savings
         # Try Redis first
         savings_entries = _get_savings_entries_from_redis(current_user.id)
         if savings_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_m savings_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT date, amount FROM savings_entries
                 WHERE user_id = %s
@@ -9761,7 +9518,7 @@ def dashboard_m():
             # Update Redis cache
             _set_savings_entries_to_redis(current_user.id, savings_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_m savings_entries for user {current_user.id}")
+            pass
 
         # Fetch credit accounts - try Redis first (dashboard_m specific)
         credit_accounts = _get_credit_accounts_from_redis(current_user.id)
@@ -9773,9 +9530,8 @@ def dashboard_m():
                 ORDER BY id ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_m credit_accounts for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_m credit_accounts for user {current_user.id}")
+            pass
 
         # Fetch c_expense_categories - try Redis first (all categories for user)
         c_expense_categories = []
@@ -9790,21 +9546,18 @@ def dashboard_m():
                 ORDER BY cec.display_order ASC, cec.id ASC
             """, (current_user.id,))
             c_expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_m c_expense_categories for user {current_user.id}")
         else:
             # Add account_name to each category from Redis
             account_names = {a['id']: a['name'] for a in credit_accounts}
             for cat in all_ca_categories:
                 cat['account_name'] = account_names.get(cat.get('account_id'), '')
             c_expense_categories = all_ca_categories
-            app.logger.debug(f"[REDIS HIT] dashboard_m c_expense_categories for user {current_user.id}")
 
         # CA entries
         # Try Redis first
         c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
         if c_expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_m c_expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT cee.*, cec.name AS category_name
                 FROM c_expense_entries cee
@@ -9818,7 +9571,7 @@ def dashboard_m():
             # Update Redis cache
             _set_entries_to_redis('c_expense_entries', current_user.id, c_expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_m c_expense_entries for user {current_user.id}")
+            pass
             # Enrich with category names from c_expense_categories
             c_expense_cat_map = {cat['id']: cat['name'] for cat in c_expense_categories}
             for entry in c_expense_entries:
@@ -9830,7 +9583,6 @@ def dashboard_m():
         c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', current_user.id)
         if c_a_balances_d is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_m c_a_balances_d for user {current_user.id}")
             cursor.execute("""
                 SELECT * FROM c_a_balances_d
                 WHERE account_id IN (
@@ -9842,7 +9594,7 @@ def dashboard_m():
             # Update Redis cache
             _set_ca_balances_to_redis('c_a_balances_d', current_user.id, c_a_balances_d)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_m c_a_balances_d for user {current_user.id}")
+            pass
         cursor.close()
 
     return render_template(
@@ -9893,7 +9645,6 @@ def get_dashboard_m_data():
     totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
     if totals_remainders_d is None:
         # Redis miss - fallback to MySQL
-        app.logger.info(f"[REDIS MISS] get_dashboard_m_data totals_remainders_d for user {user_id}")
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
@@ -9906,7 +9657,7 @@ def get_dashboard_m_data():
         # Update Redis cache
         _set_totals_remainders_to_redis('totals_remainders_d', user_id, totals_remainders_d)
     else:
-        app.logger.debug(f"[REDIS HIT] get_dashboard_m_data totals_remainders_d for user {user_id}")
+        pass
     
     # Filter by date range
     from_date_obj = datetime.strptime(str(from_date), '%Y-%m-%d').date() if isinstance(from_date, str) else from_date
@@ -9920,7 +9671,6 @@ def get_dashboard_m_data():
     c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', user_id)
     if c_a_balances_d is None:
         # Redis miss - fallback to MySQL
-        app.logger.info(f"[REDIS MISS] get_dashboard_m_data c_a_balances_d for user {user_id}")
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
@@ -9933,7 +9683,7 @@ def get_dashboard_m_data():
         # Update Redis cache
         _set_ca_balances_to_redis('c_a_balances_d', user_id, c_a_balances_d)
     else:
-        app.logger.debug(f"[REDIS HIT] get_dashboard_m_data c_a_balances_d for user {user_id}")
+        pass
     
     # Filter by date range
     c_a_balances_d = [
@@ -9945,7 +9695,6 @@ def get_dashboard_m_data():
     savings_entries = _get_savings_entries_from_redis(user_id)
     if savings_entries is None:
         # Redis miss - fallback to MySQL
-        app.logger.info(f"[REDIS MISS] get_dashboard_m_data savings_entries for user {user_id}")
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
@@ -9958,7 +9707,7 @@ def get_dashboard_m_data():
         # Update Redis cache
         _set_savings_entries_to_redis(user_id, savings_entries)
     else:
-        app.logger.debug(f"[REDIS HIT] get_dashboard_m_data savings_entries for user {user_id}")
+        pass
     
     # Filter by date range
     savings_entries = [
@@ -9995,7 +9744,6 @@ def dashboard_y():
                 cached = _redis_client.get(redis_key)
                 if cached:
                     user_data = json.loads(cached)
-                    app.logger.debug(f"[REDIS HIT] dashboard_y user settings for user {current_user.id}")
             except Exception as e:
                 app.logger.error(f"[REDIS ERROR] dashboard_y user settings: {str(e)}")
         
@@ -10007,7 +9755,6 @@ def dashboard_y():
                 WHERE id = %s
             """, (current_user.id,))
             user_data = cursor.fetchone()
-            app.logger.debug(f"[MYSQL] dashboard_y user settings for user {current_user.id}")
 
         profile_picture = user_data['profile_picture'] if user_data else None
         first_name = user_data['first_name'] if user_data else ''
@@ -10029,9 +9776,8 @@ def dashboard_y():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             income_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_y income_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_y income_categories for user {current_user.id}")
+            pass
 
         # Fetch expense categories - try Redis first (dashboard_y specific)
         expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -10044,16 +9790,14 @@ def dashboard_y():
                 ORDER BY display_order DESC
             """, (current_user.id,))
             expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_y expense_categories for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_y expense_categories for user {current_user.id}")
+            pass
 
         # Entries
         # Try Redis first for income entries
         income_entries = _get_entries_from_redis('income_entries', current_user.id)
         if income_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_y income_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT ie.id, ie.date, ie.amount, ie.processed, ic.id AS category_id, ic.name AS category_name, ic.display_order
                 FROM income_entries ie
@@ -10066,7 +9810,7 @@ def dashboard_y():
             # Update Redis cache
             _set_entries_to_redis('income_entries', current_user.id, income_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_y income_entries for user {current_user.id}")
+            pass
             # Enrich with category names from income_categories
             income_cat_map = {cat['id']: cat['name'] for cat in income_categories}
             for entry in income_entries:
@@ -10077,7 +9821,6 @@ def dashboard_y():
         expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
         if expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_y expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT ee.id, ee.date, ee.amount, ee.processed, ec.id AS category_id, ec.name AS category_name, ec.display_order
                 FROM expense_entries ee
@@ -10090,7 +9833,7 @@ def dashboard_y():
             # Update Redis cache
             _set_entries_to_redis('expense_entries', current_user.id, expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_y expense_entries for user {current_user.id}")
+            pass
             # Enrich with category names from expense_categories
             expense_cat_map = {cat['id']: cat['name'] for cat in expense_categories}
             for entry in expense_entries:
@@ -10102,7 +9845,6 @@ def dashboard_y():
         totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', current_user.id)
         if totals_remainders_d is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_y totals_remainders_d for user {current_user.id}")
             cursor.execute("""
                 SELECT * FROM totals_remainders_d
                 WHERE user_id = %s
@@ -10112,14 +9854,13 @@ def dashboard_y():
             # Update Redis cache
             _set_totals_remainders_to_redis('totals_remainders_d', current_user.id, totals_remainders_d)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_y totals_remainders_d for user {current_user.id}")
+            pass
 
         # Savings
         # Try Redis first
         savings_entries = _get_savings_entries_from_redis(current_user.id)
         if savings_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_y savings_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT date, amount FROM savings_entries
                 WHERE user_id = %s
@@ -10129,7 +9870,7 @@ def dashboard_y():
             # Update Redis cache
             _set_savings_entries_to_redis(current_user.id, savings_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_y savings_entries for user {current_user.id}")
+            pass
 
         # Fetch credit accounts - try Redis first (dashboard_y specific)
         credit_accounts = _get_credit_accounts_from_redis(current_user.id)
@@ -10141,9 +9882,8 @@ def dashboard_y():
                 ORDER BY id ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_y credit_accounts for user {current_user.id}")
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_y credit_accounts for user {current_user.id}")
+            pass
 
         # Fetch c_expense_categories - try Redis first per account (dashboard_y specific)
         # Fetch c_expense_categories - try Redis first (all categories for user)
@@ -10159,21 +9899,18 @@ def dashboard_y():
                 ORDER BY cec.display_order ASC, cec.id ASC
             """, (current_user.id,))
             c_expense_categories = list(cursor.fetchall())
-            app.logger.debug(f"[MYSQL] dashboard_y c_expense_categories for user {current_user.id}")
         else:
             # Add account_name to each category from Redis
             account_names = {a['id']: a['name'] for a in credit_accounts}
             for cat in all_ca_categories:
                 cat['account_name'] = account_names.get(cat.get('account_id'), '')
             c_expense_categories = all_ca_categories
-            app.logger.debug(f"[REDIS HIT] dashboard_y c_expense_categories for user {current_user.id}")
 
         # CA entries
         # Try Redis first
         c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
         if c_expense_entries is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_y c_expense_entries for user {current_user.id}")
             cursor.execute("""
                 SELECT cee.*, cec.name AS category_name
                 FROM c_expense_entries cee
@@ -10187,7 +9924,7 @@ def dashboard_y():
             # Update Redis cache
             _set_entries_to_redis('c_expense_entries', current_user.id, c_expense_entries)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_y c_expense_entries for user {current_user.id}")
+            pass
             # Enrich with category names from c_expense_categories
             c_expense_cat_map = {cat['id']: cat['name'] for cat in c_expense_categories}
             for entry in c_expense_entries:
@@ -10199,7 +9936,6 @@ def dashboard_y():
         c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', current_user.id)
         if c_a_balances_d is None:
             # Redis miss - fallback to MySQL
-            app.logger.info(f"[REDIS MISS] dashboard_y c_a_balances_d for user {current_user.id}")
             cursor.execute("""
                 SELECT * FROM c_a_balances_d
                 WHERE account_id IN (
@@ -10211,7 +9947,7 @@ def dashboard_y():
             # Update Redis cache
             _set_ca_balances_to_redis('c_a_balances_d', current_user.id, c_a_balances_d)
         else:
-            app.logger.debug(f"[REDIS HIT] dashboard_y c_a_balances_d for user {current_user.id}")
+            pass
         cursor.close()
 
     return render_template(
@@ -10249,7 +9985,6 @@ def get_dashboard_y_data():
     totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
     if totals_remainders_d is None:
         # Redis miss - fallback to MySQL
-        app.logger.info(f"[REDIS MISS] get_dashboard_y_data totals_remainders_d for user {user_id}")
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
@@ -10262,7 +9997,7 @@ def get_dashboard_y_data():
         # Update Redis cache
         _set_totals_remainders_to_redis('totals_remainders_d', user_id, totals_remainders_d)
     else:
-        app.logger.debug(f"[REDIS HIT] get_dashboard_y_data totals_remainders_d for user {user_id}")
+        pass
     
     # Filter by year
     totals_remainders_d = [
@@ -10274,7 +10009,6 @@ def get_dashboard_y_data():
     c_a_balances_d = _get_ca_balances_from_redis('c_a_balances_d', user_id)
     if c_a_balances_d is None:
         # Redis miss - fallback to MySQL
-        app.logger.info(f"[REDIS MISS] get_dashboard_y_data c_a_balances_d for user {user_id}")
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
@@ -10287,7 +10021,7 @@ def get_dashboard_y_data():
         # Update Redis cache
         _set_ca_balances_to_redis('c_a_balances_d', user_id, c_a_balances_d)
     else:
-        app.logger.debug(f"[REDIS HIT] get_dashboard_y_data c_a_balances_d for user {user_id}")
+        pass
     
     # Filter by year
     c_a_balances_d = [
@@ -10299,7 +10033,6 @@ def get_dashboard_y_data():
     savings_entries = _get_savings_entries_from_redis(user_id)
     if savings_entries is None:
         # Redis miss - fallback to MySQL
-        app.logger.info(f"[REDIS MISS] get_dashboard_y_data savings_entries for user {user_id}")
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
@@ -10312,7 +10045,7 @@ def get_dashboard_y_data():
         # Update Redis cache
         _set_savings_entries_to_redis(user_id, savings_entries)
     else:
-        app.logger.debug(f"[REDIS HIT] get_dashboard_y_data savings_entries for user {user_id}")
+        pass
     
     # Filter by year
     savings_entries = [
@@ -10582,9 +10315,8 @@ def profile():
             cached = _redis_client.get(redis_key)
             if cached:
                 user_data = json.loads(cached)
-                app.logger.info(f"[PROFILE] Loaded from Redis - first_name: '{user_data.get('first_name')}', last_name: '{user_data.get('last_name')}'")
         except Exception as e:
-            app.logger.warning(f"[REDIS][user_settings] GET error: {e}")
+            pass
     
     # If not in Redis, load from MySQL
     if not user_data:
@@ -10599,7 +10331,7 @@ def profile():
             """, (current_user.id,))
             user_data = cursor.fetchone()
             if user_data:
-                app.logger.info(f"[PROFILE] Loaded from MySQL - first_name: '{user_data.get('first_name')}', last_name: '{user_data.get('last_name')}'")
+                pass
             cursor.close()
             
             # Cache the user data in Redis for future requests
@@ -10607,7 +10339,7 @@ def profile():
                 try:
                     _redis_client.setex(redis_key, 300, json.dumps(user_data, default=str))  # 5 minute cache
                 except Exception as e:
-                    app.logger.warning(f"[REDIS][user_settings] SET error: {e}")
+                    pass
     
     # Fetch starting balance from income_entries (check Redis first)
     income_entries = _get_entries_from_redis('income_entries', current_user.id)
@@ -10713,7 +10445,7 @@ def notifications():
             if cached:
                 user_data = json.loads(cached)
         except Exception as e:
-            app.logger.warning(f"[REDIS][user_settings] GET error: {e}")
+            pass
     
     # If not in Redis, load from MySQL
     if not user_data:
@@ -10875,7 +10607,6 @@ def settings():
                 cached = _redis_client.get(redis_key)
                 if cached:
                     user_data = json.loads(cached)
-                    app.logger.debug(f"[REDIS HIT] settings user data for user {current_user.id}")
             except Exception as e:
                 app.logger.error(f"[REDIS ERROR] settings user data: {str(e)}")
         
@@ -10887,7 +10618,6 @@ def settings():
                 WHERE id = %s
             """, (current_user.id,))
             user_data = cursor.fetchone()
-            app.logger.debug(f"[MYSQL] settings user data for user {current_user.id}")
 
         # Fetch starting balance from income_entries where category is "Starting Balance"
         cursor.execute("""
@@ -11107,9 +10837,8 @@ def update_username():
     if app.config.get('REDIS_OK'):
         try:
             _redis_client.delete(redis_key)
-            app.logger.info(f"Invalidated Redis cache for user {current_user.id} after pending email change")
         except Exception as e:
-            app.logger.warning(f"[REDIS][user_settings] DELETE error: {e}")
+            pass
     
     # Send verification email to NEW address
     email_sent = send_verification_email(new_username, current_email, verification_token)
@@ -11202,12 +10931,10 @@ def cancel_pending_email_change():
             if app.config.get('REDIS_OK'):
                 try:
                     _redis_client.delete(redis_key)
-                    app.logger.info(f"Invalidated Redis cache for user {current_user.id} after cancelling email change")
                 except Exception as e:
-                    app.logger.warning(f"[REDIS][user_settings] DELETE error: {e}")
+                    pass
             
             flash('Email change cancelled. Your current email address remains active.')
-            app.logger.info(f"User {current_user.id} cancelled pending email change.")
             
         except Exception as e:
             conn.rollback()
@@ -11426,15 +11153,12 @@ def update_balance_threshold():
     # Retrieve the new balance threshold from the form
     new_threshold = request.form.get('balance_threshold')
     
-    app.logger.info(f"[UPDATE THRESHOLD] User {current_user.id}: new_threshold='{new_threshold}' (type: {type(new_threshold)})")
-    app.logger.info(f"[UPDATE THRESHOLD] request.form: {dict(request.form)}")
     
     if new_threshold:
         # Update balance_threshold in Redis (will be flushed to MySQL)
         _update_user_setting_in_redis(current_user.id, 'balance_threshold', float(new_threshold))
-        app.logger.info(f"[UPDATE THRESHOLD] Successfully called _update_user_setting_in_redis for user {current_user.id}")
     else:
-        app.logger.warning(f"[UPDATE THRESHOLD] new_threshold is empty/None for user {current_user.id}")
+        pass
 
     return redirect(url_for('profile'))
 
@@ -11493,9 +11217,8 @@ def delete_user(username):
         try:
             from redis_manager import invalidate_user_cache
             invalidate_user_cache(user_id)
-            app.logger.info(f"[USER DELETE] Dehydrated user {user_id} ({username}) from Redis")
         except Exception as e:
-            app.logger.warning(f"[USER DELETE] Failed to dehydrate user {user_id}: {e}")
+            pass
 
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor()
@@ -11613,20 +11336,17 @@ def recurring_income():
     bucket_records = _get_entries_from_redis('recurring_income_buckets', current_user.id) or []
     income_entries = _get_entries_from_redis('income_entries', current_user.id) or []
     
-    app.logger.info(f"[RECURRING_I] Found {len(bucket_records)} bucket records for user {current_user.id}")
     
     # Create lookup for bucket records by category_id (use int for consistent comparison)
     bucket_by_category = {}
     for bucket in bucket_records:
         cat_id = int(bucket.get('category_id')) if bucket.get('category_id') is not None else None
         bucket_date = bucket.get('bucket_date')
-        app.logger.info(f"[RECURRING_I] Bucket: cat_id={cat_id}, date={bucket_date}, amount={bucket.get('amount')}, original={bucket.get('original_amount')}")
         if cat_id is not None and bucket_date:
             # Keep the earliest bucket (current period) for each category
             if cat_id not in bucket_by_category or bucket_date < bucket_by_category[cat_id]['bucket_date']:
                 bucket_by_category[cat_id] = bucket
     
-    app.logger.info(f"[RECURRING_I] bucket_by_category keys: {list(bucket_by_category.keys())}")
     
     # Calculate spent amount per category (sum of manual entries for current bucket period)
     # Also track bucket entry amounts (is_bucket=1 entries show remaining)
@@ -11657,10 +11377,8 @@ def recurring_income():
         
         # Add bucket information
         cat_id = int(record.get('category_id')) if record.get('category_id') is not None else None
-        app.logger.info(f"[RECURRING_I] Looking up bucket for category {cat_id}, type={type(cat_id)}")
         bucket_record = bucket_by_category.get(cat_id)
         bucket_entry = bucket_entry_by_category.get(cat_id)
-        app.logger.info(f"[RECURRING_I] Found bucket_record: {bucket_record}")
         
         if bucket_record:
             original_amount = float(bucket_record.get('original_amount', 0))
@@ -11953,7 +11671,6 @@ def delete_recurring_income():
             return jsonify({'status': 'error', 'message': 'Category ID not found for recurring income.'}), 404
         
         # Log the category_id we're about to delete
-        app.logger.info(f"[DELETE RECURRING] recurring_id={recurring_id}, category_id={category_id}, user_id={current_user.id}")
         
         # Redis-only operations - let flush worker handle MySQL
         today = date.today()
@@ -12373,9 +12090,7 @@ def add_recurring_expense():
             'no_end_date': no_end_date
         }
         
-        app.logger.info(f"[ADD RECURRING EXPENSE] About to add recurring entry for category {category_id}")
         _update_recurring_in_redis('recurring_expense', current_user.id, recurring_data)
-        app.logger.info(f"[ADD RECURRING EXPENSE] Recurring entry added, temp ID: {recurring_data.get('id')}")
         
         # Use a temporary ID for generating entries (will be replaced on flush)
         recurring_id = recurring_data['id']
@@ -13390,7 +13105,6 @@ def footer_add_entry():
     amount = data.get('amount')
     entry_date = data.get('date')
     
-    app.logger.info(f"[FOOTER ADD ENTRY] User {current_user.id}: type={entry_type}, category={category_id}, amount={amount}, date={entry_date}")
 
     if not all([entry_type, category_id, amount, entry_date]):
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
@@ -13436,7 +13150,6 @@ def footer_add_entry():
         
         # Make a copy of cat_row data before closing cursor
         cat_data = dict(cat_row) if cat_row else {}
-        app.logger.info(f"[FOOTER ADD ENTRY] Category data for category {category_id}: name='{cat_data.get('name')}', is_credit_account={cat_data.get('is_credit_account', 'MISSING')}")
         cursor.close()
 
     # Add to Redis only - flush worker will persist to MySQL
@@ -13471,7 +13184,6 @@ def footer_add_entry():
             cursor2.close()
         # Filter out entries marked for deletion
         existing_data = _filter_pending_deletions(table_name, current_user.id, existing_data)
-        app.logger.info(f"[REDIS][{table_name}] Loaded {len(existing_data)} entries from MySQL (after filtering pending deletions)")
     
     existing_entry = None
     
@@ -13482,7 +13194,6 @@ def footer_add_entry():
                 break
     
     # Check for bucket entries and deplete them before adding manual entry
-    app.logger.info(f"[BUCKET CHECK FOOTER] Starting bucket check for entry_type={entry_type}, category_id={category_id}, entry_date={entry_date}")
     try:
         # Get recurring info for this category to determine cadence from Redis
         if entry_type == 'income':
@@ -13494,18 +13205,15 @@ def footer_add_entry():
         else:
             recurring_info = None
         
-        app.logger.info(f"[BUCKET CHECK FOOTER] recurring_info found: {recurring_info is not None}, value: {recurring_info}")
         
         if recurring_info:
             # Process bucket depletion
-            app.logger.info(f"[BUCKET CHECK FOOTER] About to call process_manual_entry_with_bucket")
             process_manual_entry_with_bucket(
                 table_name, category_id, entry_date, 
                 float(amount), current_user.id, recurring_info
             )
-            app.logger.info(f"[BUCKET] Processed bucket depletion for {table_name}, category {category_id}, date {entry_date}, amount {amount}")
         else:
-            app.logger.info(f"[BUCKET CHECK FOOTER] No recurring_info found for category {category_id}")
+            pass
     except Exception as e:
         app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
         app.logger.exception(e)
@@ -13523,29 +13231,22 @@ def footer_add_entry():
         is_savings_category = True
 
     # If this is an expense category and is_credit_account=1, add payment entry and trigger CA balance update
-    app.logger.info(f"[FOOTER CA PAYMENT DEBUG] entry_type={entry_type}, cat_data={cat_data}")
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        app.logger.info(f"[FOOTER CA PAYMENT] Detected payment category for user {current_user.id}, category {category_id}")
         # Find the credit account by matching category name
         category_name = cat_data.get('name', '')
-        app.logger.info(f"[FOOTER CA PAYMENT] Category name: '{category_name}'")
         if category_name.endswith(' payment'):
             account_name = category_name[:-8]  # Remove ' payment' suffix
-            app.logger.info(f"[FOOTER CA PAYMENT] Looking for credit account with name: '{account_name}'")
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute("""
                     SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
                 """, (current_user.id, account_name))
                 account_row = cursor.fetchone()
-                app.logger.info(f"[FOOTER CA PAYMENT] Credit account query result: {account_row}")
                 if account_row:
                     account_id = account_row['id']
-                    app.logger.info(f"[FOOTER CA PAYMENT] Found credit account_id={account_id}, adding payment entry for date={entry_date}, amount={amount}")
                     # Add or update payment entry in Redis
                     payment_entries = _get_entries_from_redis('c_payment_entries', current_user.id)
-                    app.logger.info(f"[FOOTER CA PAYMENT] Current payment_entries from Redis: {len(payment_entries) if payment_entries else 'None'}")
                     if payment_entries is None:
                         # Load from MySQL first
                         cursor.execute("""
@@ -13555,7 +13256,6 @@ def footer_add_entry():
                         """, (current_user.id,))
                         payment_entries = list(cursor.fetchall())
                         payment_entries = _filter_pending_deletions('c_payment_entries', current_user.id, payment_entries)
-                        app.logger.info(f"[FOOTER CA PAYMENT] Loaded {len(payment_entries)} payment_entries from MySQL")
                     
                     # Check if payment entry already exists for this date/account
                     existing_payment = None
@@ -13566,19 +13266,17 @@ def footer_add_entry():
                     
                     if existing_payment:
                         new_payment_amount = Decimal(existing_payment.get('amount', 0)) + Decimal(amount)
-                        app.logger.info(f"[FOOTER CA PAYMENT] Updating existing payment: {existing_payment.get('amount')} + {amount} = {new_payment_amount}")
                         _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(new_payment_amount))
                     else:
-                        app.logger.info(f"[FOOTER CA PAYMENT] Creating new payment entry: account_id={account_id}, date={entry_date}, amount={amount}")
+                        pass
                         _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
-                    app.logger.info(f"[FOOTER CA PAYMENT] Payment entry operation completed")
                 else:
-                    app.logger.warning(f"[FOOTER CA PAYMENT] No credit account found with name '{account_name}' for user {current_user.id}")
+                    pass
                 cursor.close()
         else:
-            app.logger.warning(f"[FOOTER CA PAYMENT] Category name '{category_name}' does not end with ' payment'")
+            pass
     else:
-        app.logger.info(f"[FOOTER CA PAYMENT] Not a payment category: entry_type={entry_type}, is_credit_account={cat_data.get('is_credit_account', 0)}")
+        pass
 
     # For CA, update balances
     if entry_type.startswith('ca_') or entry_type == 'ca' or ca_triggered:
@@ -13660,7 +13358,7 @@ def buds():
         # Check for orphaned bud_items (items with bud_id not in buds_list)
         orphaned_items = [item for item in all_bud_items if int(item['bud_id']) not in valid_bud_ids]
         if orphaned_items:
-            app.logger.warning(f"[BUDS] Found {len(orphaned_items)} orphaned bud_items for user {current_user.id}: {[{'id': item['id'], 'bud_id': item['bud_id'], 'name': item['name']} for item in orphaned_items]}")
+            pass
             # Optionally: add orphaned items to a special "Orphaned Items" bud for visibility
             # For now, we just log them
 
@@ -13959,17 +13657,15 @@ def check_negative_remainders(user_id):
     Check for negative remainders in the future and create notifications.
     Checks the next 90 days for potential negative balances.
     """
-    app.logger.info(f"[NOTIFICATIONS] Starting check_negative_remainders for user {user_id}")
     
     today = date.today()
     check_until = today + timedelta(days=90)
-    app.logger.info(f"[NOTIFICATIONS] Checking from {today} to {check_until}")
     
     # Get daily totals/remainders from Redis
     cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id, today)
     
     if not cached_daily:
-        app.logger.info(f"[NOTIFICATIONS] Redis miss, falling back to MySQL")
+        pass
         # Fallback to MySQL if Redis doesn't have the data
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -13981,12 +13677,11 @@ def check_negative_remainders(user_id):
             """, (user_id, today, check_until))
             cached_daily = cursor.fetchall()
             cursor.close()
-            app.logger.info(f"[NOTIFICATIONS] MySQL returned {len(cached_daily) if cached_daily else 0} rows")
     else:
-        app.logger.info(f"[NOTIFICATIONS] Redis hit, found {len(cached_daily)} rows")
+        pass
     
     if not cached_daily:
-        app.logger.warning(f"[NOTIFICATIONS] No data found for user {user_id}, exiting")
+        pass
         return
     
     # Find the first negative remainder in the future
@@ -14004,11 +13699,10 @@ def check_negative_remainders(user_id):
         if row_date > today and remainder < 0:
             first_negative_date = row_date
             first_negative_remainder = remainder
-            app.logger.info(f"[NOTIFICATIONS] Found first negative remainder: {row_date} = {remainder}")
             break  # Stop at the first negative remainder
     
     if not first_negative_date:
-        app.logger.info(f"[NOTIFICATIONS] No negative remainders found in the future")
+        pass
         return
     
     # Check if we already have a notification for this date
@@ -14025,7 +13719,6 @@ def check_negative_remainders(user_id):
         """, (user_id, 'Projected balance on%'))
         existing_notifications = cursor.fetchall()
         
-        app.logger.info(f"[NOTIFICATIONS] Found {len(existing_notifications)} existing unread balance projection notifications")
         
         # Check if we already have a notification for this specific date
         already_notified = False
@@ -14035,7 +13728,6 @@ def check_negative_remainders(user_id):
                 notif_date = datetime.strptime(date_str, '%B %d, %Y').date()
                 if notif_date == first_negative_date:
                     already_notified = True
-                    app.logger.info(f"[NOTIFICATIONS] Already notified for date: {first_negative_date}")
                     break
             except Exception as e:
                 app.logger.error(f"[NOTIFICATIONS] Error parsing notification date: {e}")
@@ -14047,14 +13739,12 @@ def check_negative_remainders(user_id):
     if not already_notified:
         formatted_date = first_negative_date.strftime('%B %d, %Y')
         message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
-        app.logger.info(f"[NOTIFICATIONS] Creating notification for {first_negative_date}: {message}")
         try:
             notification_id = add_notification(user_id, message)
-            app.logger.info(f"[NOTIFICATIONS] Successfully created notification ID {notification_id}")
         except Exception as e:
             app.logger.error(f"[NOTIFICATIONS] Error creating notification: {e}")
     else:
-        app.logger.info(f"[NOTIFICATIONS] Skipping notification - already exists for {first_negative_date}")
+        pass
 
 def check_and_hide_bud_category(bud_id):
     """
@@ -15492,7 +15182,6 @@ def add_credit_account():
             }
             
             _update_recurring_in_redis('recurring_expense', current_user.id, recurring_data)
-            app.logger.info(f"[ADD CREDIT ACCOUNT] Created recurring payment reminder for {payment_category_name} with amount {payment_amount}")
             
             # Generate the expense entries (bucket entries) for this recurring expense
             recurring_id = recurring_data.get('id')
@@ -15511,7 +15200,6 @@ def add_credit_account():
                     yearly_month=None,
                     user_id=current_user.id
                 )
-                app.logger.info(f"[ADD CREDIT ACCOUNT] Generated expense entries for recurring payment")
                 
                 # Also generate c_payment_entries for the same dates
                 # These track payments TO the credit account
@@ -15579,7 +15267,6 @@ def add_credit_account():
                         _redis_client.sadd(dirty_key, 'c_payment_entries')
                         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                         
-                        app.logger.info(f"[ADD CREDIT ACCOUNT] Generated {len(payment_dates)} c_payment_entries for recurring payment")
                         
                 except Exception as payment_err:
                     app.logger.error(f"[ADD CREDIT ACCOUNT] Error generating c_payment_entries: {payment_err}")
@@ -15628,22 +15315,18 @@ def add_credit_account():
             _redis_client.sadd(dirty_key, 'c_expense_entries')
             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
             
-            app.logger.info(f"[REDIS] Added starting balance entry to account {temp_account_id}")
             
             # Force immediate flush to MySQL so balance records can be created
             try:
                 from redis_manager import flush_dirty_tables_for_user
-                app.logger.info(f"[FLUSH] Forcing immediate flush for user {current_user.id}")
                 flush_dirty_tables_for_user(current_user.id)
-                app.logger.info(f"[FLUSH] Immediate flush completed")
             except Exception as flush_err:
                 app.logger.error(f"Error during forced flush: {flush_err}")
             
             # Recalculate CA balances from scratch (same as when adding entries in dashboard)
             try:
-                app.logger.info(f"[CA BALANCE] Recalculating balances for starting balance entry")
+                pass
                 save_ca_daily_balance()
-                app.logger.info(f"[CA BALANCE] Balance recalculation completed")
             except Exception as balance_err:
                 app.logger.error(f"Error recalculating CA balances for starting balance: {balance_err}")
             
@@ -15653,9 +15336,8 @@ def add_credit_account():
     # Recalculate totals and remainders for the new expense entries (if recurring payment was set up)
     if recurring_payment:
         try:
-            app.logger.info(f"[ADD CREDIT ACCOUNT] Recalculating totals for recurring payment entries")
+            pass
             save_totals_remainders_d()
-            app.logger.info(f"[ADD CREDIT ACCOUNT] Totals recalculation completed")
         except Exception as totals_err:
             app.logger.error(f"Error recalculating totals for recurring payment: {totals_err}")
     
@@ -15891,13 +15573,11 @@ def update_credit_account():
                         _redis_client.sadd(dirty_key, 'c_payment_entries')
                         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                         
-                        app.logger.info(f"[UPDATE CREDIT ACCOUNT] Generated {len(payment_dates)} c_payment_entries")
                         
                 except Exception as payment_err:
                     app.logger.error(f"[UPDATE CREDIT ACCOUNT] Error generating c_payment_entries: {payment_err}")
             
             save_totals_remainders_d()
-            app.logger.info(f"[UPDATE CREDIT ACCOUNT] Enabled recurring payment for {name}")
             
         elif not recurring_payment and was_recurring:
             # TURNING OFF recurring payment - only delete future entries, keep past entries as-is
@@ -15996,7 +15676,6 @@ def update_credit_account():
                                     _redis_client.sadd(pending_key, str(payment['id']))
                                     _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
                             
-                            app.logger.info(f"[UPDATE CREDIT ACCOUNT] Deleted {len(payments_to_delete)} future c_payment_entries")
                             
                 except Exception as payment_err:
                     app.logger.error(f"[UPDATE CREDIT ACCOUNT] Error deleting future c_payment_entries: {payment_err}")
@@ -16013,7 +15692,6 @@ def update_credit_account():
                 _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
                 
                 save_totals_remainders_d()
-                app.logger.info(f"[UPDATE CREDIT ACCOUNT] Disabled recurring payment for {name}, deleted {len(entries_to_delete)} future entries")
         
         elif recurring_payment and was_recurring:
             # Recurring was on and stays on - just update amount/due date if changed
@@ -16191,9 +15869,8 @@ def delete_credit_account():
                         pending_key = f"pending_deletes:credit_accounts:{current_user.id}"
                         _redis_client.sadd(pending_key, str(actual_id_to_delete))
                         _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
-                        app.logger.info(f"[REDIS] Added account {actual_id_to_delete} to pending deletes")
                     else:
-                        app.logger.info(f"[REDIS] Skipped pending delete for temp ID {actual_id_to_delete} (not in MySQL yet)")
+                        pass
                     
                     # CASCADE DELETE: Delete all related Redis keys for this credit account
                     # These correspond to MySQL CASCADE DELETE foreign key constraints
@@ -16293,7 +15970,6 @@ def delete_credit_account():
                             _redis_client.delete(recurring_buckets_key)
                         _redis_client.sadd(dirty_key, 'recurring_c_expense_buckets')
                     
-                    app.logger.info(f"[REDIS] CASCADE DELETE: Deleted credit account {actual_id_to_delete} and all related data from Redis")
         
         # Fallback: Get account name from MySQL if not found in Redis
         if not account_name:
@@ -16356,9 +16032,8 @@ def delete_credit_account():
                         pending_key = f"pending_deletes:expense_categories:{current_user.id}"
                         _redis_client.sadd(pending_key, str(category_id_to_delete))
                         _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
-                        app.logger.info(f"[REDIS] Added payment category {category_id_to_delete} to pending deletes")
                     elif category_id_to_delete:
-                        app.logger.info(f"[REDIS] Skipped pending delete for temp payment category ID {category_id_to_delete}")
+                        pass
                     
                     # CASCADE DELETE: Delete recurring_expense entries for this payment category
                     if category_id_to_delete:
@@ -16379,7 +16054,6 @@ def delete_credit_account():
                                     pending_rec_key = f"pending_deletes:recurring_expense:{current_user.id}"
                                     _redis_client.sadd(pending_rec_key, str(rec_id))
                                     _redis_client.expire(pending_rec_key, PERSISTENT_CACHE_TTL)
-                            app.logger.info(f"[REDIS] Deleted {len(recurring_ids_to_delete)} recurring_expense records for payment category {category_id_to_delete}")
                         
                         # CASCADE DELETE: Delete recurring_expense_buckets for this payment category
                         recurring_buckets_key = f"recurring_expense_buckets:v1:{current_user.id}"
@@ -16399,7 +16073,6 @@ def delete_credit_account():
                                     pending_bucket_key = f"pending_deletes:recurring_expense_buckets:{current_user.id}"
                                     _redis_client.sadd(pending_bucket_key, str(bucket_id))
                                     _redis_client.expire(pending_bucket_key, PERSISTENT_CACHE_TTL)
-                            app.logger.info(f"[REDIS] Deleted {len(bucket_ids_to_delete)} recurring_expense_buckets for payment category {category_id_to_delete}")
                         
                         # CASCADE DELETE: Delete expense_entries for this payment category
                         expense_entries_key = f"expense_entries:v1:{current_user.id}"
@@ -16417,7 +16090,6 @@ def delete_credit_account():
                                     pending_entry_key = f"pending_deletes:expense_entries:{current_user.id}"
                                     _redis_client.sadd(pending_entry_key, str(entry_id))
                                     _redis_client.expire(pending_entry_key, PERSISTENT_CACHE_TTL)
-                            app.logger.info(f"[REDIS] Deleted {len(entry_ids_to_delete)} expense_entries for payment category {category_id_to_delete}")
 
 
         save_ca_daily_balance()
@@ -16473,10 +16145,9 @@ def shutdown_redis_on_teardown(exception=None):
 def cleanup_on_exit():
     """Cleanup function to run on application exit"""
     try:
-        app.logger.info("Application shutting down...")
+        pass
         shutdown_redis_manager()
         dispose_db_pool()
-        app.logger.info("Cleanup complete")
     except Exception as e:
         app.logger.error(f"Error during cleanup: {e}")
 
@@ -16538,7 +16209,6 @@ def quiltt_settings():
                 conn.commit()
             else:
                 # Failed to create session token - likely missing API credentials
-                app.logger.warning("Failed to create Quiltt session token - check API credentials")
                 session_token = None
         else:
             session_token = profile['session_token']
@@ -16628,7 +16298,6 @@ def get_quiltt_session_token():
         
         # Always generate a fresh token for opening the Connector
         # This ensures we never use an expired token
-        app.logger.info(f"Generating fresh Quiltt session token for user {current_user.id}")
         
         if profile and profile.get('profile_id'):
             # Existing profile - refresh token
@@ -16676,14 +16345,12 @@ def get_quiltt_session_token():
         update_quiltt_profile(profile_data, current_user.id)
         
         # Update the profile with the user's email so Quiltt doesn't ask for it
-        app.logger.info(f"Updating Quiltt profile with email for user {current_user.id}")
         email_updated = quiltt_client.update_profile_email(session_token, current_user.username)
         if email_updated:
-            app.logger.info(f"Successfully set email in Quiltt profile for user {current_user.id}")
+            pass
         else:
-            app.logger.warning(f"Could not update email in Quiltt profile for user {current_user.id}")
+            pass
         
-        app.logger.info(f"Successfully generated fresh session token for user {current_user.id}")
         
         return jsonify({
             'status': 'success',
@@ -16742,7 +16409,7 @@ def quiltt_reconnect():
         profile = get_quiltt_profile(current_user.id)
         
         if profile and profile.get('session_token'):
-            app.logger.info(f"Triggering sync for reconnected connection {connection_id}")
+            pass
             profile_data = quiltt_client.get_profile(profile['session_token'])
             
             if profile_data:
@@ -16784,7 +16451,6 @@ def quiltt_reconnect():
                             }, current_user.id)
                         break
         
-        app.logger.info(f"Reconnected and synced Quiltt connection {connection_id} for user {current_user.id}")
         return jsonify({'status': 'success'})
         
     except Exception as e:
@@ -16839,7 +16505,6 @@ def quiltt_disconnect():
                 
                 _set_to_redis('quiltt_accounts', current_user.id, accounts)
             
-            app.logger.info(f"Disconnected Quiltt connection {connection_id} for user {current_user.id} (Redis-first)")
             return jsonify({'status': 'success'})
         else:
             return jsonify({'status': 'error', 'message': 'Failed to disconnect'}), 500
@@ -16856,7 +16521,6 @@ def quiltt_delete():
     data = request.get_json()
     connection_id = data.get('connection_id')
     
-    app.logger.info(f"DELETE REQUEST - User: {current_user.id}, Connection ID: {connection_id}")
     
     if not connection_id:
         app.logger.error("DELETE FAILED - Missing connection_id in request")
@@ -16884,7 +16548,7 @@ def quiltt_delete():
         success = delete_quiltt_connection(connection_id, current_user.id)
         
         if success:
-            app.logger.info(f"DELETE SUCCESS - Deleted Quiltt connection {connection_id} for user {current_user.id}")
+            pass
             return jsonify({
                 'status': 'success', 
                 'message': 'Connection deleted successfully'
@@ -16917,13 +16581,11 @@ def quiltt_sync_profile():
             return jsonify({'status': 'error', 'message': 'No active session'}), 400
             
         # Fetch profile data from Quiltt
-        app.logger.info(f"Syncing Quiltt profile data for user {current_user.id}")
         profile_data = quiltt_client.get_profile(profile['session_token'])
         
         if not profile_data:
             return jsonify({'status': 'error', 'message': 'Failed to fetch profile from Quiltt'}), 500
         
-        app.logger.info(f"Quiltt profile data received: {len(profile_data.get('connections', []))} connections")
         
         # Save/update connections and accounts using Redis-first operations
         for connection in profile_data.get('connections', []):
@@ -16938,7 +16600,6 @@ def quiltt_sync_profile():
             connection_id = connection.get('id', '')
             connection_status = connection.get('status', 'ACTIVE')
             
-            app.logger.info(f"Processing connection {connection_id}: {institution_name} (status: {connection_status})")
             
             # Upsert connection to Redis + MySQL
             connection_db_id = upsert_quiltt_connection({
@@ -16954,7 +16615,6 @@ def quiltt_sync_profile():
             
             # Save accounts for this connection
             accounts = connection.get('accounts', [])
-            app.logger.info(f"Connection {connection_id} has {len(accounts)} accounts")
             
             for account in accounts:
                 if not account:
@@ -16963,7 +16623,7 @@ def quiltt_sync_profile():
                 # Only process compatible account types (depository and credit)
                 account_type = account.get('kind', '')
                 if not _is_compatible_account_type(account_type):
-                    app.logger.info(f"Skipping incompatible account type: {account_type} for account {account.get('id', '')}")
+                    pass
                     continue
                     
                 # Get balance info safely
@@ -16974,7 +16634,6 @@ def quiltt_sync_profile():
                 account_id = account.get('id', '')
                 account_name = account.get('name', 'Account')
                 
-                app.logger.info(f"Syncing account {account_id} ({account_name}): balance={current_balance}, available={available_balance}")
                 
                 # Upsert account to Redis + MySQL
                 upsert_quiltt_account({
@@ -16990,7 +16649,6 @@ def quiltt_sync_profile():
                     'sync_transactions': None
                 }, current_user.id)
         
-        app.logger.info(f"Successfully synced Quiltt profile for user {current_user.id}")
         
         # Note: Transactions will not be synced automatically during initial setup
         # User must select accounts first, then transactions will be synced for selected accounts
@@ -17083,7 +16741,7 @@ def quiltt_check_sync_status():
                     
                     # Only upsert if status changed
                     if status_changed:
-                        app.logger.info(f"[QUILTT_POLL] Status changed for {connection_id}: {current_conn.get('status') if current_conn else 'NEW'} -> {connection_status}")
+                        pass
                         connection_db_id = upsert_quiltt_connection({
                             'connection_id': connection_id,
                             'institution_name': institution_name,
@@ -17100,7 +16758,7 @@ def quiltt_check_sync_status():
                                 # Only process compatible account types (depository and credit)
                                 account_type = account.get('kind', '')
                                 if not _is_compatible_account_type(account_type):
-                                    app.logger.info(f"Skipping incompatible account type: {account_type} for account {account.get('id', '')}")
+                                    pass
                                     continue
                                 
                                 balance = account.get('balance') or {}
@@ -17204,19 +16862,17 @@ def quiltt_get_connections():
     try:
         from quiltt_redis import get_quiltt_connections, get_quiltt_accounts, upsert_quiltt_connection, get_quiltt_profile
         
-        app.logger.info(f"Fetching connections for user {current_user.id}")
         
         # Get all connections from Redis
         connections = get_quiltt_connections(current_user.id)
         
         if not connections:
-            app.logger.info(f"No connections found for user {current_user.id}")
+            pass
             return jsonify({
                 'status': 'success',
                 'connections': []
             })
         
-        app.logger.info(f"Found {len(connections)} connections for user {current_user.id}")
         
         # Check if any connections are still syncing and fetch latest status from Quiltt API
         profile = get_quiltt_profile(current_user.id)
@@ -17238,13 +16894,11 @@ def quiltt_get_connections():
                                 'status': conn_data['status']
                             }, current_user.id)
                             connection['status'] = conn_data['status']
-                            app.logger.info(f"Updated connection {connection['connection_id']} status from Quiltt API: {conn_data['status']}")
                     except Exception as e:
-                        app.logger.warning(f"Could not fetch connection status from Quiltt API: {e}")
+                        pass
         
         # Get all accounts
         all_accounts = get_quiltt_accounts(current_user.id)
-        app.logger.info(f"Found {len(all_accounts) if all_accounts else 0} accounts for user {current_user.id}")
         
         # Attach accounts to their connections
         for connection in connections:
@@ -17262,7 +16916,6 @@ def quiltt_get_connections():
                 if 'available_balance' in account:
                     account['available_balance'] = float(account['available_balance']) if account['available_balance'] is not None else 0
         
-        app.logger.info(f"Returning {len(connections)} connections with accounts for user {current_user.id}")
         
         return jsonify({
             'status': 'success',
@@ -17286,26 +16939,23 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
     
     Returns tuple: (success: bool, synced_count: int, error_message: str)
     """
-    app.logger.info(f"=== Starting transaction sync for user {user_id} ===")
     if specific_account_id:
-        app.logger.info(f"Syncing specific account only: {specific_account_id}")
+        pass
     try:
         # Get session token from Quiltt profile
         profile = get_quiltt_profile(user_id)
         
         if not profile or not profile.get('session_token'):
-            app.logger.warning(f"No active Quiltt session for user {user_id}")
+            pass
             return (False, 0, 'No active Quiltt session')
         
         session_token = profile['session_token']
-        app.logger.info(f"Found session token for user {user_id}")
         
         # Get accounts with sync enabled from Redis
-        app.logger.info(f"Fetching accounts with sync_transactions=1 from Redis for user {user_id}")
         accounts = get_quiltt_accounts(user_id)
         
         if not accounts:
-            app.logger.info(f"No accounts found for user {user_id}")
+            pass
             return (True, 0, 'No accounts found')
         
         # Filter for accounts with sync enabled
@@ -17321,17 +16971,15 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 if acc.get('account_id') == specific_account_id
             ]
             if not sync_enabled_accounts:
-                app.logger.warning(f"Specific account {specific_account_id} not found or not enabled for sync")
+                pass
                 return (False, 0, f'Account {specific_account_id} not found or not enabled')
         
-        app.logger.info(f"Found {len(sync_enabled_accounts)} accounts with sync enabled: {[acc['account_id'] for acc in sync_enabled_accounts]}")
         
         if not sync_enabled_accounts:
-            app.logger.info(f"No accounts enabled for sync for user {user_id}")
+            pass
             return (True, 0, 'No accounts enabled for sync')
         
         # Get the default "Auto Adjustments" category for unmapped transactions
-        app.logger.info(f"Fetching Auto Adjustments category for user {user_id}")
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
@@ -17343,10 +16991,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             default_expense_category_id = auto_adj_category['id'] if auto_adj_category else None
             cursor.close()
         
-        app.logger.info(f"Auto Adjustments category_id: {default_expense_category_id}")
         
         if not default_expense_category_id:
-            app.logger.warning(f"No auto-adjustment category found for user {user_id}")
+            pass
             return (False, 0, 'Auto Adjustments category not found')
         
         total_synced = 0
@@ -17356,18 +17003,15 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         if not start_date or not end_date:
             start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
             end_date = datetime.now().strftime('%Y-%m-%d')
-            app.logger.info(f"No date range provided, using default: {start_date} to {end_date}")
         else:
-            app.logger.info(f"Using webhook date range: {start_date} to {end_date}")
+            pass
         
         # Get existing transactions from Redis to check for duplicates
         existing_transactions = get_quiltt_transactions(user_id)
         existing_txn_ids = {txn.get('transaction_id') for txn in existing_transactions}
-        app.logger.info(f"Found {len(existing_txn_ids)} existing transactions in Redis")
         
         for account in sync_enabled_accounts:
             account_id = account['account_id']  # Quiltt account_id string (e.g., "acct_xxx")
-            app.logger.info(f"Fetching transactions for account {account_id}")
             
             # Get transactions from Quiltt
             transactions = quiltt_client.get_transactions(
@@ -17379,17 +17023,16 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             )
             
             if not transactions:
-                app.logger.info(f"No transactions returned for account {account_id}")
+                pass
                 continue
             
-            app.logger.info(f"Fetched {len(transactions)} transactions for account {account_id}")
             
             for txn in transactions:
-                app.logger.debug(f"Processing transaction: {txn.get('id')} - {txn.get('description')} - ${txn.get('amount')}")
+                pass
                 
                 # Skip pending transactions (status is PENDING vs POSTED)
                 if txn.get('status') == 'PENDING':
-                    app.logger.debug(f"Skipping pending transaction: {txn.get('id')}")
+                    pass
                     continue
                 
                 txn_id = txn.get('id')
@@ -17399,20 +17042,18 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 # For expenses, we want DEBIT (money going out, amount < 0)
                 is_expense = float(txn.get('amount', 0)) < 0
                 
-                app.logger.debug(f"Transaction {txn_id}: amount={amount}, date={date}, is_expense={is_expense}, status={txn.get('status')}")
                 
                 # Check if transaction already exists in Redis
                 if txn_id in existing_txn_ids:
-                    app.logger.debug(f"Skipping already imported transaction: {txn_id}")
+                    pass
                     continue
                 
                 # Only process expense transactions for now
                 if not is_expense:
-                    app.logger.debug(f"Skipping income transaction: {txn_id}")
+                    pass
                     continue
                 
                 # Store transaction in Redis with reference to expense category
-                app.logger.info(f"Storing transaction {txn_id} in Redis: ${amount} on {date}")
                 transaction_data = {
                     'transaction_id': txn_id,
                     'account_id': account_id,  # Quiltt account_id string
@@ -17430,13 +17071,12 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 
                 txn_db_id = upsert_quiltt_transaction(transaction_data, user_id)
                 if txn_db_id:
-                    app.logger.info(f"Successfully stored transaction {txn_id} in Redis with ID {txn_db_id}")
+                    pass
                     total_synced += 1
                     existing_txn_ids.add(txn_id)  # Add to set to avoid re-processing
                 else:
                     app.logger.error(f"Failed to store transaction {txn_id} in Redis")
         
-        app.logger.info(f"Successfully synced {total_synced} transactions to Redis for user {user_id}")
         return (True, total_synced, f'Synced {total_synced} new transactions')
         
     except Exception as e:
@@ -17482,12 +17122,11 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
                 row_date = datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']
                 if row_date == today:
                     today_remainder = float(row.get('remainder', 0))
-                    app.logger.info(f"[AUTO-ADJUSTMENT] Found remainder in Redis: {today_remainder}")
                     break
         
         # Fallback to MySQL if not in Redis
         if today_remainder is None:
-            app.logger.info(f"[AUTO-ADJUSTMENT] Remainder not in Redis, checking MySQL")
+            pass
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute("""
@@ -17500,9 +17139,8 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
                 
                 if result:
                     today_remainder = float(result['remainder'])
-                    app.logger.info(f"[AUTO-ADJUSTMENT] Found remainder in MySQL: {today_remainder}")
                 else:
-                    app.logger.warning(f"[AUTO-ADJUSTMENT] No remainder found for user {user_id} on {today_str}")
+                    pass
                     return False, "No remainder data found for today"
         
         bank_balance_float = float(bank_balance)
@@ -17512,7 +17150,7 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
         
         # Skip if difference is negligible (less than 1 cent)
         if abs(diff) < 0.01:
-            app.logger.info(f"[AUTO-ADJUSTMENT] User {user_id}: No adjustment needed (diff={diff:.2f})")
+            pass
             return True, f"No adjustment needed - balance already matches (${bank_balance_float:.2f})"
         
         # Determine if we need income or expense adjustment
@@ -17581,11 +17219,9 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
             # Update existing entry
             new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(adjustment_amount)
             _update_entry_in_redis(table_name, user_id, category_id, today_str, float(new_amount))
-            app.logger.info(f"[AUTO-ADJUSTMENT] User {user_id}: Updated {entry_type} auto-adjustment to ${new_amount:.2f}")
         else:
             # Create new entry
             _update_entry_in_redis(table_name, user_id, category_id, today_str, float(adjustment_amount))
-            app.logger.info(f"[AUTO-ADJUSTMENT] User {user_id}: Created {entry_type} auto-adjustment for ${adjustment_amount:.2f}")
         
         return True, f"Auto-adjustment created: {entry_type} of ${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
         
@@ -17632,11 +17268,10 @@ def quiltt_toggle_sync():
                         target_account = acc
                         break
                 
-                app.logger.info(f"[TOGGLE-SYNC] Found account: {target_account}")
                 
                 # Resync transactions for this specific account only
                 try:
-                    app.logger.info(f"Re-syncing transactions for account {account_id}")
+                    pass
                     success, count, message = _sync_quiltt_transactions_for_user(
                         current_user.id, 
                         specific_account_id=account_id
@@ -17649,11 +17284,10 @@ def quiltt_toggle_sync():
                         account_type = target_account.get('account_type', '').lower()
                         current_balance = target_account.get('current_balance', 0)
                         
-                        app.logger.info(f"[TOGGLE-SYNC] Account details - name: {account_name}, type: {account_type}, balance: {current_balance}")
                         
                         # Check if it's a checking account (depository type with "checking" in name)
                         if account_type == 'depository' and 'checking' in account_name and current_balance:
-                            app.logger.info(f"[TOGGLE-SYNC] Detected checking account: {account_name}, balance: {current_balance}")
+                            pass
                             auto_success, auto_msg = _create_auto_adjustment_for_bank_balance(
                                 current_user.id, 
                                 current_balance,
@@ -17661,11 +17295,10 @@ def quiltt_toggle_sync():
                             )
                             if auto_success:
                                 auto_adjustment_msg = f" | {auto_msg}"
-                                app.logger.info(f"[TOGGLE-SYNC] Auto-adjustment created: {auto_msg}")
                             else:
-                                app.logger.warning(f"[TOGGLE-SYNC] Auto-adjustment failed: {auto_msg}")
+                                pass
                         else:
-                            app.logger.info(f"[TOGGLE-SYNC] Not a checking account or no balance - skipping auto-adjustment")
+                            pass
                     
                     if success:
                         return jsonify({
@@ -17703,7 +17336,7 @@ def quiltt_toggle_sync():
             if success_sync and success_active:
                 # Delete all transactions for this account from Redis and MySQL
                 try:
-                    app.logger.info(f"Deleting transactions for account {account_id}")
+                    pass
                     delete_quiltt_transactions_for_account(account_id, current_user.id)
                 except Exception as del_error:
                     app.logger.error(f"Error deleting transactions: {del_error}")
@@ -17730,7 +17363,7 @@ def quiltt_update_account():
         return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
     
     try:
-        app.logger.info(f"Updating account {account_id}: is_active={is_active}, sync_transactions={sync_transactions}")
+        pass
         
         # Update both fields together to avoid race conditions
         from quiltt_redis import update_quiltt_account_fields
@@ -17747,7 +17380,6 @@ def quiltt_update_account():
             app.logger.error(f"Failed to update account {account_id}")
             return jsonify({'status': 'error', 'message': 'Failed to update account'}), 500
         
-        app.logger.info(f"Successfully updated account {account_id}")
         return jsonify({'status': 'success'})
         
     except Exception as e:
@@ -17811,7 +17443,7 @@ def quiltt_auto_adjust_checking():
             current_balance = account.get('current_balance', 0)
             
             if is_active and account_type == 'depository' and 'checking' in account_name and current_balance:
-                app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing checking account: {account_name}, balance: {current_balance}")
+                pass
                 
                 success, message = _create_auto_adjustment_for_bank_balance(
                     current_user.id,
@@ -17825,9 +17457,8 @@ def quiltt_auto_adjust_checking():
                         'balance': float(current_balance),
                         'message': message
                     })
-                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Success: {message}")
                 else:
-                    app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed for {account_name}: {message}")
+                    pass
         
         if adjustments_made:
             return jsonify({
@@ -17908,7 +17539,6 @@ def quiltt_webhook():
                 current_time = int(time.time())
                 webhook_time = int(quiltt_timestamp)
                 if abs(current_time - webhook_time) > 300:  # 5 minutes
-                    app.logger.warning(f"Webhook timestamp too old: {quiltt_timestamp}")
                     return '', 204
                 
                 # Verify signature
@@ -17926,15 +17556,13 @@ def quiltt_webhook():
                     app.logger.error("Webhook signature verification failed")
                     return '', 204
                 
-                app.logger.info("Webhook signature verified successfully")
         
-        app.logger.info(f"Received Quiltt webhook payload: {json.dumps(payload)[:500]}...")
         
         event_types = payload.get('eventTypes', [])
         events = payload.get('events', [])
         
         if not events:
-            app.logger.warning("Webhook has no events to process")
+            pass
             return '', 204
         
         with get_db_pool().get_connection() as conn:
@@ -17953,7 +17581,6 @@ def quiltt_webhook():
                 # Connection ID could be in record or metadata depending on event type
                 connection_id = record_obj.get('id') if 'connection' in event_type else None
                 
-                app.logger.info(f"Processing event: type={event_type}, profile={profile_id}, connection={connection_id}")
                 
                 # Get user_id from profile_id
                 cursor.execute("""
@@ -17962,7 +17589,7 @@ def quiltt_webhook():
                 profile = cursor.fetchone()
                 
                 if not profile:
-                    app.logger.warning(f"Profile {profile_id} not found in database")
+                    pass
                     continue
                 
                 user_id = profile['user_id']
@@ -17984,7 +17611,7 @@ def quiltt_webhook():
                 
                 # ===== CONNECTION SYNC SUCCESS EVENTS =====
                 if event_type and event_type.startswith('connection.synced.successful'):
-                    app.logger.info(f"Processing {event_type} event for user {user_id}")
+                    pass
                     
                     # Update connection status in MySQL
                     if connection_id:
@@ -18001,7 +17628,6 @@ def quiltt_webhook():
                             'status': 'SYNCED'
                         }, user_id)
                         
-                        app.logger.info(f"Updated connection {connection_id} status to SYNCED")
                     
                     conn.commit()
                     
@@ -18010,21 +17636,20 @@ def quiltt_webhook():
                     end_date = metadata_obj.get('endDate')
                     
                     if start_date and end_date:
-                        app.logger.info(f"Syncing transactions for date range: {start_date} to {end_date}")
+                        pass
                         # Trigger automatic transaction sync with date range
                         success, count, message = _sync_quiltt_transactions_for_user(user_id, start_date, end_date)
                         
                         if success:
-                            app.logger.info(f"Synced {count} transactions for user {user_id}")
+                            pass
                         else:
                             app.logger.error(f"Transaction sync failed: {message}")
                     else:
-                        app.logger.info("No date range in metadata - connection is up to date")
+                        pass
                 
                 # ===== CONNECTION ERROR EVENTS =====
                 elif event_type and event_type.startswith('connection.synced.errored'):
                     error_type = event_type.split('.')[-1]  # repairable, institution, provider, service
-                    app.logger.warning(f"Connection {connection_id} errored: {error_type}")
                     
                     # Map error types to statuses
                     status_map = {
@@ -18050,13 +17675,12 @@ def quiltt_webhook():
                             'status': new_status
                         }, user_id)
                         
-                        app.logger.info(f"Updated connection {connection_id} status to {new_status}")
                     
                     conn.commit()
                 
                 # ===== CONNECTION DISCONNECTED EVENT =====
                 elif event_type == 'connection.disconnected':
-                    app.logger.info(f"Connection {connection_id} disconnected for user {user_id}")
+                    pass
                     
                     if connection_id:
                         cursor.execute("""
@@ -18072,7 +17696,6 @@ def quiltt_webhook():
                             'status': 'DISCONNECTED'
                         }, user_id)
                         
-                        app.logger.info(f"Updated connection {connection_id} status to DISCONNECTED")
                     
                     conn.commit()
                 
@@ -18081,7 +17704,6 @@ def quiltt_webhook():
                     balance = record_obj
                     account_id = balance.get('account', {}).get('id') if isinstance(balance.get('account'), dict) else None
                     
-                    app.logger.info(f"New balance created for account {account_id}")
                     
                     if account_id:
                         # Update account balance in Redis
@@ -18097,11 +17719,10 @@ def quiltt_webhook():
                                 'available_balance': available_balance
                             }, user_id)
                             
-                            app.logger.info(f"Updated account {account_id} balance: current={current_balance}, available={available_balance}")
                 
                 # ===== PROFILE READY EVENT =====
                 elif event_type == 'profile.ready':
-                    app.logger.info(f"Profile {profile_id} is ready with enriched data")
+                    pass
                     
                     # Check if there's a connection_id in metadata
                     conn_id_in_metadata = metadata_obj.get('connectionId')
@@ -18109,27 +17730,25 @@ def quiltt_webhook():
                     end_date = metadata_obj.get('endDate')
                     
                     if conn_id_in_metadata and start_date and end_date:
-                        app.logger.info(f"Profile ready with new data for connection {conn_id_in_metadata}: {start_date} to {end_date}")
+                        pass
                         # Trigger transaction sync
                         success, count, message = _sync_quiltt_transactions_for_user(user_id, start_date, end_date)
                         if success:
-                            app.logger.info(f"Synced {count} transactions for user {user_id}")
+                            pass
                 
                 # ===== ACCOUNT EVENTS =====
                 elif event_type in ['account.created', 'account.verified', 'account.reconnected']:
                     account = record_obj
                     account_id = account.get('id')
                     
-                    app.logger.info(f"Account event {event_type} for account {account_id}")
                     
                     # For account.reconnected, metadata contains old/new connection info
                     if event_type == 'account.reconnected':
                         from_conn = metadata_obj.get('from', {})
                         to_conn = metadata_obj.get('to', {})
-                        app.logger.info(f"Account reconnected from connection {from_conn.get('id')} to {to_conn.get('id')}")
                 
                 else:
-                    app.logger.info(f"Unhandled event type: {event_type}")
+                    pass
             
             cursor.close()
         

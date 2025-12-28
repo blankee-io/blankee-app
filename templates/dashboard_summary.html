@@ -195,13 +195,6 @@
         var credit_accounts = {{ credit_accounts | tojson | safe }};
         var c_expense_categories = {{ c_expense_categories_all | tojson | safe }};
         
-        console.log('Footer vars loaded:', {
-            incomeCategories: incomeCategories?.length,
-            expenseCategories: expenseCategories?.length,
-            credit_accounts: credit_accounts?.length,
-            c_expense_categories: c_expense_categories?.length
-        });
-        
         // Functions for footer - save totals/balances then reload
         var shouldReloadAfterEntry = false;
         function updateLocalState() { shouldReloadAfterEntry = true; }

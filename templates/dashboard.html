@@ -3864,9 +3864,6 @@
                     success: async function(response) {
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
-                            console.log('[DEBUG] update-week-entry success, goofyWeekMode=', goofyWeekMode);
-                            console.log('[DEBUG] fridayDateStr=', fridayDateStr, 'startDate=', startDate, 'endDate=', endDate);
-                            console.log('[DEBUG] updated_buckets=', response.updated_buckets);
                             
                             // If amount is 0, clear the input immediately (entry was deleted)
                             if (amount === 0) {
@@ -3891,19 +3888,14 @@
                             // IMPORTANT: Only process the bucket for the current week being edited
                             if (response.updated_buckets && response.updated_buckets.length > 0) {
                                 let entriesArray = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
-                                console.log('[DEBUG] Before bucket update, entriesArray for category', categoryId, '=', 
-                                    entriesArray.filter(e => String(e.category_id) === String(categoryId)));
-                                console.log('[DEBUG] Current week being edited: fridayDateStr=', fridayDateStr);
                                 
                                 response.updated_buckets.forEach(bucket => {
-                                    console.log('[DEBUG] Processing bucket:', bucket);
                                     
                                     // Process ALL returned buckets - the server returns only relevant ones
                                     // In dashboard.html, entries are AGGREGATED by week - find by category_id and week date
                                     const bucketEntry = entriesArray.find(e => {
                                         return String(e.category_id) === String(categoryId) && e.date === bucket.date;
                                     });
-                                    console.log('[DEBUG] Found bucketEntry:', bucketEntry);
                                     if (bucketEntry) {
                                         if (bucket.amount > 0) {
                                             // Update existing aggregated entry - this IS the total for the week
@@ -3912,7 +3904,6 @@
                                             bucketEntry.has_bucket = true;
                                             bucketEntry.bucket_amount = bucket.amount;
                                             bucketEntry.original_amount = bucket.original_amount;
-                                            console.log('[DEBUG] Updated bucketEntry.amount and total_amount to', bucket.amount);
                                         } else {
                                             // Bucket depleted - update to 0 (or remove if no manual entries)
                                             bucketEntry.amount = 0;

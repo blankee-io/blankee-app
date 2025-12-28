@@ -1851,7 +1851,6 @@
                                                     method: 'POST',
                                                     contentType: 'application/json',
                                                     success: function(autoAdjustResponse) {
-                                                        console.log('[AUTO-ADJUST] Reconnect response:', autoAdjustResponse);
                                                         window.location.reload();
                                                     },
                                                     error: function(xhr, status, error) {
@@ -1883,7 +1882,6 @@
                                             method: 'POST',
                                             contentType: 'application/json',
                                             success: function(autoAdjustResponse) {
-                                                console.log('[AUTO-ADJUST] Response:', autoAdjustResponse);
                                                 // Start polling for balance updates
                                                 startBalancePolling();
                                             },
@@ -2284,7 +2282,6 @@
                     success: function(response) {
                         if (response.status === 'success' || response.status === 'warning') {
                             // Log the response message (includes auto-adjustment info if applicable)
-                            console.log('[TOGGLE-SYNC] ' + response.message);
                             
                             // If enabling account, refresh connections to show updated balances
                             if (syncEnabled) {
