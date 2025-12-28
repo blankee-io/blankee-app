@@ -514,6 +514,17 @@
 
     <script type="text/javascript">
     document.getElementById('loading-screen').style.display = 'none';
+    
+        // Helper function to show success messages
+        function showSuccessMessage(message, color) {
+            const bgColor = color || '#2aaaa8';
+            const successMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: ' + bgColor + '; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">' + message + '</div>');
+            $('body').append(successMsg);
+            setTimeout(function() {
+                successMsg.fadeOut(300, function() { $(this).remove(); });
+            }, 2000);
+        }
+        
         $(document).ready(function() {
             let mfaVerified = false; // Track if MFA was successfully verified
 
@@ -1219,6 +1230,20 @@
                 setTimeout(function() {
                     successModal.css('display', 'none');
                 }, 3000);
+            }
+            
+            // Check if we're returning from a first name change
+            if (urlParams.get('success') === 'first_name') {
+                showSuccessMessage('First name updated successfully');
+                // Remove the query parameter from URL without reload
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            
+            // Check if we're returning from a last name change
+            if (urlParams.get('success') === 'last_name') {
+                showSuccessMessage('Last name updated successfully');
+                // Remove the query parameter from URL without reload
+                window.history.replaceState({}, document.title, window.location.pathname);
             }
 
             $('#close-resend-success-btn').on('click', function() {
@@ -2570,7 +2595,12 @@
                     }),
                     success: function(response) {
                         if (response.status === 'success' || response.status === 'warning') {
-                            // Log the response message (includes auto-adjustment info if applicable)
+                            // Show success message for toggle
+                            if (syncEnabled) {
+                                showSuccessMessage('Account sync enabled');
+                            } else {
+                                showSuccessMessage('Account sync disabled', '#E45F1C');
+                            }
                             
                             // If enabling account, refresh connections to show updated balances
                             if (syncEnabled) {

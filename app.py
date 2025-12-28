@@ -16574,6 +16574,44 @@ def quiltt_delete():
             app.logger.error(f"DELETE FAILED - Connection status is '{connection.get('status')}', not DISCONNECTED")
             return jsonify({'status': 'error', 'message': 'Can only delete disconnected connections'}), 400
         
+        # Before deleting, get all accounts for this connection to update credit accounts
+        quiltt_accounts = get_quiltt_accounts(current_user.id)
+        connection_db_id = connection.get('id')  # MySQL ID
+        accounts_to_update = []
+        
+        for acc in quiltt_accounts:
+            if acc.get('connection_id') == connection_db_id and acc.get('account_type', '').upper() == 'CREDIT':
+                account_mask = acc.get('mask')
+                if account_mask:
+                    accounts_to_update.append(account_mask)
+        
+        # Set is_quiltt=0 for all credit accounts that match these masks
+        if accounts_to_update:
+            redis_key = f"credit_accounts:v1:{current_user.id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            credit_accounts = json.loads(cached) if cached else []
+            
+            updated_count = 0
+            for i, ca in enumerate(credit_accounts):
+                if ca.get('mask') in accounts_to_update:
+                    credit_accounts[i]['is_quiltt'] = 0
+                    updated_count += 1
+            
+            if updated_count > 0:
+                # Save back to Redis
+                _redis_client.setex(
+                    redis_key,
+                    PERSISTENT_CACHE_TTL,
+                    json.dumps(credit_accounts, cls=DecimalEncoder)
+                )
+                
+                # Mark as dirty
+                dirty_key = f"dirty_tables:{current_user.id}"
+                _redis_client.sadd(dirty_key, 'credit_accounts')
+                _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                
+                app.logger.info(f"Set is_quiltt=0 for {updated_count} credit accounts after deleting connection {connection_id}")
+        
         # Delete using Redis-first operation
         success = delete_quiltt_connection(connection_id, current_user.id)
         
@@ -16700,7 +16738,7 @@ def quiltt_sync_profile():
                                     app.logger.info(f"Account {account_id} extracted liability_data: {liability_data}")
                 
                 # Upsert account to Redis + MySQL
-                upsert_quiltt_account({
+                account_db_data = {
                     'connection_id': connection_db_id,
                     'account_id': account_id,
                     'account_name': account_name,
@@ -16712,7 +16750,218 @@ def quiltt_sync_profile():
                     'is_active': None,
                     'sync_transactions': None,
                     **liability_data  # Merge in liability fields
-                }, current_user.id)
+                }
+                upsert_quiltt_account(account_db_data, current_user.id)
+                
+                # If this is a credit account AND it's active with sync enabled, create a credit account in the budget system
+                # Check the account settings from Redis after upsert
+                redis_key = f"quiltt_accounts:v1:{current_user.id}"
+                cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                quiltt_accounts = json.loads(cached) if cached else []
+                
+                # Find this account in Redis to check its settings
+                quiltt_account = None
+                for qa in quiltt_accounts:
+                    if qa.get('account_id') == account_id:
+                        quiltt_account = qa
+                        break
+                
+                # Only create credit account if it's active and sync is enabled
+                if (account_type.upper() == 'CREDIT' and 
+                    quiltt_account and 
+                    quiltt_account.get('is_active') == 1 and 
+                    quiltt_account.get('sync_transactions') == 1):
+                    # Convert balance to positive if negative
+                    starting_balance = abs(float(current_balance)) if current_balance else 0.0
+                    
+                    # Get mask for account identification
+                    account_mask = account.get('mask', '')
+                    
+                    # Get interest rate from liability data
+                    interest_rate = 0.0
+                    if liability_data.get('interest_rate'):
+                        try:
+                            interest_rate = float(liability_data['interest_rate'])
+                        except (ValueError, TypeError):
+                            interest_rate = 0.0
+                    
+                    # Check if credit account already exists for this Quiltt account
+                    redis_key = f"credit_accounts:v1:{current_user.id}"
+                    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                    credit_accounts = json.loads(cached) if cached else []
+                    
+                    # Look for existing credit account with matching mask (or name if no mask)
+                    existing_account = None
+                    for i, acc in enumerate(credit_accounts):
+                        if account_mask and acc.get('mask') == account_mask:
+                            existing_account = acc
+                            # If found existing account with matching mask, set is_quiltt=1
+                            credit_accounts[i]['is_quiltt'] = 1
+                            
+                            # Save back to Redis
+                            _redis_client.setex(
+                                redis_key,
+                                PERSISTENT_CACHE_TTL,
+                                json.dumps(credit_accounts, cls=DecimalEncoder)
+                            )
+                            
+                            # Mark as dirty
+                            dirty_key = f"dirty_tables:{current_user.id}"
+                            _redis_client.sadd(dirty_key, 'credit_accounts')
+                            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                            
+                            app.logger.info(f"Found existing credit account with mask {account_mask}, setting is_quiltt=1")
+                            break
+                        elif not account_mask and acc.get('name') == account_name:
+                            existing_account = acc
+                            break
+                    
+                    # Only create if doesn't exist
+                    if not existing_account:
+                        app.logger.info(f"Creating credit account for Quiltt account: {account_name} (mask: {account_mask}) with balance ${starting_balance}")
+                        
+                        # Determine if it's a card or line of credit based on name/type
+                        is_card = 1 if 'card' in account_name.lower() else 0
+                        is_line = 1 if 'line' in account_name.lower() else 0
+                        
+                        # Add credit account to Redis
+                        account_data = {
+                            'name': account_name,
+                            'mask': account_mask,
+                            'interest_rate': interest_rate,
+                            'is_card': is_card,
+                            'is_line': is_line,
+                            'starting_balance': starting_balance,
+                            'is_quiltt': 1
+                        }
+                        
+                        temp_account_id = _add_credit_account_to_redis(current_user.id, account_data)
+                        
+                        # Add default categories for the credit account
+                        if temp_account_id:
+                            # "Interest Charge" category
+                            _add_category_to_redis('c_expense_categories', current_user.id, {
+                                'account_id': temp_account_id,
+                                'name': 'Interest Charge',
+                                'display_order': -1,
+                                'group_id': None,
+                                'is_recurring': 0,
+                                'no_end_date': 0,
+                                'hidden': 0,
+                                'is_bud': 0,
+                                'is_interest': 1,
+                                'is_auto_adjustment': 0
+                            })
+                            
+                            # "Auto Adjustments" category
+                            _add_category_to_redis('c_expense_categories', current_user.id, {
+                                'account_id': temp_account_id,
+                                'name': 'Auto Adjustments',
+                                'display_order': 0,
+                                'group_id': None,
+                                'is_recurring': 0,
+                                'no_end_date': 0,
+                                'hidden': 0,
+                                'is_bud': 0,
+                                'is_interest': 0,
+                                'is_auto_adjustment': 1
+                            })
+                            
+                            # "Starting Balance" category
+                            starting_balance_cat_id = _add_category_to_redis('c_expense_categories', current_user.id, {
+                                'account_id': temp_account_id,
+                                'name': 'Starting Balance',
+                                'display_order': 1,
+                                'group_id': None,
+                                'is_recurring': 0,
+                                'no_end_date': 0,
+                                'hidden': 0,
+                                'is_bud': 0,
+                                'is_interest': 0,
+                                'is_auto_adjustment': 0
+                            })
+                            
+                            # Create matching expense_categories record for payment
+                            payment_category_name = f"{account_name} payment"
+                            
+                            # Get max display_order for expense_categories
+                            expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+                            if expense_categories:
+                                max_display_order = max([cat.get('display_order', 0) for cat in expense_categories])
+                            else:
+                                max_display_order = 0
+                            new_display_order = max_display_order + 1
+                            
+                            payment_category_id = _add_category_to_redis('expense_categories', current_user.id, {
+                                'user_id': current_user.id,
+                                'name': payment_category_name,
+                                'display_order': new_display_order,
+                                'group_id': None,
+                                'is_recurring': 0,
+                                'is_auto_adjustment': 0,
+                                'no_end_date': 0,
+                                'hidden': 0,
+                                'is_bud': 0,
+                                'is_credit_account': 1
+                            })
+                            
+                            # Create starting balance entry if starting_balance > 0
+                            if starting_balance and float(starting_balance) > 0.0:
+                                today_str = date.today().strftime('%Y-%m-%d')
+                                
+                                # Add starting balance entry to Redis
+                                try:
+                                    redis_key_entries = f"c_expense_entries:v1:{current_user.id}"
+                                    cached_entries = _redis_client.get(redis_key_entries)
+                                    entries = json.loads(cached_entries) if cached_entries else []
+                                    
+                                    # Generate temp ID
+                                    existing_ids = [int(e.get('id', 0)) for e in entries]
+                                    min_id = min(existing_ids) if existing_ids else 0
+                                    entry_id = min_id - 1 if min_id <= 0 else -1
+                                    
+                                    # Add entry
+                                    entries.append({
+                                        'id': entry_id,
+                                        'category_id': starting_balance_cat_id,
+                                        'date': today_str,
+                                        'amount': float(starting_balance),
+                                        'recurring_id': None,
+                                        'is_bucket': 0,
+                                        'original_amount': float(starting_balance),
+                                        'processed': 0,
+                                        'bud_item_id': None
+                                    })
+                                    
+                                    # Save to Redis
+                                    _redis_client.setex(
+                                        redis_key_entries,
+                                        PERSISTENT_CACHE_TTL,
+                                        json.dumps(entries, cls=DecimalEncoder)
+                                    )
+                                    
+                                    # Mark dirty
+                                    dirty_key_entries = f"dirty_tables:{current_user.id}"
+                                    _redis_client.sadd(dirty_key_entries, 'c_expense_entries')
+                                    _redis_client.expire(dirty_key_entries, PERSISTENT_CACHE_TTL)
+                                    
+                                    app.logger.info(f"Created starting balance entry for credit account {account_name}: ${starting_balance}")
+                                    
+                                    # Force immediate flush to MySQL so balance records can be created
+                                    try:
+                                        from redis_manager import flush_dirty_tables_for_user
+                                        flush_dirty_tables_for_user(current_user.id)
+                                    except Exception as flush_err:
+                                        app.logger.error(f"Error during forced flush for Quiltt credit account: {flush_err}")
+                                    
+                                    # Recalculate CA balances from scratch
+                                    try:
+                                        save_ca_daily_balance()
+                                    except Exception as balance_err:
+                                        app.logger.error(f"Error recalculating CA balances for Quiltt credit account: {balance_err}")
+                                    
+                                except Exception as entry_err:
+                                    app.logger.error(f"Error creating starting balance entry: {entry_err}")
         
         
         # Note: Transactions will not be synced automatically during initial setup
@@ -17333,6 +17582,37 @@ def quiltt_toggle_sync():
                         target_account = acc
                         break
                 
+                # If this is a credit account, set is_quiltt=1 on the credit account
+                if target_account and target_account.get('account_type', '').upper() == 'CREDIT':
+                    account_mask = target_account.get('mask')
+                    if account_mask:
+                        # Find and update the credit account
+                        redis_key = f"credit_accounts:v1:{current_user.id}"
+                        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                        credit_accounts = json.loads(cached) if cached else []
+                        
+                        updated = False
+                        for i, ca in enumerate(credit_accounts):
+                            if ca.get('mask') == account_mask:
+                                credit_accounts[i]['is_quiltt'] = 1
+                                updated = True
+                                break
+                        
+                        if updated:
+                            # Save back to Redis
+                            _redis_client.setex(
+                                redis_key,
+                                PERSISTENT_CACHE_TTL,
+                                json.dumps(credit_accounts, cls=DecimalEncoder)
+                            )
+                            
+                            # Mark as dirty
+                            dirty_key = f"dirty_tables:{current_user.id}"
+                            _redis_client.sadd(dirty_key, 'credit_accounts')
+                            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                            
+                            app.logger.info(f"Set is_quiltt=1 for credit account with mask {account_mask} (toggle-sync enable)")
+                
                 
                 # Resync transactions for this specific account only
                 try:
@@ -17399,6 +17679,45 @@ def quiltt_toggle_sync():
             )
             
             if success_sync and success_active:
+                # Get the Quiltt account to find its mask and type
+                quiltt_accounts = get_quiltt_accounts(current_user.id)
+                quiltt_account = None
+                for qa in quiltt_accounts:
+                    if qa.get('account_id') == account_id:
+                        quiltt_account = qa
+                        break
+                
+                # If this is a credit account, set is_quiltt=0 on the credit account
+                if quiltt_account and quiltt_account.get('account_type', '').upper() == 'CREDIT':
+                    account_mask = quiltt_account.get('mask')
+                    if account_mask:
+                        # Find and update the credit account
+                        redis_key = f"credit_accounts:v1:{current_user.id}"
+                        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                        credit_accounts = json.loads(cached) if cached else []
+                        
+                        updated = False
+                        for i, ca in enumerate(credit_accounts):
+                            if ca.get('mask') == account_mask:
+                                credit_accounts[i]['is_quiltt'] = 0
+                                updated = True
+                                break
+                        
+                        if updated:
+                            # Save back to Redis
+                            _redis_client.setex(
+                                redis_key,
+                                PERSISTENT_CACHE_TTL,
+                                json.dumps(credit_accounts, cls=DecimalEncoder)
+                            )
+                            
+                            # Mark as dirty
+                            dirty_key = f"dirty_tables:{current_user.id}"
+                            _redis_client.sadd(dirty_key, 'credit_accounts')
+                            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                            
+                            app.logger.info(f"Set is_quiltt=0 for credit account with mask {account_mask} (toggle-sync)")
+                
                 # Delete all transactions for this account from Redis and MySQL
                 try:
                     pass
@@ -17444,6 +17763,46 @@ def quiltt_update_account():
         if not success:
             app.logger.error(f"Failed to update account {account_id}")
             return jsonify({'status': 'error', 'message': 'Failed to update account'}), 500
+        
+        # If account is being toggled off (is_active=0 or sync_transactions=0), update credit account is_quiltt to 0
+        if is_active == 0 or sync_transactions == 0:
+            # Get the Quiltt account to find its mask
+            quiltt_accounts = get_quiltt_accounts(current_user.id)
+            quiltt_account = None
+            for qa in quiltt_accounts:
+                if qa.get('account_id') == account_id:
+                    quiltt_account = qa
+                    break
+            
+            if quiltt_account and quiltt_account.get('account_type', '').upper() == 'CREDIT':
+                account_mask = quiltt_account.get('mask')
+                if account_mask:
+                    # Find and update the credit account
+                    redis_key = f"credit_accounts:v1:{current_user.id}"
+                    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                    credit_accounts = json.loads(cached) if cached else []
+                    
+                    updated = False
+                    for i, ca in enumerate(credit_accounts):
+                        if ca.get('mask') == account_mask:
+                            credit_accounts[i]['is_quiltt'] = 0
+                            updated = True
+                            break
+                    
+                    if updated:
+                        # Save back to Redis
+                        _redis_client.setex(
+                            redis_key,
+                            PERSISTENT_CACHE_TTL,
+                            json.dumps(credit_accounts, cls=DecimalEncoder)
+                        )
+                        
+                        # Mark as dirty
+                        dirty_key = f"dirty_tables:{current_user.id}"
+                        _redis_client.sadd(dirty_key, 'credit_accounts')
+                        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                        
+                        app.logger.info(f"Set is_quiltt=0 for credit account with mask {account_mask}")
         
         return jsonify({'status': 'success'})
         
