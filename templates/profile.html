@@ -2162,23 +2162,27 @@
                                     }
                                 });
                             } else {
-                                // Normal new connection - sync and show account selection
+                                // Normal new connection - show loading and sync with liability data
+                                $('#setup-profile-loading-modal').show();
+                                
                                 $.ajax({
                                     url: '/quiltt/sync-profile',
                                     method: 'POST',
                                     contentType: 'application/json',
                                     success: function(response) {
                                         if (response.status === 'success') {
-                                            // Profile synced - show account selection
+                                            // Wait for Redis flush to MySQL to complete (liability data)
                                             setTimeout(function() {
+                                                $('#setup-profile-loading-modal').hide();
                                                 loadAccountSelectionProfile();
-                                            }, 500);
+                                            }, 2000);
                                         } else {
+                                            $('#setup-profile-loading-modal').hide();
                                             window.location.reload();
                                         }
                                     },
                                     error: function(xhr, status, error) {
-                                        // Reload anyway - connections may still be visible
+                                        $('#setup-profile-loading-modal').hide();
                                         window.location.reload();
                                     }
                                 });
