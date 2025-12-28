@@ -6711,6 +6711,17 @@ def dashboard():
                 WHERE id = %s
             """, (current_user.id,))
             user_data = cursor.fetchone()
+            
+            # Cache back to Redis
+            if user_data and app.config.get('REDIS_OK'):
+                try:
+                    _redis_client.setex(
+                        redis_key,
+                        604800,  # 7 days TTL
+                        json.dumps(user_data, default=str, cls=DecimalEncoder)
+                    )
+                except Exception as e:
+                    app.logger.error(f"[REDIS ERROR] Failed to cache user data: {str(e)}")
 
         goofy_week_mode = bool(user_data.get('goofy_week_mode', False)) if user_data else False
 
@@ -7046,13 +7057,13 @@ def dashboard():
 
         cursor.close()
 
-    profile_picture = user_data['profile_picture'] if user_data else None
-    first_name = user_data['first_name'] if user_data else ''
-    last_name = user_data['last_name'] if user_data else ''
-    balance_threshold = user_data['balance_threshold'] if user_data else 0
-    member_since = user_data['member_since'] if user_data else None
-    currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
-    landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard'
+    profile_picture = user_data.get('profile_picture') if user_data else None
+    first_name = user_data.get('first_name', '') if user_data else ''
+    last_name = user_data.get('last_name', '') if user_data else ''
+    balance_threshold = user_data.get('balance_threshold', 0) if user_data else 0
+    member_since = user_data.get('member_since') if user_data else None
+    currency_type = user_data.get('currency_type', 'USD') if user_data else 'USD'
+    landing_page = user_data.get('landing_page', 'dashboard') if user_data else 'dashboard'
 
     return render_template(
         'dashboard.html',
@@ -11211,6 +11222,25 @@ def delete_user(username):
 
     # Get user_id before deletion
     user_id = current_user.id
+
+    # Delete Quiltt profile if user has one
+    try:
+        from quiltt_utils import QuilttClient
+        quiltt_client = QuilttClient()
+        
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT profile_id FROM quiltt_profiles WHERE user_id = %s", (user_id,))
+            quiltt_profile = cursor.fetchone()
+            cursor.close()
+            
+            if quiltt_profile and quiltt_profile[0]:
+                quiltt_profile_id = quiltt_profile[0]
+                # Delete profile from Quiltt's side
+                quiltt_client.delete_profile(quiltt_profile_id)
+    except Exception as e:
+        # Log but don't fail user deletion if Quiltt deletion fails
+        app.logger.error(f"Error deleting Quiltt profile for user {user_id}: {e}")
 
     # Dehydrate user data from Redis before deleting from MySQL
     if app.config.get('REDIS_OK'):
