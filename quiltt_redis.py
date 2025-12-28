@@ -385,9 +385,14 @@ def upsert_quiltt_account(account_data: Dict[str, Any], user_id: Optional[int] =
         for i, acc in enumerate(cached_data):
             if acc.get('account_id') == account_id:
                 # Update existing account - only update non-None fields to preserve user settings
+                liability_fields = {
+                    'interest_rate', 'origination_principal', 'origination_date', 'maturity_date',
+                    'loan_term', 'last_payment_date', 'last_payment_amount', 'next_payment_due_date',
+                    'minimum_payment_amount', 'next_payment_minimum_amount', 'payment_frequency', 'account_state'
+                }
                 for key, value in account_data.items():
-                    # Don't overwrite is_active or sync_transactions with None
-                    if key in ('is_active', 'sync_transactions') and value is None:
+                    # Don't overwrite user settings or liability data with None
+                    if value is None and key in ('is_active', 'sync_transactions', *liability_fields):
                         continue
                     cached_data[i][key] = value
                 db_id = cached_data[i].get('id')

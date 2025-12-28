@@ -16664,6 +16664,40 @@ def quiltt_sync_profile():
                 account_id = account.get('id', '')
                 account_name = account.get('name', 'Account')
                 
+                # Extract Finicity liability data if present
+                liability_data = {}
+                remote_data = account.get('remoteData', {})
+                
+                # Debug: Log remoteData structure to see what's actually returned
+                app.logger.info(f"Account {account_id} ({account_name}) remoteData: {remote_data}")
+                
+                if remote_data:
+                    finicity = remote_data.get('finicity', {})
+                    if finicity:
+                        app.logger.info(f"Account {account_id} finicity data: {finicity}")
+                        account_data = finicity.get('account', {})
+                        if account_data:
+                            response = account_data.get('response', {})
+                            if response:
+                                detail = response.get('detail', {})
+                                if detail:
+                                    app.logger.info(f"Account {account_id} detail fields: {detail}")
+                                    # Map Finicity fields to our database columns
+                                    liability_data = {
+                                        'interest_rate': detail.get('interestRate') or detail.get('originalInterestRate'),
+                                        'origination_principal': detail.get('initialMlAmount'),
+                                        'origination_date': detail.get('openDate'),
+                                        'maturity_date': detail.get('maturityDate'),
+                                        'loan_term': detail.get('termOfMl'),
+                                        'last_payment_date': detail.get('lastPaymentDate'),
+                                        'last_payment_amount': detail.get('lastPaymentAmount'),
+                                        'next_payment_due_date': detail.get('nextPaymentDate'),
+                                        'minimum_payment_amount': None,  # Not available in RemoteDataFinicityDetail
+                                        'next_payment_minimum_amount': None,  # Not available in RemoteDataFinicityDetail
+                                        'payment_frequency': None,  # Not directly available in Finicity detail
+                                        'account_state': None  # Not directly available in Finicity detail
+                                    }
+                                    app.logger.info(f"Account {account_id} extracted liability_data: {liability_data}")
                 
                 # Upsert account to Redis + MySQL
                 upsert_quiltt_account({
@@ -16676,7 +16710,8 @@ def quiltt_sync_profile():
                     'current_balance': current_balance,
                     'available_balance': available_balance,
                     'is_active': None,
-                    'sync_transactions': None
+                    'sync_transactions': None,
+                    **liability_data  # Merge in liability fields
                 }, current_user.id)
         
         

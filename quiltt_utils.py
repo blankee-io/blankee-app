@@ -307,6 +307,33 @@ class QuilttClient:
                         available
                     }
                     currencyCode
+                    remoteData {
+                        finicity {
+                            account {
+                                response {
+                                    detail {
+                                        interestRate
+                                        originalInterestRate
+                                        creditAvailableAmount
+                                        creditMaxAmount
+                                        currentBalance
+                                        lastPaymentAmount
+                                        lastPaymentDate
+                                        nextPaymentDate
+                                        termOfMl
+                                        openDate
+                                        maturityDate
+                                        initialMlAmount
+                                        currentLoanBalance
+                                        escrowBalance
+                                        payoffAmount
+                                        ytdPrincipalPaid
+                                        ytdInterestPaid
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

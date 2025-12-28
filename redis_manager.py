@@ -2845,6 +2845,27 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         skipped_count += 1
                         continue
                     
+                    # Helper to safely convert string numbers to float
+                    def to_float(val):
+                        if val is None:
+                            return None
+                        try:
+                            return float(val)
+                        except (ValueError, TypeError):
+                            return None
+                    
+                    # Helper to convert Unix timestamp (string) to date
+                    def to_date(val):
+                        if val is None:
+                            return None
+                        try:
+                            from datetime import datetime
+                            # Convert Unix timestamp string to date
+                            timestamp = int(val)
+                            return datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+                        except (ValueError, TypeError):
+                            return None
+                    
                     batch_data.append((
                         user_id,
                         mysql_conn_id,
@@ -2856,7 +2877,19 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         float(current_bal) if current_bal is not None else 0.0,
                         float(available_bal) if available_bal is not None else 0.0,
                         int(row.get('is_active')) if row.get('is_active') is not None else None,
-                        int(row.get('sync_transactions')) if row.get('sync_transactions') is not None else None
+                        int(row.get('sync_transactions')) if row.get('sync_transactions') is not None else None,
+                        to_float(row.get('interest_rate')),
+                        to_float(row.get('origination_principal')),
+                        to_date(row.get('origination_date')),
+                        to_date(row.get('maturity_date')),
+                        row.get('loan_term'),
+                        to_date(row.get('last_payment_date')),
+                        to_float(row.get('last_payment_amount')),
+                        to_date(row.get('next_payment_due_date')),
+                        to_float(row.get('minimum_payment_amount')),
+                        to_float(row.get('next_payment_minimum_amount')),
+                        row.get('payment_frequency'),
+                        row.get('account_state')
                     ))
                     
                     # Update row with real connection_id for Redis
@@ -2879,14 +2912,29 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 cursor.executemany("""
                     INSERT INTO quiltt_accounts
                     (user_id, connection_id, account_id, account_name, account_type, account_subtype,
-                     mask, current_balance, available_balance, is_active, sync_transactions)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     mask, current_balance, available_balance, is_active, sync_transactions,
+                     interest_rate, origination_principal, origination_date, maturity_date, loan_term,
+                     last_payment_date, last_payment_amount, next_payment_due_date, minimum_payment_amount,
+                     next_payment_minimum_amount, payment_frequency, account_state)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         account_name = VALUES(account_name),
                         current_balance = VALUES(current_balance),
                         available_balance = VALUES(available_balance),
                         is_active = VALUES(is_active),
-                        sync_transactions = VALUES(sync_transactions)
+                        sync_transactions = VALUES(sync_transactions),
+                        interest_rate = VALUES(interest_rate),
+                        origination_principal = VALUES(origination_principal),
+                        origination_date = VALUES(origination_date),
+                        maturity_date = VALUES(maturity_date),
+                        loan_term = VALUES(loan_term),
+                        last_payment_date = VALUES(last_payment_date),
+                        last_payment_amount = VALUES(last_payment_amount),
+                        next_payment_due_date = VALUES(next_payment_due_date),
+                        minimum_payment_amount = VALUES(minimum_payment_amount),
+                        next_payment_minimum_amount = VALUES(next_payment_minimum_amount),
+                        payment_frequency = VALUES(payment_frequency),
+                        account_state = VALUES(account_state)
                 """, batch_data)
                 
                 rows_affected = cursor.rowcount
