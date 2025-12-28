@@ -1,0 +1,595 @@
+/* Custom CSS for Blankee Fider Feedback Platform */
+/* Brand Colors:
+   Primary Teal: #2AAAA8
+   Secondary (Light) Teal: #59D6D4
+   Primary Coral: #E45F1C
+   Secondary (Light) Coral: #EF9F77
+   Light Teal BG: #E6FAF9
+   Light Coral BG: #FDEEEE
+*/
+
+/* Override Fider's primary color with brand teal */
+:root {
+    --primary-teal: #2AAAA8;
+    --primary-teal-hover: #248f8d;
+    --primary-teal-dark: #1e7a78;
+    --secondary-teal: #59D6D4;
+    --secondary-teal-hover: #4bc5c3;
+    --primary-coral: #E45F1C;
+    --primary-coral-hover: #cc5519;
+    --secondary-coral: #EF9F77;
+    --secondary-coral-hover: #e88f67;
+    --background-light: #E6FAF9;
+    --background-coral: #FDEEEE;
+}
+
+/* Body/Page Background - Match main app aesthetic */
+body,
+.c-page,
+.l-container,
+.c-content {
+    background: #2AAAA8 !important;
+    min-height: 100vh;
+}
+
+/* Main content area */
+.p-home,
+.p-idea {
+    background: transparent !important;
+}
+
+/* AGGRESSIVE: Make ALL text white on post detail page */
+body.p-idea,
+body.p-idea *,
+.p-idea,
+.p-idea * {
+    color: white !important;
+}
+
+/* Force specific elements */
+body.p-idea h1,
+body.p-idea h2, 
+body.p-idea h3,
+body.p-idea p,
+body.p-idea span,
+body.p-idea div {
+    color: white !important;
+}
+
+/* Keep white panels with dark text */
+body.p-idea .c-comment,
+body.p-idea .c-comment *,
+body.p-idea .c-panel,
+body.p-idea .c-panel *,
+body.p-idea .c-form-field,
+body.p-idea .c-form-field *,
+body.p-idea .l-sidebar-col,
+body.p-idea .l-sidebar-col *,
+body.p-idea .c-modal,
+body.p-idea .c-modal * {
+    color: #333 !important;
+}
+
+/* Override Fider's blue progress bars with white */
+.border-blue-500,
+.border-blue-400,
+.border-blue-600,
+[class*="border-blue"] {
+    border-color: white !important;
+}
+
+.bg-blue-500,
+.bg-blue-400,
+.bg-blue-600,
+[class*="bg-blue"] {
+    background-color: white !important;
+}
+
+/* Header/Navigation Bar */
+.c-header {
+    background: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(42, 170, 168, 0.2);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+}
+
+.c-header__logo img {
+    max-height: 40px;
+}
+
+/* Primary Buttons */
+.c-button--primary,
+button.c-button--primary,
+button.c-button.c-button--default.c-button--primary {
+    background: linear-gradient(135deg, #2AAAA8 0%, #248f8d 100%) !important;
+    border: none !important;
+    color: white !important;
+    font-weight: 600;
+    padding: 10px 24px;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(42, 170, 168, 0.3);
+}
+
+.c-button--primary:hover,
+button.c-button--primary:hover,
+button.c-button.c-button--default.c-button--primary:hover {
+    background: linear-gradient(135deg, #248f8d 0%, #1e7a78 100%) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(42, 170, 168, 0.4);
+}
+
+.c-button--primary:active,
+button.c-button.c-button--default.c-button--primary:active {
+    transform: translateY(0);
+}
+
+/* Secondary Buttons */
+.c-button--secondary {
+    background: transparent !important;
+    border: 2px solid #2AAAA8 !important;
+    color: #2AAAA8 !important;
+    font-weight: 600;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.c-button--secondary:hover {
+    background: #E6FAF9 !important;
+    border-color: #248f8d !important;
+}
+
+/* Danger/Delete Buttons */
+.c-button--danger {
+    background: linear-gradient(135deg, #E45F1C 0%, #cc5519 100%) !important;
+    border: none !important;
+    color: white !important;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(228, 95, 28, 0.3);
+}
+
+.c-button--danger:hover {
+    background: linear-gradient(135deg, #cc5519 0%, #b44a16 100%) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(228, 95, 28, 0.4);
+}
+
+/* Vote Button - AGGRESSIVE STYLING */
+body.p-idea .c-vote-counter,
+body.p-idea button.c-vote-counter,
+.p-idea .c-vote-counter,
+.p-idea button.c-vote-counter,
+.c-vote-counter,
+button.c-vote-counter {
+    border: 4px solid white !important;
+    border-radius: 8px !important;
+    transition: all 0.3s ease;
+    background: white !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
+}
+
+body.p-idea .c-vote-counter *,
+body.p-idea button.c-vote-counter *,
+.p-idea .c-vote-counter *,
+.p-idea button.c-vote-counter *,
+.c-vote-counter *,
+button.c-vote-counter * {
+    color: #2AAAA8 !important;
+    font-weight: 700 !important;
+}
+
+.c-vote-counter:hover,
+button.c-vote-counter:hover {
+    background: #E6FAF9 !important;
+    border-color: white !important;
+    transform: scale(1.08);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Voted state - VERY visible coral button */
+body.p-idea .c-vote-counter--voted,
+body.p-idea button.c-vote-counter--voted,
+.p-idea .c-vote-counter--voted,
+.p-idea button.c-vote-counter--voted,
+.c-vote-counter--voted,
+button.c-vote-counter--voted {
+    background: #E45F1C !important;
+    border-color: #E45F1C !important;
+    color: white !important;
+    font-weight: 900 !important;
+    box-shadow: 0 6px 20px rgba(228, 95, 28, 0.6) !important;
+}
+
+body.p-idea .c-vote-counter--voted *,
+body.p-idea button.c-vote-counter--voted *,
+.p-idea .c-vote-counter--voted *,
+.p-idea button.c-vote-counter--voted *,
+.c-vote-counter--voted *,
+button.c-vote-counter--voted * {
+    color: white !important;
+    font-weight: 900 !important;
+}
+
+.c-vote-counter__number {
+    font-weight: 900 !important;
+    font-size: 1.2em !important;
+}
+
+/* Post/Idea Cards */
+.c-idea-item,
+.c-list-item {
+    background: white !important;
+    border: 1px solid rgba(42, 170, 168, 0.2);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.c-idea-item:hover,
+.c-list-item:hover {
+    border-color: rgba(228, 95, 28, 0.4);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+}
+
+/* Idea/Suggestion Title Links - already handled by main link rules */
+
+/* Left sidebar/info panel */
+.c-form-field,
+.c-panel,
+.l-sidebar-col {
+    background: white !important;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+/* Labels and text outside white panels on detail page */
+.p-idea .c-label,
+.p-idea .c-stats,
+.p-idea .c-metadata,
+.p-idea .c-timestamp {
+    color: white !important;
+}
+
+/* See details link */
+.c-panel__toggle,
+a.c-panel__toggle {
+    color: white !important;
+    font-weight: 600;
+}
+
+.c-panel__toggle:hover,
+a.c-panel__toggle:hover {
+    color: #FDEEEE !important;
+}
+
+/* Idea submission form */
+.c-idea-form {
+    background: white !important;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(42, 170, 168, 0.2);
+}
+
+/* Filter and sort buttons */
+.c-button--flat {
+    background: white !important;
+    border: 1px solid rgba(42, 170, 168, 0.2);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* Tags/Labels */
+.c-tag,
+.c-label {
+    background: #E6FAF9 !important;
+    color: #1e7a78 !important;
+    border: 1px solid rgba(42, 170, 168, 0.3);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-weight: 500;
+    font-size: 12px;
+}
+
+/* Status Tags */
+.c-tag--planned {
+    background: #E6FAF9 !important;
+    color: #1e7a78 !important;
+}
+
+.c-tag--started {
+    background: #FDEEEE !important;
+    color: #b44a16 !important;
+}
+
+.c-tag--completed {
+    background: #d4edda !important;
+    color: #155724 !important;
+}
+
+.c-tag--declined {
+    background: #f8d7da !important;
+    color: #721c24 !important;
+}
+
+/* Input Fields */
+.c-input,
+.c-textarea,
+input[type="text"],
+input[type="email"],
+textarea {
+    border: 2px solid #e0e0e0 !important;
+    border-radius: 8px !important;
+    padding: 12px 16px !important;
+    transition: all 0.3s ease;
+    font-family: inherit;
+}
+
+.c-input:focus,
+.c-textarea:focus,
+input[type="text"]:focus,
+input[type="email"]:focus,
+textarea:focus {
+    border-color: #2AAAA8 !important;
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(42, 170, 168, 0.1) !important;
+}
+
+/* Modal/Dialog */
+.c-modal,
+.c-modal__window {
+    border-radius: 16px !important;
+    overflow: hidden;
+}
+
+.c-modal__header {
+    background: linear-gradient(135deg, #2AAAA8 0%, #248f8d 100%);
+    color: white;
+    padding: 20px 24px;
+    border-bottom: none;
+}
+
+.c-modal__close {
+    color: white !important;
+    opacity: 0.9;
+}
+
+.c-modal__close:hover {
+    opacity: 1;
+}
+
+.c-modal__body {
+    padding: 24px;
+}
+
+/* Dropdown/Select */
+.c-select,
+select {
+    border: 2px solid #e0e0e0 !important;
+    border-radius: 8px !important;
+    padding: 10px 16px !important;
+    transition: all 0.3s ease;
+}
+
+.c-select:focus,
+select:focus {
+    border-color: #2AAAA8 !important;
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(42, 170, 168, 0.1) !important;
+}
+
+/* Notifications/Alerts */
+.c-notification--success {
+    background: #d4edda !important;
+    border-color: #c3e6cb !important;
+    color: #155724 !important;
+    border-radius: 8px;
+}
+
+.c-notification--error {
+    background: #FDEEEE !important;
+    border-color: #E45F1C !important;
+    color: #721c24 !important;
+    border-radius: 8px;
+}
+
+.c-notification--info {
+    background: #E6FAF9 !important;
+    border-color: #2AAAA8 !important;
+    color: #0c5460 !important;
+    border-radius: 8px;
+}
+
+/* Sidebar/Navigation */
+.c-sidebar {
+    background: white !important;
+    border-right: 1px solid rgba(42, 170, 168, 0.2);
+    box-shadow: 2px 0 6px rgba(0, 0, 0, 0.05);
+}
+
+.c-menu__item {
+    border-radius: 8px;
+    margin: 4px 8px;
+    transition: all 0.3s ease;
+}
+
+.c-menu__item:hover {
+    background: #E6FAF9 !important;
+}
+
+.c-menu__item--active {
+    background: linear-gradient(135deg, #2AAAA8 0%, #248f8d 100%) !important;
+    color: white !important;
+}
+
+/* Comments Section */
+.c-comment {
+    background: white !important;
+    border: 1px solid rgba(42, 170, 168, 0.2);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.c-comment__author {
+    font-weight: 600;
+    color: #1e7a78;
+}
+
+/* Footer */
+.c-footer {
+    background: rgba(255, 255, 255, 0.95) !important;
+    border-top: 1px solid rgba(42, 170, 168, 0.2);
+    padding: 24px 0;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+/* Links - default dark teal on white backgrounds */
+a {
+    color: #1e7a78 !important;
+    transition: color 0.3s ease;
+}
+
+a:hover {
+    color: #E45F1C !important;
+    text-decoration: none;
+}
+
+/* Links on teal background should be white */
+.p-idea > a,
+.p-idea > div > a,
+.p-idea > section > a {
+    color: white !important;
+}
+
+.p-idea > a:hover,
+.p-idea > div > a:hover,
+.p-idea > section > a:hover {
+    color: #FDEEEE !important;
+}
+
+/* Links inside white panels stay dark */
+.c-idea-item a,
+.c-list-item a,
+.c-comment a,
+.c-panel a,
+.c-form-field a {
+    color: #1e7a78 !important;
+}
+
+.c-idea-item a:hover,
+.c-list-item a:hover,
+.c-comment a:hover,
+.c-panel a:hover,
+.c-form-field a:hover {
+    color: #E45F1C !important;
+}
+
+/* Pagination */
+.c-pagination__item {
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+
+.c-pagination__item:hover {
+    background: #E6FAF9 !important;
+}
+
+.c-pagination__item--active {
+    background: #2AAAA8 !important;
+    color: white !important;
+}
+
+/* Search Bar */
+.c-search-input {
+    border: 2px solid #e0e0e0 !important;
+    border-radius: 24px !important;
+    padding: 10px 20px !important;
+    transition: all 0.3s ease;
+}
+
+.c-search-input:focus {
+    border-color: #2AAAA8 !important;
+    box-shadow: 0 0 0 3px rgba(42, 170, 168, 0.1) !important;
+}
+
+/* Avatar/Profile Picture */
+.c-avatar {
+    border: 2px solid #2AAAA8;
+    border-radius: 50%;
+}
+
+/* Badge/Counter */
+.c-badge {
+    background: #E45F1C !important;
+    color: white !important;
+    border-radius: 12px;
+    font-weight: 600;
+}
+
+/* Loading Spinner */
+.c-spinner {
+    border-top-color: #2AAAA8 !important;
+}
+
+/* Tabs */
+.c-tabs__item {
+    border-bottom: 3px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.c-tabs__item:hover {
+    border-bottom-color: rgba(42, 170, 168, 0.3);
+}
+
+.c-tabs__item--active {
+    border-bottom-color: #2AAAA8 !important;
+    color: #1e7a78 !important;
+    font-weight: 600;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #2AAAA8;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #248f8d;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .c-button--primary,
+    .c-button--secondary,
+    .c-button--danger {
+        padding: 8px 16px;
+        font-size: 14px;
+    }
+    
+    .c-idea-item,
+    .c-list-item {
+        padding: 12px;
+    }
+    
+    .c-modal__body {
+        padding: 16px;
+    }
+}
