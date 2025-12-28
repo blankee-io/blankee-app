@@ -396,6 +396,64 @@ class QuilttClient:
         result = self.query_graphql(session_token, mutation, variables)
         
         return result is not None
+    
+    def delete_profile(self, profile_id: str) -> bool:
+        """
+        Permanently delete a Quiltt Profile and all its associated data.
+        
+        This is a Platform API call that requires the API key (not a session token).
+        It permanently deletes:
+        - Profile information (name, email, phone, etc.)
+        - All Connections and their credentials
+        - All Accounts and their balances
+        - All Transactions and transaction data
+        - All Identities and identity verification data
+        - Custom metadata associated with the Profile
+        
+        Note: This process can take up to 15 minutes to complete on Quiltt's side.
+        A profile.deleted webhook event will be sent when deletion is complete.
+        
+        Args:
+            profile_id: The Quiltt Profile ID (e.g., 'p_1hyoxpVVFib1HngGwKAzIr')
+            
+        Returns:
+            True if deletion request was successful, False otherwise
+        """
+        if not self.api_key:
+            logger.error("Quiltt API key not configured - cannot delete profile")
+            return False
+            
+        if not profile_id:
+            logger.warning("No profile_id provided for deletion")
+            return False
+            
+        try:
+            url = f'{self.base_url}/profiles/{profile_id}'
+            
+            response = requests.delete(
+                url,
+                headers=self._get_headers(),  # Uses API key for Platform API
+                timeout=30
+            )
+            
+            # 204 No Content means successful deletion
+            if response.status_code == 204:
+                logger.info(f"Successfully requested deletion of Quiltt profile: {profile_id}")
+                return True
+            elif response.status_code == 404:
+                # Profile doesn't exist - consider this a success
+                logger.warning(f"Quiltt profile not found (may already be deleted): {profile_id}")
+                return True
+            else:
+                logger.error(f"Failed to delete Quiltt profile. Status: {response.status_code}, Body: {response.text}")
+                return False
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error deleting Quiltt profile {profile_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text}")
+            return False
 
 
 def map_quiltt_transaction_to_entry(transaction: Dict, user_id: int, category_mapping: Dict[str, int]) -> Dict:

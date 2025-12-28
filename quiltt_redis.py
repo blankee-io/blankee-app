@@ -384,8 +384,12 @@ def upsert_quiltt_account(account_data: Dict[str, Any], user_id: Optional[int] =
         found = False
         for i, acc in enumerate(cached_data):
             if acc.get('account_id') == account_id:
-                # Update existing account
-                cached_data[i].update(account_data)
+                # Update existing account - only update non-None fields to preserve user settings
+                for key, value in account_data.items():
+                    # Don't overwrite is_active or sync_transactions with None
+                    if key in ('is_active', 'sync_transactions') and value is None:
+                        continue
+                    cached_data[i][key] = value
                 db_id = cached_data[i].get('id')
                 found = True
                 break
@@ -602,6 +606,8 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
         cached_connections = [c for c in cached_connections if c.get('connection_id') != connection_id]
         _set_to_redis('quiltt_connections', user_id, cached_connections)
         
+        logger.info(f"After deletion, user {user_id} has {len(cached_connections)} connection(s) remaining")
+        
         # Get account_ids to delete their transactions
         account_ids_to_delete = []
         if conn_db_id:
@@ -645,6 +651,50 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
         redis_client.expire(delete_key, 300)  # Expire in 5 minutes
         
         logger.info(f"Marked Quiltt connection {connection_id} for deletion (user {user_id})")
+        
+        # Check if this was the last connection - if so, delete the Quiltt profile
+        logger.info(f"Checking if last connection: len(cached_connections) = {len(cached_connections)}")
+        if len(cached_connections) == 0:
+            logger.info(f"Last connection deleted for user {user_id}, deleting Quiltt profile")
+            try:
+                from quiltt_utils import QuilttClient
+                from db_connections import get_db_pool
+                import pymysql
+                
+                # Get profile_id from database
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT profile_id FROM quiltt_profiles WHERE user_id = %s", (user_id,))
+                    profile = cursor.fetchone()
+                    cursor.close()
+                    
+                if profile and profile.get('profile_id'):
+                    quiltt_client = QuilttClient()
+                    success = quiltt_client.delete_profile(profile['profile_id'])
+                    if success:
+                        logger.info(f"Successfully deleted Quiltt profile {profile['profile_id']} for user {user_id}")
+                        
+                        # Delete quiltt_profiles record from database
+                        with get_db_pool().get_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM quiltt_profiles WHERE user_id = %s", (user_id,))
+                            conn.commit()
+                            cursor.close()
+                        
+                        # Delete quiltt_profiles from Redis cache
+                        profiles_key = f"quiltt_profiles:v1:{user_id}"
+                        redis_client.delete(profiles_key)
+                        
+                        logger.info(f"Deleted quiltt_profiles record and Redis cache for user {user_id}")
+                    else:
+                        logger.warning(f"Failed to delete Quiltt profile {profile['profile_id']} for user {user_id}")
+                else:
+                    logger.warning(f"No Quiltt profile found in database for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error deleting Quiltt profile: {e}", exc_info=True)
+        else:
+            logger.info(f"User {user_id} still has {len(cached_connections)} connection(s), not deleting profile")
+        
         return True
         
     except Exception as e:

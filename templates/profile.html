@@ -377,6 +377,41 @@
         </div>
     </div>
 
+    <!-- Account Selection Modal -->
+    <div id="account-selection-modal" class="modal">
+        <div class="modal-content">
+            <span id="close-account-selection-modal" class="close-modal">&times;</span>
+            <h2>Select Accounts to Sync</h2>
+            <p>Choose which accounts you'd like to sync with Blankee. Only selected accounts will have their transactions imported.</p>
+            <div id="account-selection-list" class="account-selection-list">
+                <!-- Accounts will be dynamically populated here -->
+            </div>
+            <div class="modal-buttons">
+                <button id="confirm-account-selection" class="confirm-delete-category-btn">Continue</button>
+                <button id="cancel-account-selection" class="cancel-delete-category-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bank Info Fetching Modal -->
+    <div id="bank-fetching-modal" class="loading-screen" style="display: none;">
+        <div class="setup-loading-container">
+            <div class="bank-icon-container">
+                <i class="fa-solid fa-building-columns fa-3x bank-icon"></i>
+                <div class="loading-arrows-circle">
+                    <i class="fa-solid fa-arrows-spin fa-spin loading-arrows"></i>
+                </div>
+            </div>
+            <h2 class="setup-loading-title">Fetching Your Bank Information</h2>
+            <p class="setup-loading-subtitle">Hang tight, we're syncing your balances...</p>
+            <div class="loading-dots">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+            </div>
+        </div>
+    </div>
+
     <div id="resend-verification-modal" class="modal">
         <div class="modal-content">
             <h2>✓ Verification Email Sent</h2>
@@ -1765,6 +1800,263 @@
                 }
             }
 
+            // Account selection for new bank connections
+            function loadAccountSelectionProfile() {
+                $.ajax({
+                    url: '/quiltt/connections',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.status === 'success' && response.connections) {
+                            const accountList = $('#account-selection-list');
+                            accountList.empty();
+                            
+                            let hasAccounts = false;
+                            
+                            response.connections.forEach(function(conn) {
+                                if (conn.accounts && conn.accounts.length > 0) {
+                                    conn.accounts.forEach(function(account) {
+                                        hasAccounts = true;
+                                        const mask = account.mask ? `<div class="account-mask">...${account.mask}</div>` : '';
+                                        const accountItem = $(`
+                                            <div class="account-selection-item">
+                                                <input type="checkbox" 
+                                                       class="account-checkbox" 
+                                                       data-account-id="${account.account_id}" 
+                                                       checked>
+                                                <div class="account-selection-info">
+                                                    <div class="account-selection-name">${account.account_name || 'Account'}</div>
+                                                    ${mask}
+                                                </div>
+                                            </div>
+                                        `);
+                                        accountList.append(accountItem);
+                                    });
+                                }
+                            });
+                            
+                            if (hasAccounts) {
+                                $('#account-selection-modal').css('display', 'flex');
+                                document.body.classList.add('modal-open');
+                            } else {
+                                // No accounts found, just reload
+                                window.location.reload();
+                            }
+                        } else {
+                            window.location.reload();
+                        }
+                    },
+                    error: function() {
+                        window.location.reload();
+                    }
+                });
+            }
+
+            // Handle account selection confirmation
+            $('#confirm-account-selection').on('click', function() {
+                const selectedAccounts = [];
+                $('.account-checkbox:checked').each(function() {
+                    selectedAccounts.push($(this).data('account-id'));
+                });
+                
+                if (selectedAccounts.length === 0) {
+                    alert('Please select at least one account to continue.');
+                    return;
+                }
+                
+                // Hide account selection modal
+                $('#account-selection-modal').css('display', 'none');
+                
+                // Show fetching modal
+                $('#bank-fetching-modal').show();
+                
+                // Update accounts and sync
+                updateAccountsAndSyncProfile(selectedAccounts);
+            });
+
+            // Cancel account selection
+            $('#cancel-account-selection, #close-account-selection-modal').on('click', function() {
+                $('#account-selection-modal').css('display', 'none');
+                document.body.classList.remove('modal-open');
+                window.location.reload();
+            });
+
+            function updateAccountsAndSyncProfile(selectedAccountIds) {
+                // Build update requests for all accounts
+                const updatePromises = [];
+                
+                $('.account-checkbox').each(function() {
+                    const accountId = $(this).data('account-id');
+                    const isActive = $(this).is(':checked') ? 1 : 0;
+                    
+                    updatePromises.push(
+                        $.ajax({
+                            url: '/quiltt/update-account',
+                            method: 'POST',
+                            contentType: 'application/json',
+                            data: JSON.stringify({
+                                account_id: accountId,
+                                is_active: isActive,
+                                sync_transactions: isActive
+                            })
+                        })
+                    );
+                });
+                
+                // Wait for all updates to complete
+                Promise.all(updatePromises)
+                    .then(function() {
+                        // Sync transactions for selected accounts
+                        return $.ajax({
+                            url: '/quiltt/sync-transactions-setup',
+                            method: 'POST',
+                            contentType: 'application/json',
+                            data: JSON.stringify({
+                                account_ids: selectedAccountIds
+                            })
+                        });
+                    })
+                    .then(function() {
+                        // Trigger auto-adjustment for checking accounts
+                        return $.ajax({
+                            url: '/quiltt/auto-adjust-checking',
+                            method: 'POST',
+                            contentType: 'application/json'
+                        });
+                    })
+                    .then(function() {
+                        // Poll for balances before proceeding
+                        pollForBalances(selectedAccountIds);
+                    })
+                    .catch(function(error) {
+                        $('#bank-fetching-modal').hide();
+                        window.location.reload();
+                    });
+            }
+
+            // Poll for non-zero balances
+            let balancePollCount = 0;
+            const maxBalancePolls = 60; // 60 polls * 500ms = 30 seconds max
+            
+            function pollForBalances(selectedAccountIds) {
+                balancePollCount++;
+                
+                $.ajax({
+                    url: '/quiltt/connections',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.status === 'success' && response.connections && response.connections.length > 0) {
+                            // Check if all connections are SYNCED
+                            const allSynced = response.connections.every(function(conn) {
+                                return conn.status === 'SYNCED';
+                            });
+                            
+                            if (allSynced) {
+                                // All connections synced - sync to our database one more time to get latest balances
+                                $.ajax({
+                                    url: '/quiltt/sync-profile',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    success: function(syncResponse) {
+                                        // Now fetch balances and check for non-zero
+                                        checkForNonZeroBalances(selectedAccountIds);
+                                    },
+                                    error: function() {
+                                        checkForNonZeroBalances(selectedAccountIds);
+                                    }
+                                });
+                            } else if (balancePollCount < maxBalancePolls) {
+                                // Not synced yet, try again in 500ms
+                                setTimeout(function() {
+                                    pollForBalances(selectedAccountIds);
+                                }, 500);
+                            } else {
+                                // Max attempts reached, try one more sync anyway
+                                $.ajax({
+                                    url: '/quiltt/sync-profile',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    success: function(syncResponse) {
+                                        $('#bank-fetching-modal').hide();
+                                        window.location.reload();
+                                    },
+                                    error: function() {
+                                        $('#bank-fetching-modal').hide();
+                                        window.location.reload();
+                                    }
+                                });
+                            }
+                        } else {
+                            // No connections or error - reload
+                            $('#bank-fetching-modal').hide();
+                            window.location.reload();
+                        }
+                    },
+                    error: function() {
+                        // Error - just reload
+                        $('#bank-fetching-modal').hide();
+                        window.location.reload();
+                    }
+                });
+            }
+            
+            function checkForNonZeroBalances(selectedAccountIds) {
+                $.ajax({
+                    url: '/quiltt/connections',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.status === 'success' && response.connections) {
+                            let hasNonZeroBalance = false;
+                            
+                            response.connections.forEach(function(conn) {
+                                (conn.accounts || []).forEach(function(account) {
+                                    if (selectedAccountIds.includes(account.account_id)) {
+                                        const balance = parseFloat(account.current_balance || 0);
+                                        if (balance !== 0) {
+                                            hasNonZeroBalance = true;
+                                        }
+                                    }
+                                });
+                            });
+                            
+                            if (hasNonZeroBalance) {
+                                // We have balances - done
+                                $('#bank-fetching-modal').hide();
+                                window.location.reload();
+                            } else {
+                                // Still no balances - poll a few more times
+                                if (balancePollCount < maxBalancePolls + 10) {
+                                    balancePollCount++;
+                                    setTimeout(function() {
+                                        // Try sync again then check
+                                        $.ajax({
+                                            url: '/quiltt/sync-profile',
+                                            method: 'POST',
+                                            success: function() {
+                                                checkForNonZeroBalances(selectedAccountIds);
+                                            },
+                                            error: function() {
+                                                checkForNonZeroBalances(selectedAccountIds);
+                                            }
+                                        });
+                                    }, 1000);
+                                } else {
+                                    // Give up and reload
+                                    $('#bank-fetching-modal').hide();
+                                    window.location.reload();
+                                }
+                            }
+                        } else {
+                            $('#bank-fetching-modal').hide();
+                            window.location.reload();
+                        }
+                    },
+                    error: function() {
+                        $('#bank-fetching-modal').hide();
+                        window.location.reload();
+                    }
+                });
+            }
+
             // Connect bank account - Load Quiltt Connector
             connectBankBtn.on('click', function() {
                 const connectorId = '{{ connector_id if connector_id else "" }}';
@@ -1851,7 +2143,6 @@
                                                     method: 'POST',
                                                     contentType: 'application/json',
                                                     success: function(autoAdjustResponse) {
-                                                        console.log('[AUTO-ADJUST] Reconnect response:', autoAdjustResponse);
                                                         window.location.reload();
                                                     },
                                                     error: function(xhr, status, error) {
@@ -1871,28 +2162,20 @@
                                     }
                                 });
                             } else {
-                                // Normal new connection - sync and reload
+                                // Normal new connection - sync and show account selection
                                 $.ajax({
                                     url: '/quiltt/sync-profile',
                                     method: 'POST',
                                     contentType: 'application/json',
                                     success: function(response) {
-                                        // Trigger auto-adjustment for checking accounts after sync
-                                        $.ajax({
-                                            url: '/quiltt/auto-adjust-checking',
-                                            method: 'POST',
-                                            contentType: 'application/json',
-                                            success: function(autoAdjustResponse) {
-                                                console.log('[AUTO-ADJUST] Response:', autoAdjustResponse);
-                                                // Start polling for balance updates
-                                                startBalancePolling();
-                                            },
-                                            error: function(xhr, status, error) {
-                                                console.warn('[AUTO-ADJUST] Failed but continuing:', error);
-                                                // Start polling anyway
-                                                startBalancePolling();
-                                            }
-                                        });
+                                        if (response.status === 'success') {
+                                            // Profile synced - show account selection
+                                            setTimeout(function() {
+                                                loadAccountSelectionProfile();
+                                            }, 500);
+                                        } else {
+                                            window.location.reload();
+                                        }
                                     },
                                     error: function(xhr, status, error) {
                                         // Reload anyway - connections may still be visible
@@ -2284,7 +2567,6 @@
                     success: function(response) {
                         if (response.status === 'success' || response.status === 'warning') {
                             // Log the response message (includes auto-adjustment info if applicable)
-                            console.log('[TOGGLE-SYNC] ' + response.message);
                             
                             // If enabling account, refresh connections to show updated balances
                             if (syncEnabled) {
