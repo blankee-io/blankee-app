@@ -689,36 +689,30 @@
 
             function pollForSyncedBalances(attempt = 0, maxAttempts = 60) {
                 // Poll Quiltt to check if balances are synced (up to 60 attempts = 30 seconds)
-                console.log(`pollForSyncedBalances attempt ${attempt + 1}/${maxAttempts}`);
                 
                 $.ajax({
                     url: '/quiltt/connections',
                     method: 'GET',
                     success: function(response) {
-                        console.log('Polling response:', response);
                         
                         if (response.status === 'success' && response.connections && response.connections.length > 0) {
                             const statuses = response.connections.map(c => c.status);
-                            console.log('Connection statuses:', statuses);
                             
                             const allSynced = response.connections.every(function(conn) {
                                 return conn.status === 'SYNCED';
                             });
                             
                             if (allSynced) {
-                                console.log('All connections SYNCED, re-syncing profile to fetch balances...');
                                 // All connections synced - sync to our database one more time to get latest balances
                                 $.ajax({
                                     url: '/quiltt/sync-profile',
                                     method: 'POST',
                                     contentType: 'application/json',
                                     success: function(syncResponse) {
-                                        console.log('Re-sync response:', syncResponse);
                                         // Always fetch balances regardless of sync status
                                         fetchBankBalancesForBalancePage();
                                     },
                                     error: function() {
-                                        console.log('Re-sync failed, proceeding with existing data');
                                         fetchBankBalancesForBalancePage();
                                     }
                                 });
@@ -729,24 +723,20 @@
                                 }, 500);
                             } else {
                                 // Max attempts reached, try one more sync anyway
-                                console.log('Timeout reached, attempting final sync...');
                                 $.ajax({
                                     url: '/quiltt/sync-profile',
                                     method: 'POST',
                                     contentType: 'application/json',
                                     success: function(syncResponse) {
-                                        console.log('Timeout sync response:', syncResponse);
                                         fetchBankBalancesForBalancePage();
                                     },
                                     error: function() {
-                                        console.log('Timeout sync failed');
                                         fetchBankBalancesForBalancePage();
                                     }
                                 });
                             }
                         } else {
                             // No connections or error, proceed anyway
-                            console.log('No connections found, proceeding...');
                             fetchBankBalancesForBalancePage();
                         }
                     },
@@ -763,7 +753,6 @@
                     url: '/quiltt/connections',
                     method: 'GET',
                     success: function(response) {
-                        console.log('fetchBankBalancesForBalancePage - Full response:', JSON.stringify(response, null, 2));
                         
                         if (response.status === 'success' && response.connections) {
                             // Get selected account IDs (those with is_active=1)
@@ -773,7 +762,6 @@
                             response.connections.forEach(function(conn) {
                                 (conn.accounts || []).forEach(function(account) {
                                     allAccounts.push(account);
-                                    console.log(`Account: ${account.account_name}, is_active: ${account.is_active}, balance: ${account.current_balance}`);
                                     
                                     if (account.is_active === 1) {
                                         selectedAccountIds.push(account.account_id);
@@ -781,34 +769,27 @@
                                 });
                             });
                             
-                            console.log('Selected account IDs (is_active=1):', selectedAccountIds);
-                            console.log('All accounts:', allAccounts.length);
                             
                             // If no accounts selected, use all DEPOSITORY accounts as fallback
                             const accountsToProcess = selectedAccountIds.length > 0 
                                 ? allAccounts.filter(acc => selectedAccountIds.includes(acc.account_id))
                                 : allAccounts.filter(acc => acc.account_type === 'DEPOSITORY');
                             
-                            console.log('Accounts to process:', accountsToProcess.length);
                             
                             // Extract checking and savings balances
                             accountsToProcess.forEach(function(account) {
                                 const accountName = (account.account_name || '').toLowerCase();
                                 const balance = parseFloat(account.current_balance || 0);
                                 
-                                console.log(`Processing: ${accountName}, Balance: ${balance}, Type: ${account.account_type}`);
                                 
                                 // Match by name
                                 if (accountName.includes('checking')) {
                                     bankBalances.checking = Math.max(bankBalances.checking, balance);
-                                    console.log(`Updated checking balance to: ${bankBalances.checking}`);
                                 } else if (accountName.includes('savings')) {
                                     bankBalances.savings = Math.max(bankBalances.savings, balance);
-                                    console.log(`Updated savings balance to: ${bankBalances.savings}`);
                                 }
                             });
                             
-                            console.log('Final bankBalances:', bankBalances);
                         }
                         
                         // Hide loading and show balance page
@@ -820,13 +801,11 @@
                                 .prop('readonly', true)
                                 .css({'background-color': '#f0f0f0', 'cursor': 'not-allowed'});
                             $('#checking-auto-filled-indicator').addClass('visible');
-                            console.log('Set checking field to:', bankBalances.checking.toFixed(2));
                         } else {
                             $('#setup-profile-starting-balance').val('')
                                 .prop('readonly', false)
                                 .css({'background-color': '', 'cursor': ''});
                             $('#checking-auto-filled-indicator').removeClass('visible');
-                            console.log('Checking balance is 0, field left empty');
                         }
                         
                         if (bankBalances.savings > 0) {
@@ -834,13 +813,11 @@
                                 .prop('readonly', true)
                                 .css({'background-color': '#f0f0f0', 'cursor': 'not-allowed'});
                             $('#savings-auto-filled-indicator').addClass('visible');
-                            console.log('Set savings field to:', bankBalances.savings.toFixed(2));
                         } else {
                             $('#setup-profile-starting-savings').val('')
                                 .prop('readonly', false)
                                 .css({'background-color': '', 'cursor': ''});
                             $('#savings-auto-filled-indicator').removeClass('visible');
-                            console.log('Savings balance is 0, field left empty');
                         }
                         
                         $('#starting-balance-modal-setup').show();
