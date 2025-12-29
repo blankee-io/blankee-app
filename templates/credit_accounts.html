@@ -61,7 +61,8 @@
                                 data-type="{% if account.is_card %}card{% elif account.is_line %}line{% else %}other{% endif %}"
                                 data-recurring="{{ 'true' if recurring_info.get('enabled') else 'false' }}"
                                 data-payment-amount="{{ recurring_info.get('amount', 0) }}"
-                                data-due-date="{{ recurring_info.get('monthly_days', '1') }}">
+                                data-due-date="{{ recurring_info.get('monthly_days', '1') }}"
+                                data-is-quiltt="{{ account.is_quiltt|default(0) }}">
                                 <td>{{ account.name }}</td>
                                 <td>
                                     {% if account.interest_rate is not none %}
@@ -88,12 +89,18 @@
                                     {% endif %}
                                 </td>
                                 <td class="credit-account-action-cell">
-                                    <button class="edit-credit-account-btn" data-account-id="{{ account.id }}">
-                                        <i class="fas fa-pencil-alt"></i>
-                                    </button>
-                                    <button class="delete-credit-account-btn" data-account-id="{{ account.id }}">
-                                        <i class="fa-regular fa-trash"></i>
-                                    </button>
+                                    {% if account.is_quiltt == 1 %}
+                                        <button class="quiltt-linked-btn" title="Linked to bank account">
+                                            <i class="fa-solid fa-building-columns"></i>
+                                        </button>
+                                    {% else %}
+                                        <button class="edit-credit-account-btn" data-account-id="{{ account.id }}">
+                                            <i class="fas fa-pencil-alt"></i>
+                                        </button>
+                                        <button class="delete-credit-account-btn" data-account-id="{{ account.id }}">
+                                            <i class="fa-regular fa-trash"></i>
+                                        </button>
+                                    {% endif %}
                                 </td>
                             </tr>
                         {% endfor %}
@@ -250,6 +257,15 @@
             document.getElementById('loading-screen').style.display = 'none';
         });
 
+        // Helper function to show success messages
+        function showSuccessMessage(message) {
+            const successMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: #2aaaa8; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">' + message + '</div>');
+            $('body').append(successMsg);
+            setTimeout(function() {
+                successMsg.fadeOut(300, function() { $(this).remove(); });
+            }, 2000);
+        }
+
         $(function() {
             // Show modal when Add Credit Account button is clicked
             $('#add-cas-btn').on('click', function() {
@@ -314,6 +330,13 @@
                 e.preventDefault();
                 e.stopPropagation();
                 const $row = $(this).closest('tr');
+                const isQuiltt = $row.data('is-quiltt') == 1;
+                
+                // Don't allow editing Quiltt-linked accounts
+                if (isQuiltt) {
+                    return;
+                }
+                
                 const accountId = $row.data('account-id');
                 const name = $row.data('name');
                 const interest = $row.data('interest');
@@ -374,7 +397,10 @@
                         $('#loading-screen').hide();
                         $('#edit-credit-account-modal').hide();
                         if (data.status === 'success') {
-                            location.reload();
+                            showSuccessMessage('Credit account updated successfully');
+                            setTimeout(function() {
+                                location.reload();
+                            }, 500);
                         } else {
                             alert(data.message || 'Error updating credit account.');
                         }
@@ -477,6 +503,14 @@
             // Open modal on delete button click
             $('.credit-accounts-table').on('click', '.delete-credit-account-btn', function(e) {
                 e.preventDefault();
+                const $row = $(this).closest('tr');
+                const isQuiltt = $row.data('is-quiltt') == 1;
+                
+                // Don't allow deleting Quiltt-linked accounts
+                if (isQuiltt) {
+                    return;
+                }
+                
                 const accountId = $(this).data('account-id');
                 $('#delete-credit-account-modal').data('account-id', accountId).show();
             });
@@ -508,101 +542,6 @@
                         $('#loading-screen').hide();
                         $('#delete-credit-account-modal').hide();
                         alert('Error deleting credit account.');
-                    }
-                });
-            });
-        });
-
-        $(function() {
-            const $creditTableBody = $('.credit-accounts-table tbody');
-
-            // Inline edit for credit accounts
-            $creditTableBody.on('click', 'td:not(.credit-account-action-cell)', function() {
-                const $td = $(this);
-                const $tr = $td.closest('tr');
-                const accountId = $tr.find('.delete-credit-account-btn').data('account-id');
-                if (!accountId) return;
-
-                // Determine column
-                const colIndex = $td.index();
-                let field, inputType, inputValue;
-                if (colIndex === 0) {
-                    field = 'name';
-                    inputType = 'text';
-                    inputValue = $td.text().trim();
-                } else if (colIndex === 1) {
-                    field = 'interest_rate';
-                    inputType = 'number';
-                    inputValue = $td.text().replace('%', '').trim();
-                } else if (colIndex === 2) {
-                    field = 'type';
-                    inputType = 'select';
-                    inputValue = $td.text().trim();
-                } else {
-                    return;
-                }
-
-                // Prevent multiple inputs
-                if ($td.find('input').length || $td.find('select').length) return;
-
-                let $input;
-                if (inputType === 'select') {
-                    $input = $('<select>')
-                        .addClass('credit-account-edit-input')
-                        .append('<option value="card">Card</option>')
-                        .append('<option value="line">Line</option>');
-                    $input.val(inputValue.toLowerCase());
-                } else {
-                    $input = $('<input>')
-                        .attr('type', inputType)
-                        .addClass('credit-account-edit-input')
-                        .val(inputValue);
-                    if (field === 'interest_rate') {
-                        $input.attr('min', '0').attr('max', '100').attr('step', '0.01');
-                    }
-                }
-
-                $td.empty().append($input);
-                $input.focus();
-
-                // Submit on blur or Enter
-                $input.on('blur keydown', function(e) {
-                    if (e.type === 'blur' || (e.type === 'keydown' && e.key === 'Enter')) {
-                        let newValue = $input.val().trim();
-                        if (inputType === 'select') {
-                            newValue = $input.val();
-                        }
-                        if (!newValue) {
-                            $td.text(inputValue);
-                            return;
-                        }
-                        $.ajax({
-                            url: '/update-credit-account',
-                            method: 'POST',
-                            contentType: 'application/json',
-                            data: JSON.stringify({
-                                id: accountId,
-                                field: field,
-                                value: newValue
-                            }),
-                            success: function(response) {
-                                if (response.status === 'success') {
-                                    if (field === 'interest_rate') {
-                                        $td.text(newValue + '%');
-                                    } else if (field === 'type') {
-                                        $td.text(newValue.charAt(0).toUpperCase() + newValue.slice(1));
-                                    } else {
-                                        $td.text(newValue);
-                                    }
-                                    location.reload();
-                                } else {
-                                    $td.text(inputValue);
-                                }
-                            },
-                            error: function() {
-                                $td.text(inputValue);
-                            }
-                        });
                     }
                 });
             });

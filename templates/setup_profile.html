@@ -408,23 +408,28 @@
                             $('#bank-connection-modal-setup').hide();
                         },
                         onExitSuccess: function(metadata) {
-                            // Bank connected successfully - first sync the profile, then show account selection
+                            // Bank connected successfully - show loading, sync profile and wait for liability data flush
+                            $('#setup-profile-loading-modal').show();
+                            
                             $.ajax({
                                 url: '/quiltt/sync-profile',
                                 method: 'POST',
                                 contentType: 'application/json',
                                 success: function(response) {
                                     if (response.status === 'success') {
-                                        // Profile synced - show account selection immediately (balances may still be 0)
+                                        // Wait for Redis flush to MySQL to complete (liability data)
                                         setTimeout(function() {
+                                            $('#setup-profile-loading-modal').hide();
                                             loadAccountSelection();
-                                        }, 500);
+                                        }, 2000);
                                     } else {
+                                        $('#setup-profile-loading-modal').hide();
                                         alert('Connection successful but sync failed. Continuing with manual setup.');
                                         $('#name-modal-setup').show();
                                     }
                                 },
                                 error: function() {
+                                    $('#setup-profile-loading-modal').hide();
                                     alert('Connection successful but sync failed. Continuing with manual setup.');
                                     $('#name-modal-setup').show();
                                 }

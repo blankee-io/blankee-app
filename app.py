@@ -33,6 +33,7 @@ from quiltt_redis import (
     delete_quiltt_connection, get_quiltt_transactions, upsert_quiltt_transaction
 )
 from bucket_utils import process_manual_entry_with_bucket
+from push_notifications import apns_enabled, send_apns_notification
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
@@ -10443,6 +10444,45 @@ def profile():
         connector_id=connector_id
     )
 
+@app.route('/api/notifications/register', methods=['POST'])
+@login_required
+def register_device_token():
+    """Register or update a device token for the current user."""
+    payload = request.get_json(silent=True) or {}
+    device_token = (payload.get('deviceToken') or payload.get('device_token') or '').strip()
+    platform = (payload.get('platform') or 'ios').lower()
+    device_info = payload.get('deviceInfo') or payload.get('device_info')
+
+    if not device_token:
+        return jsonify({'success': False, 'error': 'deviceToken required'}), 400
+
+    try:
+        upsert_device_token(current_user.id, device_token, platform, device_info)
+    except Exception as exc:
+        app.logger.error(f"Failed to register device token for user {current_user.id}: {exc}")
+        return jsonify({'success': False, 'error': 'server_error'}), 500
+
+    return jsonify({'success': True})
+
+
+@app.route('/api/notifications/unregister', methods=['POST'])
+@login_required
+def unregister_device_token():
+    """Remove a device token for the current user."""
+    payload = request.get_json(silent=True) or {}
+    device_token = (payload.get('deviceToken') or payload.get('device_token') or '').strip()
+
+    if not device_token:
+        return jsonify({'success': False, 'error': 'deviceToken required'}), 400
+
+    try:
+        remove_device_token(current_user.id, device_token)
+    except Exception as exc:
+        app.logger.error(f"Failed to unregister device token for user {current_user.id}: {exc}")
+        return jsonify({'success': False, 'error': 'server_error'}), 500
+
+    return jsonify({'success': True})
+
 @app.route('/notifications', methods=['GET'])
 @login_required
 def notifications():
@@ -13637,6 +13677,73 @@ def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
                 # Create new entry
                 _update_entry_in_redis('c_expense_entries', current_user.id, category_id, date_val, float(value), bud_item_id=bud_item_id)
 
+def upsert_device_token(user_id, device_token, platform='ios', device_info=None):
+    """Store or update a device token for push notifications."""
+    serialized_info = None
+    if device_info is not None:
+        try:
+            serialized_info = json.dumps(device_info)
+        except TypeError:
+            serialized_info = None
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute(
+            """
+            INSERT INTO device_tokens (user_id, device_token, platform, device_info)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                user_id = VALUES(user_id),
+                platform = VALUES(platform),
+                device_info = VALUES(device_info),
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, device_token, platform, serialized_info)
+        )
+        conn.commit()
+        cursor.close()
+
+
+def remove_device_token(user_id, device_token):
+    """Remove a device token for a user."""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM device_tokens
+            WHERE device_token = %s AND user_id = %s
+            """,
+            (device_token, user_id)
+        )
+        conn.commit()
+        cursor.close()
+
+
+def get_user_device_tokens(user_id, platform=None):
+    """Fetch all device tokens for a user (optionally filtered by platform)."""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        if platform:
+            cursor.execute(
+                """
+                SELECT device_token, platform
+                FROM device_tokens
+                WHERE user_id = %s AND platform = %s
+                """,
+                (user_id, platform)
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT device_token, platform
+                FROM device_tokens
+                WHERE user_id = %s
+                """,
+                (user_id,)
+            )
+        tokens = cursor.fetchall()
+        cursor.close()
+        return tokens or []
+
 def add_notification(user_id, message, notification_date=None):
     """
     Create a new notification for a user and optionally send via email.
@@ -13651,6 +13758,8 @@ def add_notification(user_id, message, notification_date=None):
     """
     if notification_date is None:
         notification_date = datetime.now()
+    user = None
+    unread_count = 0
     
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -13667,6 +13776,18 @@ def add_notification(user_id, message, notification_date=None):
             WHERE id = %s
         """, (user_id,))
         user = cursor.fetchone()
+
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM notifications
+            WHERE user_id = %s AND is_read = 0
+            """,
+            (user_id,)
+        )
+        unread_row = cursor.fetchone() or {}
+        unread_count = unread_row.get('total', 0)
         
         conn.commit()
         cursor.close()
@@ -13679,6 +13800,29 @@ def add_notification(user_id, message, notification_date=None):
             send_notification_email(user['email'], user_name, message, notification_date)
         except Exception as e:
             app.logger.error(f"Failed to send notification email to user {user_id}: {str(e)}")
+
+    # Send APNs push notification if configured
+    if apns_enabled():
+        try:
+            tokens = get_user_device_tokens(user_id, platform='ios')
+            if tokens:
+                for token_row in tokens:
+                    token_value = token_row.get('device_token')
+                    if not token_value:
+                        continue
+                    result = send_apns_notification(
+                        device_token=token_value,
+                        title="Blankee",
+                        body=message,
+                        badge=unread_count
+                    )
+                    if not result.get('sent') and result.get('reason') == 'invalid_token':
+                        try:
+                            remove_device_token(user_id, token_value)
+                        except Exception as cleanup_err:
+                            app.logger.warning(f"Failed to prune invalid token for user {user_id}: {cleanup_err}")
+        except Exception as push_err:
+            app.logger.warning(f"APNs push failed for user {user_id}: {push_err}")
     
     return notification_id
 
@@ -16574,6 +16718,44 @@ def quiltt_delete():
             app.logger.error(f"DELETE FAILED - Connection status is '{connection.get('status')}', not DISCONNECTED")
             return jsonify({'status': 'error', 'message': 'Can only delete disconnected connections'}), 400
         
+        # Before deleting, get all accounts for this connection to update credit accounts
+        quiltt_accounts = get_quiltt_accounts(current_user.id)
+        connection_db_id = connection.get('id')  # MySQL ID
+        accounts_to_update = []
+        
+        for acc in quiltt_accounts:
+            if acc.get('connection_id') == connection_db_id and acc.get('account_type', '').upper() == 'CREDIT':
+                account_mask = acc.get('mask')
+                if account_mask:
+                    accounts_to_update.append(account_mask)
+        
+        # Set is_quiltt=0 for all credit accounts that match these masks
+        if accounts_to_update:
+            redis_key = f"credit_accounts:v1:{current_user.id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            credit_accounts = json.loads(cached) if cached else []
+            
+            updated_count = 0
+            for i, ca in enumerate(credit_accounts):
+                if ca.get('mask') in accounts_to_update:
+                    credit_accounts[i]['is_quiltt'] = 0
+                    updated_count += 1
+            
+            if updated_count > 0:
+                # Save back to Redis
+                _redis_client.setex(
+                    redis_key,
+                    PERSISTENT_CACHE_TTL,
+                    json.dumps(credit_accounts, cls=DecimalEncoder)
+                )
+                
+                # Mark as dirty
+                dirty_key = f"dirty_tables:{current_user.id}"
+                _redis_client.sadd(dirty_key, 'credit_accounts')
+                _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                
+                app.logger.info(f"Set is_quiltt=0 for {updated_count} credit accounts after deleting connection {connection_id}")
+        
         # Delete using Redis-first operation
         success = delete_quiltt_connection(connection_id, current_user.id)
         
@@ -16664,9 +16846,43 @@ def quiltt_sync_profile():
                 account_id = account.get('id', '')
                 account_name = account.get('name', 'Account')
                 
+                # Extract Finicity liability data if present
+                liability_data = {}
+                remote_data = account.get('remoteData', {})
+                
+                # Debug: Log remoteData structure to see what's actually returned
+                app.logger.info(f"Account {account_id} ({account_name}) remoteData: {remote_data}")
+                
+                if remote_data:
+                    finicity = remote_data.get('finicity', {})
+                    if finicity:
+                        app.logger.info(f"Account {account_id} finicity data: {finicity}")
+                        account_data = finicity.get('account', {})
+                        if account_data:
+                            response = account_data.get('response', {})
+                            if response:
+                                detail = response.get('detail', {})
+                                if detail:
+                                    app.logger.info(f"Account {account_id} detail fields: {detail}")
+                                    # Map Finicity fields to our database columns
+                                    liability_data = {
+                                        'interest_rate': detail.get('interestRate') or detail.get('originalInterestRate'),
+                                        'origination_principal': detail.get('initialMlAmount'),
+                                        'origination_date': detail.get('openDate'),
+                                        'maturity_date': detail.get('maturityDate'),
+                                        'loan_term': detail.get('termOfMl'),
+                                        'last_payment_date': detail.get('lastPaymentDate'),
+                                        'last_payment_amount': detail.get('lastPaymentAmount'),
+                                        'next_payment_due_date': detail.get('nextPaymentDate'),
+                                        'minimum_payment_amount': None,  # Not available in RemoteDataFinicityDetail
+                                        'next_payment_minimum_amount': None,  # Not available in RemoteDataFinicityDetail
+                                        'payment_frequency': None,  # Not directly available in Finicity detail
+                                        'account_state': None  # Not directly available in Finicity detail
+                                    }
+                                    app.logger.info(f"Account {account_id} extracted liability_data: {liability_data}")
                 
                 # Upsert account to Redis + MySQL
-                upsert_quiltt_account({
+                account_db_data = {
                     'connection_id': connection_db_id,
                     'account_id': account_id,
                     'account_name': account_name,
@@ -16676,8 +16892,220 @@ def quiltt_sync_profile():
                     'current_balance': current_balance,
                     'available_balance': available_balance,
                     'is_active': None,
-                    'sync_transactions': None
-                }, current_user.id)
+                    'sync_transactions': None,
+                    **liability_data  # Merge in liability fields
+                }
+                upsert_quiltt_account(account_db_data, current_user.id)
+                
+                # If this is a credit account AND it's active with sync enabled, create a credit account in the budget system
+                # Check the account settings from Redis after upsert
+                redis_key = f"quiltt_accounts:v1:{current_user.id}"
+                cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                quiltt_accounts = json.loads(cached) if cached else []
+                
+                # Find this account in Redis to check its settings
+                quiltt_account = None
+                for qa in quiltt_accounts:
+                    if qa.get('account_id') == account_id:
+                        quiltt_account = qa
+                        break
+                
+                # Only create credit account if it's active and sync is enabled
+                if (account_type.upper() == 'CREDIT' and 
+                    quiltt_account and 
+                    quiltt_account.get('is_active') == 1 and 
+                    quiltt_account.get('sync_transactions') == 1):
+                    # Convert balance to positive if negative
+                    starting_balance = abs(float(current_balance)) if current_balance else 0.0
+                    
+                    # Get mask for account identification
+                    account_mask = account.get('mask', '')
+                    
+                    # Get interest rate from liability data
+                    interest_rate = 0.0
+                    if liability_data.get('interest_rate'):
+                        try:
+                            interest_rate = float(liability_data['interest_rate'])
+                        except (ValueError, TypeError):
+                            interest_rate = 0.0
+                    
+                    # Check if credit account already exists for this Quiltt account
+                    redis_key = f"credit_accounts:v1:{current_user.id}"
+                    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                    credit_accounts = json.loads(cached) if cached else []
+                    
+                    # Look for existing credit account with matching mask (or name if no mask)
+                    existing_account = None
+                    for i, acc in enumerate(credit_accounts):
+                        if account_mask and acc.get('mask') == account_mask:
+                            existing_account = acc
+                            # If found existing account with matching mask, set is_quiltt=1
+                            credit_accounts[i]['is_quiltt'] = 1
+                            
+                            # Save back to Redis
+                            _redis_client.setex(
+                                redis_key,
+                                PERSISTENT_CACHE_TTL,
+                                json.dumps(credit_accounts, cls=DecimalEncoder)
+                            )
+                            
+                            # Mark as dirty
+                            dirty_key = f"dirty_tables:{current_user.id}"
+                            _redis_client.sadd(dirty_key, 'credit_accounts')
+                            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                            
+                            app.logger.info(f"Found existing credit account with mask {account_mask}, setting is_quiltt=1")
+                            break
+                        elif not account_mask and acc.get('name') == account_name:
+                            existing_account = acc
+                            break
+                    
+                    # Only create if doesn't exist
+                    if not existing_account:
+                        app.logger.info(f"Creating credit account for Quiltt account: {account_name} (mask: {account_mask}) with balance ${starting_balance}")
+                        
+                        # Determine if it's a card or line of credit based on name/type
+                        is_card = 1 if 'card' in account_name.lower() else 0
+                        is_line = 1 if 'line' in account_name.lower() else 0
+                        
+                        # Add credit account to Redis
+                        account_data = {
+                            'name': account_name,
+                            'mask': account_mask,
+                            'interest_rate': interest_rate,
+                            'is_card': is_card,
+                            'is_line': is_line,
+                            'starting_balance': starting_balance,
+                            'is_quiltt': 1
+                        }
+                        
+                        temp_account_id = _add_credit_account_to_redis(current_user.id, account_data)
+                        
+                        # Add default categories for the credit account
+                        if temp_account_id:
+                            # "Interest Charge" category
+                            _add_category_to_redis('c_expense_categories', current_user.id, {
+                                'account_id': temp_account_id,
+                                'name': 'Interest Charge',
+                                'display_order': -1,
+                                'group_id': None,
+                                'is_recurring': 0,
+                                'no_end_date': 0,
+                                'hidden': 0,
+                                'is_bud': 0,
+                                'is_interest': 1,
+                                'is_auto_adjustment': 0
+                            })
+                            
+                            # "Auto Adjustments" category
+                            _add_category_to_redis('c_expense_categories', current_user.id, {
+                                'account_id': temp_account_id,
+                                'name': 'Auto Adjustments',
+                                'display_order': 0,
+                                'group_id': None,
+                                'is_recurring': 0,
+                                'no_end_date': 0,
+                                'hidden': 0,
+                                'is_bud': 0,
+                                'is_interest': 0,
+                                'is_auto_adjustment': 1
+                            })
+                            
+                            # "Starting Balance" category
+                            starting_balance_cat_id = _add_category_to_redis('c_expense_categories', current_user.id, {
+                                'account_id': temp_account_id,
+                                'name': 'Starting Balance',
+                                'display_order': 1,
+                                'group_id': None,
+                                'is_recurring': 0,
+                                'no_end_date': 0,
+                                'hidden': 0,
+                                'is_bud': 0,
+                                'is_interest': 0,
+                                'is_auto_adjustment': 0
+                            })
+                            
+                            # Create matching expense_categories record for payment
+                            payment_category_name = f"{account_name} payment"
+                            
+                            # Get max display_order for expense_categories
+                            expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+                            if expense_categories:
+                                max_display_order = max([cat.get('display_order', 0) for cat in expense_categories])
+                            else:
+                                max_display_order = 0
+                            new_display_order = max_display_order + 1
+                            
+                            payment_category_id = _add_category_to_redis('expense_categories', current_user.id, {
+                                'user_id': current_user.id,
+                                'name': payment_category_name,
+                                'display_order': new_display_order,
+                                'group_id': None,
+                                'is_recurring': 0,
+                                'is_auto_adjustment': 0,
+                                'no_end_date': 0,
+                                'hidden': 0,
+                                'is_bud': 0,
+                                'is_credit_account': 1
+                            })
+                            
+                            # Create starting balance entry if starting_balance > 0
+                            if starting_balance and float(starting_balance) > 0.0:
+                                today_str = date.today().strftime('%Y-%m-%d')
+                                
+                                # Add starting balance entry to Redis
+                                try:
+                                    redis_key_entries = f"c_expense_entries:v1:{current_user.id}"
+                                    cached_entries = _redis_client.get(redis_key_entries)
+                                    entries = json.loads(cached_entries) if cached_entries else []
+                                    
+                                    # Generate temp ID
+                                    existing_ids = [int(e.get('id', 0)) for e in entries]
+                                    min_id = min(existing_ids) if existing_ids else 0
+                                    entry_id = min_id - 1 if min_id <= 0 else -1
+                                    
+                                    # Add entry
+                                    entries.append({
+                                        'id': entry_id,
+                                        'category_id': starting_balance_cat_id,
+                                        'date': today_str,
+                                        'amount': float(starting_balance),
+                                        'recurring_id': None,
+                                        'is_bucket': 0,
+                                        'original_amount': float(starting_balance),
+                                        'processed': 0,
+                                        'bud_item_id': None
+                                    })
+                                    
+                                    # Save to Redis
+                                    _redis_client.setex(
+                                        redis_key_entries,
+                                        PERSISTENT_CACHE_TTL,
+                                        json.dumps(entries, cls=DecimalEncoder)
+                                    )
+                                    
+                                    # Mark dirty
+                                    dirty_key_entries = f"dirty_tables:{current_user.id}"
+                                    _redis_client.sadd(dirty_key_entries, 'c_expense_entries')
+                                    _redis_client.expire(dirty_key_entries, PERSISTENT_CACHE_TTL)
+                                    
+                                    app.logger.info(f"Created starting balance entry for credit account {account_name}: ${starting_balance}")
+                                    
+                                    # Force immediate flush to MySQL so balance records can be created
+                                    try:
+                                        from redis_manager import flush_dirty_tables_for_user
+                                        flush_dirty_tables_for_user(current_user.id)
+                                    except Exception as flush_err:
+                                        app.logger.error(f"Error during forced flush for Quiltt credit account: {flush_err}")
+                                    
+                                    # Recalculate CA balances from scratch
+                                    try:
+                                        save_ca_daily_balance()
+                                    except Exception as balance_err:
+                                        app.logger.error(f"Error recalculating CA balances for Quiltt credit account: {balance_err}")
+                                    
+                                except Exception as entry_err:
+                                    app.logger.error(f"Error creating starting balance entry: {entry_err}")
         
         
         # Note: Transactions will not be synced automatically during initial setup
@@ -17298,6 +17726,37 @@ def quiltt_toggle_sync():
                         target_account = acc
                         break
                 
+                # If this is a credit account, set is_quiltt=1 on the credit account
+                if target_account and target_account.get('account_type', '').upper() == 'CREDIT':
+                    account_mask = target_account.get('mask')
+                    if account_mask:
+                        # Find and update the credit account
+                        redis_key = f"credit_accounts:v1:{current_user.id}"
+                        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                        credit_accounts = json.loads(cached) if cached else []
+                        
+                        updated = False
+                        for i, ca in enumerate(credit_accounts):
+                            if ca.get('mask') == account_mask:
+                                credit_accounts[i]['is_quiltt'] = 1
+                                updated = True
+                                break
+                        
+                        if updated:
+                            # Save back to Redis
+                            _redis_client.setex(
+                                redis_key,
+                                PERSISTENT_CACHE_TTL,
+                                json.dumps(credit_accounts, cls=DecimalEncoder)
+                            )
+                            
+                            # Mark as dirty
+                            dirty_key = f"dirty_tables:{current_user.id}"
+                            _redis_client.sadd(dirty_key, 'credit_accounts')
+                            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                            
+                            app.logger.info(f"Set is_quiltt=1 for credit account with mask {account_mask} (toggle-sync enable)")
+                
                 
                 # Resync transactions for this specific account only
                 try:
@@ -17315,9 +17774,9 @@ def quiltt_toggle_sync():
                         current_balance = target_account.get('current_balance', 0)
                         
                         
-                        # Check if it's a checking account (depository type with "checking" in name)
-                        if account_type == 'depository' and 'checking' in account_name and current_balance:
-                            pass
+                        # Check if it's a depository account (checking/savings) with a balance
+                        if account_type == 'depository' and current_balance:
+                            app.logger.info(f"[AUTO-ADJUST] Creating auto-adjustment for depository account '{account_name}' with balance {current_balance}")
                             auto_success, auto_msg = _create_auto_adjustment_for_bank_balance(
                                 current_user.id, 
                                 current_balance,
@@ -17325,8 +17784,9 @@ def quiltt_toggle_sync():
                             )
                             if auto_success:
                                 auto_adjustment_msg = f" | {auto_msg}"
+                                app.logger.info(f"[AUTO-ADJUST] Success: {auto_msg}")
                             else:
-                                pass
+                                app.logger.warning(f"[AUTO-ADJUST] Failed: {auto_msg}")
                         else:
                             pass
                     
@@ -17364,6 +17824,45 @@ def quiltt_toggle_sync():
             )
             
             if success_sync and success_active:
+                # Get the Quiltt account to find its mask and type
+                quiltt_accounts = get_quiltt_accounts(current_user.id)
+                quiltt_account = None
+                for qa in quiltt_accounts:
+                    if qa.get('account_id') == account_id:
+                        quiltt_account = qa
+                        break
+                
+                # If this is a credit account, set is_quiltt=0 on the credit account
+                if quiltt_account and quiltt_account.get('account_type', '').upper() == 'CREDIT':
+                    account_mask = quiltt_account.get('mask')
+                    if account_mask:
+                        # Find and update the credit account
+                        redis_key = f"credit_accounts:v1:{current_user.id}"
+                        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                        credit_accounts = json.loads(cached) if cached else []
+                        
+                        updated = False
+                        for i, ca in enumerate(credit_accounts):
+                            if ca.get('mask') == account_mask:
+                                credit_accounts[i]['is_quiltt'] = 0
+                                updated = True
+                                break
+                        
+                        if updated:
+                            # Save back to Redis
+                            _redis_client.setex(
+                                redis_key,
+                                PERSISTENT_CACHE_TTL,
+                                json.dumps(credit_accounts, cls=DecimalEncoder)
+                            )
+                            
+                            # Mark as dirty
+                            dirty_key = f"dirty_tables:{current_user.id}"
+                            _redis_client.sadd(dirty_key, 'credit_accounts')
+                            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                            
+                            app.logger.info(f"Set is_quiltt=0 for credit account with mask {account_mask} (toggle-sync)")
+                
                 # Delete all transactions for this account from Redis and MySQL
                 try:
                     pass
@@ -17409,6 +17908,46 @@ def quiltt_update_account():
         if not success:
             app.logger.error(f"Failed to update account {account_id}")
             return jsonify({'status': 'error', 'message': 'Failed to update account'}), 500
+        
+        # If account is being toggled off (is_active=0 or sync_transactions=0), update credit account is_quiltt to 0
+        if is_active == 0 or sync_transactions == 0:
+            # Get the Quiltt account to find its mask
+            quiltt_accounts = get_quiltt_accounts(current_user.id)
+            quiltt_account = None
+            for qa in quiltt_accounts:
+                if qa.get('account_id') == account_id:
+                    quiltt_account = qa
+                    break
+            
+            if quiltt_account and quiltt_account.get('account_type', '').upper() == 'CREDIT':
+                account_mask = quiltt_account.get('mask')
+                if account_mask:
+                    # Find and update the credit account
+                    redis_key = f"credit_accounts:v1:{current_user.id}"
+                    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                    credit_accounts = json.loads(cached) if cached else []
+                    
+                    updated = False
+                    for i, ca in enumerate(credit_accounts):
+                        if ca.get('mask') == account_mask:
+                            credit_accounts[i]['is_quiltt'] = 0
+                            updated = True
+                            break
+                    
+                    if updated:
+                        # Save back to Redis
+                        _redis_client.setex(
+                            redis_key,
+                            PERSISTENT_CACHE_TTL,
+                            json.dumps(credit_accounts, cls=DecimalEncoder)
+                        )
+                        
+                        # Mark as dirty
+                        dirty_key = f"dirty_tables:{current_user.id}"
+                        _redis_client.sadd(dirty_key, 'credit_accounts')
+                        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                        
+                        app.logger.info(f"Set is_quiltt=0 for credit account with mask {account_mask}")
         
         return jsonify({'status': 'success'})
         
@@ -17466,14 +18005,15 @@ def quiltt_auto_adjust_checking():
         adjustments_made = []
         
         for account in accounts:
-            # Only process active checking accounts (depository type with "checking" in name)
+            # Only process active depository accounts (checking/savings)
             is_active = account.get('is_active', 0)
+            sync_transactions = account.get('sync_transactions', 0)
             account_type = account.get('account_type', '').lower()
             account_name = account.get('account_name', '').lower()
             current_balance = account.get('current_balance', 0)
             
-            if is_active and account_type == 'depository' and 'checking' in account_name and current_balance:
-                pass
+            if is_active and sync_transactions and account_type == 'depository' and current_balance:
+                app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing depository account '{account.get('account_name')}' with balance {current_balance}")
                 
                 success, message = _create_auto_adjustment_for_bank_balance(
                     current_user.id,
@@ -17487,8 +18027,9 @@ def quiltt_auto_adjust_checking():
                         'balance': float(current_balance),
                         'message': message
                     })
+                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Success for {account.get('account_name')}: {message}")
                 else:
-                    pass
+                    app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed for {account.get('account_name')}: {message}")
         
         if adjustments_made:
             return jsonify({
