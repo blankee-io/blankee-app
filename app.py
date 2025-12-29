@@ -17630,9 +17630,9 @@ def quiltt_toggle_sync():
                         current_balance = target_account.get('current_balance', 0)
                         
                         
-                        # Check if it's a checking account (depository type with "checking" in name)
-                        if account_type == 'depository' and 'checking' in account_name and current_balance:
-                            pass
+                        # Check if it's a depository account (checking/savings) with a balance
+                        if account_type == 'depository' and current_balance:
+                            app.logger.info(f"[AUTO-ADJUST] Creating auto-adjustment for depository account '{account_name}' with balance {current_balance}")
                             auto_success, auto_msg = _create_auto_adjustment_for_bank_balance(
                                 current_user.id, 
                                 current_balance,
@@ -17640,8 +17640,9 @@ def quiltt_toggle_sync():
                             )
                             if auto_success:
                                 auto_adjustment_msg = f" | {auto_msg}"
+                                app.logger.info(f"[AUTO-ADJUST] Success: {auto_msg}")
                             else:
-                                pass
+                                app.logger.warning(f"[AUTO-ADJUST] Failed: {auto_msg}")
                         else:
                             pass
                     
@@ -17860,14 +17861,15 @@ def quiltt_auto_adjust_checking():
         adjustments_made = []
         
         for account in accounts:
-            # Only process active checking accounts (depository type with "checking" in name)
+            # Only process active depository accounts (checking/savings)
             is_active = account.get('is_active', 0)
+            sync_transactions = account.get('sync_transactions', 0)
             account_type = account.get('account_type', '').lower()
             account_name = account.get('account_name', '').lower()
             current_balance = account.get('current_balance', 0)
             
-            if is_active and account_type == 'depository' and 'checking' in account_name and current_balance:
-                pass
+            if is_active and sync_transactions and account_type == 'depository' and current_balance:
+                app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing depository account '{account.get('account_name')}' with balance {current_balance}")
                 
                 success, message = _create_auto_adjustment_for_bank_balance(
                     current_user.id,
@@ -17881,8 +17883,9 @@ def quiltt_auto_adjust_checking():
                         'balance': float(current_balance),
                         'message': message
                     })
+                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Success for {account.get('account_name')}: {message}")
                 else:
-                    pass
+                    app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed for {account.get('account_name')}: {message}")
         
         if adjustments_made:
             return jsonify({
