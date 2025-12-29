@@ -1,5 +1,20 @@
 import logging
 import os
+import collections
+
+# Compatibility shim for Python 3.10+ where Iterable/Mapping moved to collections.abc
+try:
+    from collections.abc import Iterable, Mapping, MutableSet, MutableMapping
+    if not hasattr(collections, "Iterable"):
+        collections.Iterable = Iterable
+    if not hasattr(collections, "Mapping"):
+        collections.Mapping = Mapping
+    if not hasattr(collections, "MutableSet"):
+        collections.MutableSet = MutableSet
+    if not hasattr(collections, "MutableMapping"):
+        collections.MutableMapping = MutableMapping
+except Exception:
+    pass
 
 from apns2.client import APNsClient
 from apns2.credentials import TokenCredentials
