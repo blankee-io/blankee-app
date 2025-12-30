@@ -73,6 +73,9 @@ def apns_enabled():
 
 def send_apns_notification(device_token, title, body, badge=None, sound="default", custom=None):
     """Send a push notification via APNs.
+    
+    Automatically strips HTML tags from body and adds mutable-content flag
+    for iOS Notification Service Extension processing.
 
     Returns a dict with keys:
     - sent: bool
@@ -81,12 +84,30 @@ def send_apns_notification(device_token, title, body, badge=None, sound="default
     client = _get_client()
     if not client or not _apns_topic:
         return {"sent": False, "reason": "apns_not_configured"}
+    
+    # Strip HTML tags from body for cleaner notifications
+    import re
+    clean_body = body
+    if body:
+        # Remove HTML tags
+        clean_body = re.sub(r'<[^>]+>', '', body)
+        # Decode HTML entities
+        clean_body = clean_body.replace('&nbsp;', ' ')
+        clean_body = clean_body.replace('&amp;', '&')
+        clean_body = clean_body.replace('&lt;', '<')
+        clean_body = clean_body.replace('&gt;', '>')
+        clean_body = clean_body.replace('&quot;', '"')
+        clean_body = clean_body.replace('&#39;', "'")
+        clean_body = clean_body.replace('&apos;', "'")
+        # Remove extra whitespace
+        clean_body = ' '.join(clean_body.split()).strip()
 
     payload = Payload(
-        alert={"title": title, "body": body},
+        alert={"title": title, "body": clean_body},
         badge=badge,
         sound=sound,
-        custom=custom or {}
+        custom=custom or {},
+        mutable_content=True  # Enable iOS Notification Service Extension
     )
 
     try:
