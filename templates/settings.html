@@ -66,6 +66,20 @@
                                     </button>
                                 </div>
                             </form>
+
+                            <!-- Starting Savings Form -->
+                            <form id="starting-savings-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="starting_savings">Start Savings:</label>
+                                    <div class="currency-input-container">
+                                        <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                                        <input type="number" name="starting_savings" id="starting_savings" class="login-input" value="{{ starting_savings }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
+                                    </div>
+                                    <button type="submit" class="submit-button">
+                                        <i id="starting-savings-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
             
                             <!-- Balance Threshold Form -->
                             <form id="balance-threshold-form" class="profile-form">
@@ -135,6 +149,17 @@
         </div>
     </div>
 
+    <div id="starting-savings-modal" class="modal" style="display:none;">
+        <div id="starting-savings-modal-content" class="modal-content">
+            <span class="close-modal" id="close-starting-savings-modal">&times;</span>
+            <h2>Change Starting Savings</h2>
+            <p>
+                Changing the starting savings will update <strong>all savings calculations</strong> because it is the savings balance that you started with.
+            </p>
+            <button id="confirm-starting-savings-change" class="submit-button">Continue</button>
+        </div>
+    </div>
+
     <!-- Include the recurring modal template -->
     {% include 'loading_modals.html' %}
 
@@ -193,6 +218,37 @@
 
             // Format to show .00 on blur
             $('#starting_balance').on('blur', function() {
+                if (this.value && !isNaN(this.value)) {
+                    this.value = parseFloat(this.value).toFixed(2);
+                }
+            });
+
+            // Starting Savings input handling
+            const startingSavings = $('#starting_savings');
+            if (startingSavings.val() && !isNaN(startingSavings.val())) {
+                startingSavings.val(parseFloat(startingSavings.val()).toFixed(2));
+            }
+
+            $('#starting_savings').on('input', function() {
+                $('#starting-savings-submit-icon').removeClass('fa-times').addClass('fa-check');
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                // Limit to 2 decimal places
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+
+            // Format to show .00 on blur
+            $('#starting_savings').on('blur', function() {
                 if (this.value && !isNaN(this.value)) {
                     this.value = parseFloat(this.value).toFixed(2);
                 }
@@ -441,6 +497,62 @@
                     $(this).css('display', 'none');
                     $('#starting_balance').val(originalStartingBalance); // Reset immediately
                     pendingStartingBalance = null;
+                }
+            });
+
+            // Starting Savings form handling
+            let originalStartingSavings = $('#starting_savings').val();
+            let pendingStartingSavings = null;
+
+            $('#starting_savings').on('focus', function() {
+                originalStartingSavings = $(this).val();
+            });
+
+            $('#starting-savings-form').on('submit', function(event) {
+                event.preventDefault();
+                pendingStartingSavings = $('#starting_savings').val();
+                $('#starting-savings-modal').css('display', 'flex');
+            });
+
+            $('#close-starting-savings-modal').on('click', function() {
+                $('#starting-savings-modal').css('display', 'none');
+                $('#starting_savings').val(originalStartingSavings);
+                pendingStartingSavings = null;
+            });
+
+            $('#confirm-starting-savings-change').on('click', function() {
+                if (pendingStartingSavings !== null) {
+                    $.ajax({
+                        url: "{{ url_for('update_starting_savings') }}",
+                        method: "POST",
+                        data: { starting_savings: pendingStartingSavings },
+                        success: function(response) {
+                            if (response.status === 'success') {
+                                showSuccessMessage('Starting savings updated successfully');
+                                saveDailyTotalsAndRemainders();
+                                originalStartingSavings = pendingStartingSavings;
+                            } else {
+                                alert('Error updating starting savings: ' + response.message);
+                                $('#starting_savings').val(originalStartingSavings);
+                            }
+                        },
+                        error: function() {
+                            alert('An error occurred while updating the starting savings.');
+                            $('#starting_savings').val(originalStartingSavings);
+                        },
+                        complete: function() {
+                            $('#starting-savings-modal').css('display', 'none');
+                            pendingStartingSavings = null;
+                        }
+                    });
+                }
+            });
+
+            $('#starting-savings-modal').on('click', function(event) {
+                if (event.target === this) {
+                    $(this).css('display', 'none');
+                    $('#starting_savings').val(originalStartingSavings);
+                    pendingStartingSavings = null;
                 }
             });
         });

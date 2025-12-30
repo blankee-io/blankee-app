@@ -10158,6 +10158,7 @@ html.modal-open {
 .summary-left-column {
     flex: 0 0 33%;
     max-width: 400px;
+    min-width: 280px;
 }
 
 .summary-right-column {
@@ -10173,6 +10174,7 @@ html.modal-open {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
     padding: 28px;
     text-align: center;
+    overflow: hidden;
 }
 
 .buffer-card-header {
@@ -10187,6 +10189,9 @@ html.modal-open {
     font-weight: 700;
     margin-bottom: 6px;
     line-height: 1.1;
+    white-space: nowrap;
+    overflow: visible;
+    position: relative;
 }
 
 .buffer-amount.positive {
@@ -10194,7 +10199,7 @@ html.modal-open {
 }
 
 .buffer-amount.negative {
-    color: #E45F1C;
+    color: #E45F1C !important;
 }
 
 .buffer-subtitle {
@@ -10220,6 +10225,9 @@ html.modal-open {
     font-weight: 700;
     margin-bottom: 6px;
     line-height: 1.1;
+    white-space: nowrap;
+    overflow: visible;
+    position: relative;
 }
 
 .projected-amount.positive {
@@ -10829,14 +10837,6 @@ html.modal-open {
         padding: 24px 20px;
     }
     
-    .buffer-amount {
-        font-size: 42px;
-    }
-    
-    .projected-amount {
-        font-size: 34px;
-    }
-    
     .payday-info {
         flex-direction: column;
         gap: 10px;
@@ -10853,14 +10853,6 @@ html.modal-open {
     .buffer-card {
         padding: 20px 16px;
         border-radius: 12px;
-    }
-    
-    .buffer-amount {
-        font-size: 36px;
-    }
-    
-    .projected-amount {
-        font-size: 28px;
     }
     
     .summary-row {

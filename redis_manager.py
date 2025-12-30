@@ -73,6 +73,7 @@ USER_TABLES = [
     'totals_remainders_d',
     'totals_remainders_m',
     'savings_entries',
+    'savings_adjustments',  # Bank balance adjustments for savings
     'credit_accounts',
     'c_expense_categories',
     'c_expense_entries',
@@ -491,6 +492,7 @@ def _dehydrate_user_data(user_id: int):
                 'totals_remainders_d', 
                 'totals_remainders_m',
                 'savings_entries',
+                'savings_adjustments',  # Bank balance adjustments
                 'c_a_balances',
                 'c_a_balances_d',
                 'c_a_balances_m',
@@ -618,6 +620,7 @@ def _flush_redis_to_mysql():
             'totals_remainders_d', 
             'totals_remainders_m',
             'savings_entries',
+            'savings_adjustments',  # Bank balance adjustments for savings
             'credit_accounts',  # MUST flush FIRST - other tables depend on this for foreign keys
             'c_a_balances',
             'c_a_balances_d',
@@ -883,6 +886,35 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 conn.commit()
                 cursor.close()
                 logger.debug(f"[FLUSH] → savings_entries: {len(batch_data)} rows")
+                return len(batch_data)
+            
+            elif table == 'savings_adjustments':
+                # Savings adjustments table (bank balance sync)
+                # Allow multiple adjustments per date (no unique constraint on user_id+date)
+                
+                # First, delete all existing adjustments for this user
+                cursor.execute("DELETE FROM savings_adjustments WHERE user_id = %s", (user_id,))
+                
+                # Then insert all adjustments from Redis
+                batch_data = []
+                for row in rows:
+                    batch_data.append((
+                        user_id,
+                        row.get('date'),
+                        float(row.get('amount', 0)),
+                        row.get('description'),
+                        row.get('quiltt_account_id')
+                    ))
+                
+                if batch_data:
+                    cursor.executemany("""
+                        INSERT INTO savings_adjustments (user_id, date, amount, description, quiltt_account_id)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, batch_data)
+                
+                conn.commit()
+                cursor.close()
+                logger.debug(f"[FLUSH] → savings_adjustments: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table in ['c_a_balances', 'c_a_balances_d', 'c_a_balances_m']:

@@ -901,9 +901,8 @@
                     const balanceThreshold = $('#setup-profile-balance-threshold').val();
                     const startingSavings = $('#setup-profile-starting-savings').val();
 
-                    // Calculate the income_entry_date (for example, today minus one day)
+                    // Calculate the income_entry_date (today's date)
                     const startingBalanceDate = new Date();
-                    startingBalanceDate.setDate(startingBalanceDate.getDate() - 1);
                     // Format as YYYY-MM-DD using local time
                     const year = startingBalanceDate.getFullYear();
                     const month = String(startingBalanceDate.getMonth() + 1).padStart(2, '0');
