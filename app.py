@@ -395,11 +395,11 @@ def register():
             cursor.execute("""
                 INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (new_user_id, 'Auto Adjustments', 1, 0, 1))
+            """, (new_user_id, 'Auto Adjustments', -2, 0, 1))
             cursor.execute("""
                 INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (new_user_id, 'Auto Adjustments', 1, 0, 1))
+            """, (new_user_id, 'Auto Adjustments', -2, 0, 1))
             # --- Add Savings categories ---
             cursor.execute("""
                 INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
@@ -529,11 +529,11 @@ def verify_email():
             cursor.execute("""
                 INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, 'Auto Adjustments', 1, 0, 1))
+            """, (user_id, 'Auto Adjustments', -2, 0, 1))
             cursor.execute("""
                 INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, 'Auto Adjustments', 1, 0, 1))
+            """, (user_id, 'Auto Adjustments', -2, 0, 1))
             cursor.execute("""
                 INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
@@ -6860,7 +6860,8 @@ def dashboard():
             """, (current_user.id,))
             income_categories = list(cursor.fetchall())
         else:
-            pass
+            # Sort by display_order descending (higher numbers first)
+            income_categories = sorted(income_categories, key=lambda x: x.get('display_order', 0), reverse=True)
 
         # Fetch expense categories - try Redis first
         expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -6874,7 +6875,8 @@ def dashboard():
             """, (current_user.id,))
             expense_categories = list(cursor.fetchall())
         else:
-            pass
+            # Sort by display_order descending (higher numbers first)
+            expense_categories = sorted(expense_categories, key=lambda x: x.get('display_order', 0), reverse=True)
 
         # Helper to get week key (start of week for goofy, end of week for normal)
         def get_week_key(date_val, goofy_week_mode):
@@ -8729,7 +8731,8 @@ def dashboard_3m():
             """, (current_user.id,))
             income_categories = list(cursor.fetchall())
         else:
-            pass
+            # Sort by display_order descending (higher numbers first)
+            income_categories = sorted(income_categories, key=lambda x: x.get('display_order', 0), reverse=True)
 
         # Fetch expense categories - try Redis first
         expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -8743,7 +8746,8 @@ def dashboard_3m():
             """, (current_user.id,))
             expense_categories = list(cursor.fetchall())
         else:
-            pass
+            # Sort by display_order descending (higher numbers first)
+            expense_categories = sorted(expense_categories, key=lambda x: x.get('display_order', 0), reverse=True)
 
         # Helper: get last day of month string
         def get_month_end_str(date_val):
