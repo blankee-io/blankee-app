@@ -4987,13 +4987,14 @@ def update_daily_savings_for_savings_category(user_id, start_date):
             """, (user_id,))
             savings_adjustments = list(cursor.fetchall())
         
-        # Build adjustments lookup by date
+        # Build adjustments lookup by date (sum multiple adjustments for the same date)
         adjustment_by_date = {}
         for adj in savings_adjustments:
             adj_date = adj.get('date')
             if isinstance(adj_date, str):
                 adj_date = datetime.strptime(adj_date, '%Y-%m-%d').date()
-            adjustment_by_date[adj_date] = float(adj.get('amount', 0))
+            # Sum adjustments for the same date (e.g., Initial savings + Bank sync)
+            adjustment_by_date[adj_date] = adjustment_by_date.get(adj_date, 0.0) + float(adj.get('amount', 0))
         
         # Filter and aggregate income by date
         income_by_date = {}
@@ -16840,6 +16841,9 @@ def quiltt_reconnect():
                             balance = account.get('balance') or {}
                             current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
                             available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
+                            # Always store balance as positive (credit cards may report negative)
+                            current_balance = abs(current_balance) if current_balance else 0
+                            available_balance = abs(available_balance) if available_balance else 0
                             
                             upsert_quiltt_account({
                                 'connection_id': conn_db_id,
@@ -17072,6 +17076,9 @@ def quiltt_sync_profile():
                 balance = account.get('balance') or {}
                 current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
                 available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
+                # Always store balance as positive (credit cards may report negative)
+                current_balance = abs(current_balance) if current_balance else 0
+                available_balance = abs(available_balance) if available_balance else 0
                 
                 account_id = account.get('id', '')
                 account_name = account.get('name', 'Account')
@@ -17452,6 +17459,9 @@ def quiltt_check_sync_status():
                                 balance = account.get('balance') or {}
                                 current_balance = balance.get('current', 0) if isinstance(balance, dict) else 0
                                 available_balance = balance.get('available', 0) if isinstance(balance, dict) else 0
+                                # Always store balance as positive (credit cards may report negative)
+                                current_balance = abs(current_balance) if current_balance else 0
+                                available_balance = abs(available_balance) if available_balance else 0
                                 
                                 upsert_quiltt_account({
                                     'connection_id': connection_db_id,
@@ -17997,49 +18007,23 @@ def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_acco
                     })
                 cursor.close()
         
-        # Check if adjustment already exists for today
-        today_adjustment = None
-        for adj in adjustments:
-            adj_date = adj.get('date')
-            if isinstance(adj_date, str):
-                if adj_date == today_str:
-                    today_adjustment = adj
-                    break
-            elif adj_date == today:
-                today_adjustment = adj
-                break
+        # Always create a new "Bank balance sync" adjustment
+        # (Don't touch any existing adjustments - those stay as historical records)
+        existing_ids = [int(a.get('id', 0)) for a in adjustments if a.get('id')]
+        min_id = min(existing_ids) if existing_ids else 0
+        temp_id = min_id - 1 if min_id <= 0 else -1
         
-        if today_adjustment:
-            # If the adjustment is from "Initial savings balance" (profile setup), don't overwrite it
-            # The user's starting savings from profile setup takes precedence
-            if today_adjustment.get('description') == 'Initial savings balance':
-                app.logger.info(f"[SAVINGS-ADJUST] Skipping - adjustment already exists from profile setup: ${today_adjustment.get('amount')}")
-                return True, "Savings adjustment already exists from profile setup"
-            
-            # Update existing adjustment with new delta
-            old_delta = today_adjustment.get('amount', 0)
-            today_adjustment['amount'] = float(adjustment_delta)
-            today_adjustment['description'] = 'Bank balance sync'
-            if quiltt_account_id:
-                today_adjustment['quiltt_account_id'] = quiltt_account_id
-            app.logger.info(f"[SAVINGS-ADJUST] Updated adjustment delta for {today_str}: ${old_delta} -> ${adjustment_delta}")
-        else:
-            # Create new adjustment
-            existing_ids = [int(a.get('id', 0)) for a in adjustments if a.get('id')]
-            min_id = min(existing_ids) if existing_ids else 0
-            temp_id = min_id - 1 if min_id <= 0 else -1
-            
-            adjustments.append({
-                'id': temp_id,
-                'user_id': user_id,
-                'date': today_str,
-                'amount': float(adjustment_delta),
-                'description': 'Bank balance sync',
-                'quiltt_account_id': quiltt_account_id
-            })
-            # Sort by date
-            adjustments.sort(key=lambda x: x['date'])
-            app.logger.info(f"[SAVINGS-ADJUST] Created new adjustment delta for {today_str}: ${adjustment_delta}")
+        adjustments.append({
+            'id': temp_id,
+            'user_id': user_id,
+            'date': today_str,
+            'amount': float(adjustment_delta),
+            'description': 'Bank balance sync',
+            'quiltt_account_id': quiltt_account_id
+        })
+        # Sort by date
+        adjustments.sort(key=lambda x: x['date'])
+        app.logger.info(f"[SAVINGS-ADJUST] Created new bank sync adjustment for {today_str}: ${adjustment_delta}")
         
         # Save to Redis
         _set_savings_adjustments_to_redis(user_id, adjustments)
@@ -18053,6 +18037,210 @@ def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_acco
     except Exception as e:
         app.logger.error(f"[SAVINGS-ADJUST] Error for user {user_id}: {e}", exc_info=True)
         return False, f"Error creating savings adjustment: {str(e)}"
+
+
+def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_balance, account_mask):
+    """
+    Create an auto-adjustment entry for a credit account to match the bank balance.
+    Called when a credit account is connected/enabled via Quiltt.
+    
+    Args:
+        user_id: User ID
+        quiltt_account_id: Quiltt account ID
+        bank_balance: Current balance from the bank
+        account_mask: Account mask to match with credit_accounts
+        
+    Returns: (success: bool, message: str)
+    """
+    try:
+        from datetime import date as date_class
+        today = date_class.today()
+        today_str = today.strftime('%Y-%m-%d')
+        
+        app.logger.info(f"[CA-AUTO-ADJUST] Creating adjustment for user {user_id}, mask {account_mask}: bank balance ${bank_balance}")
+        
+        # Find the credit account by mask
+        credit_accounts = None
+        redis_key = f"credit_accounts:v1:{user_id}"
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(redis_key)
+                if cached:
+                    credit_accounts = json.loads(cached)
+            except Exception as e:
+                app.logger.error(f"[CA-AUTO-ADJUST] Redis error: {e}")
+        
+        if credit_accounts is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s", (user_id,))
+                credit_accounts = list(cursor.fetchall())
+                cursor.close()
+        
+        # Find the matching credit account
+        target_account = None
+        for ca in credit_accounts:
+            if ca.get('mask') == account_mask:
+                target_account = ca
+                break
+        
+        if not target_account:
+            app.logger.warning(f"[CA-AUTO-ADJUST] No credit account found with mask {account_mask}")
+            return False, f"No credit account found with mask {account_mask}"
+        
+        account_id = target_account.get('id')
+        starting_balance = float(target_account.get('starting_balance', 0))
+        
+        # Get current calculated balance for this credit account
+        # The balance = starting_balance + expenses - payments
+        # We need to find the current calculated balance and adjust to match bank
+        
+        c_a_balances = None
+        balance_key = f"c_a_balances_d:v1:{user_id}"
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(balance_key)
+                if cached:
+                    c_a_balances = json.loads(cached)
+            except Exception as e:
+                app.logger.error(f"[CA-AUTO-ADJUST] Redis error getting balances: {e}")
+        
+        current_calculated_balance = starting_balance  # Default to starting balance
+        
+        if c_a_balances:
+            for bal in c_a_balances:
+                if str(bal.get('account_id')) == str(account_id) and str(bal.get('date')) == today_str:
+                    current_calculated_balance = float(bal.get('balance', starting_balance))
+                    break
+        
+        if current_calculated_balance == starting_balance:
+            # Try MySQL
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT balance FROM c_a_balances_d
+                    WHERE account_id = %s AND date = %s
+                """, (account_id, today_str))
+                result = cursor.fetchone()
+                if result:
+                    current_calculated_balance = float(result['balance'])
+                cursor.close()
+        
+        bank_balance_float = float(bank_balance)
+        
+        # Calculate difference (how much we need to add as expense to match bank balance)
+        # Bank shows what we owe, calculated balance shows what we think we owe
+        diff = bank_balance_float - current_calculated_balance
+        
+        app.logger.info(f"[CA-AUTO-ADJUST] Calculated balance: ${current_calculated_balance}, Bank: ${bank_balance_float}, Diff: ${diff}")
+        
+        # Skip if difference is negligible
+        if abs(diff) < 0.01:
+            return True, f"No adjustment needed - balance already matches (${bank_balance_float:.2f})"
+        
+        adjustment_amount = abs(diff)
+        
+        if diff > 0:
+            # Balance needs to go UP (bank balance higher than calculated)
+            # Create a c_expense_entries record
+            
+            # Find Auto Adjustments category for this credit account
+            c_expense_categories = None
+            cat_key = f"c_expense_categories:v1:{user_id}"
+            if app.config.get('REDIS_OK'):
+                try:
+                    cached = _redis_client.get(cat_key)
+                    if cached:
+                        c_expense_categories = json.loads(cached)
+                except Exception as e:
+                    app.logger.error(f"[CA-AUTO-ADJUST] Redis error getting categories: {e}")
+            
+            if c_expense_categories is None:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("""
+                        SELECT * FROM c_expense_categories WHERE account_id = %s
+                    """, (account_id,))
+                    c_expense_categories = list(cursor.fetchall())
+                    cursor.close()
+            
+            # Find auto adjustment category for this account
+            auto_cat = None
+            for cat in c_expense_categories:
+                if str(cat.get('account_id')) == str(account_id) and cat.get('is_auto_adjustment') == 1:
+                    auto_cat = cat
+                    break
+            
+            if not auto_cat:
+                app.logger.warning(f"[CA-AUTO-ADJUST] No Auto Adjustments category found for account {account_id}")
+                return False, f"No Auto Adjustments category found for credit account"
+            
+            category_id = auto_cat.get('id')
+            
+            # Create expense entry to increase balance
+            _update_entry_in_redis('c_expense_entries', user_id, category_id, today_str, float(adjustment_amount), processed=1)
+            app.logger.info(f"[CA-AUTO-ADJUST] Created expense entry for ${adjustment_amount} to increase balance")
+            
+            return True, f"Credit account expense adjustment: +${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
+        
+        else:
+            # Balance needs to go DOWN (bank balance lower than calculated)
+            # Create a c_payment_entries record
+            
+            # Get existing c_payment_entries
+            c_payment_entries = _get_entries_from_redis('c_payment_entries', user_id)
+            
+            if c_payment_entries is None:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("""
+                        SELECT * FROM c_payment_entries WHERE account_id = %s
+                    """, (account_id,))
+                    c_payment_entries = list(cursor.fetchall())
+                    cursor.close()
+            
+            # Create payment entry to decrease balance
+            # Use _update_ca_payment_entry_in_redis or similar helper
+            # Get existing entries for this account
+            if c_payment_entries is None:
+                c_payment_entries = []
+            
+            # Generate temp ID for new entry
+            existing_ids = [int(e.get('id', 0)) for e in c_payment_entries if e.get('id')]
+            min_id = min(existing_ids) if existing_ids else 0
+            temp_id = min_id - 1 if min_id <= 0 else -1
+            
+            # Add new payment entry
+            new_entry = {
+                'id': temp_id,
+                'account_id': account_id,
+                'date': today_str,
+                'amount': float(adjustment_amount),
+                'recurring_id': None,
+                'processed': 1
+            }
+            c_payment_entries.append(new_entry)
+            
+            # Save to Redis
+            redis_key = f"c_payment_entries:v1:{user_id}"
+            if app.config.get('REDIS_OK'):
+                _redis_client.setex(
+                    redis_key,
+                    PERSISTENT_CACHE_TTL,
+                    json.dumps(c_payment_entries, cls=DecimalEncoder)
+                )
+                # Mark as dirty
+                dirty_key = f"dirty_tables:{user_id}"
+                _redis_client.sadd(dirty_key, 'c_payment_entries')
+                _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            
+            app.logger.info(f"[CA-AUTO-ADJUST] Created payment entry for ${adjustment_amount} to decrease balance")
+            
+            return True, f"Credit account payment adjustment: -${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
+        
+    except Exception as e:
+        app.logger.error(f"[CA-AUTO-ADJUST] Error for user {user_id}: {e}", exc_info=True)
+        return False, f"Error creating credit account auto-adjustment: {str(e)}"
 
 
 @app.route('/quiltt/toggle-sync', methods=['POST'])
@@ -18093,18 +18281,25 @@ def quiltt_toggle_sync():
                         target_account = acc
                         break
                 
-                # If this is a credit account, set is_quiltt=1 on the credit account
+                # If this is a credit account, set is_quiltt=1 on the credit account (or create it)
+                credit_account_was_created = False  # Track if we just created the account
                 if target_account and target_account.get('account_type', '').upper() == 'CREDIT':
                     account_mask = target_account.get('mask')
+                    account_name = target_account.get('account_name', 'Credit Account')
+                    current_balance = abs(float(target_account.get('current_balance', 0) or 0))
+                    
                     if account_mask:
                         # Find and update the credit account
                         redis_key = f"credit_accounts:v1:{current_user.id}"
                         cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
                         credit_accounts = json.loads(cached) if cached else []
                         
+                        # Look for existing credit account with matching mask
+                        existing_account = None
                         updated = False
                         for i, ca in enumerate(credit_accounts):
                             if ca.get('mask') == account_mask:
+                                existing_account = ca
                                 credit_accounts[i]['is_quiltt'] = 1
                                 updated = True
                                 break
@@ -18123,6 +18318,159 @@ def quiltt_toggle_sync():
                             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                             
                             app.logger.info(f"Set is_quiltt=1 for credit account with mask {account_mask} (toggle-sync enable)")
+                        
+                        elif not existing_account:
+                            # Credit account doesn't exist - create it (mirror bank connection logic)
+                            app.logger.info(f"Creating credit account for Quiltt account: {account_name} (mask: {account_mask}) with balance ${current_balance}")
+                            
+                            # Determine if it's a card or line of credit based on name/type
+                            is_card = 1 if 'card' in account_name.lower() else 0
+                            is_line = 1 if 'line' in account_name.lower() else 0
+                            
+                            # Add credit account to Redis
+                            account_data = {
+                                'name': account_name,
+                                'mask': account_mask,
+                                'interest_rate': 0.0,
+                                'is_card': is_card,
+                                'is_line': is_line,
+                                'starting_balance': current_balance,
+                                'is_quiltt': 1
+                            }
+                            
+                            temp_account_id = _add_credit_account_to_redis(current_user.id, account_data)
+                            
+                            # Add default categories for the credit account
+                            if temp_account_id:
+                                # "Interest Charge" category
+                                _add_category_to_redis('c_expense_categories', current_user.id, {
+                                    'account_id': temp_account_id,
+                                    'name': 'Interest Charge',
+                                    'display_order': -1,
+                                    'group_id': None,
+                                    'is_recurring': 0,
+                                    'no_end_date': 0,
+                                    'hidden': 0,
+                                    'is_bud': 0,
+                                    'is_interest': 1,
+                                    'is_auto_adjustment': 0
+                                })
+                                
+                                # "Auto Adjustments" category
+                                _add_category_to_redis('c_expense_categories', current_user.id, {
+                                    'account_id': temp_account_id,
+                                    'name': 'Auto Adjustments',
+                                    'display_order': 0,
+                                    'group_id': None,
+                                    'is_recurring': 0,
+                                    'no_end_date': 0,
+                                    'hidden': 0,
+                                    'is_bud': 0,
+                                    'is_interest': 0,
+                                    'is_auto_adjustment': 1
+                                })
+                                
+                                # "Starting Balance" category
+                                starting_balance_cat_id = _add_category_to_redis('c_expense_categories', current_user.id, {
+                                    'account_id': temp_account_id,
+                                    'name': 'Starting Balance',
+                                    'display_order': 1,
+                                    'group_id': None,
+                                    'is_recurring': 0,
+                                    'no_end_date': 0,
+                                    'hidden': 0,
+                                    'is_bud': 0,
+                                    'is_interest': 0,
+                                    'is_auto_adjustment': 0
+                                })
+                                
+                                # Create matching expense_categories record for payment
+                                payment_category_name = f"{account_name} payment"
+                                
+                                # Get max display_order for expense_categories
+                                expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+                                if expense_categories:
+                                    max_display_order = max([cat.get('display_order', 0) for cat in expense_categories])
+                                else:
+                                    max_display_order = 0
+                                new_display_order = max_display_order + 1
+                                
+                                _add_category_to_redis('expense_categories', current_user.id, {
+                                    'user_id': current_user.id,
+                                    'name': payment_category_name,
+                                    'display_order': new_display_order,
+                                    'group_id': None,
+                                    'is_recurring': 0,
+                                    'is_auto_adjustment': 0,
+                                    'no_end_date': 0,
+                                    'hidden': 0,
+                                    'is_bud': 0,
+                                    'is_credit_account': 1
+                                })
+                                
+                                app.logger.info(f"Created payment category '{payment_category_name}' for credit account (toggle-sync)")
+                                
+                                # Create starting balance entry if starting_balance > 0
+                                if current_balance and float(current_balance) > 0.0:
+                                    today_str = date.today().strftime('%Y-%m-%d')
+                                    
+                                    # Add starting balance entry to Redis
+                                    try:
+                                        redis_key_entries = f"c_expense_entries:v1:{current_user.id}"
+                                        cached_entries = _redis_client.get(redis_key_entries)
+                                        entries = json.loads(cached_entries) if cached_entries else []
+                                        
+                                        # Generate temp ID
+                                        existing_ids = [int(e.get('id', 0)) for e in entries]
+                                        min_id = min(existing_ids) if existing_ids else 0
+                                        entry_id = min_id - 1 if min_id <= 0 else -1
+                                        
+                                        # Add entry
+                                        entries.append({
+                                            'id': entry_id,
+                                            'category_id': starting_balance_cat_id,
+                                            'date': today_str,
+                                            'amount': float(current_balance),
+                                            'recurring_id': None,
+                                            'is_bucket': 0,
+                                            'original_amount': float(current_balance),
+                                            'processed': 0,
+                                            'bud_item_id': None
+                                        })
+                                        
+                                        # Save to Redis
+                                        _redis_client.setex(
+                                            redis_key_entries,
+                                            PERSISTENT_CACHE_TTL,
+                                            json.dumps(entries, cls=DecimalEncoder)
+                                        )
+                                        
+                                        # Mark dirty
+                                        dirty_key_entries = f"dirty_tables:{current_user.id}"
+                                        _redis_client.sadd(dirty_key_entries, 'c_expense_entries')
+                                        _redis_client.expire(dirty_key_entries, PERSISTENT_CACHE_TTL)
+                                        
+                                        app.logger.info(f"Created starting balance entry for credit account {account_name}: ${current_balance} (toggle-sync)")
+                                        
+                                        # Force immediate flush to MySQL so balance records can be created
+                                        try:
+                                            from redis_manager import flush_dirty_tables_for_user
+                                            flush_dirty_tables_for_user(current_user.id)
+                                        except Exception as flush_err:
+                                            app.logger.error(f"Error during forced flush for Quiltt credit account (toggle-sync): {flush_err}")
+                                        
+                                        # Recalculate CA balances from scratch
+                                        try:
+                                            save_ca_daily_balance()
+                                            app.logger.info(f"Recalculated CA daily balances for credit account {account_name} (toggle-sync)")
+                                        except Exception as balance_err:
+                                            app.logger.error(f"Error recalculating CA balances for Quiltt credit account (toggle-sync): {balance_err}")
+                                        
+                                    except Exception as entry_err:
+                                        app.logger.error(f"Error creating starting balance entry (toggle-sync): {entry_err}")
+                                
+                                app.logger.info(f"Created credit account {account_name} with ID {temp_account_id} and all default categories (toggle-sync)")
+                                credit_account_was_created = True  # Mark that we created it
                 
                 
                 # Resync transactions for this specific account only
@@ -18139,21 +18487,56 @@ def quiltt_toggle_sync():
                         account_name = target_account.get('account_name', '').lower()
                         account_type = target_account.get('account_type', '').lower()
                         current_balance = target_account.get('current_balance', 0)
+                        account_mask = target_account.get('mask')
                         
                         
                         # Check if it's a depository account (checking/savings) with a balance
                         if account_type == 'depository' and current_balance:
-                            app.logger.info(f"[AUTO-ADJUST] Creating auto-adjustment for depository account '{account_name}' with balance {current_balance}")
-                            auto_success, auto_msg = _create_auto_adjustment_for_bank_balance(
-                                current_user.id, 
-                                current_balance,
-                                account_name
-                            )
-                            if auto_success:
-                                auto_adjustment_msg = f" | {auto_msg}"
-                                app.logger.info(f"[AUTO-ADJUST] Success: {auto_msg}")
+                            # Differentiate between checking and savings accounts
+                            if 'savings' in account_name:
+                                # Savings account - create savings adjustment
+                                app.logger.info(f"[AUTO-ADJUST] Creating savings adjustment for account '{account_name}' with balance {current_balance}")
+                                auto_success, auto_msg = _update_savings_balance_from_bank(
+                                    current_user.id, 
+                                    current_balance,
+                                    account_id
+                                )
+                                if auto_success:
+                                    auto_adjustment_msg = f" | {auto_msg}"
+                                    app.logger.info(f"[AUTO-ADJUST-SAVINGS] Success: {auto_msg}")
+                                else:
+                                    app.logger.warning(f"[AUTO-ADJUST-SAVINGS] Failed: {auto_msg}")
                             else:
-                                app.logger.warning(f"[AUTO-ADJUST] Failed: {auto_msg}")
+                                # Checking account - create income/expense auto-adjustment
+                                app.logger.info(f"[AUTO-ADJUST] Creating auto-adjustment for checking account '{account_name}' with balance {current_balance}")
+                                auto_success, auto_msg = _create_auto_adjustment_for_bank_balance(
+                                    current_user.id, 
+                                    current_balance,
+                                    account_name
+                                )
+                                if auto_success:
+                                    auto_adjustment_msg = f" | {auto_msg}"
+                                    app.logger.info(f"[AUTO-ADJUST] Success: {auto_msg}")
+                                else:
+                                    app.logger.warning(f"[AUTO-ADJUST] Failed: {auto_msg}")
+                        elif account_type == 'credit' and current_balance is not None and account_mask:
+                            # Credit account - create credit account auto-adjustment
+                            # Skip if we just created the account (already has starting balance entry)
+                            if credit_account_was_created:
+                                app.logger.info(f"[AUTO-ADJUST-CREDIT] Skipping auto-adjustment - account was just created with starting balance")
+                            else:
+                                app.logger.info(f"[AUTO-ADJUST] Creating credit account adjustment for '{account_name}' with balance {current_balance}")
+                                auto_success, auto_msg = _create_credit_account_auto_adjustment(
+                                    current_user.id,
+                                    account_id,
+                                    current_balance,
+                                    account_mask
+                                )
+                                if auto_success:
+                                    auto_adjustment_msg = f" | {auto_msg}"
+                                    app.logger.info(f"[AUTO-ADJUST-CREDIT] Success: {auto_msg}")
+                                else:
+                                    app.logger.warning(f"[AUTO-ADJUST-CREDIT] Failed: {auto_msg}")
                         else:
                             pass
                     

@@ -890,6 +890,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
             
             elif table == 'savings_adjustments':
                 # Savings adjustments table (bank balance sync)
+                # Allow multiple adjustments per date (no unique constraint on user_id+date)
+                
+                # First, delete all existing adjustments for this user
+                cursor.execute("DELETE FROM savings_adjustments WHERE user_id = %s", (user_id,))
+                
+                # Then insert all adjustments from Redis
                 batch_data = []
                 for row in rows:
                     batch_data.append((
@@ -900,14 +906,11 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         row.get('quiltt_account_id')
                     ))
                 
-                cursor.executemany("""
-                    INSERT INTO savings_adjustments (user_id, date, amount, description, quiltt_account_id)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE 
-                        amount = VALUES(amount),
-                        description = VALUES(description),
-                        quiltt_account_id = VALUES(quiltt_account_id)
-                """, batch_data)
+                if batch_data:
+                    cursor.executemany("""
+                        INSERT INTO savings_adjustments (user_id, date, amount, description, quiltt_account_id)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, batch_data)
                 
                 conn.commit()
                 cursor.close()

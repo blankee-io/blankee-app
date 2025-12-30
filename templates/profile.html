@@ -2592,6 +2592,23 @@
                 const syncEnabled = $(this).is(':checked');
                 const $checkbox = $(this);
                 
+                // Determine account type by finding the preceding divider
+                const $accountItem = $checkbox.closest('.account-item');
+                let accountType = 'unknown';
+                
+                // Look for the divider before this account item
+                let $prevDivider = $accountItem.prevAll('.account-type-divider').first();
+                if ($prevDivider.length) {
+                    const dividerText = $prevDivider.text().toLowerCase();
+                    if (dividerText.includes('checking')) {
+                        accountType = 'checking';
+                    } else if (dividerText.includes('savings')) {
+                        accountType = 'savings';
+                    } else if (dividerText.includes('credit')) {
+                        accountType = 'credit';
+                    }
+                }
+                
                 $.ajax({
                     url: '/quiltt/toggle-sync',
                     method: 'POST',
@@ -2607,6 +2624,42 @@
                                 showSuccessMessage('Account sync enabled');
                             } else {
                                 showSuccessMessage('Account sync disabled', '#E45F1C');
+                            }
+                            
+                            // Call appropriate recalculation based on account type
+                            if (accountType === 'checking') {
+                                // Recalculate totals and remainders for checking
+                                $.ajax({
+                                    url: '/save_totals_remainders_d',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    success: function() {
+                                        console.log('Totals recalculated for checking account toggle');
+                                    }
+                                });
+                            } else if (accountType === 'savings') {
+                                // Recalculate savings
+                                $.ajax({
+                                    url: '/save_totals_remainders_d',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    success: function() {
+                                        console.log('Savings recalculated for savings account toggle');
+                                    }
+                                });
+                            } else if (accountType === 'credit') {
+                                // Recalculate credit account balances
+                                $.ajax({
+                                    url: '/save_ca_daily_balance',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    success: function() {
+                                        console.log('CA balances recalculated for credit account toggle');
+                                    }
+                                });
                             }
                             
                             // If enabling account, refresh connections to show updated balances
