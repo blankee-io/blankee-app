@@ -695,6 +695,8 @@ def complete_profile_setup():
 
         # Update user settings in Redis (flush worker will persist to MySQL)
         _update_user_setting_in_redis(current_user.id, 'balance_threshold', balance_threshold)
+        # Save starting_savings to user record (for reference/display)
+        # Note: The actual calculation uses savings_adjustments, not this field
         _update_user_setting_in_redis(current_user.id, 'starting_savings', starting_savings)
         _update_user_setting_in_redis(current_user.id, 'currency_type', currency_type)
         
@@ -784,39 +786,66 @@ def complete_profile_setup():
         _set_entries_to_redis('income_entries', current_user.id, income_entries)
         print(f"[complete_profile_setup] Starting balance saved to Redis: {starting_balance}")
         
-        # Insert starting savings into Redis (Redis-first)
-        savings_entries = _get_savings_entries_from_redis(current_user.id)
-        
-        if savings_entries is None:
-            # Load from MySQL if not in Redis
-            print(f"[complete_profile_setup] Loading savings_entries from MySQL for user {current_user.id}")
-            with get_db_pool().get_cursor() as cursor:
-                cursor.execute("""
-                    SELECT date, amount FROM savings_entries
-                    WHERE user_id = %s
-                    ORDER BY date
-                """, (current_user.id,))
-                savings_entries = [
-                    {'date': row[0].isoformat() if isinstance(row[0], date) else row[0], 
-                     'amount': float(row[1])}
-                    for row in cursor.fetchall()
-                ]
-        
-        # Add/update the starting savings entry
-        existing_entry = next((e for e in savings_entries if e['date'] == income_entry_date), None)
-        
-        if existing_entry:
-            existing_entry['amount'] = float(starting_savings)
-            print(f"[complete_profile_setup] Updated existing savings entry for {income_entry_date}: {starting_savings}")
-        else:
-            savings_entries.append({'date': income_entry_date, 'amount': float(starting_savings)})
-            # Keep sorted by date
-            savings_entries.sort(key=lambda x: x['date'])
-            print(f"[complete_profile_setup] Added new savings entry for {income_entry_date}: {starting_savings}")
-        
-        # Save to Redis
-        _set_savings_entries_to_redis(current_user.id, savings_entries)
-        print(f"[complete_profile_setup] Starting savings saved to Redis: {starting_savings}")
+        # Create a savings adjustment entry for starting savings (instead of direct savings_entry)
+        # This persists through recalculations
+        if starting_savings > 0:
+            print(f"[complete_profile_setup] Creating savings adjustment for starting savings: {starting_savings}")
+            
+            # Get or create savings adjustments
+            savings_adjustments = _get_savings_adjustments_from_redis(current_user.id)
+            
+            if savings_adjustments is None:
+                # Load from MySQL if not in Redis
+                savings_adjustments = []
+                with get_db_pool().get_cursor(dictionary=True) as cursor:
+                    cursor.execute("""
+                        SELECT id, user_id, date, amount, description, quiltt_account_id
+                        FROM savings_adjustments
+                        WHERE user_id = %s
+                        ORDER BY date
+                    """, (current_user.id,))
+                    for row in cursor.fetchall():
+                        savings_adjustments.append({
+                            'id': row['id'],
+                            'user_id': row['user_id'],
+                            'date': row['date'].isoformat() if hasattr(row['date'], 'isoformat') else row['date'],
+                            'amount': float(row['amount']) if row['amount'] else 0,
+                            'description': row['description'],
+                            'quiltt_account_id': row['quiltt_account_id']
+                        })
+            
+            # Check if adjustment already exists for this date
+            existing_adj = next(
+                (a for a in savings_adjustments if a.get('date') == income_entry_date),
+                None
+            )
+            
+            if existing_adj:
+                # Update existing adjustment
+                existing_adj['amount'] = float(starting_savings)
+                existing_adj['description'] = 'Initial savings balance'
+                print(f"[complete_profile_setup] Updated existing savings adjustment for {income_entry_date}: {starting_savings}")
+            else:
+                # Create new adjustment
+                existing_ids = [int(a.get('id', 0)) for a in savings_adjustments if a.get('id')]
+                min_id = min(existing_ids) if existing_ids else 0
+                temp_id = min_id - 1 if min_id <= 0 else -1
+                
+                savings_adjustments.append({
+                    'id': temp_id,
+                    'user_id': current_user.id,
+                    'date': income_entry_date,
+                    'amount': float(starting_savings),
+                    'description': 'Initial savings balance',
+                    'quiltt_account_id': None
+                })
+                # Sort by date
+                savings_adjustments.sort(key=lambda x: x['date'])
+                print(f"[complete_profile_setup] Created new savings adjustment for {income_entry_date}: {starting_savings}")
+            
+            # Save to Redis
+            _set_savings_adjustments_to_redis(current_user.id, savings_adjustments)
+            print(f"[complete_profile_setup] Starting savings adjustment saved to Redis: {starting_savings}")
         
         # Trigger immediate flush to MySQL before totals calculation
         from redis_manager import _flush_redis_to_mysql
@@ -2940,6 +2969,64 @@ def _set_savings_entries_to_redis(user_id, data):
     except Exception as e:
         pass
 
+
+def _get_savings_adjustments_from_redis(user_id):
+    """
+    Get savings adjustments from Redis.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        List of dicts or None if not in cache
+    """
+    if not app.config.get('REDIS_OK'):
+        return None
+    
+    try:
+        redis_key = f"savings_adjustments:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        
+        if cached:
+            return json.loads(cached)
+        return None
+    except Exception as e:
+        app.logger.error(f"Error getting savings_adjustments from Redis: {e}")
+        return None
+
+
+def _set_savings_adjustments_to_redis(user_id, data):
+    """
+    Set savings adjustments to Redis.
+    
+    Args:
+        user_id: User ID
+        data: List of savings adjustment records
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    
+    try:
+        redis_key = f"savings_adjustments:v1:{user_id}"
+        serializable_data = []
+        for row in data:
+            row_copy = row.copy()
+            if 'date' in row_copy and isinstance(row_copy['date'], date):
+                row_copy['date'] = row_copy['date'].isoformat()
+            for k, v in row_copy.items():
+                if isinstance(v, Decimal):
+                    row_copy[k] = float(v)
+            serializable_data.append(row_copy)
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(serializable_data))
+        # Mark table as dirty for flush
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, "savings_adjustments")
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        app.logger.error(f"Error setting savings_adjustments to Redis: {e}")
+
+
 # Redis helper functions for user settings
 
 def _update_user_setting_in_redis(user_id, field, value):
@@ -4889,6 +4976,25 @@ def update_daily_savings_for_savings_category(user_id, start_date):
             """, (user_id,))
             expense_entries = list(cursor.fetchall())
         
+        # Get savings adjustments from bank connections
+        savings_adjustments = _get_savings_adjustments_from_redis(user_id)
+        if savings_adjustments is None:
+            cursor.execute("""
+                SELECT id, user_id, date, amount, description, quiltt_account_id
+                FROM savings_adjustments
+                WHERE user_id = %s
+                ORDER BY date
+            """, (user_id,))
+            savings_adjustments = list(cursor.fetchall())
+        
+        # Build adjustments lookup by date
+        adjustment_by_date = {}
+        for adj in savings_adjustments:
+            adj_date = adj.get('date')
+            if isinstance(adj_date, str):
+                adj_date = datetime.strptime(adj_date, '%Y-%m-%d').date()
+            adjustment_by_date[adj_date] = float(adj.get('amount', 0))
+        
         # Filter and aggregate income by date
         income_by_date = {}
         if income_savings_id:
@@ -4918,12 +5024,13 @@ def update_daily_savings_for_savings_category(user_id, start_date):
             # Get income and expense totals for this date
             total_income = income_by_date.get(current_date, 0.0)
             total_expenses = expense_by_date.get(current_date, 0.0)
+            
+            # Check if there's an adjustment for this date (from profile setup or bank sync)
+            adjustment_delta = adjustment_by_date.get(current_date, 0.0)
 
-            # Only add starting_savings on the member_since date
-            if current_date == member_since:
-                savings = last_savings + total_expenses - total_income + starting_savings
-            else:
-                savings = last_savings + total_expenses - total_income
+            # Calculate savings: previous + expenses - income + any adjustment
+            # Note: starting_savings is stored in savings_adjustments, not added separately
+            savings = last_savings + total_expenses - total_income + adjustment_delta
                 
             redis_updates.append({
                 'date': current_date,
@@ -10681,6 +10788,12 @@ def settings():
         """, (current_user.id,))
         starting_balance_data = cursor.fetchone()
 
+        # Fetch starting_savings from users table
+        cursor.execute("SELECT starting_savings, member_since FROM users WHERE id = %s", (current_user.id,))
+        savings_data = cursor.fetchone()
+        starting_savings = float(savings_data['starting_savings']) if savings_data and savings_data['starting_savings'] else 0.0
+        member_since = savings_data['member_since'] if savings_data else None
+
         cursor.close()
 
     # Extract values from the query result
@@ -10705,6 +10818,7 @@ def settings():
         first_name=first_name,
         last_name=last_name,
         starting_balance=starting_balance,
+        starting_savings=starting_savings,
         balance_threshold=balance_threshold,
         goofy_week_mode=goofy_week_mode,
         landing_page=landing_page,
@@ -11197,6 +11311,122 @@ def update_starting_balance():
             cursor.close()
 
     return redirect(url_for('profile'))
+
+
+@app.route('/update_starting_savings', methods=['POST'])
+@login_required
+def update_starting_savings():
+    """
+    Update starting savings - updates both users.starting_savings AND 
+    the savings_adjustments entry for the member_since date.
+    """
+    new_savings = request.form.get('starting_savings')
+    
+    if new_savings is None:
+        return jsonify({'status': 'error', 'message': 'No starting savings provided'}), 400
+    
+    try:
+        new_savings_float = float(new_savings)
+    except (ValueError, TypeError):
+        return jsonify({'status': 'error', 'message': 'Invalid starting savings value'}), 400
+    
+    try:
+        # 1. Update users.starting_savings in Redis
+        _update_user_setting_in_redis(current_user.id, 'starting_savings', new_savings_float)
+        
+        # 2. Get member_since date for the adjustment
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT member_since FROM users WHERE id = %s", (current_user.id,))
+            user_row = cursor.fetchone()
+            cursor.close()
+        
+        if not user_row or not user_row['member_since']:
+            return jsonify({'status': 'error', 'message': 'Member since date not found'}), 400
+        
+        member_since = user_row['member_since']
+        member_since_str = member_since.isoformat() if hasattr(member_since, 'isoformat') else str(member_since)
+        
+        # 3. Update or create savings_adjustments entry for member_since date
+        savings_adjustments = _get_savings_adjustments_from_redis(current_user.id)
+        
+        if savings_adjustments is None:
+            # Load from MySQL
+            savings_adjustments = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT id, user_id, date, amount, description, quiltt_account_id
+                    FROM savings_adjustments
+                    WHERE user_id = %s
+                    ORDER BY date
+                """, (current_user.id,))
+                for row in cursor.fetchall():
+                    savings_adjustments.append({
+                        'id': row['id'],
+                        'user_id': row['user_id'],
+                        'date': row['date'].isoformat() if hasattr(row['date'], 'isoformat') else row['date'],
+                        'amount': float(row['amount']) if row['amount'] else 0,
+                        'description': row['description'],
+                        'quiltt_account_id': row['quiltt_account_id']
+                    })
+                cursor.close()
+        
+        # Find existing adjustment - look for "Initial savings balance" first, then by member_since date
+        existing_adj = None
+        
+        # First, look for adjustment with "Initial savings balance" description (most reliable)
+        for adj in savings_adjustments:
+            if adj.get('description') == 'Initial savings balance':
+                existing_adj = adj
+                break
+        
+        # If not found by description, try by member_since date
+        if not existing_adj:
+            for adj in savings_adjustments:
+                adj_date = adj.get('date')
+                # Handle both string and date object formats
+                if isinstance(adj_date, str):
+                    if adj_date == member_since_str:
+                        existing_adj = adj
+                        break
+                elif hasattr(adj_date, 'isoformat'):
+                    if adj_date.isoformat() == member_since_str:
+                        existing_adj = adj
+                        break
+        
+        if existing_adj:
+            # Update existing adjustment
+            existing_adj['amount'] = new_savings_float
+            existing_adj['description'] = 'Initial savings balance'
+            app.logger.info(f"[UPDATE-STARTING-SAVINGS] Updated existing adjustment id={existing_adj.get('id')} to ${new_savings_float}")
+        else:
+            # Create new adjustment (shouldn't normally happen if profile was set up correctly)
+            existing_ids = [int(a.get('id', 0)) for a in savings_adjustments if a.get('id')]
+            min_id = min(existing_ids) if existing_ids else 0
+            temp_id = min_id - 1 if min_id <= 0 else -1
+            
+            savings_adjustments.append({
+                'id': temp_id,
+                'user_id': current_user.id,
+                'date': member_since_str,
+                'amount': new_savings_float,
+                'description': 'Initial savings balance',
+                'quiltt_account_id': None
+            })
+            # Sort by date
+            savings_adjustments.sort(key=lambda x: x['date'])
+            app.logger.info(f"[UPDATE-STARTING-SAVINGS] Created new adjustment for {member_since_str}: ${new_savings_float}")
+        
+        # Save to Redis
+        _set_savings_adjustments_to_redis(current_user.id, savings_adjustments)
+        
+        return jsonify({'status': 'success', 'message': 'Starting savings updated successfully'})
+        
+    except Exception as e:
+        app.logger.error(f"Error updating starting savings for user {current_user.id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.route('/update_balance_threshold', methods=['POST'])
 @login_required
@@ -17676,16 +17906,153 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
         if existing_entry:
             # Update existing entry
             new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(adjustment_amount)
-            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(new_amount))
+            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(new_amount), processed=1)
         else:
             # Create new entry
-            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(adjustment_amount))
+            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(adjustment_amount), processed=1)
         
         return True, f"Auto-adjustment created: {entry_type} of ${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
         
     except Exception as e:
         app.logger.error(f"[AUTO-ADJUSTMENT] Error for user {user_id}: {e}", exc_info=True)
         return False, f"Error creating auto-adjustment: {str(e)}"
+
+
+def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_account_id=None):
+    """
+    Create a savings adjustment entry to reconcile with the bank balance.
+    The adjustment stores the DELTA (difference) between bank balance and calculated balance.
+    This delta persists through recalculations and is ADDED to the calculated value.
+    
+    Args:
+        user_id: User ID
+        bank_savings_balance: Current savings balance from the bank
+        quiltt_account_id: Optional Quiltt account ID for reference
+        
+    Returns: (success: bool, message: str)
+    """
+    try:
+        from datetime import date as date_class
+        today = date_class.today()
+        today_str = today.strftime('%Y-%m-%d')
+        
+        app.logger.info(f"[SAVINGS-ADJUST] Creating adjustment for user {user_id}: bank balance ${bank_savings_balance}")
+        
+        # Get current calculated savings for today (before adjustment)
+        current_calculated_savings = 0.0
+        savings_entries = _get_savings_entries_from_redis(user_id)
+        
+        if savings_entries:
+            for entry in savings_entries:
+                entry_date = entry.get('date')
+                if isinstance(entry_date, str):
+                    if entry_date == today_str:
+                        current_calculated_savings = float(entry.get('amount', 0))
+                        break
+                elif entry_date == today:
+                    current_calculated_savings = float(entry.get('amount', 0))
+                    break
+        
+        if current_calculated_savings == 0.0:
+            # Fallback to MySQL
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT amount FROM savings_entries
+                    WHERE user_id = %s AND date = %s
+                """, (user_id, today_str))
+                result = cursor.fetchone()
+                if result:
+                    current_calculated_savings = float(result['amount'])
+                cursor.close()
+        
+        # Calculate the delta (what we need to add to match bank balance)
+        bank_balance_float = float(bank_savings_balance)
+        adjustment_delta = bank_balance_float - current_calculated_savings
+        
+        app.logger.info(f"[SAVINGS-ADJUST] Calculated savings: ${current_calculated_savings}, Bank: ${bank_balance_float}, Delta: ${adjustment_delta}")
+        
+        # Get current savings adjustments from Redis
+        adjustments = _get_savings_adjustments_from_redis(user_id)
+        
+        if adjustments is None:
+            # Load from MySQL if not in Redis
+            adjustments = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT id, user_id, date, amount, description, quiltt_account_id
+                    FROM savings_adjustments
+                    WHERE user_id = %s
+                    ORDER BY date
+                """, (user_id,))
+                for row in cursor.fetchall():
+                    adjustments.append({
+                        'id': row['id'],
+                        'user_id': row['user_id'],
+                        'date': row['date'].isoformat() if isinstance(row['date'], date_class) else row['date'],
+                        'amount': float(row['amount']) if row['amount'] else 0,
+                        'description': row['description'],
+                        'quiltt_account_id': row['quiltt_account_id']
+                    })
+                cursor.close()
+        
+        # Check if adjustment already exists for today
+        today_adjustment = None
+        for adj in adjustments:
+            adj_date = adj.get('date')
+            if isinstance(adj_date, str):
+                if adj_date == today_str:
+                    today_adjustment = adj
+                    break
+            elif adj_date == today:
+                today_adjustment = adj
+                break
+        
+        if today_adjustment:
+            # If the adjustment is from "Initial savings balance" (profile setup), don't overwrite it
+            # The user's starting savings from profile setup takes precedence
+            if today_adjustment.get('description') == 'Initial savings balance':
+                app.logger.info(f"[SAVINGS-ADJUST] Skipping - adjustment already exists from profile setup: ${today_adjustment.get('amount')}")
+                return True, "Savings adjustment already exists from profile setup"
+            
+            # Update existing adjustment with new delta
+            old_delta = today_adjustment.get('amount', 0)
+            today_adjustment['amount'] = float(adjustment_delta)
+            today_adjustment['description'] = 'Bank balance sync'
+            if quiltt_account_id:
+                today_adjustment['quiltt_account_id'] = quiltt_account_id
+            app.logger.info(f"[SAVINGS-ADJUST] Updated adjustment delta for {today_str}: ${old_delta} -> ${adjustment_delta}")
+        else:
+            # Create new adjustment
+            existing_ids = [int(a.get('id', 0)) for a in adjustments if a.get('id')]
+            min_id = min(existing_ids) if existing_ids else 0
+            temp_id = min_id - 1 if min_id <= 0 else -1
+            
+            adjustments.append({
+                'id': temp_id,
+                'user_id': user_id,
+                'date': today_str,
+                'amount': float(adjustment_delta),
+                'description': 'Bank balance sync',
+                'quiltt_account_id': quiltt_account_id
+            })
+            # Sort by date
+            adjustments.sort(key=lambda x: x['date'])
+            app.logger.info(f"[SAVINGS-ADJUST] Created new adjustment delta for {today_str}: ${adjustment_delta}")
+        
+        # Save to Redis
+        _set_savings_adjustments_to_redis(user_id, adjustments)
+        
+        # Note: We don't call update_daily_savings_for_savings_category here because
+        # the calling code (quiltt_auto_adjust_checking) already calls save_totals_remainders_d()
+        # which will apply the adjustment. Calling it here would double-apply the delta.
+        
+        return True, f"Savings adjustment created: delta ${adjustment_delta:.2f} (bank ${bank_balance_float:.2f})"
+        
+    except Exception as e:
+        app.logger.error(f"[SAVINGS-ADJUST] Error for user {user_id}: {e}", exc_info=True)
+        return False, f"Error creating savings adjustment: {str(e)}"
 
 
 @app.route('/quiltt/toggle-sync', methods=['POST'])
@@ -17999,10 +18366,14 @@ def quiltt_auto_adjust_checking():
         # Get all active accounts for this user
         accounts = get_quiltt_accounts(current_user.id)
         
+        app.logger.info(f"[AUTO-ADJUST-CHECKING] User {current_user.id}: Found {len(accounts) if accounts else 0} accounts")
+        
         if not accounts:
+            app.logger.info(f"[AUTO-ADJUST-CHECKING] User {current_user.id}: No accounts found, returning early")
             return jsonify({'status': 'success', 'message': 'No accounts found'})
         
         adjustments_made = []
+        savings_updated = False
         
         for account in accounts:
             # Only process active depository accounts (checking/savings)
@@ -18012,35 +18383,70 @@ def quiltt_auto_adjust_checking():
             account_name = account.get('account_name', '').lower()
             current_balance = account.get('current_balance', 0)
             
+            app.logger.info(f"[AUTO-ADJUST-CHECKING] Account: {account.get('account_name')} - type={account_type}, is_active={is_active}, sync_transactions={sync_transactions}, balance={current_balance}")
+            
             if is_active and sync_transactions and account_type == 'depository' and current_balance:
-                app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing depository account '{account.get('account_name')}' with balance {current_balance}")
+                # Check if it's a CHECKING account - create auto-adjustment
+                if 'checking' in account_name:
+                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing CHECKING account '{account.get('account_name')}' with balance {current_balance}")
+                    
+                    success, message = _create_auto_adjustment_for_bank_balance(
+                        current_user.id,
+                        current_balance,
+                        account_name
+                    )
+                    
+                    if success:
+                        adjustments_made.append({
+                            'account_name': account.get('account_name'),
+                            'balance': float(current_balance),
+                            'message': message
+                        })
+                        app.logger.info(f"[AUTO-ADJUST-CHECKING] Success for {account.get('account_name')}: {message}")
+                    else:
+                        app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed for {account.get('account_name')}: {message}")
                 
-                success, message = _create_auto_adjustment_for_bank_balance(
-                    current_user.id,
-                    current_balance,
-                    account_name
-                )
-                
-                if success:
-                    adjustments_made.append({
-                        'account_name': account.get('account_name'),
-                        'balance': float(current_balance),
-                        'message': message
-                    })
-                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Success for {account.get('account_name')}: {message}")
-                else:
-                    app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed for {account.get('account_name')}: {message}")
+                # Check if it's a SAVINGS account - update savings balance
+                elif 'savings' in account_name:
+                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing SAVINGS account '{account.get('account_name')}' with balance {current_balance}")
+                    
+                    success, message = _update_savings_balance_from_bank(
+                        current_user.id,
+                        float(current_balance)
+                    )
+                    
+                    if success:
+                        savings_updated = True
+                        app.logger.info(f"[AUTO-ADJUST-CHECKING] Savings updated for {account.get('account_name')}: {message}")
+                    else:
+                        app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed to update savings for {account.get('account_name')}: {message}")
         
+        # Recalculate totals and remainders if any changes were made
+        if adjustments_made or savings_updated:
+            app.logger.info(f"[AUTO-ADJUST-CHECKING] Recalculating totals for user {current_user.id}")
+            try:
+                save_totals_remainders_d()
+                app.logger.info(f"[AUTO-ADJUST-CHECKING] Totals recalculated successfully")
+            except Exception as calc_err:
+                app.logger.error(f"[AUTO-ADJUST-CHECKING] Error recalculating totals: {calc_err}")
+        
+        result_message = []
         if adjustments_made:
+            result_message.append(f'Created {len(adjustments_made)} auto-adjustment(s)')
+        if savings_updated:
+            result_message.append('Updated savings balance')
+        
+        if result_message:
             return jsonify({
                 'status': 'success',
                 'adjustments': adjustments_made,
-                'message': f'Created {len(adjustments_made)} auto-adjustment(s)'
+                'savings_updated': savings_updated,
+                'message': ' | '.join(result_message)
             })
         else:
             return jsonify({
                 'status': 'success',
-                'message': 'No checking accounts needed adjustment'
+                'message': 'No accounts needed adjustment'
             })
     
     except Exception as e:
