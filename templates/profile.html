@@ -514,6 +514,17 @@
 
     <script type="text/javascript">
     document.getElementById('loading-screen').style.display = 'none';
+    
+        // Helper function to show success messages
+        function showSuccessMessage(message, color) {
+            const bgColor = color || '#2aaaa8';
+            const successMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: ' + bgColor + '; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">' + message + '</div>');
+            $('body').append(successMsg);
+            setTimeout(function() {
+                successMsg.fadeOut(300, function() { $(this).remove(); });
+            }, 2000);
+        }
+        
         $(document).ready(function() {
             let mfaVerified = false; // Track if MFA was successfully verified
 
@@ -1220,6 +1231,20 @@
                     successModal.css('display', 'none');
                 }, 3000);
             }
+            
+            // Check if we're returning from a first name change
+            if (urlParams.get('success') === 'first_name') {
+                showSuccessMessage('First name updated successfully');
+                // Remove the query parameter from URL without reload
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            
+            // Check if we're returning from a last name change
+            if (urlParams.get('success') === 'last_name') {
+                showSuccessMessage('Last name updated successfully');
+                // Remove the query parameter from URL without reload
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
 
             $('#close-resend-success-btn').on('click', function() {
                 resendModal.css('display', 'none');
@@ -1916,15 +1941,8 @@
                         });
                     })
                     .then(function() {
-                        // Trigger auto-adjustment for checking accounts
-                        return $.ajax({
-                            url: '/quiltt/auto-adjust-checking',
-                            method: 'POST',
-                            contentType: 'application/json'
-                        });
-                    })
-                    .then(function() {
                         // Poll for balances before proceeding
+                        // Auto-adjustment will be triggered after balances are confirmed
                         pollForBalances(selectedAccountIds);
                     })
                     .catch(function(error) {
@@ -2019,9 +2037,23 @@
                             });
                             
                             if (hasNonZeroBalance) {
-                                // We have balances - done
-                                $('#bank-fetching-modal').hide();
-                                window.location.reload();
+                                // We have balances - NOW call auto-adjust for checking accounts
+                                console.log('[DEBUG] Non-zero balances found, triggering auto-adjust-checking');
+                                $.ajax({
+                                    url: '/quiltt/auto-adjust-checking',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    success: function(autoAdjustResponse) {
+                                        console.log('[DEBUG] Auto-adjust response:', autoAdjustResponse);
+                                        $('#bank-fetching-modal').hide();
+                                        window.location.reload();
+                                    },
+                                    error: function(err) {
+                                        console.log('[DEBUG] Auto-adjust error:', err);
+                                        $('#bank-fetching-modal').hide();
+                                        window.location.reload();
+                                    }
+                                });
                             } else {
                                 // Still no balances - poll a few more times
                                 if (balancePollCount < maxBalancePolls + 10) {
@@ -2162,23 +2194,27 @@
                                     }
                                 });
                             } else {
-                                // Normal new connection - sync and show account selection
+                                // Normal new connection - show loading and sync with liability data
+                                $('#setup-profile-loading-modal').show();
+                                
                                 $.ajax({
                                     url: '/quiltt/sync-profile',
                                     method: 'POST',
                                     contentType: 'application/json',
                                     success: function(response) {
                                         if (response.status === 'success') {
-                                            // Profile synced - show account selection
+                                            // Wait for Redis flush to MySQL to complete (liability data)
                                             setTimeout(function() {
+                                                $('#setup-profile-loading-modal').hide();
                                                 loadAccountSelectionProfile();
-                                            }, 500);
+                                            }, 2000);
                                         } else {
+                                            $('#setup-profile-loading-modal').hide();
                                             window.location.reload();
                                         }
                                     },
                                     error: function(xhr, status, error) {
-                                        // Reload anyway - connections may still be visible
+                                        $('#setup-profile-loading-modal').hide();
                                         window.location.reload();
                                     }
                                 });
@@ -2556,6 +2592,23 @@
                 const syncEnabled = $(this).is(':checked');
                 const $checkbox = $(this);
                 
+                // Determine account type by finding the preceding divider
+                const $accountItem = $checkbox.closest('.account-item');
+                let accountType = 'unknown';
+                
+                // Look for the divider before this account item
+                let $prevDivider = $accountItem.prevAll('.account-type-divider').first();
+                if ($prevDivider.length) {
+                    const dividerText = $prevDivider.text().toLowerCase();
+                    if (dividerText.includes('checking')) {
+                        accountType = 'checking';
+                    } else if (dividerText.includes('savings')) {
+                        accountType = 'savings';
+                    } else if (dividerText.includes('credit')) {
+                        accountType = 'credit';
+                    }
+                }
+                
                 $.ajax({
                     url: '/quiltt/toggle-sync',
                     method: 'POST',
@@ -2566,7 +2619,48 @@
                     }),
                     success: function(response) {
                         if (response.status === 'success' || response.status === 'warning') {
-                            // Log the response message (includes auto-adjustment info if applicable)
+                            // Show success message for toggle
+                            if (syncEnabled) {
+                                showSuccessMessage('Account sync enabled');
+                            } else {
+                                showSuccessMessage('Account sync disabled', '#E45F1C');
+                            }
+                            
+                            // Call appropriate recalculation based on account type
+                            if (accountType === 'checking') {
+                                // Recalculate totals and remainders for checking
+                                $.ajax({
+                                    url: '/save_totals_remainders_d',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    success: function() {
+                                        console.log('Totals recalculated for checking account toggle');
+                                    }
+                                });
+                            } else if (accountType === 'savings') {
+                                // Recalculate savings
+                                $.ajax({
+                                    url: '/save_totals_remainders_d',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    success: function() {
+                                        console.log('Savings recalculated for savings account toggle');
+                                    }
+                                });
+                            } else if (accountType === 'credit') {
+                                // Recalculate credit account balances
+                                $.ajax({
+                                    url: '/save_ca_daily_balance',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    success: function() {
+                                        console.log('CA balances recalculated for credit account toggle');
+                                    }
+                                });
+                            }
                             
                             // If enabling account, refresh connections to show updated balances
                             if (syncEnabled) {

@@ -340,6 +340,35 @@
             return Math.round((date2 - date1) / oneDay);
         }
 
+        // Fit text to container by reducing font size until it fits
+        function fitText(el, maxSize) {
+            if (!el) return;
+            const parent = el.parentElement;
+            const availableWidth = parent.clientWidth - 56; // Account for padding
+            
+            // Reset to max size first
+            el.style.fontSize = maxSize + 'px';
+            
+            // Create a temporary span to measure text width
+            const temp = document.createElement('span');
+            temp.style.fontSize = maxSize + 'px';
+            temp.style.fontWeight = '700';
+            temp.style.visibility = 'hidden';
+            temp.style.position = 'absolute';
+            temp.style.whiteSpace = 'nowrap';
+            temp.textContent = el.textContent;
+            document.body.appendChild(temp);
+            
+            let fontSize = maxSize;
+            while (temp.offsetWidth > availableWidth && fontSize > 16) {
+                fontSize -= 2;
+                temp.style.fontSize = fontSize + 'px';
+            }
+            
+            document.body.removeChild(temp);
+            el.style.fontSize = fontSize + 'px';
+        }
+
         // Find next payday (next recurring income entry in the future)
         function findNextPayday() {
             const today = new Date();
@@ -449,6 +478,7 @@
             const bufferEl = document.getElementById('buffer-amount');
             bufferEl.textContent = formatCurrency(currentBalance);
             bufferEl.className = currentBalance >= 0 ? 'buffer-amount positive' : 'buffer-amount negative';
+            fitText(bufferEl, 52);
             
             if (nextPayday) {
                 const paydayDate = nextPayday.date;
@@ -469,6 +499,7 @@
                 const projectedEl = document.getElementById('projected-amount');
                 projectedEl.textContent = formatCurrency(projectedBalance);
                 projectedEl.className = projectedBalance >= 0 ? 'projected-amount positive' : 'projected-amount negative';
+                fitText(projectedEl, 42);
             } else {
                 // No recurring income found
                 document.getElementById('next-payday-date').textContent = 'Not set';
@@ -533,12 +564,15 @@
                 if (lastVal > firstVal) {
                     trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-up fa-beat"></i>';
                     trendIndicator.className = 'trend-indicator trend-up';
+                    trendIndicator.title = 'Your balance is trending upward';
                 } else if (lastVal < firstVal) {
                     trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-down fa-beat"></i>';
                     trendIndicator.className = 'trend-indicator trend-down';
+                    trendIndicator.title = 'Your balance is trending downward';
                 } else {
                     trendIndicator.innerHTML = '<i class="fa-solid fa-minus"></i>';
                     trendIndicator.className = 'trend-indicator trend-flat';
+                    trendIndicator.title = 'Your balance is holding steady';
                 }
             }
             

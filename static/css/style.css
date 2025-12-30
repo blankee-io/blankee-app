@@ -322,7 +322,7 @@ body {
     padding: 0 10px;
 
     /* visual */
-    background-color: rgb(42 170 168 / 95%);
+    background-color: #2AAAA8;
     box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
     backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
@@ -9060,11 +9060,45 @@ form button[type="submit"] {
 }
 
 .credit-accounts-table th, .credit-accounts-table td {
-    width: 25%;
     height: 20px;
     padding-right: 10px;
     padding-left: 10px;
     box-sizing: border-box;
+}
+
+.credit-accounts-table th:nth-child(1),
+.credit-accounts-table td:nth-child(1) {
+    width: 35%;
+}
+
+.credit-accounts-table th:nth-child(2),
+.credit-accounts-table td:nth-child(2) {
+    width: 12%;
+}
+
+.credit-accounts-table th:nth-child(3),
+.credit-accounts-table td:nth-child(3) {
+    width: 13%;
+}
+
+.credit-accounts-table th:nth-child(4),
+.credit-accounts-table td:nth-child(4) {
+    width: 20%;
+}
+
+.credit-accounts-table th:nth-child(5),
+.credit-accounts-table td:nth-child(5) {
+    width: 20%;
+}
+
+td.credit-account-action-cell {
+    text-align: right;
+    white-space: nowrap;
+}
+
+td.credit-account-action-cell button {
+    display: inline-block;
+    vertical-align: middle;
 }
 
 .credit-accounts-table th {
@@ -9113,7 +9147,7 @@ form button[type="submit"] {
     background: transparent;
     border: none;
     border-radius: 50%;
-    color: #2aaaa8;
+    color: #676767;
     cursor: pointer;
     margin-right: 8px;
 }
@@ -9134,6 +9168,17 @@ form button[type="submit"] {
 
 .delete-credit-account-btn:hover {
     color: #575757;
+}
+
+.quiltt-linked-btn {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    color: #676767;
+    cursor: default;
+    opacity: 0.8;
 }
 
 .add-credit-account {
@@ -10113,6 +10158,7 @@ html.modal-open {
 .summary-left-column {
     flex: 0 0 33%;
     max-width: 400px;
+    min-width: 280px;
 }
 
 .summary-right-column {
@@ -10128,6 +10174,7 @@ html.modal-open {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
     padding: 28px;
     text-align: center;
+    overflow: hidden;
 }
 
 .buffer-card-header {
@@ -10142,6 +10189,9 @@ html.modal-open {
     font-weight: 700;
     margin-bottom: 6px;
     line-height: 1.1;
+    white-space: nowrap;
+    overflow: visible;
+    position: relative;
 }
 
 .buffer-amount.positive {
@@ -10149,7 +10199,7 @@ html.modal-open {
 }
 
 .buffer-amount.negative {
-    color: #E45F1C;
+    color: #E45F1C !important;
 }
 
 .buffer-subtitle {
@@ -10175,6 +10225,9 @@ html.modal-open {
     font-weight: 700;
     margin-bottom: 6px;
     line-height: 1.1;
+    white-space: nowrap;
+    overflow: visible;
+    position: relative;
 }
 
 .projected-amount.positive {
@@ -10784,14 +10837,6 @@ html.modal-open {
         padding: 24px 20px;
     }
     
-    .buffer-amount {
-        font-size: 42px;
-    }
-    
-    .projected-amount {
-        font-size: 34px;
-    }
-    
     .payday-info {
         flex-direction: column;
         gap: 10px;
@@ -10808,14 +10853,6 @@ html.modal-open {
     .buffer-card {
         padding: 20px 16px;
         border-radius: 12px;
-    }
-    
-    .buffer-amount {
-        font-size: 36px;
-    }
-    
-    .projected-amount {
-        font-size: 28px;
     }
     
     .summary-row {
