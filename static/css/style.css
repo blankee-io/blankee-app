@@ -3193,9 +3193,14 @@ tr[data-category-id] td.before-member-since {
 
 .income-categories-title {
     flex: 1 1 auto;
-    flex-wrap: wrap;
     text-align: left;
-    white-space: normal;
+    min-width: 0;
+    /* Single line with ellipsis above 600px */
+    height: 20px;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Align the toggle-hidden-btn to the right of the Expense Categories text */
@@ -3208,9 +3213,14 @@ tr[data-category-id] td.before-member-since {
 
 .expense-categories-title {
     flex: 1 1 auto;
-    flex-wrap: wrap;
     text-align: left;
-    white-space: normal;
+    min-width: 0;
+    /* Single line with ellipsis above 600px */
+    height: 20px;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Align the toggle-hidden-btn to the right of the Expense Categories text */
@@ -3223,9 +3233,14 @@ tr[data-category-id] td.before-member-since {
 
 .ca-categories-title {
     flex: 1 1 auto;
-    flex-wrap: wrap;
     text-align: left;
-    white-space: normal;
+    min-width: 0;
+    /* Single line with ellipsis above 600px */
+    height: 20px;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Alternate rows for income and expense categories between white and light gray */
@@ -3242,11 +3257,37 @@ tr[data-category-id] td.before-member-since {
     margin-right: 5px;
     /* Space for the delete button */
     padding-right: 20px;
-    /* Prevent text from expanding the cell */
+    /* Single line with ellipsis above 600px */
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     max-width: 150px;
+    height: 20px;
+    line-height: 20px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+@media (max-width: 600px) {
+    .category-cell {
+        height: 40px;
+        line-height: 20px;
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        text-overflow: ellipsis;
+    }
+    
+    .income-categories-title,
+    .expense-categories-title,
+    .ca-categories-title {
+        height: 40px;
+        line-height: 20px;
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        text-overflow: ellipsis;
+    }
 }
 
 .search-btn-container {
@@ -3561,14 +3602,17 @@ tr[data-category-id] td.before-member-since {
 
 /* Style for the editable category name */
 .category-name {
-    flex-wrap: wrap;
     margin-left: 5px;
     padding: 2px;
 
     /* Remove the default focus outline */
     outline: none; 
 
-    white-space: normal;
+    /* Inherit ellipsis behavior from parent */
+    white-space: inherit;
+    overflow: inherit;
+    text-overflow: inherit;
+    display: inline;
 }
 
 /* Ensure the input field is clickable */
