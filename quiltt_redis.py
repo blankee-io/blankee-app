@@ -72,6 +72,27 @@ def _set_to_redis(table: str, user_id: int, data: List[Dict[str, Any]]) -> bool:
         return False
 
 
+def _set_to_redis_no_dirty(table: str, user_id: int, data: List[Dict[str, Any]]) -> bool:
+    """Set Quiltt data to Redis WITHOUT marking as dirty (for deletion operations)"""
+    redis_client = _get_redis_client()
+    if not redis_client:
+        logger.error(f"Redis client not available for {table}")
+        return False
+    
+    try:
+        redis_key = _get_redis_key(table, user_id)
+        logger.info(f"Setting Redis key {redis_key} with {len(data)} records (no dirty flag)")
+        redis_client.setex(
+            redis_key,
+            INACTIVITY_TIMEOUT + 60,
+            json.dumps(data, cls=DecimalEncoder)
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error setting Redis data for {table}: {e}", exc_info=True)
+        return False
+
+
 def get_quiltt_profile(user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """
     Get user's Quiltt profile from Redis or MySQL.
@@ -566,15 +587,26 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
     Returns:
         True if successful
     """
+    # Use print for debugging since logger may not be configured
+    import sys
+    def debug_log(msg):
+        print(f"[DELETE_CONN] {msg}", file=sys.stderr, flush=True)
+    
+    debug_log(f"delete_quiltt_connection called for connection_id={connection_id}, user_id={user_id}")
+    
     if user_id is None:
         if not current_user.is_authenticated:
+            debug_log("user_id is None and no authenticated user")
             return False
         user_id = current_user.id
     
+    debug_log(f"Processing delete for user {user_id}")
+    
     try:
         redis_client = _get_redis_client()
+        debug_log(f"Got redis_client: {redis_client is not None}")
         if not redis_client:
-            logger.warning("Redis client not available for delete, falling back to direct MySQL")
+            debug_log("Redis client not available for delete, falling back to direct MySQL")
             # Fallback to direct MySQL deletion
             from db_connections import get_db_pool
             with get_db_pool().get_connection() as conn:
@@ -596,22 +628,33 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
             return True
         
         # Get connection's db_id before deleting
+        debug_log(f"Getting connections for user {user_id}")
         connections = get_quiltt_connections(user_id)
+        debug_log(f"Got {len(connections)} connections")
         conn_db_id = None
         for conn in connections:
             if conn.get('connection_id') == connection_id:
                 conn_db_id = conn.get('id')
                 break
         
-        # Remove connection from Redis
+        debug_log(f"Found conn_db_id={conn_db_id} for connection_id={connection_id}")
+        
+        # Remove connection from Redis (without marking dirty - deletion is handled separately)
         cached_connections = _get_from_redis('quiltt_connections', user_id)
+        debug_log(f"Got {len(cached_connections) if cached_connections else 0} cached connections from Redis")
         if cached_connections is None:
             cached_connections = connections
         
+        before_count = len(cached_connections)
         cached_connections = [c for c in cached_connections if c.get('connection_id') != connection_id]
-        _set_to_redis('quiltt_connections', user_id, cached_connections)
+        after_count = len(cached_connections)
+        debug_log(f"Filtered connections: {before_count} -> {after_count}")
         
-        logger.info(f"After deletion, user {user_id} has {len(cached_connections)} connection(s) remaining")
+        debug_log(f"About to call _set_to_redis_no_dirty for quiltt_connections")
+        result = _set_to_redis_no_dirty('quiltt_connections', user_id, cached_connections)
+        debug_log(f"_set_to_redis_no_dirty returned: {result}")
+        
+        debug_log(f"After deletion, user {user_id} has {len(cached_connections)} connection(s) remaining")
         
         # Get account_ids to delete their transactions
         account_ids_to_delete = []
@@ -626,9 +669,9 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
                     a.get('account_id') for a in cached_accounts 
                     if a.get('connection_id') == conn_db_id and a.get('account_id')
                 ]
-                # Remove accounts
+                # Remove accounts (without marking dirty - deletion is handled separately)
                 cached_accounts = [a for a in cached_accounts if a.get('connection_id') != conn_db_id]
-                _set_to_redis('quiltt_accounts', user_id, cached_accounts)
+                _set_to_redis_no_dirty('quiltt_accounts', user_id, cached_accounts)
         
         # Remove associated transactions from Redis (cascade delete)
         if account_ids_to_delete:
@@ -642,7 +685,7 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
                     t for t in cached_transactions 
                     if t.get('account_id') not in account_ids_to_delete
                 ]
-                _set_to_redis('quiltt_transactions', user_id, cached_transactions)
+                _set_to_redis_no_dirty('quiltt_transactions', user_id, cached_transactions)
         
         # Mark tables as dirty for deletion flush
         dirty_key = f"dirty_tables:{user_id}"
@@ -895,3 +938,186 @@ def delete_quiltt_transactions_for_account(account_id: str, user_id: Optional[in
     except Exception as e:
         logger.error(f"Error deleting transactions for account: {e}", exc_info=True)
         return False
+
+
+def get_user_id_by_profile_id(profile_id: str) -> Optional[int]:
+    """
+    Look up user_id from a Quiltt profile_id.
+    Checks MySQL since we need to find the user from an incoming webhook.
+    
+    Args:
+        profile_id: Quiltt profile ID string
+        
+    Returns:
+        user_id or None if not found
+    """
+    try:
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                "SELECT user_id FROM quiltt_profiles WHERE profile_id = %s",
+                (profile_id,)
+            )
+            result = cursor.fetchone()
+            return result['user_id'] if result else None
+    except Exception as e:
+        logger.error(f"Error looking up user_id for profile {profile_id}: {e}")
+        return None
+
+
+def get_quiltt_webhook_events(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Get Quiltt webhook events from Redis or MySQL.
+    
+    Args:
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        List of webhook event dicts
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return []
+        user_id = current_user.id
+    
+    # Try Redis first
+    if is_user_hydrated(user_id):
+        cached_data = _get_from_redis('quiltt_webhook_events', user_id)
+        if cached_data is not None:
+            return cached_data
+    
+    # Fallback to MySQL - get events for this user's profile
+    try:
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
+            cursor.execute("""
+                SELECT qwe.* FROM quiltt_webhook_events qwe
+                INNER JOIN quiltt_profiles qp ON qwe.profile_id = qp.profile_id
+                WHERE qp.user_id = %s
+                ORDER BY qwe.created_at DESC
+            """, (user_id,))
+            return cursor.fetchall() or []
+    except Exception as e:
+        logger.error(f"Error getting Quiltt webhook events from MySQL: {e}")
+        return []
+
+
+def upsert_quiltt_webhook_event(event_data: Dict[str, Any], user_id: int) -> bool:
+    """
+    Insert or update a Quiltt webhook event (Redis-first).
+    
+    Args:
+        event_data: Dict with event fields (event_id, event_type, profile_id, connection_id, payload)
+        user_id: User ID to store under
+        
+    Returns:
+        True if successful
+    """
+    try:
+        # Get existing events from Redis or MySQL
+        cached_data = _get_from_redis('quiltt_webhook_events', user_id)
+        
+        if cached_data is None:
+            # Not in Redis - load from MySQL
+            cached_data = get_quiltt_webhook_events(user_id)
+        
+        if not isinstance(cached_data, list):
+            cached_data = []
+        
+        event_id = event_data.get('event_id')
+        
+        # Check if event already exists
+        existing_idx = None
+        for i, evt in enumerate(cached_data):
+            if evt.get('event_id') == event_id:
+                existing_idx = i
+                break
+        
+        if existing_idx is not None:
+            # Update existing
+            cached_data[existing_idx].update(event_data)
+        else:
+            # Add new - generate temp ID
+            next_id = max((e.get('id', 0) for e in cached_data), default=0) + 1
+            if next_id < 1000000000:
+                next_id = 1000000000 + len(cached_data)
+            event_data['id'] = next_id
+            event_data['created_at'] = datetime.now().isoformat()
+            cached_data.append(event_data)
+        
+        # Save to Redis
+        return _set_to_redis('quiltt_webhook_events', user_id, cached_data)
+        
+    except Exception as e:
+        logger.error(f"Error upserting Quiltt webhook event: {e}", exc_info=True)
+        return False
+
+
+def delete_quiltt_webhook_events_for_connection(connection_id: str, user_id: int, is_last_connection: bool = False) -> bool:
+    """
+    Delete all webhook events for a specific connection (Redis-first).
+    If is_last_connection is True, also deletes events with NULL connection_id.
+    
+    Args:
+        connection_id: Quiltt connection ID
+        user_id: User ID
+        is_last_connection: If True, also delete events with NULL connection_id
+        
+    Returns:
+        True if successful
+    """
+    try:
+        cached_data = _get_from_redis('quiltt_webhook_events', user_id)
+        
+        if cached_data is None:
+            cached_data = get_quiltt_webhook_events(user_id)
+        
+        if not isinstance(cached_data, list):
+            cached_data = []
+        
+        # Get user's profile_id for NULL event deletion
+        profile_id = None
+        if is_last_connection:
+            profile = get_quiltt_profile(user_id)
+            if profile:
+                profile_id = profile.get('profile_id')
+        
+        # Filter out events for this connection
+        original_count = len(cached_data)
+        
+        if is_last_connection:
+            # Remove events for this connection AND events with NULL connection_id
+            cached_data = [evt for evt in cached_data 
+                          if evt.get('connection_id') != connection_id 
+                          and evt.get('connection_id') is not None]
+        else:
+            # Only remove events for this specific connection
+            cached_data = [evt for evt in cached_data if evt.get('connection_id') != connection_id]
+        
+        deleted_count = original_count - len(cached_data)
+        
+        if deleted_count > 0:
+            logger.info(f"Deleted {deleted_count} webhook events for connection {connection_id} (is_last={is_last_connection})")
+        
+        # Always save to Redis (even if empty) and mark pending deletes for MySQL
+        _set_to_redis('quiltt_webhook_events', user_id, cached_data)
+        
+        # Always add to pending deletes for MySQL cleanup
+        redis_client = _get_redis_client()
+        if redis_client:
+            pending_key = f"pending_webhook_deletes:{user_id}"
+            redis_client.sadd(pending_key, connection_id)
+            if is_last_connection and profile_id:
+                # Store profile_id so we can delete NULL events even after profile is deleted
+                redis_client.sadd(pending_key, f'__NULL__:{profile_id}')
+            redis_client.expire(pending_key, INACTIVITY_TIMEOUT + 60)
+            
+            # Mark table as dirty so flush worker will process the pending delete
+            dirty_key = f"dirty_tables:{user_id}"
+            redis_client.sadd(dirty_key, 'quiltt_webhook_events')
+            redis_client.expire(dirty_key, INACTIVITY_TIMEOUT + 60)
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error deleting webhook events for connection: {e}", exc_info=True)
+        return False
+
