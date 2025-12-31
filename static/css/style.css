@@ -2107,6 +2107,23 @@ input#setup-profile-starting-savings {
     border-color: #3CC5C0;
 }
 
+.account-selection-item.disabled {
+    background-color: #f0f0f0;
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.account-selection-item.disabled:hover {
+    border-color: #e0e0e0;
+}
+
+.account-disabled-note {
+    font-size: 0.8em;
+    color: #999;
+    font-style: italic;
+    margin-top: 2px;
+}
+
 .account-selection-item input[type="checkbox"] {
     width: 20px;
     height: 20px;
@@ -9737,6 +9754,19 @@ html.modal-open {
     background: #f8f9fa;
     border-radius: 6px;
     margin-bottom: 8px;
+}
+
+.account-item.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.account-item.disabled label {
+    cursor: not-allowed;
+}
+
+.account-item.disabled .account-sync-toggle {
+    cursor: not-allowed;
 }
 
 .account-type-divider {

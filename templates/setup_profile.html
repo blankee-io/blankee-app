@@ -463,22 +463,88 @@
                             const accountList = $('#account-selection-list');
                             accountList.empty();
                             
+                            // Count already synced checking/savings accounts across ALL connections
+                            let hasSyncedChecking = false;
+                            let hasSyncedSavings = false;
+                            
+                            response.connections.forEach(function(conn) {
+                                if (conn.accounts) {
+                                    conn.accounts.forEach(function(acc) {
+                                        if (acc.sync_transactions) {
+                                            const isChecking = acc.account_type === 'DEPOSITORY' && 
+                                                acc.account_name.toLowerCase().includes('checking');
+                                            const isSavings = acc.account_type === 'DEPOSITORY' && 
+                                                acc.account_name.toLowerCase().includes('savings');
+                                            if (isChecking) hasSyncedChecking = true;
+                                            if (isSavings) hasSyncedSavings = true;
+                                        }
+                                    });
+                                }
+                            });
+                            
                             let hasAccounts = false;
+                            let checkingCount = 0;
+                            let savingsCount = 0;
                             
                             response.connections.forEach(function(conn) {
                                 if (conn.accounts && conn.accounts.length > 0) {
                                     conn.accounts.forEach(function(account) {
+                                        const isChecking = account.account_type === 'DEPOSITORY' && 
+                                            account.account_name.toLowerCase().includes('checking');
+                                        const isSavings = account.account_type === 'DEPOSITORY' && 
+                                            account.account_name.toLowerCase().includes('savings');
+                                        const isCredit = account.account_type === 'CREDIT';
+                                        
+                                        // Only allow depository (checking/savings) and credit accounts
+                                        if (!isChecking && !isSavings && !isCredit) return;
+                                        
                                         hasAccounts = true;
-                                        const mask = account.mask ? `<div class="account-mask">...${account.mask}</div>` : '';
+                                        const mask = account.mask ? `<div class="account-mask">...${(account.mask || '').slice(-4)}</div>` : '';
+                                        
+                                        // Determine if this should be checked by default and if disabled
+                                        // Disable if: already synced from another connection, OR already have one selected in this list
+                                        let isChecked = false;
+                                        let isDisabled = false;
+                                        let disabledReason = '';
+                                        
+                                        if (isChecking) {
+                                            checkingCount++;
+                                            if (hasSyncedChecking) {
+                                                isDisabled = true;
+                                                disabledReason = 'Already syncing a Checking account';
+                                            } else if (checkingCount > 1) {
+                                                isDisabled = true;
+                                                disabledReason = 'Only one Checking account allowed';
+                                            } else {
+                                                isChecked = true;
+                                            }
+                                        } else if (isSavings) {
+                                            savingsCount++;
+                                            if (hasSyncedSavings) {
+                                                isDisabled = true;
+                                                disabledReason = 'Already syncing a Savings account';
+                                            } else if (savingsCount > 1) {
+                                                isDisabled = true;
+                                                disabledReason = 'Only one Savings account allowed';
+                                            } else {
+                                                isChecked = true;
+                                            }
+                                        } else {
+                                            isChecked = true; // Credit accounts checked by default
+                                        }
+                                        
                                         const accountItem = $(`
-                                            <div class="account-selection-item">
+                                            <div class="account-selection-item${isDisabled ? ' disabled' : ''}">
                                                 <input type="checkbox" 
                                                        class="account-checkbox" 
-                                                       data-account-id="${account.account_id}" 
-                                                       checked>
+                                                       data-account-id="${account.account_id}"
+                                                       data-account-type="${isChecking ? 'checking' : (isSavings ? 'savings' : 'credit')}"
+                                                       ${isChecked ? 'checked' : ''}
+                                                       ${isDisabled ? 'disabled' : ''}>
                                                 <div class="account-selection-info">
                                                     <div class="account-selection-name">${account.account_name || 'Account'}</div>
                                                     ${mask}
+                                                    ${isDisabled ? `<div class="account-disabled-note">${disabledReason}</div>` : ''}
                                                 </div>
                                             </div>
                                         `);
@@ -501,6 +567,28 @@
                     }
                 });
             }
+
+            // Prevent selecting more than one checking or savings account
+            $(document).on('change', '.account-checkbox', function() {
+                const checkbox = $(this);
+                const accountType = checkbox.data('account-type');
+                
+                if (!checkbox.is(':checked')) {
+                    // Always allow unchecking
+                    return;
+                }
+                
+                // Only enforce limit for checking and savings
+                if (accountType === 'checking' || accountType === 'savings') {
+                    const otherChecked = $(`.account-checkbox[data-account-type="${accountType}"]:checked`).not(checkbox);
+                    if (otherChecked.length > 0) {
+                        // Another one is already checked, prevent this selection
+                        checkbox.prop('checked', false);
+                        const typeLabel = accountType === 'checking' ? 'Checking' : 'Savings';
+                        alert(`You can only select one ${typeLabel} account. Please deselect the other first.`);
+                    }
+                }
+            });
 
             // Handle account selection confirmation
             $('#confirm-account-selection').on('click', function() {
