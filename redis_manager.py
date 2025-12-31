@@ -425,6 +425,7 @@ def _refresh_user_ttls(user_id: int):
     Refresh TTLs for all of a user's Redis keys to prevent expiration during active use.
     This is called periodically when an active user makes requests.
     Uses a throttle to avoid excessive Redis operations.
+    Also hydrates any missing tables (e.g., if new tables were added to USER_TABLES).
     
     Args:
         user_id: User ID
@@ -446,13 +447,20 @@ def _refresh_user_ttls(user_id: int):
         if _redis_client.exists(user_key):
             _redis_client.expire(user_key, INACTIVITY_TIMEOUT + 60)
         
-        # Refresh TTL for all user tables
+        # Refresh TTL for all user tables, hydrate any missing
         refreshed_count = 0
+        hydrated_count = 0
         for table in USER_TABLES:
             key = _get_redis_key(table, user_id)
             if _redis_client.exists(key):
                 _redis_client.expire(key, INACTIVITY_TIMEOUT + 60)
                 refreshed_count += 1
+            else:
+                # Missing table - hydrate it from MySQL
+                rows_count = _hydrate_table(table, user_id)
+                if rows_count > 0:
+                    hydrated_count += 1
+                    logger.info(f"[TTL REFRESH] Hydrated missing table {table} for user {user_id}: {rows_count} rows")
         
         # Refresh TTL for bud_items (stored by user_id)
         bud_items_key = f"bud_items:{REDIS_KEY_VERSION}:{user_id}"
@@ -460,7 +468,10 @@ def _refresh_user_ttls(user_id: int):
             _redis_client.expire(bud_items_key, INACTIVITY_TIMEOUT + 60)
             refreshed_count += 1
         
-        logger.debug(f"[TTL REFRESH] ✓ Refreshed {refreshed_count} keys for user {user_id}")
+        if hydrated_count > 0:
+            logger.info(f"[TTL REFRESH] ✓ Refreshed {refreshed_count} keys, hydrated {hydrated_count} missing tables for user {user_id}")
+        else:
+            logger.debug(f"[TTL REFRESH] ✓ Refreshed {refreshed_count} keys for user {user_id}")
         
     except Exception as e:
         logger.error(f"[TTL REFRESH] Error refreshing TTLs for user {user_id}: {e}")

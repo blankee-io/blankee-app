@@ -2496,6 +2496,10 @@ tr[data-category-id] td.before-member-since {
 .dashboard-d-label-cell {
     flex: 3;
     text-align: right;
+    /* Prevent text from expanding the cell */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 #dashboard-d-amount {
@@ -3237,7 +3241,12 @@ tr[data-category-id] td.before-member-since {
     position: relative;
     margin-right: 5px;
     /* Space for the delete button */
-    padding-right: 20px; 
+    padding-right: 20px;
+    /* Prevent text from expanding the cell */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 150px;
 }
 
 .search-btn-container {
@@ -9787,22 +9796,33 @@ html.modal-open {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex: 1;
+    min-width: 0;
+    margin-right: 10px;
 }
 
 .account-sync-toggle {
     width: 18px;
     height: 18px;
     cursor: pointer;
+    flex-shrink: 0;
 }
 
 .account-info label {
     cursor: pointer;
     margin: 0;
+    /* Prevent text from expanding the cell */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
 }
 
 .account-mask {
     color: #666;
-    margin-left: 8px;
+    flex-shrink: 0;
 }
 
 .account-balance {
