@@ -218,16 +218,13 @@
                                        id="account-{{ account.id }}"
                                        class="account-sync-toggle"
                                        data-account-id="{{ account.account_id }}"
-                                       {% if account.sync_transactions %}checked{% endif %}
-                                       style="width: 18px; height: 18px; cursor: pointer;">
+                                       data-account-type="checking"
+                                       {% if account.sync_transactions %}checked{% endif %}>
                                 <label for="account-{{ account.id }}">
                                     <strong>{{ account.account_name }}</strong>
-                                    <span class="account-mask">...{{ account.mask }}</span>
                                 </label>
                             </div>
-                            <div class="account-balance">
-                                {{ currency_symbol }}{{ "{:,.2f}".format(account.current_balance or 0) }}
-                            </div>
+                            <div class="account-mask">...{{ account.mask[-4:] if account.mask else '' }}</div>
                         </div>
                         {% endfor %}
                         {% endif %}
@@ -241,16 +238,13 @@
                                        id="account-{{ account.id }}"
                                        class="account-sync-toggle"
                                        data-account-id="{{ account.account_id }}"
-                                       {% if account.sync_transactions %}checked{% endif %}
-                                       style="width: 18px; height: 18px; cursor: pointer;">
+                                       data-account-type="savings"
+                                       {% if account.sync_transactions %}checked{% endif %}>
                                 <label for="account-{{ account.id }}">
                                     <strong>{{ account.account_name }}</strong>
-                                    <span class="account-mask">...{{ account.mask }}</span>
                                 </label>
                             </div>
-                            <div class="account-balance">
-                                {{ currency_symbol }}{{ "{:,.2f}".format(account.current_balance or 0) }}
-                            </div>
+                            <div class="account-mask">...{{ account.mask[-4:] if account.mask else '' }}</div>
                         </div>
                         {% endfor %}
                         {% endif %}
@@ -264,16 +258,13 @@
                                        id="account-{{ account.id }}"
                                        class="account-sync-toggle"
                                        data-account-id="{{ account.account_id }}"
-                                       {% if account.sync_transactions %}checked{% endif %}
-                                       style="width: 18px; height: 18px; cursor: pointer;">
+                                       data-account-type="credit"
+                                       {% if account.sync_transactions %}checked{% endif %}>
                                 <label for="account-{{ account.id }}">
                                     <strong>{{ account.account_name }}</strong>
-                                    <span class="account-mask">...{{ account.mask }}</span>
                                 </label>
                             </div>
-                            <div class="account-balance">
-                                {{ currency_symbol }}{{ "{:,.2f}".format(account.current_balance or 0) }}
-                            </div>
+                            <div class="account-mask">...{{ account.mask[-4:] if account.mask else '' }}</div>
                         </div>
                         {% endfor %}
                         {% endif %}
@@ -1747,11 +1738,6 @@
             }
             
             function renderAccountItem(account, currencySymbol) {
-                const balance = parseFloat(account.current_balance || 0).toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2
-                });
-                
                 return `
                     <div class="account-item">
                         <div class="account-info">
@@ -1763,12 +1749,9 @@
                                    style="width: 18px; height: 18px; cursor: pointer;">
                             <label for="account-${account.id}">
                                 <strong>${account.account_name}</strong>
-                                <span class="account-mask">...${account.mask}</span>
                             </label>
                         </div>
-                        <div class="account-balance">
-                            ${currencySymbol}${balance}
-                        </div>
+                        <div class="account-mask">...${(account.mask || '').slice(-4)}</div>
                     </div>
                 `;
             }
@@ -1826,7 +1809,7 @@
             }
 
             // Account selection for new bank connections
-            function loadAccountSelectionProfile() {
+            function loadAccountSelectionProfile(newConnectionId) {
                 $.ajax({
                     url: '/quiltt/connections',
                     method: 'GET',
@@ -1835,22 +1818,97 @@
                             const accountList = $('#account-selection-list');
                             accountList.empty();
                             
-                            let hasAccounts = false;
+                            // Count already synced checking/savings accounts across ALL connections
+                            let hasSyncedChecking = false;
+                            let hasSyncedSavings = false;
                             
                             response.connections.forEach(function(conn) {
+                                // Skip the new connection when counting existing synced accounts
+                                if (newConnectionId && conn.connection_id === newConnectionId) {
+                                    return;
+                                }
+                                if (conn.accounts) {
+                                    conn.accounts.forEach(function(acc) {
+                                        if (acc.sync_transactions) {
+                                            const isChecking = acc.account_type === 'DEPOSITORY' && 
+                                                acc.account_name.toLowerCase().includes('checking');
+                                            const isSavings = acc.account_type === 'DEPOSITORY' && 
+                                                acc.account_name.toLowerCase().includes('savings');
+                                            if (isChecking) hasSyncedChecking = true;
+                                            if (isSavings) hasSyncedSavings = true;
+                                        }
+                                    });
+                                }
+                            });
+                            
+                            let hasAccounts = false;
+                            let checkingCount = 0;
+                            let savingsCount = 0;
+                            
+                            response.connections.forEach(function(conn) {
+                                // If a new connection ID was provided, only show accounts from that connection
+                                if (newConnectionId && conn.connection_id !== newConnectionId) {
+                                    return; // Skip this connection
+                                }
+                                
                                 if (conn.accounts && conn.accounts.length > 0) {
                                     conn.accounts.forEach(function(account) {
+                                        const isChecking = account.account_type === 'DEPOSITORY' && 
+                                            account.account_name.toLowerCase().includes('checking');
+                                        const isSavings = account.account_type === 'DEPOSITORY' && 
+                                            account.account_name.toLowerCase().includes('savings');
+                                        const isCredit = account.account_type === 'CREDIT';
+                                        
+                                        // Only allow depository (checking/savings) and credit accounts
+                                        if (!isChecking && !isSavings && !isCredit) return;
+                                        
                                         hasAccounts = true;
-                                        const mask = account.mask ? `<div class="account-mask">...${account.mask}</div>` : '';
+                                        const mask = account.mask ? `<div class="account-mask">...${(account.mask || '').slice(-4)}</div>` : '';
+                                        
+                                        // Determine if this should be checked by default and if disabled
+                                        // Disable if: already synced from another connection, OR already have one selected in this list
+                                        let isChecked = false;
+                                        let isDisabled = false;
+                                        let disabledReason = '';
+                                        
+                                        if (isChecking) {
+                                            checkingCount++;
+                                            if (hasSyncedChecking) {
+                                                isDisabled = true;
+                                                disabledReason = 'Already syncing a Checking account';
+                                            } else if (checkingCount > 1) {
+                                                isDisabled = true;
+                                                disabledReason = 'Only one Checking account allowed';
+                                            } else {
+                                                isChecked = true;
+                                            }
+                                        } else if (isSavings) {
+                                            savingsCount++;
+                                            if (hasSyncedSavings) {
+                                                isDisabled = true;
+                                                disabledReason = 'Already syncing a Savings account';
+                                            } else if (savingsCount > 1) {
+                                                isDisabled = true;
+                                                disabledReason = 'Only one Savings account allowed';
+                                            } else {
+                                                isChecked = true;
+                                            }
+                                        } else {
+                                            isChecked = true; // Credit accounts checked by default
+                                        }
+                                        
                                         const accountItem = $(`
-                                            <div class="account-selection-item">
+                                            <div class="account-selection-item${isDisabled ? ' disabled' : ''}">
                                                 <input type="checkbox" 
                                                        class="account-checkbox" 
-                                                       data-account-id="${account.account_id}" 
-                                                       checked>
+                                                       data-account-id="${account.account_id}"
+                                                       data-account-type="${isChecking ? 'checking' : (isSavings ? 'savings' : 'credit')}"
+                                                       ${isChecked ? 'checked' : ''}
+                                                       ${isDisabled ? 'disabled' : ''}>
                                                 <div class="account-selection-info">
                                                     <div class="account-selection-name">${account.account_name || 'Account'}</div>
                                                     ${mask}
+                                                    ${isDisabled ? `<div class="account-disabled-note">${disabledReason}</div>` : ''}
                                                 </div>
                                             </div>
                                         `);
@@ -1875,6 +1933,28 @@
                     }
                 });
             }
+
+            // Prevent selecting more than one checking or savings account
+            $(document).on('change', '.account-checkbox', function() {
+                const checkbox = $(this);
+                const accountType = checkbox.data('account-type');
+                
+                if (!checkbox.is(':checked')) {
+                    // Always allow unchecking
+                    return;
+                }
+                
+                // Only enforce limit for checking and savings
+                if (accountType === 'checking' || accountType === 'savings') {
+                    const otherChecked = $(`.account-checkbox[data-account-type="${accountType}"]:checked`).not(checkbox);
+                    if (otherChecked.length > 0) {
+                        // Another one is already checked, prevent this selection
+                        checkbox.prop('checked', false);
+                        const typeLabel = accountType === 'checking' ? 'Checking' : 'Savings';
+                        alert(`You can only select one ${typeLabel} account. Please deselect the other first.`);
+                    }
+                }
+            });
 
             // Handle account selection confirmation
             $('#confirm-account-selection').on('click', function() {
@@ -2148,6 +2228,8 @@
                             // Connector loaded
                         },
                         onExitSuccess: function(metadata) {
+                            // Capture the new connection ID from metadata
+                            const newConnectionId = metadata && metadata.connectionId ? metadata.connectionId : null;
                             
                             // Check if this was a reconnect operation
                             if (window.reconnectingConnectionId) {
@@ -2206,7 +2288,7 @@
                                             // Wait for Redis flush to MySQL to complete (liability data)
                                             setTimeout(function() {
                                                 $('#setup-profile-loading-modal').hide();
-                                                loadAccountSelectionProfile();
+                                                loadAccountSelectionProfile(newConnectionId);
                                             }, 2000);
                                         } else {
                                             $('#setup-profile-loading-modal').hide();
@@ -2544,9 +2626,7 @@
             }
             
             function buildAccountHtml(account) {
-                const currencySymbol = '{{ currency_symbol }}';
                 const checked = account.sync_transactions ? 'checked' : '';
-                const balance = (account.current_balance || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
                 
                 return `
                     <div class="account-item">
@@ -2559,12 +2639,9 @@
                                    style="width: 18px; height: 18px; cursor: pointer;">
                             <label for="account-${account.id}">
                                 <strong>${account.account_name}</strong>
-                                <span class="account-mask">...${account.mask}</span>
                             </label>
                         </div>
-                        <div class="account-balance">
-                            ${currencySymbol}${balance}
-                        </div>
+                        <div class="account-mask">...${(account.mask || '').slice(-4)}</div>
                     </div>
                 `;
             }
@@ -2586,28 +2663,48 @@
             // Start polling on page load
             startSyncPolling();
 
+            // Function to update disabled state of account sync checkboxes
+            function updateAccountSyncDisabledState() {
+                // Check if there's a checked checking account
+                const hasCheckedChecking = $('.account-sync-toggle[data-account-type="checking"]:checked').length > 0;
+                const hasCheckedSavings = $('.account-sync-toggle[data-account-type="savings"]:checked').length > 0;
+                
+                // Disable unchecked checking accounts if one is already checked
+                $('.account-sync-toggle[data-account-type="checking"]').each(function() {
+                    const $cb = $(this);
+                    const $item = $cb.closest('.account-item');
+                    if (!$cb.is(':checked') && hasCheckedChecking) {
+                        $cb.prop('disabled', true);
+                        $item.addClass('disabled');
+                    } else {
+                        $cb.prop('disabled', false);
+                        $item.removeClass('disabled');
+                    }
+                });
+                
+                // Disable unchecked savings accounts if one is already checked
+                $('.account-sync-toggle[data-account-type="savings"]').each(function() {
+                    const $cb = $(this);
+                    const $item = $cb.closest('.account-item');
+                    if (!$cb.is(':checked') && hasCheckedSavings) {
+                        $cb.prop('disabled', true);
+                        $item.addClass('disabled');
+                    } else {
+                        $cb.prop('disabled', false);
+                        $item.removeClass('disabled');
+                    }
+                });
+            }
+            
+            // Run on page load
+            updateAccountSyncDisabledState();
+
             // Toggle account sync
             $(document).on('change', '.account-sync-toggle', function() {
                 const accountId = $(this).data('account-id');
                 const syncEnabled = $(this).is(':checked');
                 const $checkbox = $(this);
-                
-                // Determine account type by finding the preceding divider
-                const $accountItem = $checkbox.closest('.account-item');
-                let accountType = 'unknown';
-                
-                // Look for the divider before this account item
-                let $prevDivider = $accountItem.prevAll('.account-type-divider').first();
-                if ($prevDivider.length) {
-                    const dividerText = $prevDivider.text().toLowerCase();
-                    if (dividerText.includes('checking')) {
-                        accountType = 'checking';
-                    } else if (dividerText.includes('savings')) {
-                        accountType = 'savings';
-                    } else if (dividerText.includes('credit')) {
-                        accountType = 'credit';
-                    }
-                }
+                const accountType = $checkbox.data('account-type') || 'unknown';
                 
                 $.ajax({
                     url: '/quiltt/toggle-sync',
@@ -2619,6 +2716,9 @@
                     }),
                     success: function(response) {
                         if (response.status === 'success' || response.status === 'warning') {
+                            // Update disabled state of other checkboxes
+                            updateAccountSyncDisabledState();
+                            
                             // Show success message for toggle
                             if (syncEnabled) {
                                 showSuccessMessage('Account sync enabled');

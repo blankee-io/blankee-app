@@ -16939,21 +16939,30 @@ def quiltt_delete():
         return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
     
     try:
-        # Get connection from Redis or MySQL
-        connections = get_quiltt_connections(current_user.id)
+        # Get connection from Redis first, then MySQL if not found
+        from quiltt_redis import _get_from_redis
+        connections = _get_from_redis('quiltt_connections', current_user.id)
+        
+        # If not in Redis, try direct MySQL
+        if connections is None:
+            app.logger.info(f"Connections not in Redis cache, fetching from MySQL for user {current_user.id}")
+            connections = get_quiltt_connections(current_user.id)
+        
         connection = None
-        for conn in connections:
+        for conn in connections or []:
             if conn.get('connection_id') == connection_id:
                 connection = conn
                 break
         
         if not connection:
-            app.logger.error(f"DELETE FAILED - Connection not found for connection_id={connection_id}")
-            return jsonify({'status': 'error', 'message': 'Connection not found or access denied'}), 404
+            # Connection might have already been deleted - return success to clean up UI
+            app.logger.warning(f"DELETE - Connection {connection_id} not found for user {current_user.id}, may already be deleted")
+            return jsonify({'status': 'success', 'message': 'Connection already deleted'})
         
         # Safety check - only allow deletion of disconnected connections
-        if connection.get('status', '').upper() != 'DISCONNECTED':
-            app.logger.error(f"DELETE FAILED - Connection status is '{connection.get('status')}', not DISCONNECTED")
+        status = connection.get('status', '').upper()
+        if status not in ('DISCONNECTED', 'ERROR', 'DELETING'):
+            app.logger.error(f"DELETE FAILED - Connection status is '{status}', not DISCONNECTED/ERROR/DELETING")
             return jsonify({'status': 'error', 'message': 'Can only delete disconnected connections'}), 400
         
         # Before deleting, get all accounts for this connection to update credit accounts
@@ -16961,7 +16970,7 @@ def quiltt_delete():
         connection_db_id = connection.get('id')  # MySQL ID
         accounts_to_update = []
         
-        for acc in quiltt_accounts:
+        for acc in quiltt_accounts or []:
             if acc.get('connection_id') == connection_db_id and acc.get('account_type', '').upper() == 'CREDIT':
                 account_mask = acc.get('mask')
                 if account_mask:
@@ -16994,22 +17003,35 @@ def quiltt_delete():
                 
                 app.logger.info(f"Set is_quiltt=0 for {updated_count} credit accounts after deleting connection {connection_id}")
         
+        # Check if there are any remaining connections (before deleting this one)
+        remaining_connections = [c for c in (connections or []) if c.get('connection_id') != connection_id]
+        is_last_connection = len(remaining_connections) == 0
+        
+        app.logger.info(f"Deleting connection {connection_id} for user {current_user.id}, is_last={is_last_connection}, remaining={len(remaining_connections)}")
+        
+        # Delete webhook events for this connection (Redis-first)
+        # If last connection, also delete events with NULL connection_id
+        from quiltt_redis import delete_quiltt_webhook_events_for_connection
+        delete_quiltt_webhook_events_for_connection(connection_id, current_user.id, is_last_connection)
+        
         # Delete using Redis-first operation
+        app.logger.info(f"[APP_DELETE] About to call delete_quiltt_connection for {connection_id}")
         success = delete_quiltt_connection(connection_id, current_user.id)
+        app.logger.info(f"[APP_DELETE] delete_quiltt_connection returned: {success}")
         
         if success:
-            pass
+            app.logger.info(f"Successfully deleted connection {connection_id} for user {current_user.id}")
             return jsonify({
                 'status': 'success', 
                 'message': 'Connection deleted successfully'
             })
         else:
+            app.logger.error(f"delete_quiltt_connection returned False for {connection_id}")
             return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
                 
     except Exception as e:
         app.logger.error(f"DELETE ERROR - Exception deleting Quiltt connection: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
-
 
 def _is_compatible_account_type(account_type):
     """Check if account type is compatible (depository or credit only)"""
@@ -17036,6 +17058,22 @@ def quiltt_sync_profile():
         if not profile_data:
             return jsonify({'status': 'error', 'message': 'Failed to fetch profile from Quiltt'}), 500
         
+        # Check if user already has synced checking/savings accounts
+        existing_accounts = get_quiltt_accounts(current_user.id) or []
+        has_synced_checking = False
+        has_synced_savings = False
+        
+        for acc in existing_accounts:
+            if acc.get('sync_transactions') == 1 and acc.get('is_active') == 1:
+                acc_type = (acc.get('account_type') or '').upper()
+                acc_name = (acc.get('account_name') or '').lower()
+                if acc_type == 'DEPOSITORY':
+                    if 'checking' in acc_name:
+                        has_synced_checking = True
+                    elif 'savings' in acc_name:
+                        has_synced_savings = True
+        
+        app.logger.info(f"User {current_user.id} sync-profile: has_synced_checking={has_synced_checking}, has_synced_savings={has_synced_savings}")
         
         # Save/update connections and accounts using Redis-first operations
         for connection in profile_data.get('connections', []):
@@ -17075,6 +17113,22 @@ def quiltt_sync_profile():
                 if not _is_compatible_account_type(account_type):
                     pass
                     continue
+                
+                account_id = account.get('id', '')
+                account_name = account.get('name', 'Account')
+                account_name_lower = account_name.lower()
+                account_type_upper = account_type.upper()
+                
+                # Skip checking/savings accounts if user already has one synced
+                # But allow updating existing accounts (check if this account already exists)
+                is_new_account = True
+                for existing_acc in existing_accounts:
+                    if existing_acc.get('account_id') == account_id:
+                        is_new_account = False
+                        break
+                
+                # Note: We no longer skip checking/savings accounts here - they're saved but shown
+                # as disabled in the UI if user already has that type synced
                     
                 # Get balance info safely
                 balance = account.get('balance') or {}
@@ -17083,9 +17137,6 @@ def quiltt_sync_profile():
                 # Always store balance as positive (credit cards may report negative)
                 current_balance = abs(current_balance) if current_balance else 0
                 available_balance = abs(available_balance) if available_balance else 0
-                
-                account_id = account.get('id', '')
-                account_name = account.get('name', 'Account')
                 
                 # Extract Finicity liability data if present
                 liability_data = {}
@@ -17196,6 +17247,19 @@ def quiltt_sync_profile():
                             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                             
                             app.logger.info(f"Found existing credit account with mask {account_mask}, setting is_quiltt=1")
+                            
+                            # Create auto-adjustment entry to sync balance with bank
+                            auto_success, auto_msg = _create_credit_account_auto_adjustment(
+                                current_user.id,
+                                account_id,  # quiltt_account_id
+                                starting_balance,  # bank balance (already converted to positive above)
+                                account_mask
+                            )
+                            if auto_success:
+                                app.logger.info(f"[SYNC-PROFILE] Credit account auto-adjustment: {auto_msg}")
+                            else:
+                                app.logger.warning(f"[SYNC-PROFILE] Credit account auto-adjustment failed: {auto_msg}")
+                            
                             break
                         elif not account_mask and acc.get('name') == account_name:
                             existing_account = acc
@@ -17423,7 +17487,7 @@ def quiltt_check_sync_status():
             profile_data = quiltt_client.get_profile(profile['session_token'])
             
             if profile_data and profile_data.get('connections'):
-                # Update connections and accounts ONLY if status changed
+                # Update connections and accounts ONLY if they exist locally and status changed
                 for quiltt_conn in profile_data.get('connections', []):
                     if not quiltt_conn:
                         continue
@@ -17434,9 +17498,15 @@ def quiltt_check_sync_status():
                     connection_id = quiltt_conn.get('id', '')
                     connection_status = quiltt_conn.get('status', 'ACTIVE')
                     
-                    # Check if status actually changed
+                    # Check if this connection exists locally
                     current_conn = current_conn_map.get(connection_id)
-                    status_changed = not current_conn or current_conn.get('status') != connection_status
+                    
+                    # IMPORTANT: Only update if connection exists locally - don't re-add deleted connections
+                    if not current_conn:
+                        continue
+                    
+                    # Only update if status actually changed
+                    status_changed = current_conn.get('status') != connection_status
                     
                     # Only upsert if status changed
                     if status_changed:
@@ -18259,9 +18329,35 @@ def quiltt_toggle_sync():
         return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
     
     try:
-        from quiltt_redis import get_quiltt_transactions, delete_quiltt_transactions_for_account
+        from quiltt_redis import get_quiltt_transactions, delete_quiltt_transactions_for_account, get_quiltt_profile, upsert_quiltt_account
         
         if sync_enabled:
+            # First, fetch latest balance from Quiltt before doing anything else
+            profile = get_quiltt_profile(current_user.id)
+            if profile and profile.get('session_token'):
+                try:
+                    profile_data = quiltt_client.get_profile(profile['session_token'])
+                    if profile_data and profile_data.get('connections'):
+                        # Find the account and update its balance in Redis
+                        for connection in profile_data['connections']:
+                            if connection and connection.get('accounts'):
+                                for account in connection['accounts']:
+                                    if account and account.get('id') == account_id:
+                                        # Found the account - update balance in Redis
+                                        balance = account.get('balance') or {}
+                                        current_balance = abs(float(balance.get('current', 0) or 0))
+                                        available_balance = abs(float(balance.get('available', 0) or 0))
+                                        
+                                        app.logger.info(f"[TOGGLE-SYNC] Refreshed balance for {account_id}: current=${current_balance}, available=${available_balance}")
+                                        
+                                        # Update the account in Redis with fresh balance
+                                        update_quiltt_account_field(account_id, 'current_balance', current_balance, current_user.id)
+                                        update_quiltt_account_field(account_id, 'available_balance', available_balance, current_user.id)
+                                        break
+                except Exception as e:
+                    app.logger.warning(f"[TOGGLE-SYNC] Could not refresh balance from Quiltt: {e}")
+                    # Continue anyway - we'll use cached balance
+            
             # Enable: Set both sync_transactions and is_active to 1
             success_sync = update_quiltt_account_field(
                 account_id, 
@@ -18947,29 +19043,22 @@ def quiltt_webhook():
                 
                 
                 # Get user_id from profile_id
-                cursor.execute("""
-                    SELECT user_id FROM quiltt_profiles WHERE profile_id = %s
-                """, (profile_id,))
-                profile = cursor.fetchone()
+                from quiltt_redis import get_user_id_by_profile_id, upsert_quiltt_webhook_event
+                user_id = get_user_id_by_profile_id(profile_id)
                 
-                if not profile:
+                if not user_id:
                     pass
                     continue
                 
-                user_id = profile['user_id']
-                
-                # Store webhook event
-                cursor.execute("""
-                    INSERT INTO quiltt_webhook_events 
-                    (event_id, event_type, profile_id, connection_id, payload)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (
-                    event_id,
-                    event_type,
-                    profile_id,
-                    connection_id,
-                    json.dumps(event)
-                ))
+                # Store webhook event in Redis (will flush to MySQL periodically)
+                upsert_quiltt_webhook_event({
+                    'event_id': event_id,
+                    'event_type': event_type,
+                    'profile_id': profile_id,
+                    'connection_id': connection_id,
+                    'payload': event,
+                    'processed': 0
+                }, user_id)
                 
                 # Process different event types
                 
@@ -18979,18 +19068,25 @@ def quiltt_webhook():
                     
                     # Update connection status in MySQL
                     if connection_id:
-                        cursor.execute("""
-                            UPDATE quiltt_connections 
-                            SET status = 'SYNCED', last_synced_at = NOW()
-                            WHERE user_id = %s AND connection_id = %s
-                        """, (user_id, connection_id))
+                        # Check if this connection is being deleted - if so, skip update
+                        delete_key = f"quiltt_connections_to_delete:{user_id}"
+                        is_pending_delete = _redis_client.sismember(delete_key, connection_id) if _redis_client else False
                         
-                        # Update Redis
-                        from quiltt_redis import upsert_quiltt_connection
-                        upsert_quiltt_connection({
-                            'connection_id': connection_id,
-                            'status': 'SYNCED'
-                        }, user_id)
+                        if is_pending_delete:
+                            app.logger.info(f"Skipping webhook update for {connection_id} - pending delete")
+                        else:
+                            cursor.execute("""
+                                UPDATE quiltt_connections 
+                                SET status = 'SYNCED', last_synced_at = NOW()
+                                WHERE user_id = %s AND connection_id = %s
+                            """, (user_id, connection_id))
+                            
+                            # Update Redis
+                            from quiltt_redis import upsert_quiltt_connection
+                            upsert_quiltt_connection({
+                                'connection_id': connection_id,
+                                'status': 'SYNCED'
+                            }, user_id)
                         
                     
                     conn.commit()
@@ -19026,18 +19122,25 @@ def quiltt_webhook():
                     new_status = status_map.get(error_type, 'ERROR')
                     
                     if connection_id:
-                        cursor.execute("""
-                            UPDATE quiltt_connections 
-                            SET status = %s, last_synced_at = NOW()
-                            WHERE user_id = %s AND connection_id = %s
-                        """, (new_status, user_id, connection_id))
+                        # Check if this connection is being deleted - if so, skip update
+                        delete_key = f"quiltt_connections_to_delete:{user_id}"
+                        is_pending_delete = _redis_client.sismember(delete_key, connection_id) if _redis_client else False
                         
-                        # Update Redis
-                        from quiltt_redis import upsert_quiltt_connection
-                        upsert_quiltt_connection({
-                            'connection_id': connection_id,
-                            'status': new_status
-                        }, user_id)
+                        if is_pending_delete:
+                            app.logger.info(f"Skipping webhook update for {connection_id} - pending delete")
+                        else:
+                            cursor.execute("""
+                                UPDATE quiltt_connections 
+                                SET status = %s, last_synced_at = NOW()
+                                WHERE user_id = %s AND connection_id = %s
+                            """, (new_status, user_id, connection_id))
+                            
+                            # Update Redis
+                            from quiltt_redis import upsert_quiltt_connection
+                            upsert_quiltt_connection({
+                                'connection_id': connection_id,
+                                'status': new_status
+                            }, user_id)
                         
                     
                     conn.commit()
@@ -19047,18 +19150,25 @@ def quiltt_webhook():
                     pass
                     
                     if connection_id:
-                        cursor.execute("""
-                            UPDATE quiltt_connections 
-                            SET status = 'DISCONNECTED', last_synced_at = NOW()
-                            WHERE user_id = %s AND connection_id = %s
-                        """, (user_id, connection_id))
+                        # Check if this connection is being deleted - if so, don't update Redis
+                        delete_key = f"quiltt_connections_to_delete:{user_id}"
+                        is_pending_delete = _redis_client.sismember(delete_key, connection_id) if _redis_client else False
                         
-                        # Update Redis
-                        from quiltt_redis import upsert_quiltt_connection
-                        upsert_quiltt_connection({
-                            'connection_id': connection_id,
-                            'status': 'DISCONNECTED'
-                        }, user_id)
+                        if is_pending_delete:
+                            app.logger.info(f"Skipping webhook update for {connection_id} - pending delete")
+                        else:
+                            cursor.execute("""
+                                UPDATE quiltt_connections 
+                                SET status = 'DISCONNECTED', last_synced_at = NOW()
+                                WHERE user_id = %s AND connection_id = %s
+                            """, (user_id, connection_id))
+                            
+                            # Update Redis
+                            from quiltt_redis import upsert_quiltt_connection
+                            upsert_quiltt_connection({
+                                'connection_id': connection_id,
+                                'status': 'DISCONNECTED'
+                            }, user_id)
                         
                     
                     conn.commit()
