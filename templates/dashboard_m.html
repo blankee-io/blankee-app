@@ -387,7 +387,7 @@
                     if (parseFloat(incomeValue) === 0) {
                         incomeTotalDiv.classList.add('zero-value');
                     }
-                    incomeTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-income">I</span> <span class="dashboard-m-value">${currencySymbol}${incomeValue}</span>`;
+                    incomeTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-income">I</span> <span class="dashboard-m-value">${currencySymbol}${formatNumberWithCommas(parseFloat(incomeValue))}</span>`;
 
                     const expenseTotalDiv = document.createElement('div');
                     expenseTotalDiv.classList.add('dashboard-m-expense-total');
@@ -395,17 +395,17 @@
                     if (parseFloat(expenseValue) === 0) {
                         expenseTotalDiv.classList.add('zero-value');
                     }
-                    expenseTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-expense">E</span> <span class="dashboard-m-value">${currencySymbol}${expenseValue}</span>`;
+                    expenseTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-expense">E</span> <span class="dashboard-m-value">${currencySymbol}${formatNumberWithCommas(parseFloat(expenseValue))}</span>`;
 
                     const remainderDiv = document.createElement('div');
                     remainderDiv.classList.add('dashboard-m-remainder');
                     const remainderValue = parseFloat(getRemainderForDate(currentDay));
-                    remainderDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-remainder">R</span> <span class="dashboard-m-value">${currencySymbol}${remainderValue.toFixed(2)}</span>`;
+                    remainderDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-remainder">R</span> <span class="dashboard-m-value">${currencySymbol}${formatNumberWithCommas(remainderValue)}</span>`;
                     
                     const savingsDiv = document.createElement('div');
                     savingsDiv.classList.add('dashboard-m-savings');
                     const savingsValue = parseFloat(getSavingsForDate(currentDay));
-                    savingsDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-savings">S</span> <span class="dashboard-m-value">${currencySymbol}${savingsValue.toFixed(2)}</span>`;
+                    savingsDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-savings">S</span> <span class="dashboard-m-value">${currencySymbol}${formatNumberWithCommas(savingsValue)}</span>`;
 
                     let applyThresholdClass = true;
                     if (member_since) {
@@ -468,7 +468,7 @@
                             initials = 'CA';
                         }
 
-                        const balanceValue = caBalance ? parseFloat(caBalance.balance).toFixed(2) : '0.00';
+                        const balanceValue = caBalance ? formatNumberWithCommas(parseFloat(caBalance.balance)) : '0.00';
 
                         const caBalanceDiv = document.createElement('div');
                         caBalanceDiv.classList.add('dashboard-m-ca-balance');
