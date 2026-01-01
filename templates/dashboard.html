@@ -2835,11 +2835,14 @@
             input.addEventListener('focus', function () {
                 // Reset the processed flag when focusing on the input
                 entryProcessed = false;
-                // Remove currency symbol only if present
-                const trimmed = input.value.trim();
-                if (trimmed.startsWith(currencySymbol)) {
-                    input.value = trimmed.substring(currencySymbol.length).trim();
+                // Remove currency symbol and commas if present
+                let cleanValue = input.value.trim();
+                if (cleanValue.startsWith(currencySymbol)) {
+                    cleanValue = cleanValue.substring(currencySymbol.length).trim();
                 }
+                // Remove commas from the value
+                cleanValue = cleanValue.replace(/,/g, '');
+                input.value = cleanValue;
                 originalValue = input.value;
                 input.select();
             });
@@ -3872,14 +3875,9 @@
                                 td.setAttribute('data-processed', '0');
                                 td.classList.remove('paid');
                             } else {
-                                // Format the value with currency symbol if not focused
+                                // Always format the value with currency symbol
                                 const rounded = formatNumberWithCommas(amount);
-                                // Only add currency if input is not currently focused
-                                if (document.activeElement !== input) {
-                                    input.value = currencySymbol + rounded;
-                                } else {
-                                    input.value = rounded;
-                                }
+                                input.value = currencySymbol + rounded;
                             }
                             // Use fridayDateStr (the cell's data-date) since entries are keyed by Friday
                             updateLocalState(type, categoryId, fridayDateStr, amount, amount === 0, fridayDateStr);

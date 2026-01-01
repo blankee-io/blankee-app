@@ -681,6 +681,10 @@
                 dayHeader.innerHTML = `${formattedDate} ${addButton}${memberSinceIcon}`;
                 container.appendChild(dayHeader);
 
+                // Create content wrapper for border styling
+                const contentWrapper = document.createElement('div');
+                contentWrapper.classList.add('dashboard-d-content-wrapper');
+
                 // --- Use latest AJAX-fetched data ---
                 let lastRemainderValue = '0.00';
                 let totalIncomeValue = '0.00';
@@ -713,7 +717,7 @@
                 lastRemainder.innerHTML = `
                     <div class="dashboard-d-label-cell">Last remainder:</div>
                     <div class="dashboard-d-amount-cell">${formatCurrency(lastRemainderValue)}</div>`;
-                container.appendChild(lastRemainder);
+                contentWrapper.appendChild(lastRemainder);
 
                 // Income entries
                 const incomeEntriesDiv = document.createElement('div');
@@ -780,7 +784,7 @@
                         }
                     }
                 });
-                if (filteredIncomeEntries.length > 0) container.appendChild(incomeEntriesDiv);
+                if (filteredIncomeEntries.length > 0) contentWrapper.appendChild(incomeEntriesDiv);
 
                 // Total income
                 const incomeTotal = document.createElement('div');
@@ -788,7 +792,7 @@
                 incomeTotal.innerHTML = `
                     <div class="dashboard-d-label-cell">Total Income:</div>
                     <div class="dashboard-d-amount-cell">${formatCurrency(actualDayIncome)}</div>`;
-                container.appendChild(incomeTotal);
+                contentWrapper.appendChild(incomeTotal);
 
                 // Expense entries
                 const expenseEntriesDiv = document.createElement('div');
@@ -849,7 +853,7 @@
                         }
                     }
                 });
-                if (filteredExpenseEntries.length > 0) container.appendChild(expenseEntriesDiv);
+                if (filteredExpenseEntries.length > 0) contentWrapper.appendChild(expenseEntriesDiv);
 
                 // Total expenses
                 const expenseTotal = document.createElement('div');
@@ -857,7 +861,7 @@
                 expenseTotal.innerHTML = `
                     <div class="dashboard-d-label-cell">Total Expenses:</div>
                     <div class="dashboard-d-amount-cell">${formatCurrency(totalExpensesValue)}</div>`;
-                container.appendChild(expenseTotal);
+                contentWrapper.appendChild(expenseTotal);
 
                 // Remainder
                 const remainder = document.createElement('div');
@@ -887,13 +891,13 @@
                         remainderValueCell.classList.add('above-threshold');
                     }
                 }
-                container.appendChild(remainder);
+                contentWrapper.appendChild(remainder);
 
                 // --- Add teal divider with "Credit Accounts" label ---
                 const creditDivider = document.createElement('div');
                 creditDivider.className = 'dashboard-d-credit-divider';
                 creditDivider.innerHTML = `<span class="dashboard-d-credit-divider-text">Credit Accounts</span>`;
-                container.appendChild(creditDivider);
+                contentWrapper.appendChild(creditDivider);
 
                 // Credit accounts
                 credit_accounts.forEach(account => {
@@ -993,13 +997,13 @@
                     `;
                     caDiv.appendChild(balanceRow);
 
-                    container.appendChild(caDiv);
+                    contentWrapper.appendChild(caDiv);
                 });
 
                 const creditDividerAfter = document.createElement('div');
                 creditDividerAfter.className = 'dashboard-d-credit-divider';
                 creditDividerAfter.innerHTML = `<span class="dashboard-d-credit-divider-text">Savings</span>`;
-                container.appendChild(creditDividerAfter);
+                contentWrapper.appendChild(creditDividerAfter);
 
                 // Savings
                 const savingsEntry = savingsArr.find(e => {
@@ -1013,7 +1017,10 @@
                     <div class="dashboard-d-label-cell">Savings:</div>
                     <div class="dashboard-d-amount-cell">${currencySymbol}${savingsAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                 `;
-                container.appendChild(savingsDiv);
+                contentWrapper.appendChild(savingsDiv);
+
+                // Append content wrapper to container
+                container.appendChild(contentWrapper);
 
                 dashboardWrapper.appendChild(container);
             });
@@ -1027,6 +1034,9 @@
             
             // Update today banner after containers are created
             setTimeout(updateTodayBanner, 100);
+            
+            // Fit text to containers after rendering
+            setTimeout(fitTextToContainer, 150);
         }
 
         function saveDailyTotalsAndRemainders(startDate = null) {

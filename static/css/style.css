@@ -2334,6 +2334,19 @@ input#setup-profile-starting-savings {
     text-align: center;
 }
 
+/* Content wrapper for border styling */
+.dashboard-d-content-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    border: 3px solid #575757;
+    border-top: none;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+    background-color: #f9f9f9;
+}
+
 /* Member Since badge on day header */
 .member-since-badge {
     position: absolute;
@@ -2360,16 +2373,7 @@ input#setup-profile-starting-savings {
 
 /* Dim dates before member_since */
 .before-member-since .dashboard-d-day-header,
-.before-member-since .dashboard-d-lastremainder,
-.before-member-since .dashboard-d-income-entries,
-.before-member-since .dashboard-d-income-total,
-.before-member-since .dashboard-d-expense-entries,
-.before-member-since .dashboard-d-expense-total,
-.before-member-since .dashboard-d-remainder,
-.before-member-since .dashboard-d-credit-accounts,
-.before-member-since .dashboard-d-credit-row,
-.before-member-since .dashboard-d-credit-divider,
-.before-member-since .dashboard-d-savings {
+.before-member-since .dashboard-d-content-wrapper {
     opacity: 0.5;
 }
 
@@ -2511,6 +2515,8 @@ tr[data-category-id] td.before-member-since {
     position: relative;
     width: 100px;
     text-align: right;
+    padding-left: 3px;
+    padding-right: 3px;
 }
 
 .paid {
@@ -2563,16 +2569,12 @@ tr[data-category-id] td.before-member-since {
 .dashboard-d-credit-row:last-child {
     /* White for even expense entries */
     background-color: #A9A9A9; 
-    border-bottom-left-radius: 10px;
-    border-bottom-right-radius: 10px;
     color: white !important;
 }
 
 .dashboard-d-credit-row:first-child {
     /* White for even expense entries */
     background-color: #676767; 
-    border-top-left-radius: 10px;
-    border-top-right-radius: 10px;
     color: white !important;
 }
 
@@ -2585,7 +2587,7 @@ tr[data-category-id] td.before-member-since {
     align-items: center;
     width: 100%;
     height: 20px;
-    padding: 0 10px;
+    padding: 0;
     color: white;
     font-size: clamp(13px, 2vw, 14px);
     box-sizing: border-box;
@@ -2594,9 +2596,10 @@ tr[data-category-id] td.before-member-since {
 .dashboard-d-credit-divider {
     display: flex;
     align-items: center;
+    justify-content: center;
     position: relative;
     width: 80%;
-    margin: 18px 0 8px;
+    margin: 18px auto 8px;
     text-align: center;
 }
 
@@ -2606,6 +2609,7 @@ tr[data-category-id] td.before-member-since {
     flex: 1;
     height: 2px;
     background: #2AAAA8;
+    transform: translateY(1px);
 }
 
 .dashboard-d-credit-divider::before {
@@ -2620,6 +2624,9 @@ tr[data-category-id] td.before-member-since {
     font-size: 12px;
     font-weight: bold;
     letter-spacing: 1px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
 }
 
 .dashboard-d-savings {
@@ -2628,9 +2635,9 @@ tr[data-category-id] td.before-member-since {
     width: 100%;
     height: 20px;
     margin-top: 5px;
-    padding: 0 10px;
+    padding: 0px;
     background-color: #2AAAA8;
-    border-radius: 10px;
+    border-radius: 0 0 5px 5px;
     color: white;
     font-size: clamp(13px, 2vw, 14px);
     box-sizing: border-box;
@@ -2676,7 +2683,7 @@ tr[data-category-id] td.before-member-since {
 }
 
 .dashboard-d-credit-balance {
-    padding: 0 10px;
+    padding: 0px;
 }
 
 /* Specific background colors for totals and remainder rows */
@@ -2695,8 +2702,6 @@ tr[data-category-id] td.before-member-since {
 
 .dashboard-d-remainder {
     background-color: #A9A9A9;
-    border-bottom-left-radius: 10px;
-    border-bottom-right-radius: 10px;
 }
 
 .dashboard-d-move-btn {
@@ -2884,6 +2889,7 @@ tr[data-category-id] td.before-member-since {
     .dashboard-d-expense-total,
     .dashboard-d-remainder,
     .dashboard-d-row,
+    .dashboard-d-credit-row,
     .dashboard-d-savings {
         height: 40px;
         font-size: 13px;

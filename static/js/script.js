@@ -260,7 +260,7 @@ function fitTextToContainer() {
         document.body.removeChild(span);
     });
     
-    // For table cells with inputs inside (income/expense/ca tables)
+    // For table cells with inputs inside (income/expense/ca tables - weekly dashboard)
     const inputSelector = '#income-table td:not(.category-cell) input, #expenses-table td:not(.category-cell) input, .cas-table td:not(.category-cell) input';
     document.querySelectorAll(inputSelector).forEach(function(input) {
         const text = input.value;
@@ -297,6 +297,43 @@ function fitTextToContainer() {
         input.style.fontSize = fontSize + 'px';
         document.body.removeChild(span);
     });
+    
+    // For dashboard-d amount cells (day view dashboard)
+    // Handle both direct text content and inputs inside amount cells
+    document.querySelectorAll('.dashboard-d-amount-cell').forEach(function(cell) {
+        const input = cell.querySelector('input');
+        const targetElement = input || cell;
+        const text = input ? input.value : cell.textContent;
+        if (!text.trim()) return;
+        
+        const span = document.createElement('span');
+        span.style.visibility = 'hidden';
+        span.style.position = 'absolute';
+        span.style.whiteSpace = 'nowrap';
+        span.textContent = text;
+        document.body.appendChild(span);
+        
+        targetElement.style.fontSize = '';
+        let fontSize = parseFloat(window.getComputedStyle(targetElement).fontSize);
+        const minFontSize = 5;
+        
+        const style = window.getComputedStyle(targetElement);
+        const paddingLeft = parseFloat(style.paddingLeft) || 0;
+        const paddingRight = parseFloat(style.paddingRight) || 0;
+        const availableWidth = targetElement.offsetWidth - paddingLeft - paddingRight;
+        
+        span.style.fontSize = fontSize + 'px';
+        span.style.fontWeight = style.fontWeight;
+        span.style.fontFamily = style.fontFamily;
+        
+        while (span.offsetWidth > availableWidth && fontSize > minFontSize) {
+            fontSize -= 0.5;
+            span.style.fontSize = fontSize + 'px';
+        }
+        
+        targetElement.style.fontSize = fontSize + 'px';
+        document.body.removeChild(span);
+    });
 }
 
 // Debounced fitText handler
@@ -312,9 +349,17 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Watch for DOM changes in tables and re-fit text
     const observer = new MutationObserver(fitTextDebounced);
+    
+    // Weekly dashboard tables
     const tables = document.querySelectorAll('#income-table, #expenses-table, .cas-table');
     tables.forEach(function(table) {
         observer.observe(table, { childList: true, subtree: true, characterData: true });
     });
+    
+    // Day dashboard wrapper
+    const dashboardWrapper = document.getElementById('dashboard-wrapper');
+    if (dashboardWrapper) {
+        observer.observe(dashboardWrapper, { childList: true, subtree: true, characterData: true });
+    }
 });
 window.addEventListener('resize', fitTextDebounced);
