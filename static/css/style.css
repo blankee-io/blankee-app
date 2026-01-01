@@ -3683,7 +3683,7 @@ tr[data-category-id] td.before-member-since {
     width: 100%;
     height: 100%;
     padding: 0;
-    padding-right: 10px;
+    padding-right: 0px;
     background: transparent;
     border: none; 
     border-radius: 5px;
@@ -4401,79 +4401,61 @@ td:has(.bucket-progress-container) {
 #expenses-table td,
 .cas-table td {
     text-align: right;
+    white-space: nowrap;
 }
 
 
+#income-bottom-row td,
+#last-remainder-row-right td,
+#expenses-bottom-row td,
+.ca-bottom-row td,
+#remainder-row-right td,
+#savings-row-right td {
+    padding-right: 3px;
+    padding-left: 3px;
+    white-space: nowrap;
+}
+
 #income-bottom-row td {
-    padding-right: calc(var(--base-padding) + var(--scaling-factor));
     background-color: #2AAAA8;
     color: white;
     font-weight: bold;
     text-align: right;
-    --base-padding: .2px;
-
-    /* Adjust this factor based on the desired responsiveness */
-    --scaling-factor: 0.9vw; 
 }
 
 #last-remainder-row-right td{
-    padding-right: calc(var(--base-padding) + var(--scaling-factor));
     background-color: #A9A9A9;
     color: white;
     font-weight: bold;
     text-align: right;
-    --base-padding: .2px;
-
-    /* Adjust this factor based on the desired responsiveness */
-    --scaling-factor: 0.9vw; 
 }
 
 #expenses-bottom-row td {
-    padding-right: calc(var(--base-padding) + var(--scaling-factor));
     background-color: #E45F1C;
     color: white;
     font-weight: bold;
     text-align: right;
-    --base-padding: .2px;
-
-    /* Adjust this factor based on the desired responsiveness */
-    --scaling-factor: 0.9vw; 
 }
 
 .ca-bottom-row td {
-    padding-right: calc(var(--base-padding) + var(--scaling-factor));
     background-color: #A9A9A9;
     color: white;
     font-weight: bold;
     text-align: right;
-    --base-padding: .2px;
-
-    /* Adjust this factor based on the desired responsiveness */
-    --scaling-factor: 0.9vw; 
 }
 
 #remainder-row-right td {
-    padding-right: calc(var(--base-padding) + var(--scaling-factor));
     background-color: #A9A9A9;
     color: white;
     font-weight: bold;
     text-align: right;
-    --base-padding: .2px;
-
-    /* Adjust this factor based on the desired responsiveness */
-    --scaling-factor: 0.9vw; 
 }
 
 #savings-row-right td {
-    padding-right: calc(var(--base-padding) + var(--scaling-factor));
     background-color: #2AAAA8;
     color: white;
     font-weight: bold;
     text-align: right;
-    --base-padding: .2px;
-
-    /* Adjust this factor based on the desired responsiveness */
-    --scaling-factor: 0.9vw; 
 }
 
 /* Text color for remainder values below the threshold */
@@ -4548,13 +4530,6 @@ td:has(.bucket-progress-container) {
 }
 
 @media (width <= 400px) {
-    #income-table td, 
-    #expenses-table td, 
-    .cas-table td, 
-    #remainder-row-right td, 
-    #savings-row-right td {
-        padding-right: 10px;
-    }
 
     #last-remainder-row td,
     #income-total-row td

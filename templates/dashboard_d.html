@@ -787,7 +787,7 @@
                 incomeTotal.classList.add('dashboard-d-income-total');
                 incomeTotal.innerHTML = `
                     <div class="dashboard-d-label-cell">Total Income:</div>
-                    <div class="dashboard-d-amount-cell">${formatCurrency(actualDayIncome.toFixed(2))}</div>`;
+                    <div class="dashboard-d-amount-cell">${formatCurrency(actualDayIncome)}</div>`;
                 container.appendChild(incomeTotal);
 
                 // Expense entries
@@ -1232,7 +1232,7 @@
                     data: JSON.stringify(data),
                     success: function(response) {
                         if (response.status === 'success') {
-                            input.value = currencySymbol + amount;
+                            input.value = currencySymbol + formatNumberWithCommas(amount);
 
                             // Update local entry immediately
                             let entriesArray;
@@ -1675,8 +1675,8 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             const num = parseFloat(value);
             if (isNaN(num)) return currencySymbol + '0';
             
-            // Always format with 2 decimal places
-            return currencySymbol + num.toFixed(2);
+            // Always format with 2 decimal places and thousand separators
+            return currencySymbol + formatNumberWithCommas(num);
         }
         
         // Helper function to create/update bucket progress bar
@@ -1754,7 +1754,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                     const input = cell.querySelector('input');
                     if (input) {
                         // Get current value and add new amount
-                        let currentValue = input.value.replace(currencySymbol, '').trim();
+                        let currentValue = input.value.replace(currencySymbol, '').replace(/,/g, '').trim();
                         currentValue = parseFloat(currentValue) || 0;
                         const newValue = currentValue + parseFloat(formData.amount);
                         input.value = formatCurrency(newValue);
@@ -2503,9 +2503,8 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                             input.blur();
                             return;
                         }
-                        if (input.value.trim().startsWith('$')) {
-                            input.value = input.value.trim().substring(1).trim();
-                        }
+                        // Strip currency symbol and commas
+                        input.value = input.value.trim().replace(currencySymbol, '').replace(/,/g, '').trim();
                         originalValue = input.value.trim();
                         input.select();
                     });

@@ -1387,7 +1387,7 @@
                     return entryDate === monthDate;
                 });
                 const savingsValue = entry ? parseFloat(entry.amount) : 0;
-                savingsTd.textContent = `${currencySymbol}${savingsValue.toFixed(2)}`;
+                savingsTd.textContent = `${currencySymbol}${formatNumberWithCommas(savingsValue)}`;
                 
                 // Apply threshold classes
                 let applyThresholdClass = true;
@@ -2389,7 +2389,7 @@
                     if (monthEntriesMap[monthKey]) {
                         // Set total value
                         if (input) {
-                            input.value = monthEntriesMap[monthKey].total > 0 ? currencySymbol + monthEntriesMap[monthKey].total.toFixed(2) : '';
+                            input.value = monthEntriesMap[monthKey].total > 0 ? currencySymbol + formatNumberWithCommas(monthEntriesMap[monthKey].total) : '';
                         }
                         // Set processed status
                         td.setAttribute('data-processed', monthEntriesMap[monthKey].processed ? '1' : '0');
@@ -2452,7 +2452,7 @@
                     if (monthEntriesMap[monthKey]) {
                         // Set total value
                         if (input) {
-                            input.value = monthEntriesMap[monthKey].total > 0 ? currencySymbol + monthEntriesMap[monthKey].total.toFixed(2) : '';
+                            input.value = monthEntriesMap[monthKey].total > 0 ? currencySymbol + formatNumberWithCommas(monthEntriesMap[monthKey].total) : '';
                         }
                         // Set processed status
                         td.setAttribute('data-processed', monthEntriesMap[monthKey].processed ? '1' : '0');
@@ -2519,7 +2519,7 @@
                         if (monthEntriesMap[monthKey]) {
                             // Set total value
                             if (input) {
-                                input.value = monthEntriesMap[monthKey].total > 0 ? currencySymbol + monthEntriesMap[monthKey].total.toFixed(2) : '';
+                                input.value = monthEntriesMap[monthKey].total > 0 ? currencySymbol + formatNumberWithCommas(monthEntriesMap[monthKey].total) : '';
                             }
                             // Set processed status
                             td.setAttribute('data-processed', monthEntriesMap[monthKey].processed ? '1' : '0');
@@ -2898,7 +2898,7 @@
                 
                 // Only process if not already handled by Enter key
                 if (!shouldSkipProcessing) {
-                    const newValue = input.value.trim().replace(currencySymbol, '').trim();
+                    const newValue = input.value.trim().replace(currencySymbol, '').replace(/,/g, '').trim();
                     if (newValue !== originalValue) {
                         // Mark as processed to prevent duplicate submissions
                         entryProcessed = true;
@@ -2942,11 +2942,11 @@
                         input.value = '';
                     } else {
                         // Remove any existing currency symbol first
-                        const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
+                        const cleanValue = trimmedValue.replace(currencySymbol, '').replace(/,/g, '').trim();
                         // Parse as float to preserve decimals
                         const numValue = parseFloat(cleanValue);
                         if (!isNaN(numValue)) {
-                            input.value = currencySymbol + numValue.toFixed(2);
+                            input.value = currencySymbol + formatNumberWithCommas(numValue);
                         } else if (originalValue) {
                             // Restore original value if not a number
                             input.value = originalValue;
@@ -3091,10 +3091,10 @@
                 requestAnimationFrame(() => {
                     const trimmedValue = input.value.trim();
                     if (trimmedValue !== '') {
-                        const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
+                        const cleanValue = trimmedValue.replace(currencySymbol, '').replace(/,/g, '').trim();
                         const numValue = parseFloat(cleanValue);
                         if (!isNaN(numValue)) {
-                            input.value = currencySymbol + numValue.toFixed(2);
+                            input.value = currencySymbol + formatNumberWithCommas(numValue);
                         }
                     }
                     nextInput.focus();
@@ -3539,7 +3539,7 @@
                             if (categorySpan) {
                                 categorySpan.parentElement.setAttribute('data-original-name', newCategoryName);
                                 // Since the input is blurred, display formatted value with currency
-                                const rounded = amount.toFixed(2).toString();
+                                const rounded = formatNumberWithCommas(amount);
                                 input.value = currencySymbol + rounded;
                                 // --- Update the icon immediately ---
                                 let catObj;
@@ -3657,7 +3657,7 @@
             
             showDashboardSpinner(true);
             // Strip currency symbol if present (needed when called after blur reformats the value)
-            const newValue = input.value.trim().replace(currencySymbol, '').trim();
+            const newValue = input.value.trim().replace(currencySymbol, '').replace(/,/g, '').trim();
 
             const categoryId = td.closest('tr').getAttribute('data-category-id');
             const date = new Date(td.getAttribute('data-date'));
@@ -3750,7 +3750,7 @@
                                             const bucketInput = bucketCell.querySelector('input');
                                             if (bucketInput) {
                                                 if (bucket.amount > 0) {
-                                                    bucketInput.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    bucketInput.value = currencySymbol + formatNumberWithCommas(parseFloat(bucket.amount));
                                                     // Update progress bar
                                                     updateBucketProgressBar(bucketCell, {
                                                         has_bucket: true,
@@ -3845,7 +3845,7 @@
                                 td.classList.remove('paid');
                             } else {
                                 // Format the value with currency symbol if not focused
-                                const rounded = amount.toFixed(2).toString();
+                                const rounded = formatNumberWithCommas(amount);
                                 // Only add currency if input is not currently focused
                                 if (document.activeElement !== input) {
                                     input.value = currencySymbol + rounded;
@@ -3916,7 +3916,7 @@
                                             const bucketInput = bucketCell.querySelector('input');
                                             if (bucketInput) {
                                                 if (bucket.amount > 0) {
-                                                    bucketInput.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    bucketInput.value = currencySymbol + formatNumberWithCommas(parseFloat(bucket.amount));
                                                     // Update progress bar
                                                     updateBucketProgressBar(bucketCell, {
                                                         has_bucket: true,

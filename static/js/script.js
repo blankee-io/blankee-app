@@ -1,5 +1,14 @@
 // General Functions
 
+// Format a number with commas and 2 decimal places (e.g., 1234567.89 -> "1,234,567.89")
+function formatNumberWithCommas(value) {
+    const num = parseFloat(value) || 0;
+    return num.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
 // Function to refresh the notification badge in the nav
 function refreshNotificationBadge() {
     $.ajax({
@@ -213,3 +222,99 @@ function showDashboardSpinner(show = true, context = "") {
         }
     }
 }
+
+// Function to scale font size to fit text within container width
+function fitTextToContainer() {
+    // For bottom rows and special rows (direct text in td)
+    const tdSelector = '#income-bottom-row td, #last-remainder-row-right td, #expenses-bottom-row td, .ca-bottom-row td, #remainder-row-right td, #savings-row-right td';
+    document.querySelectorAll(tdSelector).forEach(function(td) {
+        if (!td.textContent.trim()) return;
+        
+        const text = td.textContent;
+        const span = document.createElement('span');
+        span.style.visibility = 'hidden';
+        span.style.position = 'absolute';
+        span.style.whiteSpace = 'nowrap';
+        span.textContent = text;
+        document.body.appendChild(span);
+        
+        td.style.fontSize = '';
+        let fontSize = parseFloat(window.getComputedStyle(td).fontSize);
+        const minFontSize = 5;
+        
+        const style = window.getComputedStyle(td);
+        const paddingLeft = parseFloat(style.paddingLeft) || 0;
+        const paddingRight = parseFloat(style.paddingRight) || 0;
+        const availableWidth = td.offsetWidth - paddingLeft - paddingRight;
+        
+        span.style.fontSize = fontSize + 'px';
+        span.style.fontWeight = style.fontWeight;
+        span.style.fontFamily = style.fontFamily;
+        
+        while (span.offsetWidth > availableWidth && fontSize > minFontSize) {
+            fontSize -= 0.5;
+            span.style.fontSize = fontSize + 'px';
+        }
+        
+        td.style.fontSize = fontSize + 'px';
+        document.body.removeChild(span);
+    });
+    
+    // For table cells with inputs inside (income/expense/ca tables)
+    const inputSelector = '#income-table td:not(.category-cell) input, #expenses-table td:not(.category-cell) input, .cas-table td:not(.category-cell) input';
+    document.querySelectorAll(inputSelector).forEach(function(input) {
+        const text = input.value;
+        if (!text.trim()) return;
+        
+        const td = input.closest('td');
+        if (!td) return;
+        
+        const span = document.createElement('span');
+        span.style.visibility = 'hidden';
+        span.style.position = 'absolute';
+        span.style.whiteSpace = 'nowrap';
+        span.textContent = text;
+        document.body.appendChild(span);
+        
+        input.style.fontSize = '';
+        let fontSize = parseFloat(window.getComputedStyle(input).fontSize);
+        const minFontSize = 5;
+        
+        const style = window.getComputedStyle(input);
+        const inputPaddingLeft = parseFloat(style.paddingLeft) || 0;
+        const inputPaddingRight = parseFloat(style.paddingRight) || 0;
+        const availableWidth = input.offsetWidth - inputPaddingLeft - inputPaddingRight;
+        
+        span.style.fontSize = fontSize + 'px';
+        span.style.fontWeight = style.fontWeight;
+        span.style.fontFamily = style.fontFamily;
+        
+        while (span.offsetWidth > availableWidth && fontSize > minFontSize) {
+            fontSize -= 0.5;
+            span.style.fontSize = fontSize + 'px';
+        }
+        
+        input.style.fontSize = fontSize + 'px';
+        document.body.removeChild(span);
+    });
+}
+
+// Debounced fitText handler
+let fitTextTimeout;
+function fitTextDebounced() {
+    clearTimeout(fitTextTimeout);
+    fitTextTimeout = setTimeout(fitTextToContainer, 50);
+}
+
+// Run fitText on load and resize
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(fitTextToContainer, 100);
+    
+    // Watch for DOM changes in tables and re-fit text
+    const observer = new MutationObserver(fitTextDebounced);
+    const tables = document.querySelectorAll('#income-table, #expenses-table, .cas-table');
+    tables.forEach(function(table) {
+        observer.observe(table, { childList: true, subtree: true, characterData: true });
+    });
+});
+window.addEventListener('resize', fitTextDebounced);

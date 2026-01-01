@@ -1367,7 +1367,7 @@
                     return entryDate === targetDate;
                 });
                 const savingsValue = entry ? parseFloat(entry.amount) : 0;
-                savingsTd.textContent = currencySymbol + savingsValue.toFixed(2);
+                savingsTd.textContent = currencySymbol + formatNumberWithCommas(savingsValue);
                 
                 // Apply threshold classes
                 let applyThresholdClass = true;
@@ -2354,7 +2354,7 @@
                         // Use 'amount' for raw entries (from API) or 'total_amount' for aggregated entries (from page load)
                         const amount = parseFloat(entry.amount || entry.total_amount || 0);
                         if (input && !isNaN(amount)) {
-                            input.value = currencySymbol + amount.toFixed(2);
+                            input.value = currencySymbol + formatNumberWithCommas(amount);
                         }
                         // Update bucket progress bar if applicable
                         updateBucketProgressBar(matchedCell, entry);
@@ -2446,7 +2446,7 @@
                         // Use 'amount' for raw entries (from API) or 'total_amount' for aggregated entries (from page load)
                         const amount = parseFloat(entry.amount || entry.total_amount || 0);
                         if (input && !isNaN(amount)) {
-                            input.value = currencySymbol + amount.toFixed(2);
+                            input.value = currencySymbol + formatNumberWithCommas(amount);
                         }
                         // Update bucket progress bar if applicable
                         updateBucketProgressBar(matchedCell, entry);
@@ -2523,7 +2523,7 @@
                         const input = td.querySelector('input');
                         if (input) {
                             if (entry && entry.total_amount !== undefined) {
-                                input.value = currencySymbol + parseFloat(entry.total_amount).toFixed(2);
+                                input.value = currencySymbol + formatNumberWithCommas(parseFloat(entry.total_amount));
                                 // Update bucket progress bar if applicable
                                 updateBucketProgressBar(td, entry);
                             } else {
@@ -2977,12 +2977,12 @@
                         // If empty, keep it empty
                         input.value = '';
                     } else {
-                        // Remove any existing currency symbol first
-                        const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
+                        // Remove any existing currency symbol and commas first
+                        const cleanValue = trimmedValue.replace(currencySymbol, '').replace(/,/g, '').trim();
                         // Parse as float to preserve decimals
                         const numValue = parseFloat(cleanValue);
                         if (!isNaN(numValue)) {
-                            input.value = currencySymbol + numValue.toFixed(2);
+                            input.value = currencySymbol + formatNumberWithCommas(numValue);
                         } else if (originalValue) {
                             // Restore original value if not a number
                             input.value = originalValue;
@@ -3132,10 +3132,10 @@
                 requestAnimationFrame(() => {
                     const trimmedValue = input.value.trim();
                     if (trimmedValue !== '') {
-                        const cleanValue = trimmedValue.replace(currencySymbol, '').trim();
+                        const cleanValue = trimmedValue.replace(currencySymbol, '').replace(/,/g, '').trim();
                         const numValue = parseFloat(cleanValue);
                         if (!isNaN(numValue)) {
-                            input.value = currencySymbol + numValue.toFixed(2);
+                            input.value = currencySymbol + formatNumberWithCommas(numValue);
                         }
                     }
                     nextInput.focus();
@@ -3781,7 +3781,7 @@
                                             const input = bucketCell.querySelector('input');
                                             if (input) {
                                                 if (bucket.amount > 0) {
-                                                    input.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    input.value = currencySymbol + formatNumberWithCommas(parseFloat(bucket.amount));
                                                     // Update progress bar
                                                     updateBucketProgressBar(bucketCell, {
                                                         has_bucket: true,
@@ -3873,7 +3873,7 @@
                                 td.classList.remove('paid');
                             } else {
                                 // Format the value with currency symbol if not focused
-                                const rounded = amount.toFixed(2).toString();
+                                const rounded = formatNumberWithCommas(amount);
                                 // Only add currency if input is not currently focused
                                 if (document.activeElement !== input) {
                                     input.value = currencySymbol + rounded;
@@ -3927,7 +3927,7 @@
                                             const input = bucketCell.querySelector('input');
                                             if (input) {
                                                 if (bucket.amount > 0) {
-                                                    input.value = currencySymbol + parseFloat(bucket.amount).toFixed(2);
+                                                    input.value = currencySymbol + formatNumberWithCommas(parseFloat(bucket.amount));
                                                     // Update progress bar
                                                     updateBucketProgressBar(bucketCell, {
                                                         has_bucket: true,
