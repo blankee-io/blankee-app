@@ -4844,6 +4844,14 @@
                 outline.style.left = `${left - parentRect.left}px`;
                 outline.style.width = `${right - left}px`;
                 outline.style.height = `${bottom - top}px`;
+                
+                // Add "T" flag to the fridays-table outline only
+                if (tableId === 'fridays-table') {
+                    const flag = document.createElement('div');
+                    flag.className = 'current-week-flag';
+                    flag.textContent = 'T';
+                    outline.appendChild(flag);
+                }
             }
 
             // Helper: outline for multiple tables (expenses, remainder, savings)
