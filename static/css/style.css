@@ -2968,6 +2968,15 @@ tr[data-category-id] td.before-member-since {
     .main-container {
         padding: 5px;
     }
+    
+    .income-categories-title,
+    .expense-categories-title,
+    #last-remainder-row td:first-child,
+    #remainder-row td:first-child,
+    .ca-total-row td:first-child,
+    #savings-row td:first-child {
+        text-align: left !important;
+    }
 }
 
 @keyframes slideLeft {
@@ -3268,25 +3277,29 @@ tr[data-category-id] td.before-member-since {
 
 @media (max-width: 600px) {
     .category-cell {
-        height: 40px;
+        height: auto;
+        max-height: 40px;
         line-height: 20px;
         white-space: normal;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         text-overflow: ellipsis;
+        align-content: center;
     }
     
     .income-categories-title,
     .expense-categories-title,
     .ca-categories-title {
-        height: 40px;
+        height: auto;
+        max-height: 40px;
         line-height: 20px;
         white-space: normal;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         text-overflow: ellipsis;
+        align-content: center;
     }
 }
 
@@ -5520,7 +5533,7 @@ td:has(.bucket-progress-container) {
 .profile-box {
     display: grid;
     grid-template-columns: 1fr;
-    min-width: fit-content;
+    width: 100%;
     max-width: 750px;
     padding-top: 25px;
     margin-top: 2em;
@@ -5528,6 +5541,7 @@ td:has(.bucket-progress-container) {
     margin-right: auto;    
     background-color: transparent;
     box-sizing: border-box;
+    overflow: hidden;
 }
 
 .profile-content {
@@ -5837,6 +5851,7 @@ td:has(.bucket-progress-container) {
     width: 100%;
     min-width: 350px;
     max-width: 875px;
+    overflow: hidden;
 }
 
 .profile-form {
@@ -6305,6 +6320,7 @@ td:has(.bucket-progress-container) {
     max-width: 100%;
     box-sizing: border-box;
     box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    overflow: hidden;
 }
 
 .data-section {
@@ -6322,6 +6338,7 @@ td:has(.bucket-progress-container) {
     max-width: 100%;
     box-sizing: border-box;
     box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    overflow: hidden;
 }
 
 /* Profile label */
@@ -6376,6 +6393,7 @@ td:has(.bucket-progress-container) {
     align-items: center;
     width: 100%;
     max-width: 100%;
+    overflow: hidden;
 }
 
 /* Notification section */
@@ -6394,6 +6412,7 @@ td:has(.bucket-progress-container) {
     max-width: 100%;
     box-sizing: border-box;
     box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
+    overflow: hidden;
 }
 
 /* Notification label */
@@ -9625,10 +9644,12 @@ html.modal-open {
 
 .connection-card {
     width: 100%;
+    max-width: 100%;
     margin: 20px 0px;
     padding: 20px 0px;
     border-top: 1px solid #e0e0e0;
     border-bottom: 1px solid #e0e0e0;
+    overflow: hidden;
 }
 
 .connection-header {
@@ -9782,6 +9803,9 @@ html.modal-open {
 
 .accounts-list {
     margin-top: 15px;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .account-type-divider {
@@ -9807,6 +9831,8 @@ html.modal-open {
     background: #f8f9fa;
     border-radius: 6px;
     margin-bottom: 8px;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .account-item.disabled {
@@ -9842,7 +9868,9 @@ html.modal-open {
     gap: 12px;
     flex: 1;
     min-width: 0;
+    max-width: calc(100% - 60px);
     margin-right: 10px;
+    overflow: hidden;
 }
 
 .account-sync-toggle {
@@ -9861,7 +9889,16 @@ html.modal-open {
     white-space: nowrap;
     flex: 1;
     min-width: 0;
+    max-width: 100%;
     text-align: left;
+    display: block;
+}
+
+.account-info label strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .account-mask {
