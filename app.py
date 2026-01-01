@@ -16697,6 +16697,68 @@ def quiltt_settings():
     )
 
 
+def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
+    """
+    Refresh the Quiltt session token for a user.
+    This ensures the session token in Redis is up-to-date for API operations.
+    
+    Args:
+        user_id: The user's ID
+        username: The user's username/email
+        
+    Returns:
+        True if refresh was successful, False otherwise
+    """
+    try:
+        from quiltt_redis import get_quiltt_profile, update_quiltt_profile
+        
+        profile = get_quiltt_profile(user_id)
+        
+        if profile and profile.get('profile_id'):
+            # Existing profile - refresh token
+            result = quiltt_client.refresh_session_token(
+                profile['profile_id'],
+                metadata={
+                    'username': username,
+                    'email': username
+                }
+            )
+        else:
+            # No profile - nothing to refresh
+            app.logger.debug(f"No Quiltt profile for user {user_id}, skipping session refresh")
+            return True
+        
+        if not result or not result.get('token'):
+            app.logger.warning(f"Failed to refresh Quiltt session token for user {user_id}")
+            return False
+        
+        session_token = result['token']
+        
+        # Parse and convert expiration time
+        expires_at_str = result.get('expiresAt')
+        if expires_at_str:
+            from dateutil import parser
+            expires_at = parser.isoparse(expires_at_str)
+            expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            expires_at_mysql = None
+        
+        # Save to Redis
+        profile_data = {
+            'profile_id': result['profileId'],
+            'session_token': session_token,
+            'session_expires_at': expires_at_mysql
+        }
+        update_quiltt_profile(profile_data, user_id)
+        
+        app.logger.info(f"Refreshed Quiltt session token for user {user_id}")
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"Error refreshing Quiltt session token for user {user_id}: {e}")
+        return False
+
+
 @app.route('/quiltt/get-session-token', methods=['POST'])
 @login_required
 def get_quiltt_session_token():
@@ -16939,6 +17001,9 @@ def quiltt_delete():
         return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
     
     try:
+        # Refresh session token to keep it current
+        _refresh_quiltt_session_token(current_user.id, current_user.username)
+        
         # Get connection from Redis first, then MySQL if not found
         from quiltt_redis import _get_from_redis
         connections = _get_from_redis('quiltt_connections', current_user.id)
@@ -18332,6 +18397,9 @@ def quiltt_toggle_sync():
         from quiltt_redis import get_quiltt_transactions, delete_quiltt_transactions_for_account, get_quiltt_profile, upsert_quiltt_account
         
         if sync_enabled:
+            # Refresh session token when enabling sync to ensure fresh API access
+            _refresh_quiltt_session_token(current_user.id, current_user.username)
+            
             # First, fetch latest balance from Quiltt before doing anything else
             profile = get_quiltt_profile(current_user.id)
             if profile and profile.get('session_token'):
