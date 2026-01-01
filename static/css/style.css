@@ -2487,10 +2487,6 @@ tr[data-category-id] td.before-member-since {
 }
 
 @media (width <= 400px) {
-    .current-week-outline {
-        border: 3px solid #E45F1C;
-        border-radius: 5px;
-    }
     #month-table-container {
         margin-left: 0px;
     }
@@ -2513,6 +2509,9 @@ tr[data-category-id] td.before-member-since {
 /* Amount cell */
 .dashboard-d-amount-cell {
     position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
     width: 100px;
     text-align: right;
     padding-left: 3px;
@@ -2897,6 +2896,10 @@ tr[data-category-id] td.before-member-since {
 
     .dashboard-d-drag-handle {
         font-size: 16px;
+    }
+
+    .dashboard-d-amount-cell {
+        height: 40px;
     }
 }
 /* Style for the top "Today" div */
@@ -4319,6 +4322,46 @@ td:has(.bucket-progress-container) {
     box-sizing: border-box;
 }
 
+@media (max-width: 400px) {
+    .current-week-outline {
+        border: 2px solid #E45F1C;
+        border-radius: 5px;
+    }
+}
+
+/* Flag for current week/month outline */
+.current-week-flag {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: #E45F1C;
+    color: #fff;
+    font-size: 9px;
+    font-weight: bold;
+    padding: 1px 5px;
+    border-top-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+@media (max-width: 600px) {
+    .current-week-flag {
+        font-size: 11px;
+        padding: 2px 6px;
+        border-bottom-right-radius: 8px;
+    }
+}
+
+@media (max-width: 400px) {
+    .current-week-flag {
+        font-size: 9px;
+        padding: 1px 5px;
+        border-top-left-radius: 4px;
+        border-bottom-right-radius: 6px;
+    }
+}
+
 #fridays-table {
     /* Ensure all tables take up the same width */
     width: 100%; 
@@ -4391,7 +4434,7 @@ td:has(.bucket-progress-container) {
 #savings-row-right td {
     width: 100%;
     height: 20px;
-    padding: 0;
+    padding: 0px;
     text-align: center;
     vertical-align: middle;
 }
@@ -4410,7 +4453,9 @@ td:has(.bucket-progress-container) {
     white-space: nowrap;
 }
 
-
+#income-table td,
+#expenses-table td,
+.cas-table td,
 #income-bottom-row td,
 #last-remainder-row-right td,
 #expenses-bottom-row td,
