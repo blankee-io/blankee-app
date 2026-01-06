@@ -1808,8 +1808,15 @@
                 }
             }
 
+            // Track pending connection that hasn't been confirmed
+            let pendingConnectionId = null;
+            
             // Account selection for new bank connections
             function loadAccountSelectionProfile(newConnectionId) {
+                // Store the connection ID so we can clean it up if user abandons
+                pendingConnectionId = newConnectionId;
+                console.log('[LOAD_SELECTION] Set pendingConnectionId to:', pendingConnectionId);
+                
                 $.ajax({
                     url: '/quiltt/connections',
                     method: 'GET',
@@ -1967,6 +1974,9 @@
                     return;
                 }
                 
+                // Clear pending connection since user confirmed
+                pendingConnectionId = null;
+                
                 // Hide account selection modal
                 $('#account-selection-modal').css('display', 'none');
                 
@@ -1978,10 +1988,55 @@
             });
 
             // Cancel account selection
-            $('#cancel-account-selection, #close-account-selection-modal').on('click', function() {
+            $('#cancel-account-selection, #close-account-selection-modal').on('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                console.log('[CANCEL] pendingConnectionId:', pendingConnectionId);
                 $('#account-selection-modal').css('display', 'none');
                 document.body.classList.remove('modal-open');
-                window.location.reload();
+                
+                // Delete the pending connection if user cancels
+                if (pendingConnectionId) {
+                    console.log('[CANCEL] Calling deleteUnconfirmedConnection for:', pendingConnectionId);
+                    deleteUnconfirmedConnection(pendingConnectionId);
+                } else {
+                    console.log('[CANCEL] No pendingConnectionId, reloading');
+                    window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                }
+            });
+            
+            // Delete connection that was never confirmed by the user
+            function deleteUnconfirmedConnection(connectionId) {
+                console.log('[DELETE_UNCONFIRMED] Starting AJAX call for:', connectionId);
+                $.ajax({
+                    url: '/quiltt/delete-unconfirmed',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ connection_id: connectionId }),
+                    success: function(response) {
+                        console.log('[DELETE_UNCONFIRMED] Success:', response);
+                        // Wait for the flush to complete before reloading
+                        setTimeout(function() {
+                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                        }, 1000);
+                    },
+                    error: function(xhr, status, error) {
+                        console.log('[DELETE_UNCONFIRMED] Error:', error);
+                        setTimeout(function() {
+                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                        }, 1000);
+                    }
+                });
+            }
+            
+            // Handle page unload/refresh - delete pending connection
+            window.addEventListener('beforeunload', function(e) {
+                if (pendingConnectionId) {
+                    // Use sendBeacon for reliability during page unload
+                    const data = JSON.stringify({ connection_id: pendingConnectionId });
+                    navigator.sendBeacon('/quiltt/delete-unconfirmed', data);
+                }
             });
 
             function updateAccountsAndSyncProfile(selectedAccountIds) {

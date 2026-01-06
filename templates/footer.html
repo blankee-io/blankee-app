@@ -112,7 +112,7 @@
     <div class="footer-modal-content autobalance-modal-content">
         <span class="footer-close-modal" id="autobalance-close">&times;</span>
         <h3>Auto Balance</h3>
-        <p>This will balance Blankee by adding an expense or income entry to the Auto Adjustments category, so that the remainder for today matches your current bank balance.</p>
+        <p>This will balance Blankee by adding an expense or income entry to the Uncategorized category, so that the remainder for today matches your current bank balance.</p>
         <form id="autobalance-form" autocomplete="off" onsubmit="return false;">
             <div class="footer-form-group">
                 <label for="autobalance-current-balance">Current Bank Balance:</label>
@@ -480,7 +480,7 @@
                                 if (catResp.status === 'success' && Array.isArray(catResp.categories)) {
                                     const autoCat = catResp.categories.find(c => c.is_auto_adjustment == 1 || c.is_auto_adjustment === true);
                                     if (!autoCat) {
-                                        alert('No Auto Adjustments category found for ' + entryType + '.');
+                                        alert('No Uncategorized category found for ' + entryType + '.');
                                         document.getElementById('loading-screen').style.display = 'none';
                                         return;
                                     }
@@ -532,7 +532,7 @@
                                         }
                                     });
                                 } else {
-                                    alert('Could not find Auto Adjustments category.');
+                                    alert('Could not find Uncategorized category.');
                                     document.getElementById('loading-screen').style.display = 'none';
                                 }
                             },

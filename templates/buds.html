@@ -74,7 +74,7 @@
                                 <span class="bud-status-inactive {% if selected_bud.active %}bud-toggle-hidden{% endif %}">Inactive</span>
                             </span>
                             <span class="bud-toggle-tooltip">
-                                When active, items are added to "{{ selected_bud.name }}" category. When deactivated, future items are removed and past items move to Auto Adjustments.
+                                When active, items are added to "{{ selected_bud.name }}" category. When deactivated, future items are removed and past items move to Uncategorized.
                             </span>
                         </div>
                     {% endif %}
@@ -163,7 +163,7 @@
 
     <div id="delete-bud-modal" class="delete-bud-modal">
         <div class="delete-bud-modal-content">
-            <h3>Are you sure you want to delete this Bud? Past entries for this Bud will be added to Auto Adjustments and future entries will be deleted.</h3>
+            <h3>Are you sure you want to delete this Bud? Past entries for this Bud will be added to Uncategorized and future entries will be deleted.</h3>
             <button id="delete-bud-confirm" class="delete-bud-confirm-btn">Delete</button>
             <button id="delete-bud-cancel" class="delete-bud-cancel-btn">Cancel</button>
         </div>
@@ -206,7 +206,7 @@
 
     <div id="delete-bud-item-modal" class="delete-bud-item-modal">
         <div class="delete-bud-item-modal-content">
-            <h3>Are you sure you want to delete this item? If the date for this item is in the past, the amount will be moved to Auto Adjustments for that date.</h3>
+            <h3>Are you sure you want to delete this item? If the date for this item is in the past, the amount will be moved to Uncategorized for that date.</h3>
             <button id="delete-bud-item-confirm" class="delete-bud-item-confirm-btn">Delete</button>
             <button id="delete-bud-item-cancel" class="delete-bud-item-cancel-btn">Cancel</button>
         </div>
