@@ -82,7 +82,7 @@
                 <div class="g-recaptcha" data-sitekey="6LdmCgAsAAAAALGB6JYlus0Rr9hepw1fbK70Bx9v" data-callback="recaptchaCallback"></div>
             </div>
             
-            <input type="hidden" name="member_since" id="member_since">
+            <!-- member_since is now set during profile setup (threshold submission), not registration -->
             <!-- Register button, initially disabled -->
             <button type="submit" id="register-button" class="login-button" disabled>Register</button>
         </form>
@@ -139,15 +139,7 @@
             let isPasswordValid = false;  // Track password validity
             let isPasswordMatchValid = false;  // Track if passwords match
 
-            $('form').on('submit', function() {
-                const now = new Date();
-                // Format as YYYY-MM-DD using local time
-                const year = now.getFullYear();
-                const month = String(now.getMonth() + 1).padStart(2, '0');
-                const day = String(now.getDate()).padStart(2, '0');
-                const localDate = `${year}-${month}-${day}`;
-                $('#member_since').val(localDate);
-            });
+            // member_since is now set during profile setup (threshold submission), not registration
 
             // Function to check overall form validity and enable/disable the register button accordingly
             function checkFormValidity() {
