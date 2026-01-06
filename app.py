@@ -354,7 +354,7 @@ def register():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        member_since = request.form['member_since']
+        # member_since is now set during profile setup (threshold submission), not registration
 
         # Regular expression for validating an Email
         email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -381,12 +381,13 @@ def register():
             verification_expiry = get_verification_token_expiry()
 
             # Hash the password and insert the new user
+            # Note: member_since is NULL until profile setup is completed
             hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
             cursor.execute(
                 """INSERT INTO users (username, email, password, member_since, email_verified, 
                    verification_token, verification_token_expires) 
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (username, username, hashed_password, member_since, 0, verification_token, verification_expiry)
+                   VALUES (%s, %s, %s, NULL, %s, %s, %s)""",
+                (username, username, hashed_password, 0, verification_token, verification_expiry)
             )
             new_user_id = cursor.lastrowid  # Get the ID of the newly created user
             conn.commit()
@@ -395,11 +396,11 @@ def register():
             cursor.execute("""
                 INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (new_user_id, 'Auto Adjustments', -2, 0, 1))
+            """, (new_user_id, 'Uncategorized', -2, 0, 1))
             cursor.execute("""
                 INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (new_user_id, 'Auto Adjustments', -2, 0, 1))
+            """, (new_user_id, 'Uncategorized', -2, 0, 1))
             # --- Add Savings categories ---
             cursor.execute("""
                 INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
@@ -529,11 +530,11 @@ def verify_email():
             cursor.execute("""
                 INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, 'Auto Adjustments', -2, 0, 1))
+            """, (user_id, 'Uncategorized', -2, 0, 1))
             cursor.execute("""
                 INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, 'Auto Adjustments', -2, 0, 1))
+            """, (user_id, 'Uncategorized', -2, 0, 1))
             cursor.execute("""
                 INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
@@ -615,6 +616,69 @@ def setup_profile():
     # Render the setup profile page with connector ID
     return render_template('setup_profile.html', connector_id=connector_id)
 
+
+@app.route('/check_has_categories', methods=['GET'])
+@login_required
+def check_has_categories():
+    """
+    Check if the user has completed the name step of profile setup.
+    If they haven't entered their name yet, they should return to category recommendations on refresh.
+    """
+    try:
+        r = init_redis()
+        
+        # Check Redis for user data (Redis-first architecture)
+        redis_key = f"users:v1:{current_user.id}"
+        user_data = None
+        
+        try:
+            cached = r.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+                # Check if name exists in Redis
+                if user_data.get('first_name') and user_data.get('last_name'):
+                    return jsonify({
+                        'status': 'success',
+                        'has_categories': True,  # Past category step
+                        'has_name': True,
+                        'source': 'redis'
+                    })
+        except Exception as redis_error:
+            print(f"[check_has_categories] Redis error: {str(redis_error)}")
+        
+        # Fallback to MySQL if not in Redis
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
+            cursor.execute("""
+                SELECT first_name, last_name 
+                FROM users 
+                WHERE id = %s
+            """, (current_user.id,))
+            
+            user = cursor.fetchone()
+        
+        # If user has name in database, they've completed setup
+        if user and user.get('first_name') and user.get('last_name'):
+            return jsonify({
+                'status': 'success',
+                'has_categories': True,  # Completed setup
+                'has_name': True,
+                'source': 'mysql'
+            })
+        
+        # No name found - still in setup process, should show category recommendations
+        return jsonify({
+            'status': 'success',
+            'has_categories': False,  # Still in category step
+            'has_name': False
+        })
+        
+    except Exception as e:
+        print(f"[check_has_categories] Error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'has_categories': False
+        }), 500
 
 @app.route('/save_setup_name', methods=['POST'])
 @login_required
@@ -699,6 +763,11 @@ def complete_profile_setup():
         # Note: The actual calculation uses savings_adjustments, not this field
         _update_user_setting_in_redis(current_user.id, 'starting_savings', starting_savings)
         _update_user_setting_in_redis(current_user.id, 'currency_type', currency_type)
+        
+        # Set member_since to the income_entry_date (when user's budget tracking starts)
+        # This is set here instead of registration so it reflects when they completed setup
+        print(f"[complete_profile_setup] Setting member_since to: {income_entry_date}")
+        _update_user_setting_in_redis(current_user.id, 'member_since', income_entry_date)
         
         # Update name fields if they exist
         if first_name and last_name:
@@ -2125,7 +2194,7 @@ def dashboard_d_add_entry():
 def get_categories():
     """
     Get income or expense categories for the current user.
-    Used by autobalance to find the Auto Adjustments category.
+    Used by autobalance to find the Uncategorized category.
     """
     entry_type = request.args.get('type')
     
@@ -6199,17 +6268,17 @@ def delete_income_category():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
 
-            # 1. Find the Auto Adjustments category for this user (Redis-first)
+            # 1. Find the Uncategorized category for this user (Redis-first)
             categories = _get_categories_from_redis('income_categories', current_user.id)
             auto_adj_id = None
             if categories:
                 for cat in categories:
-                    if cat.get('name') == 'Auto Adjustments':
+                    if cat.get('name') == 'Uncategorized':
                         auto_adj_id = cat['id']
                         break
             
             if not auto_adj_id:
-                return jsonify({'status': 'error', 'message': 'Auto Adjustments category not found'}), 400
+                return jsonify({'status': 'error', 'message': 'Uncategorized category not found'}), 400
 
             # 2. Find all entries for this category with date <= yesterday (Redis-first)
             yesterday = date.today() - timedelta(days=1)
@@ -6218,12 +6287,12 @@ def delete_income_category():
                 old_entries = [e for e in entries if int(e.get('category_id', 0)) == int(category_id) and 
                              datetime.strptime(e.get('date'), '%Y-%m-%d').date() <= yesterday]
 
-                # 3. For each entry, add its amount to the same date in Auto Adjustments
+                # 3. For each entry, add its amount to the same date in Uncategorized
                 for old_entry in old_entries:
                     entry_date = old_entry.get('date')
                     amount = float(old_entry.get('amount', 0))
                     
-                    # Find existing Auto Adjustments entry for this date
+                    # Find existing Uncategorized entry for this date
                     auto_entry = next((e for e in entries if int(e.get('category_id', 0)) == int(auto_adj_id) and 
                                       e.get('date') == entry_date), None)
                     
@@ -6332,18 +6401,18 @@ def delete_expense_category():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
 
-            # 1. Find the Auto Adjustments expense category for this user (Redis-first)
+            # 1. Find the Uncategorized expense category for this user (Redis-first)
             categories = _get_categories_from_redis('expense_categories', current_user.id)
             auto_adj_id = None
             if categories:
                 for cat in categories:
-                    if cat.get('name') == 'Auto Adjustments':
+                    if cat.get('name') == 'Uncategorized':
                         auto_adj_id = cat['id']
                         break
             
             if not auto_adj_id:
                 cursor.close()
-                return jsonify({'status': 'error', 'message': 'Auto Adjustments category not found'}), 400
+                return jsonify({'status': 'error', 'message': 'Uncategorized category not found'}), 400
 
             # 2. Find all entries for this category with date <= yesterday (Redis-first)
             yesterday = date.today() - timedelta(days=1)
@@ -6352,12 +6421,12 @@ def delete_expense_category():
                 old_entries = [e for e in entries if int(e.get('category_id', 0)) == int(category_id) and 
                              datetime.strptime(e.get('date'), '%Y-%m-%d').date() <= yesterday]
 
-                # 3. For each entry, add its amount to the same date in Auto Adjustments
+                # 3. For each entry, add its amount to the same date in Uncategorized
                 for old_entry in old_entries:
                     entry_date = old_entry.get('date')
                     amount = float(old_entry.get('amount', 0))
                     
-                    # Find existing Auto Adjustments entry for this date
+                    # Find existing Uncategorized entry for this date
                     auto_entry = next((e for e in entries if int(e.get('category_id', 0)) == int(auto_adj_id) and 
                                       e.get('date') == entry_date), None)
                     
@@ -6468,19 +6537,19 @@ def delete_ca_category():
                 return jsonify({'status': 'error', 'message': 'CA category not found'}), 400
             account_id = row[0]
 
-            # 2. Find the Auto Adjustments CA category for this account
+            # 2. Find the Uncategorized CA category for this account
             cursor.execute("""
                 SELECT id FROM c_expense_categories
-                WHERE account_id = %s AND name = 'Auto Adjustments'
+                WHERE account_id = %s AND name = 'Uncategorized'
                 LIMIT 1
             """, (account_id,))
             auto_adj_row = cursor.fetchone()
             if not auto_adj_row:
                 cursor.close()
-                return jsonify({'status': 'error', 'message': 'Auto Adjustments CA category not found'}), 400
+                return jsonify({'status': 'error', 'message': 'Uncategorized CA category not found'}), 400
             auto_adj_id = auto_adj_row[0]
 
-            # 3. For all entries for this category with date <= yesterday, move to Auto Adjustments (Redis-first)
+            # 3. For all entries for this category with date <= yesterday, move to Uncategorized (Redis-first)
             yesterday = date.today() - timedelta(days=1)
             entries = _get_entries_from_redis('c_expense_entries', current_user.id)
             if entries:
@@ -6491,7 +6560,7 @@ def delete_ca_category():
                     entry_date = old_entry.get('date')
                     amount = float(old_entry.get('amount', 0))
                     
-                    # Find existing Auto Adjustments entry for this date
+                    # Find existing Uncategorized entry for this date
                     auto_entry = next((e for e in entries if int(e.get('category_id', 0)) == int(auto_adj_id) and 
                                       e.get('date') == entry_date), None)
                     
@@ -11993,7 +12062,7 @@ def delete_recurring_income():
         _delete_category_in_redis('income_categories', current_user.id, category_id)
         
         # Flush worker will handle:
-        # - Moving past entries to Auto Adjustments in MySQL
+        # - Moving past entries to Uncategorized in MySQL
         # - Deleting category from MySQL (CASCADE deletes entries)
         # - Cleaning up recurring record from MySQL
         # - Cleaning up buckets from MySQL
@@ -12600,7 +12669,7 @@ def delete_recurring_expense():
         _delete_category_in_redis('expense_categories', current_user.id, category_id)
         
         # Flush worker will handle:
-        # - Moving past entries to Auto Adjustments in MySQL
+        # - Moving past entries to Uncategorized in MySQL
         # - Deleting category from MySQL (CASCADE deletes entries)
         # - Cleaning up recurring record from MySQL
         # - Cleaning up buckets from MySQL
@@ -13278,7 +13347,7 @@ def delete_recurring_ca_expense():
         _delete_category_in_redis('c_expense_categories', current_user.id, category_id)
         
         # Flush worker will handle:
-        # - Moving past entries to Auto Adjustments in MySQL
+        # - Moving past entries to Uncategorized in MySQL
         # - Deleting category from MySQL (CASCADE deletes entries)
         # - Cleaning up recurring record from MySQL
         # - Cleaning up buckets from MySQL
@@ -14575,18 +14644,18 @@ def delete_bud_item():
             # Get expense_category_id for this bud
             expense_category_id = bud.get('expense_category_id') if bud else None
 
-            # Find Auto Adjustments category for this user
-            cursor.execute("SELECT id FROM expense_categories WHERE user_id = %s AND name = %s", (current_user.id, "Auto Adjustments"))
+            # Find Uncategorized category for this user
+            cursor.execute("SELECT id FROM expense_categories WHERE user_id = %s AND name = %s", (current_user.id, "Uncategorized"))
             auto_adj = cursor.fetchone()
             if not auto_adj:
                 cursor.close()
-                return jsonify({'status': 'error', 'message': 'Auto Adjustments category not found'}), 404
+                return jsonify({'status': 'error', 'message': 'Uncategorized category not found'}), 404
             auto_adj_id = auto_adj['id']
 
             # Get all expense_entries for this bud_item from Redis
             expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
             if expense_entries:
-                # Collect Auto Adjustments entries to create
+                # Collect Uncategorized entries to create
                 auto_adj_entries_to_create = []
                 
                 for e in expense_entries:
@@ -14596,7 +14665,7 @@ def delete_bud_item():
                             entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                         
                         if entry_date < today:
-                            # Collect for Auto Adjustments
+                            # Collect for Uncategorized
                             auto_adj_entries_to_create.append({
                                 'date': entry_date,
                                 'amount': float(e.get('amount', 0))
@@ -14608,7 +14677,7 @@ def delete_bud_item():
                 # Save filtered entries first
                 _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
                 
-                # Now create Auto Adjustments entries
+                # Now create Uncategorized entries
                 for auto_adj_entry in auto_adj_entries_to_create:
                     _update_entry_in_redis('expense_entries', current_user.id, 
                                          auto_adj_id, auto_adj_entry['date'], 
@@ -14624,18 +14693,18 @@ def delete_bud_item():
                 return jsonify({'status': 'error', 'message': 'Credit account not found'}), 404
             account_id = ca_row['id']
 
-            # Find Auto Adjustments CA category for this account
-            cursor.execute("SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s", (account_id, "Auto Adjustments"))
+            # Find Uncategorized CA category for this account
+            cursor.execute("SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s", (account_id, "Uncategorized"))
             auto_adj = cursor.fetchone()
             if not auto_adj:
                 cursor.close()
-                return jsonify({'status': 'error', 'message': 'Auto Adjustments CA category not found'}), 404
+                return jsonify({'status': 'error', 'message': 'Uncategorized CA category not found'}), 404
             auto_adj_id = auto_adj['id']
 
             # Get all c_expense_entries for this bud_item from Redis
             c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
             if c_expense_entries:
-                # Collect Auto Adjustments entries to create
+                # Collect Uncategorized entries to create
                 ca_auto_adj_entries_to_create = []
                 
                 for e in c_expense_entries:
@@ -14645,7 +14714,7 @@ def delete_bud_item():
                             entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                         
                         if entry_date < today:
-                            # Collect for Auto Adjustments
+                            # Collect for Uncategorized
                             ca_auto_adj_entries_to_create.append({
                                 'date': entry_date,
                                 'amount': float(e.get('amount', 0))
@@ -14657,7 +14726,7 @@ def delete_bud_item():
                 # Save filtered entries first
                 _set_entries_to_redis('c_expense_entries', current_user.id, ca_entries_to_keep)
                 
-                # Now create Auto Adjustments entries
+                # Now create Uncategorized entries
                 for ca_auto_adj_entry in ca_auto_adj_entries_to_create:
                     _update_entry_in_redis('c_expense_entries', current_user.id, 
                                          auto_adj_id, ca_auto_adj_entry['date'], 
@@ -14732,10 +14801,10 @@ def delete_bud():
             account = bud_item.get('account', '').lower() if bud_item.get('account') else "blankee"
 
             if account == "blankee":
-                # Find Auto Adjustments expense category for this user
+                # Find Uncategorized expense category for this user
                 cursor.execute("""
                     SELECT id FROM expense_categories
-                    WHERE user_id = %s AND name = 'Auto Adjustments' LIMIT 1
+                    WHERE user_id = %s AND name = 'Uncategorized' LIMIT 1
                 """, (current_user.id,))
                 auto_adj = cursor.fetchone()
                 if not auto_adj:
@@ -14745,7 +14814,7 @@ def delete_bud():
                 # Get all expense_entries for this bud_item from Redis
                 expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
                 if expense_entries:
-                    # Collect Auto Adjustments entries to create
+                    # Collect Uncategorized entries to create
                     auto_adj_entries_to_create = []
                     
                     for e in expense_entries:
@@ -14755,7 +14824,7 @@ def delete_bud():
                                 entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                             
                             if entry_date < today:
-                                # Collect for Auto Adjustments
+                                # Collect for Uncategorized
                                 auto_adj_entries_to_create.append({
                                     'date': entry_date,
                                     'amount': float(e.get('amount', 0))
@@ -14767,7 +14836,7 @@ def delete_bud():
                     # Save filtered entries first
                     _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
                     
-                    # Now create Auto Adjustments entries
+                    # Now create Uncategorized entries
                     for auto_adj_entry in auto_adj_entries_to_create:
                         _update_entry_in_redis('expense_entries', current_user.id, 
                                              auto_adj_id, auto_adj_entry['date'], 
@@ -14786,10 +14855,10 @@ def delete_bud():
                     continue
                 account_id = ca_row['id']
 
-                # Find Auto Adjustments CA category for this account
+                # Find Uncategorized CA category for this account
                 cursor.execute("""
                     SELECT id FROM c_expense_categories
-                    WHERE account_id = %s AND name = 'Auto Adjustments' LIMIT 1
+                    WHERE account_id = %s AND name = 'Uncategorized' LIMIT 1
                 """, (account_id,))
                 auto_adj = cursor.fetchone()
                 if not auto_adj:
@@ -14799,7 +14868,7 @@ def delete_bud():
                 # Get all c_expense_entries for this bud_item from Redis
                 c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
                 if c_expense_entries:
-                    # Collect Auto Adjustments entries to create
+                    # Collect Uncategorized entries to create
                     ca_auto_adj_entries_to_create = []
                     
                     for e in c_expense_entries:
@@ -14809,7 +14878,7 @@ def delete_bud():
                                 entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                             
                             if entry_date < today:
-                                # Collect for Auto Adjustments
+                                # Collect for Uncategorized
                                 ca_auto_adj_entries_to_create.append({
                                     'date': entry_date,
                                     'amount': float(e.get('amount', 0))
@@ -14821,7 +14890,7 @@ def delete_bud():
                     # Save filtered entries first
                     _set_entries_to_redis('c_expense_entries', current_user.id, ca_entries_to_keep)
                     
-                    # Now create Auto Adjustments entries
+                    # Now create Uncategorized entries
                     for ca_auto_adj_entry in ca_auto_adj_entries_to_create:
                         _update_entry_in_redis('c_expense_entries', current_user.id, 
                                              auto_adj_id, ca_auto_adj_entry['date'], 
@@ -14899,7 +14968,7 @@ def toggle_bud_active():
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
         cursor.execute("""
-            SELECT id FROM expense_categories WHERE user_id = %s AND name = 'Auto Adjustments' LIMIT 1
+            SELECT id FROM expense_categories WHERE user_id = %s AND name = 'Uncategorized' LIMIT 1
         """, (current_user.id,))
         auto_adj = cursor.fetchone()
         auto_adj_id = auto_adj['id'] if auto_adj else None
@@ -14910,7 +14979,7 @@ def toggle_bud_active():
         ca_auto_adj_ids = {}
         for ca_id in ca_ids:
             cursor.execute("""
-                SELECT id FROM c_expense_categories WHERE account_id = %s AND name = 'Auto Adjustments' LIMIT 1
+                SELECT id FROM c_expense_categories WHERE account_id = %s AND name = 'Uncategorized' LIMIT 1
             """, (ca_id,))
             ca_auto_adj = cursor.fetchone()
             if ca_auto_adj:
@@ -14987,7 +15056,7 @@ def toggle_bud_active():
                                                          bud_row['expense_category_id'], entry_date, 
                                                          float(auto_entry.get('amount', 0)), bud_item_id=first_item_id)
                     
-                    # Only create new entries if we didn't transfer from Auto Adjustments
+                    # Only create new entries if we didn't transfer from Uncategorized
                     if not auto_adj_transferred:
                         # Calculate total amount for all items in this group
                         total_value = sum(float(item['value']) for item in items_group)
@@ -15095,7 +15164,7 @@ def toggle_bud_active():
                     # Get and filter entries from Redis
                     expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
                     if expense_entries:
-                        # Collect Auto Adjustments entries to create
+                        # Collect Uncategorized entries to create
                         auto_adj_entries_to_create = []
                         
                         for e in expense_entries:
@@ -15106,7 +15175,7 @@ def toggle_bud_active():
                                     entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                                 
                                 if entry_date < today and auto_adj_id:
-                                    # Collect for Auto Adjustments (preserve bud_item_id)
+                                    # Collect for Uncategorized (preserve bud_item_id)
                                     auto_adj_entries_to_create.append({
                                         'date': entry_date,
                                         'amount': float(e.get('amount', 0)),
@@ -15122,7 +15191,7 @@ def toggle_bud_active():
                         # Save filtered entries first
                         _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
                         
-                        # Now create Auto Adjustments entries (preserve bud_item_id for reactivation)
+                        # Now create Uncategorized entries (preserve bud_item_id for reactivation)
                         for auto_adj_entry in auto_adj_entries_to_create:
                             _update_entry_in_redis('expense_entries', current_user.id, 
                                                  auto_adj_id, auto_adj_entry['date'], 
@@ -15148,7 +15217,7 @@ def toggle_bud_active():
                     # Get and filter c_expense entries from Redis
                     c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
                     if c_expense_entries:
-                        # Collect Auto Adjustments entries to create
+                        # Collect Uncategorized entries to create
                         ca_auto_adj_entries_to_create = []
                         
                         for e in c_expense_entries:
@@ -15159,7 +15228,7 @@ def toggle_bud_active():
                                     entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                                 
                                 if entry_date < today and ca_auto_adj_id:
-                                    # Collect for Auto Adjustments (preserve bud_item_id)
+                                    # Collect for Uncategorized (preserve bud_item_id)
                                     ca_auto_adj_entries_to_create.append({
                                         'date': entry_date,
                                         'amount': float(e.get('amount', 0)),
@@ -15175,7 +15244,7 @@ def toggle_bud_active():
                         # Save filtered entries first
                         _set_entries_to_redis('c_expense_entries', current_user.id, ca_entries_to_keep)
                         
-                        # Now create Auto Adjustments entries (preserve bud_item_id for reactivation)
+                        # Now create Uncategorized entries (preserve bud_item_id for reactivation)
                         for ca_auto_adj_entry in ca_auto_adj_entries_to_create:
                             _update_entry_in_redis('c_expense_entries', current_user.id, 
                                                  ca_auto_adj_id, ca_auto_adj_entry['date'], 
@@ -15465,10 +15534,10 @@ def add_credit_account():
         'is_auto_adjustment': 0
     })
     
-    # "Auto Adjustments" category
+    # "Uncategorized" category
     _add_category_to_redis('c_expense_categories', current_user.id, {
         'account_id': temp_account_id,
-        'name': 'Auto Adjustments',
+        'name': 'Uncategorized',
         'display_order': 0,
         'group_id': None,
         'is_recurring': 0,
@@ -17098,6 +17167,88 @@ def quiltt_delete():
         app.logger.error(f"DELETE ERROR - Exception deleting Quiltt connection: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
 
+
+@app.route('/quiltt/delete-unconfirmed', methods=['POST'])
+@login_required
+def quiltt_delete_unconfirmed():
+    """Delete a connection that was never confirmed by user during account selection
+    Unlike /quiltt/delete, this bypasses the DISCONNECTED status check since the
+    connection was just created and never confirmed by the user."""
+    try:
+        # Handle both JSON and sendBeacon (which sends as plain text)
+        if request.is_json:
+            data = request.get_json()
+        else:
+            # sendBeacon sends data as text/plain
+            try:
+                data = json.loads(request.data.decode('utf-8'))
+            except:
+                data = {}
+        
+        connection_id = data.get('connection_id')
+        
+        if not connection_id:
+            app.logger.error("DELETE UNCONFIRMED FAILED - Missing connection_id")
+            return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
+        
+        app.logger.info(f"[DELETE_UNCONFIRMED] Starting delete for connection {connection_id}, user {current_user.id}")
+        
+        # Get the connection and profile from Redis/MySQL
+        from quiltt_redis import _get_from_redis
+        
+        connections = _get_from_redis('quiltt_connections', current_user.id)
+        if connections is None:
+            connections = get_quiltt_connections(current_user.id)
+        
+        if not connections:
+            app.logger.warning(f"[DELETE_UNCONFIRMED] No connections found for user {current_user.id}")
+            return jsonify({'status': 'success'})
+        
+        # Check if connection exists
+        connection = None
+        for conn in connections:
+            if conn.get('connection_id') == connection_id:
+                connection = conn
+                break
+        
+        if not connection:
+            app.logger.warning(f"[DELETE_UNCONFIRMED] Connection {connection_id} not found, may already be deleted")
+            return jsonify({'status': 'success'})
+        
+        app.logger.info(f"[DELETE_UNCONFIRMED] Found connection {connection_id} with status {connection.get('status')}")
+        
+        # IMPORTANT: Delete from Quiltt API first to prevent it from coming back on next sync
+        profile = get_quiltt_profile(current_user.id)
+        if profile and profile.get('session_token'):
+            try:
+                app.logger.info(f"[DELETE_UNCONFIRMED] Disconnecting from Quiltt API: {connection_id}")
+                quiltt_client.disconnect_connection(profile['session_token'], connection_id)
+                app.logger.info(f"[DELETE_UNCONFIRMED] Successfully disconnected from Quiltt API")
+            except Exception as e:
+                app.logger.warning(f"[DELETE_UNCONFIRMED] Failed to disconnect from Quiltt API: {e}, continuing with local delete")
+        
+        # Delete webhook events
+        from quiltt_redis import delete_quiltt_webhook_events_for_connection
+        remaining_connections = [c for c in connections if c.get('connection_id') != connection_id]
+        is_last_connection = len(remaining_connections) == 0
+        delete_quiltt_webhook_events_for_connection(connection_id, current_user.id, is_last_connection)
+        app.logger.info(f"[DELETE_UNCONFIRMED] Deleted webhook events for {connection_id}")
+        
+        # Delete the connection and all associated data from our database
+        success = delete_quiltt_connection(connection_id, current_user.id)
+        
+        if success:
+            app.logger.info(f"[DELETE_UNCONFIRMED] Successfully deleted unconfirmed connection {connection_id}")
+            return jsonify({'status': 'success'})
+        else:
+            app.logger.error(f"[DELETE_UNCONFIRMED] Failed to delete unconfirmed connection {connection_id}")
+            return jsonify({'status': 'error', 'message': 'Failed to delete'}), 500
+            
+    except Exception as e:
+        app.logger.error(f"[DELETE_UNCONFIRMED] Error deleting unconfirmed connection: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def _is_compatible_account_type(account_type):
     """Check if account type is compatible (depository or credit only)"""
     if not account_type:
@@ -17111,6 +17262,9 @@ def _is_compatible_account_type(account_type):
 def quiltt_sync_profile():
     """Sync all connections and accounts from Quiltt to local database (Redis-first)"""
     try:
+        # Get optional filter parameter for excluding account types (used in setup_profile)
+        exclude_liability = request.json.get('exclude_liability', False) if request.json else False
+        
         # Get session token from Redis or MySQL
         profile = get_quiltt_profile(current_user.id)
         
@@ -17173,9 +17327,16 @@ def quiltt_sync_profile():
                 if not account:
                     continue
                 
+                # Get account type early for filtering
+                account_type = account.get('kind', '').upper()
+                
+                # Skip CREDIT and LIABILITY accounts if exclude_liability is True (setup flow)
+                if exclude_liability and account_type in ['CREDIT', 'LIABILITY']:
+                    app.logger.info(f"Skipping {account_type} account during setup: {account.get('name')}")
+                    continue
+                
                 # Only process compatible account types (depository and credit)
-                account_type = account.get('kind', '')
-                if not _is_compatible_account_type(account_type):
+                if not _is_compatible_account_type(account.get('kind', '')):
                     pass
                     continue
                 
@@ -17367,10 +17528,10 @@ def quiltt_sync_profile():
                                 'is_auto_adjustment': 0
                             })
                             
-                            # "Auto Adjustments" category
+                            # "Uncategorized" category
                             _add_category_to_redis('c_expense_categories', current_user.id, {
                                 'account_id': temp_account_id,
-                                'name': 'Auto Adjustments',
+                                'name': 'Uncategorized',
                                 'display_order': 0,
                                 'group_id': None,
                                 'is_recurring': 0,
@@ -17699,6 +17860,8 @@ def quiltt_get_connections():
     try:
         from quiltt_redis import get_quiltt_connections, get_quiltt_accounts, upsert_quiltt_connection, get_quiltt_profile
         
+        # Get optional filter parameter for account types (used in setup_profile to exclude LIABILITY)
+        exclude_liability = request.args.get('exclude_liability', 'false').lower() == 'true'
         
         # Get all connections from Redis
         connections = get_quiltt_connections(current_user.id)
@@ -17736,6 +17899,13 @@ def quiltt_get_connections():
         
         # Get all accounts
         all_accounts = get_quiltt_accounts(current_user.id)
+        
+        # Filter out CREDIT and LIABILITY accounts if requested (setup_profile flow)
+        if exclude_liability and all_accounts:
+            all_accounts = [
+                acc for acc in all_accounts
+                if acc.get('account_type') not in ['CREDIT', 'LIABILITY']
+            ]
         
         # Attach accounts to their connections
         for connection in connections:
@@ -17816,7 +17986,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             pass
             return (True, 0, 'No accounts enabled for sync')
         
-        # Get the default "Auto Adjustments" category for unmapped transactions
+        # Get the default "Uncategorized" category for unmapped transactions
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
@@ -17831,7 +18001,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         
         if not default_expense_category_id:
             pass
-            return (False, 0, 'Auto Adjustments category not found')
+            return (False, 0, 'Uncategorized category not found')
         
         total_synced = 0
         
@@ -17994,7 +18164,7 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
         entry_type = 'income' if diff > 0 else 'expense'
         table_name = 'income_entries' if diff > 0 else 'expense_entries'
         
-        # Find Auto Adjustments category
+        # Find Uncategorized category
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             if entry_type == 'income':
@@ -18014,8 +18184,8 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
             cursor.close()
         
         if not auto_cat:
-            app.logger.error(f"[AUTO-ADJUSTMENT] User {user_id}: No Auto Adjustments category found for {entry_type}")
-            return False, f"No Auto Adjustments category found for {entry_type}"
+            app.logger.error(f"[AUTO-ADJUSTMENT] User {user_id}: No Uncategorized category found for {entry_type}")
+            return False, f"No Uncategorized category found for {entry_type}"
         
         category_id = auto_cat['id']
         adjustment_amount = abs(diff)
@@ -18283,7 +18453,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
             # Balance needs to go UP (bank balance higher than calculated)
             # Create a c_expense_entries record
             
-            # Find Auto Adjustments category for this credit account
+            # Find Uncategorized category for this credit account
             c_expense_categories = None
             cat_key = f"c_expense_categories:v1:{user_id}"
             if app.config.get('REDIS_OK'):
@@ -18311,8 +18481,8 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                     break
             
             if not auto_cat:
-                app.logger.warning(f"[CA-AUTO-ADJUST] No Auto Adjustments category found for account {account_id}")
-                return False, f"No Auto Adjustments category found for credit account"
+                app.logger.warning(f"[CA-AUTO-ADJUST] No Uncategorized category found for account {account_id}")
+                return False, f"No Uncategorized category found for credit account"
             
             category_id = auto_cat.get('id')
             
@@ -18524,10 +18694,10 @@ def quiltt_toggle_sync():
                                     'is_auto_adjustment': 0
                                 })
                                 
-                                # "Auto Adjustments" category
+                                # "Uncategorized" category
                                 _add_category_to_redis('c_expense_categories', current_user.id, {
                                     'account_id': temp_account_id,
-                                    'name': 'Auto Adjustments',
+                                    'name': 'Uncategorized',
                                     'display_order': 0,
                                     'group_id': None,
                                     'is_recurring': 0,
@@ -18904,6 +19074,312 @@ def quiltt_sync_transactions_setup():
     except Exception as e:
         app.logger.error(f"Error syncing transactions during setup: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/analyze-transactions-for-categories', methods=['POST'])
+@login_required
+def quiltt_analyze_transactions_for_categories():
+    """
+    Return static starter categories for new users during profile setup.
+    
+    Note: Ntropy enrichment data is not immediately available after bank connection.
+    We use generic starter categories instead and will use Ntropy for future
+    enhancements like transaction auto-categorization after the webhook confirms
+    enrichment is complete.
+    """
+    try:
+        app.logger.info(f"Returning static category recommendations for user_id={current_user.id}")
+        
+        # Static starter categories - simple and universal
+        static_recommendations = {
+            'income': [
+                {'name': 'Wages', 'is_recurring': True, 'amount': 1500, 'cadence_interval': 2, 'cadence_unit': 'weeks', 'weekdays': 'Friday'},
+                {'name': 'Variable', 'is_recurring': False, 'amount': 0, 'cadence_interval': 1, 'cadence_unit': 'months'}
+            ],
+            'expense': [
+                {'name': 'Housing', 'is_recurring': True, 'amount': 1200, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '1'},
+                {'name': 'Utilities', 'is_recurring': True, 'amount': 150, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '1'},
+                {'name': 'Phone', 'is_recurring': True, 'amount': 50, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '8'},
+                {'name': 'Internet', 'is_recurring': True, 'amount': 100, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '15'},
+                {'name': 'Gas', 'is_recurring': True, 'amount': 60, 'cadence_interval': 1, 'cadence_unit': 'weeks', 'weekdays': 'Friday'},
+                {'name': 'Groceries', 'is_recurring': True, 'amount': 100, 'cadence_interval': 1, 'cadence_unit': 'weeks', 'weekdays': 'Saturday'},
+                {'name': 'Fun', 'is_recurring': True, 'amount': 50, 'cadence_interval': 1, 'cadence_unit': 'weeks', 'weekdays': 'Friday'},
+                {'name': 'Subscriptions', 'is_recurring': True, 'amount': 50, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '5'}
+            ]
+        }
+        
+        return jsonify({
+            'status': 'success',
+            'recommendations': static_recommendations,
+            'fallback': False  # Not a fallback - this is the intended behavior
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in category recommendations: {e}", exc_info=True)
+        return jsonify({
+            'status': 'success',
+            'recommendations': {'income': [], 'expense': []},
+            'fallback': True
+        })
+
+
+@app.route('/quiltt/create-recommended-categories', methods=['POST'])
+@login_required
+def quiltt_create_recommended_categories():
+    """
+    Create income and expense categories from the recommended categories during profile setup.
+    
+    This is called after the user completes the threshold page.
+    Categories can be recurring or non-recurring.
+    For recurring categories, we create the category + recurring record + generate entries.
+    For non-recurring categories, we just create the category.
+    
+    Expected JSON input:
+    {
+        "income": [
+            {"name": "Wages", "is_recurring": true, "amount": 1500, "cadence_interval": 2, 
+             "cadence_unit": "weeks", "weekdays": "Friday", "start_date": "2026-01-05", 
+             "end_date": null, "no_end_date": true},
+            {"name": "Variable", "is_recurring": false}
+        ],
+        "expense": [
+            {"name": "Housing", "is_recurring": true, "amount": 1200, "cadence_interval": 1,
+             "cadence_unit": "months", "monthly_days": "1", "start_date": "2026-01-05",
+             "end_date": null, "no_end_date": true},
+            ...
+        ]
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': 'No data received'}), 400
+        
+        income_categories = data.get('income', [])
+        expense_categories = data.get('expense', [])
+        
+        app.logger.info(f"Creating recommended categories for user_id={current_user.id}: "
+                       f"{len(income_categories)} income, {len(expense_categories)} expense")
+        
+        created_income = []
+        created_expense = []
+        errors = []
+        
+        # Calculate 5 years from now for no_end_date categories
+        five_years_from_now = (datetime.now() + timedelta(days=365*5)).strftime('%Y-%m-%d')
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # Process income categories
+        for idx, cat in enumerate(income_categories):
+            try:
+                result = _create_single_category(
+                    user_id=current_user.id,
+                    category_type='income',
+                    category_data=cat,
+                    display_order=idx + 1,
+                    today=today,
+                    five_years_from_now=five_years_from_now
+                )
+                created_income.append(result)
+            except Exception as e:
+                app.logger.error(f"Error creating income category '{cat.get('name')}': {e}")
+                errors.append(f"Income '{cat.get('name')}': {str(e)}")
+        
+        # Process expense categories
+        for idx, cat in enumerate(expense_categories):
+            try:
+                result = _create_single_category(
+                    user_id=current_user.id,
+                    category_type='expense',
+                    category_data=cat,
+                    display_order=idx + 1,
+                    today=today,
+                    five_years_from_now=five_years_from_now
+                )
+                created_expense.append(result)
+            except Exception as e:
+                app.logger.error(f"Error creating expense category '{cat.get('name')}': {e}")
+                errors.append(f"Expense '{cat.get('name')}': {str(e)}")
+        
+        return jsonify({
+            'status': 'success',
+            'created': {
+                'income': created_income,
+                'expense': created_expense
+            },
+            'errors': errors if errors else None,
+            'message': f"Created {len(created_income)} income and {len(created_expense)} expense categories"
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error creating recommended categories: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def _create_single_category(user_id, category_type, category_data, display_order, today, five_years_from_now):
+    """
+    Helper function to create a single category (income or expense).
+    For recurring categories, also creates the recurring record and generates entries.
+    
+    Returns dict with created IDs.
+    """
+    name = category_data.get('name', '').strip()
+    is_recurring = category_data.get('is_recurring', False)
+    
+    if not name:
+        raise ValueError("Category name is required")
+    
+    # Determine table names based on type
+    if category_type == 'income':
+        category_table = 'income_categories'
+        recurring_table = 'recurring_income'
+        entries_table = 'income_entries'
+        generate_entries_func = generate_income_entries
+    else:
+        category_table = 'expense_categories'
+        recurring_table = 'recurring_expense'
+        entries_table = 'expense_entries'
+        generate_entries_func = generate_expense_entries
+    
+    # Build category data
+    new_category = {
+        'user_id': user_id,
+        'name': name,
+        'display_order': display_order,
+        'group_id': None,
+        'is_recurring': 1 if is_recurring else 0,
+        'is_auto_adjustment': 0,
+        'no_end_date': 1 if is_recurring and category_data.get('no_end_date', True) else 0,
+        'hidden': 0
+    }
+    
+    # Add expense-specific fields
+    if category_type == 'expense':
+        new_category['is_bud'] = 0
+        new_category['is_credit_account'] = 0
+    
+    # Create category in Redis
+    category_id = _add_category_to_redis(category_table, user_id, new_category)
+    
+    if category_id is None:
+        raise ValueError(f"Failed to create category in Redis")
+    
+    result = {
+        'name': name,
+        'category_id': category_id,
+        'is_recurring': is_recurring
+    }
+    
+    # If recurring, create the recurring record and generate entries
+    if is_recurring:
+        amount = float(category_data.get('amount', 0))
+        cadence_interval = int(category_data.get('cadence_interval', 1))
+        cadence_unit = category_data.get('cadence_unit', 'months')
+        
+        # Parse weekdays (can be string like "Friday" or "Monday,Wednesday")
+        weekdays_raw = category_data.get('weekdays')
+        if weekdays_raw:
+            if isinstance(weekdays_raw, list):
+                weekdays = weekdays_raw
+            else:
+                weekdays = [w.strip().lower() for w in str(weekdays_raw).split(',')]
+        else:
+            weekdays = None
+        
+        # Parse monthly_days (can be string like "1" or "1,15")
+        monthly_days_raw = category_data.get('monthly_days')
+        if monthly_days_raw:
+            if isinstance(monthly_days_raw, list):
+                monthly_days = monthly_days_raw
+            else:
+                monthly_days = [d.strip() for d in str(monthly_days_raw).split(',')]
+        else:
+            monthly_days = None
+        
+        # Handle yearly fields
+        yearly_day = category_data.get('yearly_day')
+        yearly_month = category_data.get('yearly_month')
+        
+        # Determine start and end dates
+        start_date = category_data.get('start_date') or today
+        no_end_date = category_data.get('no_end_date', True)
+        
+        if no_end_date:
+            end_date = five_years_from_now
+        elif category_data.get('occurrences_count'):
+            # Calculate end date based on occurrences
+            end_date = _calculate_end_date_from_occurrences(
+                start_date, cadence_interval, cadence_unit, 
+                int(category_data['occurrences_count']), weekdays, monthly_days
+            )
+        else:
+            end_date = category_data.get('end_date') or five_years_from_now
+        
+        # Create recurring record in Redis
+        recurring_data = {
+            'id': None,
+            'user_id': user_id,
+            'category_id': category_id,
+            'category_name': name,
+            'amount': amount,
+            'cadence_interval': cadence_interval,
+            'cadence_unit': cadence_unit,
+            'weekdays': ','.join(weekdays) if weekdays else None,
+            'monthly_days': ','.join(map(str, monthly_days)) if monthly_days else None,
+            'yearly_day': yearly_day,
+            'yearly_month': yearly_month,
+            'start_date': start_date,
+            'end_date': end_date,
+            'no_end_date': 1 if no_end_date else 0
+        }
+        
+        _update_recurring_in_redis(recurring_table, user_id, recurring_data)
+        recurring_id = recurring_data['id']
+        
+        result['recurring_id'] = recurring_id
+        
+        # Generate entries
+        if recurring_id:
+            generate_entries_func(
+                recurring_id, category_id, amount, cadence_interval, cadence_unit,
+                start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month, user_id
+            )
+    
+    return result
+
+
+def _calculate_end_date_from_occurrences(start_date_str, cadence_interval, cadence_unit, occurrences, weekdays=None, monthly_days=None):
+    """
+    Calculate the end date based on number of occurrences.
+    """
+    from datetime import datetime, timedelta
+    import calendar
+    
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+    
+    if cadence_unit == 'days':
+        # Each occurrence is cadence_interval days apart
+        end_date = start_date + timedelta(days=cadence_interval * (occurrences - 1))
+    
+    elif cadence_unit == 'weeks':
+        # Each occurrence is cadence_interval weeks apart
+        end_date = start_date + timedelta(weeks=cadence_interval * (occurrences - 1))
+    
+    elif cadence_unit == 'months':
+        # Add cadence_interval months for each occurrence
+        months_to_add = cadence_interval * (occurrences - 1)
+        year = start_date.year + (start_date.month + months_to_add - 1) // 12
+        month = (start_date.month + months_to_add - 1) % 12 + 1
+        day = min(start_date.day, calendar.monthrange(year, month)[1])
+        end_date = date(year, month, day)
+    
+    elif cadence_unit == 'years':
+        end_date = date(start_date.year + cadence_interval * (occurrences - 1), start_date.month, start_date.day)
+    
+    else:
+        end_date = start_date + timedelta(days=365 * 5)  # Default to 5 years
+    
+    return end_date.strftime('%Y-%m-%d')
 
 
 @app.route('/quiltt/auto-adjust-checking', methods=['POST'])

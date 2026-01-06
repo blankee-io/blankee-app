@@ -203,6 +203,81 @@ body {
     font-size: 1rem;
 }
 
+/* Category Analysis - Searching animation */
+.loading-search-circle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    margin-top: -10px;
+    margin-left: -10px;
+    animation: searchScan 4s ease-in-out infinite;
+}
+
+@keyframes searchScan {
+    0% {
+        transform: translate(-12px, -16px);
+    }
+    25% {
+        transform: translate(14px, -10px);
+    }
+    50% {
+        transform: translate(12px, 18px);
+    }
+    75% {
+        transform: translate(-14px, 12px);
+    }
+    100% {
+        transform: translate(-12px, -16px);
+    }
+}
+
+.loading-search-icon {
+    color: #E45F1C;
+    font-size: 1.2rem;
+    background: transparent;
+    font-weight: 900;
+    -webkit-text-stroke: 0.5px #E45F1C;
+}
+
+/* Building Budget - Hammer animation */
+.loading-hammer-circle {
+    position: absolute;
+    top: 40%;
+    left: 105%;
+    margin-top: -8px;
+    margin-left: 8px;
+    transform-origin: bottom right;
+}
+
+.loading-hammer-icon {
+    color: #E45F1C;
+    font-size: 1.8rem;
+    background: transparent;
+    font-weight: 900;
+    display: inline-block;
+    animation: hammerSwing 0.6s ease-in-out infinite;
+    transform: scaleX(-1);
+    transform-origin: 15% 85%;
+}
+
+@keyframes hammerSwing {
+    0% {
+        transform: scaleX(-1) rotate(-45deg);
+    }
+    30% {
+        transform: scaleX(-1) rotate(0deg);
+    }
+    50% {
+        transform: scaleX(-1) rotate(0deg);
+    }
+    70% {
+        transform: scaleX(-1) rotate(-45deg);
+    }
+    100% {
+        transform: scaleX(-1) rotate(-45deg);
+    }
+}
+
 .setup-loading-title {
     font-size: 24px;
     font-weight: 700;
@@ -1805,7 +1880,7 @@ button.login-button:active {
 /* Modal Background */
 .modal-setup-profile {
     position: fixed;
-    top: 0;
+    top: 50px; /* Start below nav-bar */
     left: 0;
     z-index: 1000;
 
@@ -1815,7 +1890,7 @@ button.login-button:active {
     justify-content: center;
     align-items: center;
     width: 100%;
-    height: 100%;
+    height: calc(100% - 50px); /* Subtract nav-bar height */
     overflow: auto;
 
 }
@@ -2002,6 +2077,7 @@ input#setup-profile-starting-savings {
 
     width: 100%;
     margin-top: 15px;
+    flex-shrink: 0; /* Prevent button container from shrinking */
 }
 
 /* Button Styles */
@@ -2149,6 +2225,201 @@ input#setup-profile-starting-savings {
     font-weight: 400;
     font-size: 0.9em;
 }
+
+/* Category Recommendations Modal */
+.modal-content-category-recommendations {
+    max-width: 900px !important;
+    width: 95% !important;
+    padding: 30px !important;
+    max-height: calc(90vh - 50px) !important; /* Account for nav-bar */
+    margin: 5vh auto !important; /* Override default margin to center vertically with proper spacing */
+    overflow-y: auto; /* Allow entire modal content to scroll */
+    overflow-x: hidden;
+}
+
+.modal-content-category-recommendations h2 {
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+
+.modal-content-category-recommendations > p {
+    margin-bottom: 20px;
+}
+
+.category-recommendations-scroll-container {
+    margin-bottom: 20px;
+    padding-right: 10px;
+}
+
+.category-section {
+    margin-bottom: 30px;
+}
+
+.category-section-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 15px;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.category-section-title i {
+    font-size: 16px;
+}
+
+.recommended-categories-table {
+    width: 100%;
+    margin-bottom: 15px;
+}
+
+.recommended-categories-table thead tr {
+    height: 20px;
+    max-height: 20px;
+}
+
+.recommended-categories-table thead th {
+    padding: 0 8px;
+    font-size: 12px;
+}
+
+.recommended-categories-table tbody tr {
+    height: 40px;
+}
+
+.recommended-categories-table tbody td {
+    padding: 0 8px;
+}
+
+.recommended-categories-table th,
+.recommended-categories-table td {
+    text-align: left;
+}
+
+.recommended-categories-table tfoot tr,
+.recommended-categories-table .recurring-footer {
+    height: 20px;
+}
+
+.recommended-categories-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.edit-category-recommendation-btn,
+.delete-category-recommendation-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 8px;
+    color: #666;
+    transition: all 0.2s ease;
+}
+
+.edit-category-recommendation-btn:hover {
+    color: #3CC5C0;
+}
+
+.delete-category-recommendation-btn:hover {
+    color: #e74c3c;
+}
+
+/* Category Confirmation Summary */
+.category-summary-section {
+    margin-bottom: 25px;
+    text-align: left;
+}
+
+.category-summary-section h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.category-summary-section h3 i {
+    font-size: 14px;
+}
+
+.category-summary-list {
+    background-color: #f9f9f9;
+    border-radius: 10px;
+    padding: 15px;
+}
+
+.category-summary-item {
+    padding: 10px;
+    margin-bottom: 8px;
+    background-color: #ffffff;
+    border-left: 4px solid #3CC5C0;
+    border-radius: 6px;
+}
+
+.category-summary-item:last-child {
+    margin-bottom: 0;
+}
+
+.category-summary-name {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.category-summary-details {
+    font-size: 13px;
+    color: #666;
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.category-summary-details span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.category-summary-details i {
+    font-size: 11px;
+    color: #3CC5C0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .modal-content-category-recommendations {
+        max-width: 95% !important;
+        width: 95% !important;
+        padding: 20px !important;
+        max-height: calc(95vh - 50px) !important; /* More screen space on mobile, account for nav-bar */
+        margin: 2.5vh auto !important; /* Less margin on mobile */
+    }
+    
+    .category-recommendations-scroll-container {
+        padding-right: 5px; /* Less padding on mobile */
+    }
+    
+    .recommended-category-item {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .category-name-field,
+    .category-amount-field,
+    .category-cadence-field {
+        width: 100%;
+        min-width: 0;
+    }
+    
+    .category-recurring-field {
+        justify-content: flex-start;
+        align-items: flex-start;
+    }
+}
+
 
 /* Balance auto-fill indicators */
 .balance-auto-filled-indicator {
@@ -5567,7 +5838,7 @@ td:has(.bucket-progress-container) {
     margin-right: auto;    
     background-color: transparent;
     box-sizing: border-box;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .profile-content {
@@ -5877,7 +6148,7 @@ td:has(.bucket-progress-container) {
     width: 100%;
     min-width: 350px;
     max-width: 875px;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .profile-form {
@@ -6438,7 +6709,6 @@ td:has(.bucket-progress-container) {
     max-width: 100%;
     box-sizing: border-box;
     box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
-    overflow: hidden;
 }
 
 /* Notification label */
@@ -6460,6 +6730,7 @@ td:has(.bucket-progress-container) {
 .notification-item {
     padding: 15px 20px;
     transition: background-color 0.2s;
+    overflow: visible;
 }
 
 .notification-item.notification-read .notification-date,
@@ -7139,6 +7410,11 @@ td:has(.bucket-progress-container) {
     -webkit-backdrop-filter: blur(8px);
 }
 
+/* Edit Category Recommendation Modal - needs higher z-index to appear above setup profile modals */
+#edit-category-recommendation-modal {
+    z-index: 1100;
+}
+
 /* General Modal Content */
 .modal-content {
     background-color: #fff;
@@ -7283,6 +7559,95 @@ td:has(.bucket-progress-container) {
     transform: translateY(0);
 }
 
+/* Category Name + Recurring Row Layout */
+.category-name-recurring-row {
+    display: flex;
+    align-items: stretch;
+    gap: 15px;
+    width: 100%;
+}
+
+.category-name-field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.category-name-field label {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.category-name-field input {
+    width: 100%;
+    margin: 0;
+    flex: 1;
+}
+
+.recurring-toggle-field {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.recurring-toggle-field label {
+    margin: 0 0 5px 0;
+    white-space: nowrap;
+}
+
+.recurring-toggle-field input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    margin: auto 0 20px 0px;
+}
+
+/* Recurring Toggle Row for Category Edit Modal (legacy) */
+.recurring-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.recurring-toggle-row label {
+    margin: 0;
+    font-weight: 500;
+}
+
+.recurring-toggle-row input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+/* Monthly Day Select Container */
+.monthly-day-select-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.remove-monthly-day-btn {
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+.remove-monthly-day-btn:hover {
+    background: #c82333;
+}
+
 /* Special Widths for Category and Amount */
 #category_name,
 #amount,
@@ -7411,7 +7776,8 @@ td:has(.bucket-progress-container) {
 #weekly-options,
 #edit-weekly-options,
 #expense-weekly-options,
-#ca-weekly-options {
+#ca-weekly-options,
+#edit-category-weekly-options {
     display: flex;
     align-items: center;
     gap: 15px;
@@ -7420,7 +7786,8 @@ td:has(.bucket-progress-container) {
 #weekly-options label,
 #edit-weekly-options label,
 #expense-weekly-options label,
-#ca-weekly-options label {
+#ca-weekly-options label,
+#edit-category-weekly-options label {
     font-size: 14px;
     margin: 0 0 8px 0;
     white-space: nowrap;
@@ -7430,7 +7797,8 @@ td:has(.bucket-progress-container) {
 #weekly-options .weekday,
 #edit-weekly-options .weekday,
 #expense-weekly-options .weekday,
-#ca-weekly-options .weekday {
+#ca-weekly-options .weekday,
+#edit-category-weekly-options .weekday {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -7444,16 +7812,30 @@ td:has(.bucket-progress-container) {
     width: 20px;
 }
 
+/* Monthly Options Label */
+#monthly-options label,
+#edit-monthly-options label,
+#expense-monthly-options label,
+#ca-monthly-options label,
+#edit-category-monthly-options label {
+    font-size: 14px;
+    margin: 0 0 8px 0;
+    white-space: nowrap;
+    width: 100%;
+}
+
 /* Monthly Option Row */
 #monthly-day-container div,
-#edit-monthly-day-container div {
+#edit-monthly-day-container div,
+#edit-category-monthly-day-container div {
     display: flex;
     align-items: center;
     margin-top: 6px;
 }
 
 #monthly-day-container select,
-#edit-monthly-day-container select {
+#edit-monthly-day-container select,
+#edit-category-monthly-day-container select {
     flex: 1;
     width: 100%;
     appearance: none;
@@ -7523,7 +7905,10 @@ td:has(.bucket-progress-container) {
 #expense-monthly-options,
 #ca-yearly-options,
 #ca-weekly-options,
-#ca-monthly-options {
+#ca-monthly-options,
+#edit-category-yearly-options,
+#edit-category-weekly-options,
+#edit-category-monthly-options {
     margin-bottom: 20px;
     display: flex;
     flex-wrap: wrap;
@@ -7537,12 +7922,23 @@ td:has(.bucket-progress-container) {
 #weekly-options,
 #edit-weekly-options,
 #expense-weekly-options,
-#ca-weekly-options {
+#ca-weekly-options,
+#edit-category-weekly-options {
     justify-content: space-between;
 }
 
+/* Monthly options need display: block, not flex */
+#monthly-options,
+#edit-monthly-options,
+#expense-monthly-options,
+#ca-monthly-options,
+#edit-category-monthly-options {
+    display: block;
+}
+
 #yearly-options,
-#edit-yearly-options {
+#edit-yearly-options,
+#edit-category-yearly-options {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -7550,8 +7946,10 @@ td:has(.bucket-progress-container) {
 
 #yearly-options input,
 #edit-yearly-options input,
+#edit-category-yearly-options input,
 #yearly-options select,
-#edit-yearly-options select {
+#edit-yearly-options select,
+#edit-category-yearly-options select {
     width: 100%;
     appearance: none;
     appearance: none;
@@ -7606,6 +8004,20 @@ td:has(.bucket-progress-container) {
 .date-label-row label {
     flex: 1 1 0;
     min-width: 0;
+}
+
+/* End date container for opacity toggling */
+.end-date-container {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.end-date-container label {
+    display: block;
+}
+
+.end-date-container input[type="date"] {
+    width: 100%;
 }
 
 .date-input-row input[type="date"] {
@@ -7990,6 +8402,11 @@ form button[type="submit"] {
     .expense-recurring-table td,
     .income-recurring-table td  {
         height: 90px;
+    }
+    
+    .recommended-categories-table tfoot td,
+    .recommended-categories-table .recurring-footer td {
+        height: 20px !important;
     }
 }
 
@@ -8432,6 +8849,11 @@ form button[type="submit"] {
     .ca-recurring-table td,
     .income-recurring-table td  {
         height: 90px;
+    }
+    
+    .recommended-categories-table tfoot td,
+    .recommended-categories-table .recurring-footer td {
+        height: 20px !important;
     }
 }
 
@@ -11026,5 +11448,35 @@ html.modal-open {
     
     .summary-progress-container {
         width: 100%;
+    }
+}
+
+/* Category Recommendations Modal - Small Screen (under 400px) */
+@media (max-width: 400px) {
+    #category-recommendations-modal-setup h2 {
+        font-size: 1.25rem;
+    }
+    
+    #category-recommendations-modal-setup p {
+        font-size: 0.85rem;
+    }
+    
+    #category-recommendations-modal-setup .category-section-header span {
+        font-size: 0.9rem;
+    }
+    
+    #add-recommended-income-btn,
+    #add-recommended-expense-btn {
+        font-size: 0.85rem;
+        padding: 10px 16px;
+    }
+    
+    #category-recommendations-modal-setup button[type="submit"] {
+        font-size: 0.9rem;
+        padding: 10px 20px;
+    }
+    
+    #skip-category-recommendations {
+        font-size: 0.8rem;
     }
 }
