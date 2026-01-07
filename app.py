@@ -482,8 +482,9 @@ def verify_email():
             )
             
             cursor.close()
-            return render_template('login.html', 
-                                 success_message=f'Email verification complete! Your email has been changed to {new_email}. You can now log in with your new email address.')
+            return render_template('email_verified.html', 
+                                 email_changed=True,
+                                 new_email=new_email)
         
         # Otherwise, check for regular email verification (new registration)
         cursor.execute("""
@@ -494,21 +495,20 @@ def verify_email():
         user = cursor.fetchone()
         
         if not user:
-            flash('Invalid or expired verification link.')
-            cursor.close()
-            return redirect(url_for('login'))
+            return render_template('email_verified.html', 
+                                 error=True,
+                                 error_message='Invalid or expired verification link.')
         
         # Check if already verified
         if user['email_verified']:
-            flash('Your email is already verified. You can log in now.')
-            cursor.close()
-            return redirect(url_for('login'))
+            return render_template('email_verified.html', 
+                                 already_verified=True)
         
         # Check if token is expired
         if user['verification_token_expires'] and datetime.now() > user['verification_token_expires']:
-            flash('Verification link has expired. Please register again or request a new verification link.')
-            cursor.close()
-            return redirect(url_for('login'))
+            return render_template('email_verified.html', 
+                                 error=True,
+                                 error_message='Verification link has expired. Please register again or request a new verification link.')
         
         # Verify the email
         cursor.execute("""
@@ -547,9 +547,8 @@ def verify_email():
         
         cursor.close()
         
-        # Redirect to login page with success message
-        flash('Email verified successfully! You can now log in.')
-        return redirect(url_for('login'))
+        # Render email verification success page
+        return render_template('email_verified.html')
 
 
 @app.route('/resend-verification', methods=['GET', 'POST'])
@@ -11652,7 +11651,7 @@ def recurring_income():
                 SELECT ri.id, ri.user_id, ri.category_id, ic.name as category_name, ri.amount, 
                        ri.cadence_interval, ri.cadence_unit, ri.weekdays, ri.monthly_days, 
                        ri.start_date, ri.end_date, ri.yearly_day, ri.yearly_month,
-                       ic.no_end_date
+                       ic.no_end_date, ri.wage_bill
                 FROM recurring_income ri
                 JOIN income_categories ic ON ri.category_id = ic.id
                 WHERE ri.user_id = %s
@@ -11801,6 +11800,7 @@ def add_recurring_income():
     yearly_day = data.get('yearly_day')  # Extract the yearly day, if any
     yearly_month = data.get('yearly_month')  # Extract the yearly month, if any
     no_end_date = data.get('no_end_date', 0)
+    wage_bill = data.get('wage_bill', 0)
 
     # Validate the data
     if not all([category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
@@ -11852,7 +11852,8 @@ def add_recurring_income():
             'yearly_month': yearly_month if yearly_month else None,
             'start_date': start_date,
             'end_date': end_date,
-            'no_end_date': no_end_date
+            'no_end_date': no_end_date,
+            'wage_bill': wage_bill
         }
         
         _update_recurring_in_redis('recurring_income', current_user.id, recurring_data)
@@ -12094,6 +12095,7 @@ def update_recurring_income_inner(data, user_id):
         yearly_day = data.get('yearly_day')  # Extract the yearly day, if any
         yearly_month = data.get('yearly_month')  # Extract the yearly month, if any
         no_end_date = data.get('no_end_date', 0)
+        wage_bill = data.get('wage_bill', 0)
 
         # Validate the data
         if not all([recurring_id, category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
@@ -12159,7 +12161,8 @@ def update_recurring_income_inner(data, user_id):
                 'yearly_month': yearly_month if yearly_month else None,
                 'start_date': start_date,
                 'end_date': end_date,
-                'no_end_date': no_end_date
+                'no_end_date': no_end_date,
+                'wage_bill': wage_bill
             }
             
             _update_recurring_in_redis('recurring_income', user_id, recurring_data)
@@ -12281,7 +12284,7 @@ def recurring_expense():
                 SELECT ri.id, ri.user_id, ri.category_id, ic.name as category_name, ri.amount, 
                        ri.cadence_interval, ri.cadence_unit, ri.weekdays, ri.monthly_days, 
                        ri.start_date, ri.end_date, ri.yearly_day, ri.yearly_month,
-                       ic.no_end_date
+                       ic.no_end_date, ri.wage_bill
                 FROM recurring_expense ri
                 JOIN expense_categories ic ON ri.category_id = ic.id
                 WHERE ri.user_id = %s AND ic.is_credit_account = 0
@@ -12408,6 +12411,7 @@ def add_recurring_expense():
     yearly_day = data.get('yearly_day')  # Extract the yearly day, if any
     yearly_month = data.get('yearly_month')  # Extract the yearly month, if any
     no_end_date = data.get('no_end_date', 0)
+    wage_bill = data.get('wage_bill', 0)
 
     # Validate the data
     if not all([category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
@@ -12461,7 +12465,8 @@ def add_recurring_expense():
             'yearly_month': yearly_month if yearly_month else None,
             'start_date': start_date,
             'end_date': end_date,
-            'no_end_date': no_end_date
+            'no_end_date': no_end_date,
+            'wage_bill': wage_bill
         }
         
         _update_recurring_in_redis('recurring_expense', current_user.id, recurring_data)
@@ -12701,6 +12706,7 @@ def update_recurring_expense_inner(data, user_id):
         yearly_day = data.get('yearly_day')  # Extract the yearly day, if any
         yearly_month = data.get('yearly_month')  # Extract the yearly month, if any
         no_end_date = data.get('no_end_date', 0)
+        wage_bill = data.get('wage_bill', 0)
 
         # Validate the data
         if not all([recurring_id, category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
@@ -12766,7 +12772,8 @@ def update_recurring_expense_inner(data, user_id):
                 'yearly_month': yearly_month if yearly_month else None,
                 'start_date': start_date,
                 'end_date': end_date,
-                'no_end_date': no_end_date
+                'no_end_date': no_end_date,
+                'wage_bill': wage_bill
             }
             
             _update_recurring_in_redis('recurring_expense', user_id, recurring_data)
@@ -12872,7 +12879,7 @@ def recurring_ca_expense():
                 SELECT rce.id, rce.user_id, rce.category_id, cec.account_id, cec.name as category_name, rce.amount, 
                        rce.cadence_interval, rce.cadence_unit, rce.weekdays, rce.monthly_days, 
                        rce.start_date, rce.end_date, rce.yearly_day, rce.yearly_month,
-                       cec.no_end_date
+                       cec.no_end_date, rce.wage_bill
                 FROM recurring_c_expense rce
                 JOIN c_expense_categories cec ON rce.category_id = cec.id
                 JOIN credit_accounts ca ON cec.account_id = ca.id
@@ -13017,6 +13024,7 @@ def add_recurring_ca_expense():
     yearly_day = data.get('yearly_day')
     yearly_month = data.get('yearly_month')
     no_end_date = data.get('no_end_date', 0)
+    wage_bill = data.get('wage_bill', 0)
 
     # Validate the data
     if not all([account_id, category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
@@ -13076,7 +13084,8 @@ def add_recurring_ca_expense():
             'yearly_month': yearly_month if yearly_month else None,
             'start_date': start_date,
             'end_date': end_date,
-            'no_end_date': no_end_date
+            'no_end_date': no_end_date,
+            'wage_bill': wage_bill
         }
         
         _update_recurring_in_redis('recurring_c_expense', current_user.id, recurring_data)
@@ -13378,6 +13387,7 @@ def update_recurring_ca_expense_inner(data, user_id):
         yearly_day = data.get('yearly_day')
         yearly_month = data.get('yearly_month')
         no_end_date = data.get('no_end_date', 0)
+        wage_bill = data.get('wage_bill', 0)
 
         if not all([recurring_id, amount, cadence_interval, cadence_unit, start_date, end_date]):
             return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
@@ -13439,7 +13449,8 @@ def update_recurring_ca_expense_inner(data, user_id):
                 'yearly_month': yearly_month if yearly_month else None,
                 'start_date': start_date,
                 'end_date': end_date,
-                'no_end_date': no_end_date
+                'no_end_date': no_end_date,
+                'wage_bill': wage_bill
             }
             
             _update_recurring_in_redis('recurring_c_expense', user_id, recurring_data)
@@ -19093,18 +19104,18 @@ def quiltt_analyze_transactions_for_categories():
         # Static starter categories - simple and universal
         static_recommendations = {
             'income': [
-                {'name': 'Wages', 'is_recurring': True, 'amount': 1500, 'cadence_interval': 2, 'cadence_unit': 'weeks', 'weekdays': 'Friday'},
-                {'name': 'Variable', 'is_recurring': False, 'amount': 0, 'cadence_interval': 1, 'cadence_unit': 'months'}
+                {'name': 'Wages', 'is_recurring': True, 'amount': 1500, 'cadence_interval': 2, 'cadence_unit': 'weeks', 'weekdays': 'Friday', 'wage_bill': 1},
+                {'name': 'Variable', 'is_recurring': False, 'amount': 0, 'cadence_interval': 1, 'cadence_unit': 'months', 'wage_bill': 0}
             ],
             'expense': [
-                {'name': 'Housing', 'is_recurring': True, 'amount': 1200, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '1'},
-                {'name': 'Utilities', 'is_recurring': True, 'amount': 150, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '1'},
-                {'name': 'Phone', 'is_recurring': True, 'amount': 50, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '8'},
-                {'name': 'Internet', 'is_recurring': True, 'amount': 100, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '15'},
-                {'name': 'Gas', 'is_recurring': True, 'amount': 60, 'cadence_interval': 1, 'cadence_unit': 'weeks', 'weekdays': 'Friday'},
-                {'name': 'Groceries', 'is_recurring': True, 'amount': 100, 'cadence_interval': 1, 'cadence_unit': 'weeks', 'weekdays': 'Saturday'},
-                {'name': 'Fun', 'is_recurring': True, 'amount': 50, 'cadence_interval': 1, 'cadence_unit': 'weeks', 'weekdays': 'Friday'},
-                {'name': 'Subscriptions', 'is_recurring': True, 'amount': 50, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '5'}
+                {'name': 'Housing', 'is_recurring': True, 'amount': 1200, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '1', 'wage_bill': 1},
+                {'name': 'Utilities', 'is_recurring': True, 'amount': 150, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '1', 'wage_bill': 1},
+                {'name': 'Phone', 'is_recurring': True, 'amount': 50, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '8', 'wage_bill': 1},
+                {'name': 'Internet', 'is_recurring': True, 'amount': 100, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '15', 'wage_bill': 1},
+                {'name': 'Gas', 'is_recurring': True, 'amount': 60, 'cadence_interval': 1, 'cadence_unit': 'weeks', 'weekdays': 'Friday', 'wage_bill': 0},
+                {'name': 'Groceries', 'is_recurring': True, 'amount': 100, 'cadence_interval': 1, 'cadence_unit': 'weeks', 'weekdays': 'Saturday', 'wage_bill': 0},
+                {'name': 'Fun', 'is_recurring': True, 'amount': 50, 'cadence_interval': 1, 'cadence_unit': 'weeks', 'weekdays': 'Friday', 'wage_bill': 0},
+                {'name': 'Subscriptions', 'is_recurring': True, 'amount': 50, 'cadence_interval': 1, 'cadence_unit': 'months', 'monthly_days': '5', 'wage_bill': 1}
             ]
         }
         
@@ -19330,7 +19341,8 @@ def _create_single_category(user_id, category_type, category_data, display_order
             'yearly_month': yearly_month,
             'start_date': start_date,
             'end_date': end_date,
-            'no_end_date': 1 if no_end_date else 0
+            'no_end_date': 1 if no_end_date else 0,
+            'wage_bill': int(category_data.get('wage_bill', 1))
         }
         
         _update_recurring_in_redis(recurring_table, user_id, recurring_data)

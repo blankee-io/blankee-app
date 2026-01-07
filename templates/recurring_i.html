@@ -47,9 +47,10 @@
                     <thead>
                         <tr>
                             <th class="income-category-col">Category</th>
+                            <th class="income-type-col">Type</th>
                             <th class="income-amount-col">Amount</th>
                             <th class="income-cadence-col">Cadence</th>
-                            <th class="income-bucket-col">Current Bucket</th>
+                            <th class="income-bucket-col">Current Status</th>
                             <th class="income-start-date-col">Start Date</th>
                             <th class="income-end-date-col">End Date</th>
                             <th class="income-action-col"></th>
@@ -57,24 +58,37 @@
                     </thead>
                     <tbody>
                         {% for record in recurring_income_records %}
-                        <tr data-recurring-id="{{ record.id }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{{ record.no_end_date }}">
+                        <tr data-recurring-id="{{ record.id }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{{ record.no_end_date }}" data-wage-bill="{{ record.wage_bill }}">
                             <td class="editable income-category" data-column="category_name">{{ record.category_name }}</td>
+                            <td class="income-type" data-column="type">{{ 'Wages' if record.wage_bill == 1 else 'Variable' }}</td>
                             <td class="editable income-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
                             <td class="editable income-cadence" data-column="cadence">{{ record.cadence_description }}</td>
                             <td class="income-bucket" data-column="bucket">
-                                {% if record.bucket_original is not none %}
-                                    <div class="bucket-status">
-                                        <div class="bucket-bar-container">
-                                            <div class="bucket-bar {% if record.bucket_spent > record.bucket_original %}bucket-bar-over{% else %}bucket-bar-income{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div>
-                                        </div>
-                                        <div class="bucket-text {% if record.bucket_spent > record.bucket_original %}bucket-over{% endif %}">
-                                            <span class="bucket-spent">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_spent) }}</span>
-                                            <span class="bucket-separator">/</span>
-                                            <span class="bucket-total">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_original) }}</span>
-                                        </div>
-                                    </div>
+                                {% if record.wage_bill == 1 %}
+                                    {% if record.bucket_original is not none %}
+                                        {% if record.bucket_spent >= record.bucket_original %}
+                                            <span class="status-paid">Received</span>
+                                        {% else %}
+                                            <span class="status-unpaid">Pending</span>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="bucket-none">—</span>
+                                    {% endif %}
                                 {% else %}
-                                    <span class="bucket-none">—</span>
+                                    {% if record.bucket_original is not none %}
+                                        <div class="bucket-status">
+                                            <div class="bucket-bar-container">
+                                                <div class="bucket-bar {% if record.bucket_spent > record.bucket_original %}bucket-bar-over{% else %}bucket-bar-income{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div>
+                                            </div>
+                                            <div class="bucket-text {% if record.bucket_spent > record.bucket_original %}bucket-over{% endif %}">
+                                                <span class="bucket-spent">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_spent) }}</span>
+                                                <span class="bucket-separator">/</span>
+                                                <span class="bucket-total">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_original) }}</span>
+                                            </div>
+                                        </div>
+                                    {% else %}
+                                        <span class="bucket-none">—</span>
+                                    {% endif %}
                                 {% endif %}
                             </td>
                             <td class="editable income-start-date" data-column="start_date">{{ record.start_date }}</td>
@@ -96,7 +110,7 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="7" class="recurring-footer"></td>
+                            <td colspan="8" class="recurring-footer"></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -124,7 +138,14 @@
             
                 <label for="category_name">New Category Name</label>
                 <input type="text" id="category_name" name="category_name" placeholder="Category" required>
-                
+
+                <div class="form-row">
+                    <label for="wage-bill-select">Type:</label>
+                    <select id="wage-bill-select" name="wage_bill">
+                        <option value="1">Wages (fixed income)</option>
+                        <option value="0">Variable (irregular income)</option>
+                    </select>
+                </div>
             
                 <label for="amount">Recurring Amount</label>
                 <div class="currency-input-container">
@@ -228,6 +249,14 @@
                 <!-- Update Category Name directly -->
                 <label for="edit-category-name">Category Name</label>
                 <input type="text" id="edit-category-name" name="category_name" required>
+
+                <div class="form-row">
+                    <label for="edit-wage-bill-select">Type:</label>
+                    <select id="edit-wage-bill-select" name="wage_bill">
+                        <option value="1">Wages (fixed income)</option>
+                        <option value="0">Variable (irregular income)</option>
+                    </select>
+                </div>
             
                 <label for="edit-amount">Recurring Amount</label>
                 <div class="currency-input-container">
@@ -882,7 +911,8 @@
                 start_date: startDate,
                 end_date: endDate,
                 weekdays: selectedWeekdays,  // Add the selected weekdays
-                monthly_days: selectedMonthlyDays  // Include all the selected monthly days
+                monthly_days: selectedMonthlyDays,  // Include all the selected monthly days
+                wage_bill: parseInt($('#wage-bill-select').val())
             };
 
             formData.no_end_date = $('#no-end-date-checkbox').is(':checked') ? 1 : 0;
@@ -1174,6 +1204,10 @@
                 $('#edit-yearly-month').val(yearlyMonth);
             }
 
+            // Set the wage_bill checkbox based on the row data
+            const wageBill = row.attr('data-wage-bill');
+            $('#edit-wage-bill-select').val(wageBill !== undefined ? wageBill : '1');
+
             // Open the modal
             modal.style.display = 'flex';
         }
@@ -1225,7 +1259,8 @@
                 weekdays: selectedWeekdays.length > 0 ? selectedWeekdays : null,  // Send null if empty
                 monthly_days: selectedMonthlyDays.length > 0 ? selectedMonthlyDays : null,  // Send null if empty
                 yearly_day: $('#edit-yearly-day').val() || null,
-                yearly_month: $('#edit-yearly-month').val() || null
+                yearly_month: $('#edit-yearly-month').val() || null,
+                wage_bill: parseInt($('#edit-wage-bill-select').val())
             };
 
             formData.no_end_date = $('#edit-no-end-date-checkbox').is(':checked') ? 1 : 0;
