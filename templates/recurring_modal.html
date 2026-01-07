@@ -6,6 +6,14 @@
             <label for="category_name">New Category Name</label>
             <input type="text" id="category_name" name="category_name" placeholder="Category" required>
 
+<div class="form-row">
+                    <label for="wage-bill-select">Type:</label>
+                    <select id="wage-bill-select" name="wage_bill">
+                        <option value="1">Wages (fixed income)</option>
+                        <option value="0">Variable (irregular income)</option>
+                    </select>
+            </div>
+
             <label for="amount">Recurring Amount</label>
             <div class="currency-input-container">
                 <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
@@ -95,6 +103,14 @@
         <form id="add-recurring-expense-form">
             <label for="category_name">New Category Name</label>
             <input type="text" id="expense-category_name" name="category_name" placeholder="Category" required>
+
+<div class="form-row">
+                    <label for="expense-wage-bill-select">Type:</label>
+                    <select id="expense-wage-bill-select" name="wage_bill">
+                        <option value="1">Bill (fixed expense)</option>
+                        <option value="0">Allowance (flexible spending)</option>
+                    </select>
+            </div>
 
             <label for="amount">Recurring Amount</label>
             <div class="currency-input-container">
@@ -511,7 +527,8 @@
                 start_date: startDate,
                 end_date: endDate,
                 weekdays: selectedWeekdays,
-                monthly_days: selectedMonthlyDays
+                monthly_days: selectedMonthlyDays,
+                wage_bill: parseInt($('#wage-bill-select').val())
             };
             formData.no_end_date = $('#no-end-date-checkbox').is(':checked') ? 1 : 0;
             if ($('#cadence-unit').val() === 'years') {
@@ -743,7 +760,8 @@
             start_date: startDate,
             end_date: endDate,
             weekdays: selectedWeekdays,
-            monthly_days: selectedMonthlyDays
+            monthly_days: selectedMonthlyDays,
+            wage_bill: parseInt($form.find('#expense-wage-bill-select').val())
         };
         formData.no_end_date = $form.find('#expense-no-end-date-checkbox').is(':checked') ? 1 : 0;
         if ($form.find('#expense-cadence-unit').val() === 'years') {

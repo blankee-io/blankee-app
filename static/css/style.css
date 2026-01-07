@@ -7205,6 +7205,11 @@ td:has(.bucket-progress-container) {
     width: 20%;
 }
 
+.income-recurring-table th.income-type-col,
+.income-recurring-table td.income-type-col {
+    width: 8%;
+}
+
 .income-recurring-table th.income-amount-col,
 .income-recurring-table td.income-amount-col {
     width: 10%;
@@ -7213,6 +7218,27 @@ td:has(.bucket-progress-container) {
 .income-recurring-table th.income-cadence-col,
 .income-recurring-table td.income-cadence-col {
     width: 22%;
+}
+
+/* Setup profile recommended categories - different widths */
+.recommended-categories-table.income-recurring-table th.income-category-col,
+.recommended-categories-table.income-recurring-table td.income-category-col {
+    width: 30%;
+}
+
+.recommended-categories-table.income-recurring-table th.income-type-col,
+.recommended-categories-table.income-recurring-table td.income-type-col {
+    width: 10%;
+}
+
+.recommended-categories-table.income-recurring-table th.income-amount-col,
+.recommended-categories-table.income-recurring-table td.income-amount-col {
+    width: 10%;
+}
+
+.recommended-categories-table.income-recurring-table th.income-cadence-col,
+.recommended-categories-table.income-recurring-table td.income-cadence-col {
+    width: 30%;
 }
 
 .income-recurring-table th.income-start-date-col,
@@ -7233,6 +7259,11 @@ td:has(.bucket-progress-container) {
 .income-recurring-table th.income-action-col,
 .income-recurring-table td.income-action-col {
     width: 8%;
+}
+
+.recommended-categories-table.income-recurring-table th.income-action-col,
+.recommended-categories-table.income-recurring-table td.income-action-col {
+    width: 20%;
 }
 
 .income-action-col {
@@ -7319,6 +7350,16 @@ td:has(.bucket-progress-container) {
 .bucket-none {
     color: #999;
     font-style: italic;
+}
+
+.status-paid {
+    color: #28a745;
+    font-weight: 600;
+}
+
+.status-unpaid {
+    color: #dc3545;
+    font-weight: 600;
 }
 
 .add-income-btn {
@@ -8056,6 +8097,26 @@ td:has(.bucket-progress-container) {
     font-size: 10px;
 }
 
+.type-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0;
+    font-size: 14px;
+}
+
+.type-checkbox-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.type-checkbox-row label {
+    margin: 0;
+    cursor: pointer;
+    font-weight: normal;
+}
+
 .date-checkbox-label {
     position: relative;
     left: 0;
@@ -8235,6 +8296,11 @@ form button[type="submit"] {
     width: 20%;
 }
 
+.expense-recurring-table th.expense-type-col,
+.expense-recurring-table td.expense-type-col {
+    width: 8%;
+}
+
 .expense-recurring-table th.expense-amount-col,
 .expense-recurring-table td.expense-amount-col {
     width: 10%;
@@ -8243,6 +8309,27 @@ form button[type="submit"] {
 .expense-recurring-table th.expense-cadence-col,
 .expense-recurring-table td.expense-cadence-col {
     width: 22%;
+}
+
+/* Setup profile recommended categories - different widths */
+.recommended-categories-table.expense-recurring-table th.expense-category-col,
+.recommended-categories-table.expense-recurring-table td.expense-category-col {
+    width: 30%;
+}
+
+.recommended-categories-table.expense-recurring-table th.expense-type-col,
+.recommended-categories-table.expense-recurring-table td.expense-type-col {
+    width: 10%;
+}
+
+.recommended-categories-table.expense-recurring-table th.expense-amount-col,
+.recommended-categories-table.expense-recurring-table td.expense-amount-col {
+    width: 10%;
+}
+
+.recommended-categories-table.expense-recurring-table th.expense-cadence-col,
+.recommended-categories-table.expense-recurring-table td.expense-cadence-col {
+    width: 30%;
 }
 
 .expense-recurring-table th.expense-bucket-col,
@@ -8263,6 +8350,11 @@ form button[type="submit"] {
 .expense-recurring-table th.expense-action-col,
 .expense-recurring-table td.expense-action-col {
     width: 8%;
+}
+
+.recommended-categories-table.expense-recurring-table th.expense-action-col,
+.recommended-categories-table.expense-recurring-table td.expense-action-col {
+    width: 20%;
 }
 
 .expense-action-col {
@@ -11478,5 +11570,82 @@ html.modal-open {
     
     #skip-category-recommendations {
         font-size: 0.8rem;
+    }
+}
+/* Email Verification Success Page Styles */
+.verification-success-container {
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.verification-success-icon {
+    font-size: 72px;
+    color: #155724;
+    margin-bottom: 20px;
+}
+
+.verification-success-icon i {
+    display: inline-block;
+}
+
+.verification-error-icon {
+    font-size: 72px;
+    color: #721c24;
+    margin-bottom: 20px;
+}
+
+.verification-error-icon i {
+    display: inline-block;
+}
+
+#verificationcontainer h1 {
+    font-size: 32px;
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.verification-success-message {
+    font-size: 18px;
+    margin-bottom: 10px;
+    color: #555;
+    line-height: 1.6;
+}
+
+.verification-error-message {
+    font-size: 18px;
+    margin-bottom: 20px;
+    color: #721c24;
+    line-height: 1.6;
+}
+
+.verification-success-subtext {
+    font-size: 16px;
+    margin-bottom: 30px;
+    color: #777;
+}
+
+.verification-login-btn {
+    display: inline-block;
+    margin-top: 20px;
+    text-decoration: none;
+}
+
+@media (max-width: 600px) {
+    .verification-success-icon,
+    .verification-error-icon {
+        font-size: 56px;
+    }
+    
+    #verificationcontainer h1 {
+        font-size: 26px;
+    }
+    
+    .verification-success-message,
+    .verification-error-message {
+        font-size: 16px;
+    }
+    
+    .verification-success-subtext {
+        font-size: 14px;
     }
 }
