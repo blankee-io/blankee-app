@@ -180,6 +180,36 @@
         // Pass the income and expense entries from the Flask backend
         const incomeEntries = {{ income_entries | tojson }};
         const expenseEntries = {{ expense_entries | tojson }};
+        
+        const recurringIncome = {{ recurring_income | tojson }};
+        const recurringExpense = {{ recurring_expense | tojson }};
+
+        // Build lookup maps for recurring wage_bill by category_id
+        const recurringIncomeMap = {};
+        recurringIncome.forEach(r => {
+            recurringIncomeMap[r.category_id] = r.wage_bill || 0;
+        });
+        const recurringExpenseMap = {};
+        recurringExpense.forEach(r => {
+            recurringExpenseMap[r.category_id] = r.wage_bill || 0;
+        });
+        
+        // Helper function to check if entry is overdue unpaid bill
+        function isOverdueBill(entry, entryDate, recurringMap) {
+            // Check if processed=0, date is yesterday or earlier, and wage_bill=1
+            if (entry.processed !== 0) return false;
+            
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            yesterday.setHours(0, 0, 0, 0);
+            
+            const entryDateObj = new Date(entryDate + 'T00:00:00');
+            if (entryDateObj > yesterday) return false;
+            
+            // Check if this entry's category has wage_bill=1
+            const wageBill = recurringMap[entry.category_id];
+            return wageBill === 1;
+        }
 
         const memberSince = {{ member_since | tojson }};
 
@@ -739,7 +769,11 @@
                     incomeRow.setAttribute('data-category-id', entry.category_id);
                     incomeRow.setAttribute('data-date', date);
                     const dataProcessed = entry.processed == 1 ? '1' : '0';
-                    const paidClass = entry.processed == 1 ? 'paid' : '';
+                    
+                    // Check if this is an overdue unpaid bill
+                    const isOverdue = isOverdueBill(entry, date, recurringIncomeMap);
+                    const paidClass = entry.processed == 1 ? 'paid' : (isOverdue ? 'overdue-bill' : '');
+                    
                     const catObj = incomeCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
                     const isStartingBalance = entry.category_name === 'Starting Balance' || (catObj && catObj.name === 'Starting Balance');
@@ -811,7 +845,11 @@
                     expenseRow.setAttribute('data-category-id', entry.category_id);
                     expenseRow.setAttribute('data-date', date);
                     const dataProcessed = entry.processed == 1 ? '1' : '0';
-                    const paidClass = entry.processed == 1 ? 'paid' : '';
+                    
+                    // Check if this is an overdue unpaid bill
+                    const isOverdue = isOverdueBill(entry, date, recurringExpenseMap);
+                    const paidClass = entry.processed == 1 ? 'paid' : (isOverdue ? 'overdue-bill' : '');
+                    
                     const catObj = expenseCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';

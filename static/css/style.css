@@ -2791,16 +2791,37 @@ tr[data-category-id] td.before-member-since {
 
 .paid {
     font-weight: bold;
+    position: relative;
 }
 
 .paid::after {
     position: absolute;
-    margin-top: -14px;
-    margin-left: -10px;
-    font-size: 18px;
-    font-weight: bolder;
+    top: -6px;
+    right: -8px;
+    padding: 2px;
+    font-size: 12px;
+    font-weight: 900;
     pointer-events: none;
-    content: '\2713';
+    font-family: "Font Awesome 7 Pro";
+    content: '\f058';
+    color: #28a745;
+    background-color: #575757;
+    border-radius: 50%;
+}
+
+.overdue-bill::after {
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    padding: 2px;
+    font-size: 12px;
+    font-weight: 900;
+    pointer-events: none;
+    font-family: "Font Awesome 7 Pro";
+    content: '\f059';
+    color: #A9A9A9;
+    background-color: #575757;
+    border-radius: 50%;
 }
 
 /* Alternating background colors for income entries */

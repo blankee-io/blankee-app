@@ -584,12 +584,13 @@
                 }, 800);
             });
 
-            // Handle skip bank connection - go to name modal
+            // Handle skip bank connection - show category recommendations
             $('#skip-bank-connection').on('click', function () {
                 bankConnected = false;
                 $('#bank-connection-modal-setup').hide();
-                $('#name-modal-setup').show();
-                $('#setup-profile-first-name').focus();
+                
+                // Show fallback (generic) categories instead of going to name modal
+                showFallbackCategories();
             });
 
             // Handle connect bank button

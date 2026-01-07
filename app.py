@@ -1969,6 +1969,29 @@ def dashboard_d():
             pass
         cursor.close()
 
+    # Fetch recurring data for wage_bill lookup - try Redis first
+    recurring_income = _get_recurring_from_redis('recurring_income', current_user.id)
+    if recurring_income is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM recurring_income
+                WHERE user_id = %s
+            """, (current_user.id,))
+            recurring_income = list(cursor.fetchall())
+            cursor.close()
+    
+    recurring_expense = _get_recurring_from_redis('recurring_expense', current_user.id)
+    if recurring_expense is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM recurring_expense
+                WHERE user_id = %s
+            """, (current_user.id,))
+            recurring_expense = list(cursor.fetchall())
+            cursor.close()
+
     # Render the template, passing necessary data including selected date, goofy_week_mode, entries, and totals/remainders
     return render_template('dashboard_d.html', 
         selected_date=selected_date, 
@@ -1989,7 +2012,9 @@ def dashboard_d():
         credit_accounts=credit_accounts,
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
-        c_a_balances_d=c_a_balances_d
+        c_a_balances_d=c_a_balances_d,
+        recurring_income=recurring_income,
+        recurring_expense=recurring_expense
     )
 
 @app.route('/dashboard-d/add_entry', methods=['POST'])
