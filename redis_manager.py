@@ -1613,7 +1613,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('yearly_day'),
                             row.get('yearly_month'),
                             row.get('start_date'),
-                            row.get('end_date')
+                            row.get('end_date'),
+                            int(row.get('wage_bill', 0))
                         ))
                     else:
                         batch_data.append((
@@ -1628,14 +1629,15 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('yearly_day'),
                             row.get('yearly_month'),
                             row.get('start_date'),
-                            row.get('end_date')
+                            row.get('end_date'),
+                            int(row.get('wage_bill', 0))
                         ))
                 
                 if batch_data:
                     cursor.executemany("""
                         INSERT INTO recurring_income (id, user_id, category_id, amount, cadence_interval, cadence_unit, 
-                                                     weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                                     weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date, wage_bill)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
@@ -1646,7 +1648,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             yearly_day = VALUES(yearly_day),
                             yearly_month = VALUES(yearly_month),
                             start_date = VALUES(start_date),
-                            end_date = VALUES(end_date)
+                            end_date = VALUES(end_date),
+                            wage_bill = VALUES(wage_bill)
                     """, batch_data)
                 
                 conn.commit()
@@ -1793,7 +1796,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('yearly_day'),
                             row.get('yearly_month'),
                             row.get('start_date'),
-                            row.get('end_date')
+                            row.get('end_date'),
+                            int(row.get('wage_bill', 0))
                         ))
                     else:
                         batch_data.append((
@@ -1808,14 +1812,15 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('yearly_day'),
                             row.get('yearly_month'),
                             row.get('start_date'),
-                            row.get('end_date')
+                            row.get('end_date'),
+                            int(row.get('wage_bill', 0))
                         ))
                 
                 if batch_data:
                     cursor.executemany("""
                         INSERT INTO recurring_expense (id, user_id, category_id, amount, cadence_interval, cadence_unit, 
-                                                      weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                                      weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date, wage_bill)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
@@ -1826,7 +1831,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             yearly_day = VALUES(yearly_day),
                             yearly_month = VALUES(yearly_month),
                             start_date = VALUES(start_date),
-                            end_date = VALUES(end_date)
+                            end_date = VALUES(end_date),
+                            wage_bill = VALUES(wage_bill)
                     """, batch_data)
                 
                 conn.commit()
@@ -2027,7 +2033,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('yearly_day'),
                             row.get('yearly_month'),
                             row.get('start_date'),
-                            row.get('end_date')
+                            row.get('end_date'),
+                            int(row.get('wage_bill', 0))
                         ))
                 
                 if skipped_temp_category > 0:
@@ -2039,8 +2046,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 if batch_data:
                     cursor.executemany("""
                         INSERT INTO recurring_c_expense (id, user_id, category_id, amount, cadence_interval, cadence_unit, 
-                                                        weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                                        weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date, wage_bill)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
@@ -2051,7 +2058,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             yearly_day = VALUES(yearly_day),
                             yearly_month = VALUES(yearly_month),
                             start_date = VALUES(start_date),
-                            end_date = VALUES(end_date)
+                            end_date = VALUES(end_date),
+                            wage_bill = VALUES(wage_bill)
                     """, batch_data)
                     
                     # If we had temp IDs, fetch the real MySQL IDs and update Redis

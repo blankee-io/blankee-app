@@ -92,6 +92,7 @@
                         <thead>
                             <tr>
                                 <th class="income-category-col">Category</th>
+                                <th class="income-type-col">Type</th>
                                 <th class="income-amount-col">Amount</th>
                                 <th class="income-cadence-col">Cadence</th>
                                 <th class="income-action-col"></th>
@@ -101,7 +102,7 @@
                             <!-- Income categories will be dynamically populated here -->
                         </tbody>
                         <tfoot>
-                            <tr class="recurring-footer"><td colspan="4"></td></tr>
+                            <tr class="recurring-footer"><td colspan="5"></td></tr>
                         </tfoot>
                     </table>
                 </div>
@@ -116,6 +117,7 @@
                         <thead>
                             <tr>
                                 <th class="expense-category-col">Category</th>
+                                <th class="expense-type-col">Type</th>
                                 <th class="expense-amount-col">Amount</th>
                                 <th class="expense-cadence-col">Cadence</th>
                                 <th class="expense-action-col"></th>
@@ -125,7 +127,7 @@
                             <!-- Expense categories will be dynamically populated here -->
                         </tbody>
                         <tfoot>
-                            <tr class="recurring-footer"><td colspan="4"></td></tr>
+                            <tr class="recurring-footer"><td colspan="5"></td></tr>
                         </tfoot>
                     </table>
                 </div>
@@ -155,6 +157,14 @@
                         <label for="edit-is-recurring-checkbox">Recurring?</label>
                         <input type="checkbox" id="edit-is-recurring-checkbox" name="is_recurring">
                     </div>
+                </div>
+
+                <div class="form-row" id="edit-wage-bill-row">
+                    <label for="edit-wage-bill-select">Type:</label>
+                    <select id="edit-wage-bill-select" name="wage_bill">
+                        <option value="1" id="edit-wage-bill-option-1">Wages (fixed income)</option>
+                        <option value="0" id="edit-wage-bill-option-0">Variable (irregular income)</option>
+                    </select>
                 </div>
 
                 <div id="edit-recurring-options" style="display:none;">
@@ -406,6 +416,13 @@
             return `${year}-${month}-${day}`;
         }
         
+        // Helper function to get December 31st three years from now
+        function getThreeYearsEndDateString() {
+            var today = new Date();
+            var threeYearsFromNow = today.getFullYear() + 3;
+            return `${threeYearsFromNow}-12-31`;
+        }
+        
         $(document).ready(function () {
             document.getElementById('loading-screen').style.display = 'none';
 
@@ -584,6 +601,9 @@
                     return;
                 }
 
+                // Show loading screen while fetching session token
+                $('#loading-screen').show();
+
                 // Fetch session token and open Quiltt Connector
                 $.ajax({
                     url: '/quiltt/get-session-token',
@@ -591,12 +611,16 @@
                     contentType: 'application/json',
                     success: function(response) {
                         if (response.status === 'success' && response.session_token) {
+                            // Hide loading screen before opening connector
+                            $('#loading-screen').hide();
                             loadQuilttConnectorSetup(response.session_token, connectorId);
                         } else {
+                            $('#loading-screen').hide();
                             alert('Unable to connect bank. Please skip for now.');
                         }
                     },
                     error: function() {
+                        $('#loading-screen').hide();
                         alert('Error connecting to bank service. Please skip for now.');
                     }
                 });
@@ -1117,11 +1141,25 @@
                 const rowClass = type === 'income' ? 'income' : 'expense';
                 
                 // Debug logging
-                console.log('Creating item:', name, 'isRecurring:', isRecurring, 'amount:', amount);
+                console.log('Creating item:', name, 'isRecurring:', isRecurring, 'amount:', amount, 'wage_bill:', category.wage_bill);
+                
+                const wageBill = category.wage_bill !== undefined ? category.wage_bill : 1;
+                console.log('wageBill value for', name, ':', wageBill);
+                let typeDisplay = '—';
+                if (isRecurring) {
+                    if (type === 'income') {
+                        typeDisplay = wageBill === 1 ? 'Wages' : 'Variable';
+                    } else {
+                        typeDisplay = wageBill === 1 ? 'Bill' : 'Allowance';
+                    }
+                }
                 
                 return `
                     <tr class="${rowClass}-category-row" data-type="${type}" data-index="${index}">
                         <td class="editable ${rowClass}-category" data-column="category_name">${escapeHtml(name)}</td>
+                        <td class="editable ${rowClass}-type" data-column="type">
+                            ${typeDisplay}
+                        </td>
                         <td class="editable ${rowClass}-amount" data-column="amount">
                             ${isRecurring ? `$${amount.toFixed(2)}` : '—'}
                         </td>
@@ -1190,6 +1228,17 @@
                 // Populate form fields
                 $('#edit-category-name-input').val(category.name || '');
                 $('#edit-is-recurring-checkbox').prop('checked', category.is_recurring || false);
+                
+                // Update wage_bill select options based on type
+                if (type === 'income') {
+                    $('#edit-wage-bill-option-1').text('Wages (fixed income)');
+                    $('#edit-wage-bill-option-0').text('Variable (irregular income)');
+                } else {
+                    $('#edit-wage-bill-option-1').text('Bill (fixed expense)');
+                    $('#edit-wage-bill-option-0').text('Allowance (flexible spending)');
+                }
+                $('#edit-wage-bill-select').val(category.wage_bill !== undefined ? category.wage_bill : 1);
+                
                 $('#edit-category-amount').val(category.amount || 0);
                 $('#edit-category-cadence-interval').val(category.cadence_interval || 1);
                 $('#edit-category-cadence-unit').val(category.cadence_unit || 'months');
@@ -1197,8 +1246,10 @@
                 // Show/hide recurring options based on checkbox
                 if (category.is_recurring) {
                     $('#edit-recurring-options').show();
+                    $('#edit-wage-bill-row').show();
                 } else {
                     $('#edit-recurring-options').hide();
+                    $('#edit-wage-bill-row').hide();
                 }
                 
                 // Handle cadence unit specific options
@@ -1330,12 +1381,14 @@
                 $('#edit-is-recurring-checkbox').on('change', function() {
                     if ($(this).is(':checked')) {
                         $('#edit-recurring-options').show();
+                        $('#edit-wage-bill-row').show();
                         // Set default start date to today
                         if (!$('#edit-category-start-date').val()) {
                             $('#edit-category-start-date').val(getTodayDateString());
                         }
                     } else {
                         $('#edit-recurring-options').hide();
+                        $('#edit-wage-bill-row').hide();
                     }
                 });
                 
@@ -1424,6 +1477,7 @@
                     
                     category.name = categoryName;
                     category.is_recurring = $('#edit-is-recurring-checkbox').is(':checked');
+                    category.wage_bill = parseInt($('#edit-wage-bill-select').val());
                     
                     if (category.is_recurring) {
                         category.amount = parseFloat($('#edit-category-amount').val()) || 0;
@@ -1517,6 +1571,19 @@
                 // Set modal title based on type
                 $('#edit-category-modal-title').text(type === 'income' ? 'Add Income Category' : 'Add Expense Category');
                 
+                // Hide wage_bill row initially (will show when recurring is checked)
+                $('#edit-wage-bill-row').hide();
+                
+                // Update wage_bill select options based on type
+                if (type === 'income') {
+                    $('#edit-wage-bill-option-1').text('Wages (fixed income)');
+                    $('#edit-wage-bill-option-0').text('Variable (irregular income)');
+                } else {
+                    $('#edit-wage-bill-option-1').text('Bill (fixed expense)');
+                    $('#edit-wage-bill-option-0').text('Allowance (flexible spending)');
+                }
+                $('#edit-wage-bill-select').val(1);  // Default to wages/bills
+                
                 // Set hidden fields - use -1 for index to indicate new category
                 $('#edit-category-type').val(type);
                 $('#edit-category-index').val(-1);
@@ -1590,18 +1657,18 @@
             function showFallbackCategories() {
                 const genericRecommendations = {
                     income: [
-                        { name: 'Wages', is_recurring: true, amount: 1500, cadence_interval: 2, cadence_unit: 'weeks', weekdays: 'Friday' },
-                        { name: 'Variable', is_recurring: false, amount: 0, cadence_interval: 1, cadence_unit: 'months' }
+                        { name: 'Wages', is_recurring: true, amount: 1500, cadence_interval: 2, cadence_unit: 'weeks', weekdays: 'Friday', wage_bill: 1 },
+                        { name: 'Variable', is_recurring: false, amount: 0, cadence_interval: 1, cadence_unit: 'months', wage_bill: 0 }
                     ],
                     expense: [
-                        { name: 'Housing', is_recurring: true, amount: 1200, cadence_interval: 1, cadence_unit: 'months', monthly_days: '1' },
-                        { name: 'Utilities', is_recurring: true, amount: 150, cadence_interval: 1, cadence_unit: 'months', monthly_days: '1' },
-                        { name: 'Phone', is_recurring: true, amount: 50, cadence_interval: 1, cadence_unit: 'months', monthly_days: '8' },
-                        { name: 'Internet', is_recurring: true, amount: 100, cadence_interval: 1, cadence_unit: 'months', monthly_days: '15' },
-                        { name: 'Gas', is_recurring: true, amount: 60, cadence_interval: 1, cadence_unit: 'weeks', weekdays: 'Friday' },
-                        { name: 'Groceries', is_recurring: true, amount: 100, cadence_interval: 1, cadence_unit: 'weeks', weekdays: 'Saturday' },
-                        { name: 'Fun', is_recurring: true, amount: 50, cadence_interval: 1, cadence_unit: 'weeks', weekdays: 'Friday' },
-                        { name: 'Subscriptions', is_recurring: true, amount: 50, cadence_interval: 1, cadence_unit: 'months', monthly_days: '5' }
+                        { name: 'Housing', is_recurring: true, amount: 1200, cadence_interval: 1, cadence_unit: 'months', monthly_days: '1', wage_bill: 1 },
+                        { name: 'Utilities', is_recurring: true, amount: 150, cadence_interval: 1, cadence_unit: 'months', monthly_days: '1', wage_bill: 1 },
+                        { name: 'Phone', is_recurring: true, amount: 50, cadence_interval: 1, cadence_unit: 'months', monthly_days: '8', wage_bill: 1 },
+                        { name: 'Internet', is_recurring: true, amount: 100, cadence_interval: 1, cadence_unit: 'months', monthly_days: '15', wage_bill: 1 },
+                        { name: 'Gas', is_recurring: true, amount: 60, cadence_interval: 1, cadence_unit: 'weeks', weekdays: 'Friday', wage_bill: 0 },
+                        { name: 'Groceries', is_recurring: true, amount: 100, cadence_interval: 1, cadence_unit: 'weeks', weekdays: 'Saturday', wage_bill: 0 },
+                        { name: 'Fun', is_recurring: true, amount: 50, cadence_interval: 1, cadence_unit: 'weeks', weekdays: 'Friday', wage_bill: 0 },
+                        { name: 'Subscriptions', is_recurring: true, amount: 50, cadence_interval: 1, cadence_unit: 'months', monthly_days: '5', wage_bill: 1 }
                     ]
                 };
                 
@@ -2029,16 +2096,19 @@
                     
                     console.log('Creating pending categories:', window.pendingCategoriesToCreate);
                     
-                    // Prepare the data with today's date for start_date
+                    // Prepare the data with today's date for start_date and Dec 31st three years from now for end_date
                     const today = getTodayDateString();
+                    const endDate = getThreeYearsEndDateString();
                     const categoriesToCreate = {
                         income: window.pendingCategoriesToCreate.income.map(cat => ({
                             ...cat,
-                            start_date: cat.start_date || today
+                            start_date: cat.start_date || today,
+                            end_date: cat.end_date || endDate
                         })),
                         expense: window.pendingCategoriesToCreate.expense.map(cat => ({
                             ...cat,
-                            start_date: cat.start_date || today
+                            start_date: cat.start_date || today,
+                            end_date: cat.end_date || endDate
                         }))
                     };
                     
