@@ -2712,7 +2712,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             profile_picture = %s,
                             currency_type = %s,
                             quiltt_enabled = %s,
-                            quiltt_auto_import = %s
+                            quiltt_auto_import = %s,
+                            member_since = %s
                         WHERE id = %s
                     """, (
                         float(user_data.get('balance_threshold', 0)),
@@ -2729,12 +2730,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         user_data.get('currency_type', 'USD'),
                         int(user_data.get('quiltt_enabled', 0)),
                         int(user_data.get('quiltt_auto_import', 1)),
+                        user_data.get('member_since'),
                         user_id
                     ))
                     
                     conn.commit()
                     cursor.close()
-                    logger.debug(f"[FLUSH] → users: Updated user {user_id} settings (including goofy_week_mode, landing_page, etc.)")
+                    logger.debug(f"[FLUSH] → users: Updated user {user_id} settings (including member_since, goofy_week_mode, landing_page, etc.)")
                     return 1
                 
                 return 0
