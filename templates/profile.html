@@ -2108,6 +2108,8 @@
                                     url: '/quiltt/sync-profile',
                                     method: 'POST',
                                     contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    timeout: 30000,
                                     success: function(syncResponse) {
                                         // Now fetch balances and check for non-zero
                                         checkForNonZeroBalances(selectedAccountIds);
@@ -2127,6 +2129,8 @@
                                     url: '/quiltt/sync-profile',
                                     method: 'POST',
                                     contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    timeout: 30000,
                                     success: function(syncResponse) {
                                         $('#bank-fetching-modal').hide();
                                         window.location.reload();
@@ -2197,6 +2201,9 @@
                                         $.ajax({
                                             url: '/quiltt/sync-profile',
                                             method: 'POST',
+                                            contentType: 'application/json',
+                                            data: JSON.stringify({}),
+                                            timeout: 30000,
                                             success: function() {
                                                 checkForNonZeroBalances(selectedAccountIds);
                                             },
@@ -2304,6 +2311,9 @@
                                         $.ajax({
                                             url: '/quiltt/sync-profile',
                                             method: 'POST',
+                                            contentType: 'application/json',
+                                            data: JSON.stringify({}),
+                                            timeout: 30000,
                                             success: function() {
                                                 // Trigger auto-adjustment for checking accounts after reconnect
                                                 $.ajax({
@@ -2337,6 +2347,8 @@
                                     url: '/quiltt/sync-profile',
                                     method: 'POST',
                                     contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    timeout: 30000,
                                     success: function(response) {
                                         if (response.status === 'success') {
                                             // Wait for Redis flush to MySQL to complete (liability data)

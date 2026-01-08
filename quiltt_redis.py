@@ -839,9 +839,12 @@ def upsert_quiltt_transaction(transaction_data: Dict[str, Any], user_id: Optiona
         for i, txn in enumerate(cached_data):
             if txn.get('transaction_id') == transaction_id:
                 # Update existing transaction
+                logger.info(f"BEFORE update: {transaction_id} has ntropy_enriched_at={cached_data[i].get('ntropy_enriched_at')}")
+                logger.info(f"NEW DATA: ntropy_enriched_at={transaction_data.get('ntropy_enriched_at')}")
                 cached_data[i].update(transaction_data)
                 db_id = cached_data[i].get('id')
                 found = True
+                logger.info(f"AFTER update: {transaction_id} has ntropy_enriched_at={cached_data[i].get('ntropy_enriched_at')}")
                 break
         
         if not found:

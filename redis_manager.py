@@ -3042,19 +3042,70 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         float(row.get('amount', 0)),
                         row.get('category', ''),
                         row.get('pending', 0),
-                        row.get('merchant_name')
+                        row.get('merchant_name'),
+                        row.get('transaction_type'),
+                        row.get('imported_to_entry_id'),
+                        row.get('imported_at'),
+                        # Ntropy enrichment fields
+                        row.get('ntropy_labels'),
+                        row.get('ntropy_merchant_id'),
+                        row.get('ntropy_logo'),
+                        row.get('ntropy_website'),
+                        row.get('ntropy_mcc'),
+                        row.get('ntropy_location'),
+                        row.get('ntropy_location_city'),
+                        row.get('ntropy_location_state'),
+                        row.get('ntropy_location_country'),
+                        row.get('ntropy_recurrence'),
+                        row.get('ntropy_recurrence_group_id'),
+                        row.get('ntropy_periodicity'),
+                        row.get('ntropy_periodicity_days'),
+                        row.get('ntropy_avg_amount'),
+                        row.get('ntropy_first_payment_date'),
+                        row.get('ntropy_latest_payment_date'),
+                        row.get('ntropy_person'),
+                        row.get('ntropy_transaction_type'),
+                        row.get('ntropy_enriched_at')
                     ))
                 
                 cursor.executemany("""
                     INSERT INTO quiltt_transactions
-                    (user_id, account_id, transaction_id, date, description, amount, category, pending, merchant_name)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (user_id, account_id, transaction_id, date, description, amount, category, pending, merchant_name,
+                     transaction_type, imported_to_entry_id, imported_at,
+                     ntropy_labels, ntropy_merchant_id, ntropy_logo, ntropy_website, ntropy_mcc,
+                     ntropy_location, ntropy_location_city, ntropy_location_state, ntropy_location_country,
+                     ntropy_recurrence, ntropy_recurrence_group_id, ntropy_periodicity, ntropy_periodicity_days,
+                     ntropy_avg_amount, ntropy_first_payment_date, ntropy_latest_payment_date,
+                     ntropy_person, ntropy_transaction_type, ntropy_enriched_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         description = VALUES(description),
                         amount = VALUES(amount),
                         category = VALUES(category),
                         pending = VALUES(pending),
-                        merchant_name = VALUES(merchant_name)
+                        merchant_name = VALUES(merchant_name),
+                        transaction_type = VALUES(transaction_type),
+                        imported_to_entry_id = VALUES(imported_to_entry_id),
+                        imported_at = VALUES(imported_at),
+                        ntropy_labels = VALUES(ntropy_labels),
+                        ntropy_merchant_id = VALUES(ntropy_merchant_id),
+                        ntropy_logo = VALUES(ntropy_logo),
+                        ntropy_website = VALUES(ntropy_website),
+                        ntropy_mcc = VALUES(ntropy_mcc),
+                        ntropy_location = VALUES(ntropy_location),
+                        ntropy_location_city = VALUES(ntropy_location_city),
+                        ntropy_location_state = VALUES(ntropy_location_state),
+                        ntropy_location_country = VALUES(ntropy_location_country),
+                        ntropy_recurrence = VALUES(ntropy_recurrence),
+                        ntropy_recurrence_group_id = VALUES(ntropy_recurrence_group_id),
+                        ntropy_periodicity = VALUES(ntropy_periodicity),
+                        ntropy_periodicity_days = VALUES(ntropy_periodicity_days),
+                        ntropy_avg_amount = VALUES(ntropy_avg_amount),
+                        ntropy_first_payment_date = VALUES(ntropy_first_payment_date),
+                        ntropy_latest_payment_date = VALUES(ntropy_latest_payment_date),
+                        ntropy_person = VALUES(ntropy_person),
+                        ntropy_transaction_type = VALUES(ntropy_transaction_type),
+                        ntropy_enriched_at = VALUES(ntropy_enriched_at)
                 """, batch_data)
                 
                 conn.commit()

@@ -17299,7 +17299,8 @@ def quiltt_sync_profile():
     """Sync all connections and accounts from Quiltt to local database (Redis-first)"""
     try:
         # Get optional filter parameter for excluding account types (used in setup_profile)
-        exclude_liability = request.json.get('exclude_liability', False) if request.json else False
+        json_data = request.get_json(silent=True) or {}
+        exclude_liability = json_data.get('exclude_liability', False)
         
         # Get session token from Redis or MySQL
         profile = get_quiltt_profile(current_user.id)
@@ -18053,74 +18054,159 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         existing_transactions = get_quiltt_transactions(user_id)
         existing_txn_ids = {txn.get('transaction_id') for txn in existing_transactions}
         
-        for account in sync_enabled_accounts:
-            account_id = account['account_id']  # Quiltt account_id string (e.g., "acct_xxx")
-            
-            # Get transactions from Quiltt
-            transactions = quiltt_client.get_transactions(
-                session_token=session_token,
-                account_id=account_id,
-                start_date=start_date,
-                end_date=end_date,
-                limit=100
-            )
-            
-            if not transactions:
-                pass
+        # Get all account IDs for batch fetch with Ntropy data
+        account_ids = [acc['account_id'] for acc in sync_enabled_accounts]
+        
+        # Get transactions with Ntropy enrichment from Quiltt
+        app.logger.info(f"Fetching transactions with Ntropy enrichment for {len(account_ids)} accounts")
+        transactions = quiltt_client.get_transactions_with_ntropy(
+            session_token=session_token,
+            account_ids=account_ids,
+            start_date=start_date,
+            end_date=end_date,
+            limit=1000
+        )
+        
+        if not transactions:
+            app.logger.info("No transactions returned from Quiltt")
+            return (True, 0, 'No new transactions found')
+        
+        app.logger.info(f"Retrieved {len(transactions)} transactions with Ntropy data")
+        
+        updated_count = 0
+        for txn in transactions:
+            # Skip pending transactions (status is PENDING vs POSTED)
+            if txn.get('status') == 'PENDING':
+                app.logger.info(f"Skipping pending transaction {txn.get('id')}")
                 continue
             
+            txn_id = txn.get('id')
+            account_obj = txn.get('account', {})
+            account_id = account_obj.get('id')  # Quiltt account_id string
+            amount = abs(float(txn.get('amount', 0)))
+            date = txn.get('date')
+            is_expense = float(txn.get('amount', 0)) < 0
             
-            for txn in transactions:
-                pass
+            app.logger.info(f"Processing txn {txn_id}: amount={txn.get('amount')}, is_expense={is_expense}")
+            
+            # Check if transaction already exists in Redis
+            existing_txn = None
+            if txn_id in existing_txn_ids:
+                # Find the existing transaction to check if it has Ntropy data
+                for existing in existing_transactions:
+                    if existing.get('transaction_id') == txn_id:
+                        existing_txn = existing
+                        break
                 
-                # Skip pending transactions (status is PENDING vs POSTED)
-                if txn.get('status') == 'PENDING':
-                    pass
+                # If transaction exists and already has Ntropy data, skip it
+                enriched_at_value = existing_txn.get('ntropy_enriched_at') if existing_txn else None
+                app.logger.info(f"Checking {txn_id}: ntropy_enriched_at={repr(enriched_at_value)}, type={type(enriched_at_value)}")
+                if existing_txn and enriched_at_value:
+                    app.logger.info(f"Skipping {txn_id} - already enriched")
                     continue
                 
-                txn_id = txn.get('id')
-                amount = abs(float(txn.get('amount', 0)))
-                date = txn.get('date')
-                # entryType is DEBIT or CREDIT; amount is negative for debits (outflows), positive for credits (inflows)
-                # For expenses, we want DEBIT (money going out, amount < 0)
-                is_expense = float(txn.get('amount', 0)) < 0
-                
-                
-                # Check if transaction already exists in Redis
-                if txn_id in existing_txn_ids:
-                    pass
-                    continue
-                
-                # Only process expense transactions for now
-                if not is_expense:
-                    pass
-                    continue
-                
-                # Store transaction in Redis with reference to expense category
-                transaction_data = {
-                    'transaction_id': txn_id,
-                    'account_id': account_id,  # Quiltt account_id string
-                    'amount': amount,
-                    'date': date,
-                    'description': txn.get('description', ''),
-                    'merchant_name': '',  # merchantName not in simplified query
-                    'category': txn.get('kind', ''),
-                    'pending': 0,  # Already filtered out pending
-                    'transaction_type': 'expense' if is_expense else 'income',
-                    'imported_to_entry_id': None,  # Will be set during flush
-                    'expense_category_id': default_expense_category_id,  # Store for flush
-                    'imported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                }
-                
-                txn_db_id = upsert_quiltt_transaction(transaction_data, user_id)
-                if txn_db_id:
-                    pass
-                    total_synced += 1
-                    existing_txn_ids.add(txn_id)  # Add to set to avoid re-processing
-                else:
-                    app.logger.error(f"Failed to store transaction {txn_id} in Redis")
+                # Otherwise, we'll update it with Ntropy data below
+                app.logger.info(f"Updating transaction {txn_id} with Ntropy enrichment")
+                updated_count += 1
+            else:
+                # Brand new transaction
+                app.logger.info(f"New transaction {txn_id}")
+                existing_txn_ids.add(txn_id)
+            
+            # Process both income and expense transactions
+            # (Removed the expense-only filter)
+            
+            # Extract Ntropy enrichment data
+            ntropy_data = {}
+            remote_data = txn.get('remoteData', {})
+            if remote_data:
+                ntropy = remote_data.get('ntropy', {})
+                if ntropy:
+                    enrichment = ntropy.get('enrichment', {})
+                    if enrichment:
+                        response = enrichment.get('response', {})
+                        if response:
+                            # Extract labels (category) - store as JSON string
+                            labels = response.get('labels')
+                            if labels:
+                                import json
+                                ntropy_data['ntropy_labels'] = json.dumps(labels)
+                            
+                            # Extract merchant info (handle None case)
+                            merchant = response.get('merchant')
+                            merchant_id = response.get('merchantId')
+                            
+                            if merchant and isinstance(merchant, dict):
+                                ntropy_data['ntropy_merchant_name'] = merchant.get('name')
+                                ntropy_data['ntropy_logo'] = merchant.get('logo')
+                                ntropy_data['ntropy_website'] = merchant.get('website')
+                                
+                                location = merchant.get('location')
+                                if location and isinstance(location, dict):
+                                    ntropy_data['ntropy_location'] = location.get('address')
+                                    ntropy_data['ntropy_location_city'] = location.get('city')
+                                    ntropy_data['ntropy_location_state'] = location.get('state')
+                                    ntropy_data['ntropy_location_country'] = location.get('country')
+                            
+                            if merchant_id:
+                                ntropy_data['ntropy_merchant_id'] = merchant_id
+                            
+                            # Extract recurrence info
+                            recurrence = response.get('recurrence')
+                            if recurrence:
+                                ntropy_data['ntropy_recurrence'] = recurrence
+                            
+                            recurrence_group = response.get('recurrenceGroup')
+                            if recurrence_group and isinstance(recurrence_group, dict):
+                                ntropy_data['ntropy_recurrence_group_id'] = recurrence_group.get('id')
+                                ntropy_data['ntropy_periodicity'] = recurrence_group.get('periodicity')
+                                ntropy_data['ntropy_periodicity_days'] = recurrence_group.get('periodicityInDays')
+                                ntropy_data['ntropy_avg_amount'] = recurrence_group.get('averageAmount')
+                                ntropy_data['ntropy_first_payment_date'] = recurrence_group.get('firstPaymentDate')
+                                ntropy_data['ntropy_latest_payment_date'] = recurrence_group.get('latestPaymentDate')
+                            
+                            # Extract transaction type
+                            transaction_type = response.get('transactionType')
+                            if transaction_type:
+                                ntropy_data['ntropy_transaction_type'] = transaction_type
+                            
+                            # Mark as enriched
+                            ntropy_data['ntropy_enriched_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Store transaction in Redis with Ntropy enrichment data
+            transaction_data = {
+                'transaction_id': txn_id,
+                'account_id': account_id,
+                'amount': amount,
+                'date': date,
+                'description': txn.get('description', ''),
+                'merchant_name': ntropy_data.get('ntropy_merchant_name', ''),
+                'category': txn.get('kind', ''),
+                'pending': 0,
+                'transaction_type': 'expense' if is_expense else 'income',
+                'imported_to_entry_id': None,
+                'expense_category_id': default_expense_category_id,
+                'imported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                **ntropy_data  # Include all Ntropy fields
+            }
+            
+            app.logger.info(f"transaction_data keys: {list(transaction_data.keys())}")
+            app.logger.info(f"ntropy_enriched_at value: {transaction_data.get('ntropy_enriched_at')}")
+            app.logger.info(f"ntropy_labels value: {transaction_data.get('ntropy_labels')}")
+            app.logger.info(f"ntropy_recurrence value: {transaction_data.get('ntropy_recurrence')}")
+            
+            txn_db_id = upsert_quiltt_transaction(transaction_data, user_id)
+            if txn_db_id:
+                total_synced += 1
+                app.logger.info(f"Successfully stored {txn_id}")
+            else:
+                app.logger.error(f"Failed to store transaction {txn_id} in Redis")
         
-        return (True, total_synced, f'Synced {total_synced} new transactions')
+        message = f'Synced {total_synced} transactions'
+        if updated_count > 0:
+            message += f' ({updated_count} updated with Ntropy enrichment)'
+        
+        return (True, total_synced, message)
         
     except Exception as e:
         app.logger.error(f"Error syncing Quiltt transactions for user {user_id}: {e}")
@@ -18141,6 +18227,394 @@ def quiltt_sync_transactions():
         })
     else:
         return jsonify({'status': 'error', 'message': message}), 400
+
+
+@app.route('/quiltt/check-transaction-sync', methods=['GET'])
+@login_required
+def quiltt_check_transaction_sync():
+    """Compare Quiltt transaction counts with local database"""
+    try:
+        # Get session token
+        profile = get_quiltt_profile(current_user.id)
+        if not profile or not profile.get('session_token'):
+            return jsonify({'status': 'error', 'message': 'No active session'}), 400
+        
+        session_token = profile['session_token']
+        
+        # Get sync-enabled accounts
+        accounts = get_quiltt_accounts(current_user.id) or []
+        sync_enabled_accounts = [
+            acc for acc in accounts 
+            if acc.get('sync_transactions') == 1 and acc.get('is_active') == 1
+        ]
+        
+        if not sync_enabled_accounts:
+            return jsonify({
+                'status': 'success',
+                'message': 'No accounts enabled for sync',
+                'quiltt_total': 0,
+                'local_total': 0,
+                'accounts': []
+            })
+        
+        # Get date range (last 30 days)
+        from datetime import datetime, timedelta
+        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        
+        account_ids = [acc['account_id'] for acc in sync_enabled_accounts]
+        
+        # Fetch transactions from Quiltt
+        app.logger.info(f"Fetching transactions from Quiltt for comparison: {len(account_ids)} accounts")
+        quiltt_transactions = quiltt_client.get_transactions_with_ntropy(
+            session_token=session_token,
+            account_ids=account_ids,
+            start_date=start_date,
+            end_date=end_date,
+            limit=1000
+        )
+        
+        quiltt_count = len(quiltt_transactions) if quiltt_transactions else 0
+        
+        # Count expense transactions (we only sync expenses currently)
+        quiltt_expense_count = 0
+        if quiltt_transactions:
+            for txn in quiltt_transactions:
+                if txn.get('status') != 'PENDING' and float(txn.get('amount', 0)) < 0:
+                    quiltt_expense_count += 1
+        
+        # Get local transaction count
+        local_transactions = get_quiltt_transactions(current_user.id) or []
+        local_count = len(local_transactions)
+        
+        # Count transactions with Ntropy enrichment
+        enriched_count = 0
+        for txn in local_transactions:
+            if txn.get('ntropy_enriched_at'):
+                enriched_count += 1
+        
+        # Per-account breakdown
+        account_breakdown = []
+        for acc in sync_enabled_accounts:
+            acc_id = acc['account_id']
+            acc_quiltt_txns = [t for t in (quiltt_transactions or []) if t.get('account', {}).get('id') == acc_id and t.get('status') != 'PENDING' and float(t.get('amount', 0)) < 0]
+            acc_local_txns = [t for t in local_transactions if t.get('account_id') == acc_id]
+            
+            account_breakdown.append({
+                'account_name': acc.get('account_name'),
+                'account_id': acc_id,
+                'quiltt_count': len(acc_quiltt_txns),
+                'local_count': len(acc_local_txns),
+                'synced': len(acc_quiltt_txns) == len(acc_local_txns)
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'quiltt_total': quiltt_count,
+            'quiltt_expense_total': quiltt_expense_count,
+            'local_total': local_count,
+            'enriched_count': enriched_count,
+            'date_range': f'{start_date} to {end_date}',
+            'in_sync': quiltt_expense_count == local_count,
+            'accounts': account_breakdown
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error checking transaction sync: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/transaction-diagnostics', methods=['GET'])
+@login_required
+def quiltt_transaction_diagnostics():
+    """Check for duplicate transactions and data quality issues"""
+    try:
+        local_transactions = get_quiltt_transactions(current_user.id) or []
+        
+        # Check for duplicate transaction_ids
+        transaction_ids = [t.get('transaction_id') for t in local_transactions]
+        duplicates = {}
+        for txn_id in transaction_ids:
+            count = transaction_ids.count(txn_id)
+            if count > 1:
+                duplicates[txn_id] = count
+        
+        # Get transaction date distribution
+        from datetime import datetime, timedelta, date
+        today = date.today()
+        date_buckets = {
+            'last_7_days': 0,
+            'last_30_days': 0,
+            'last_90_days': 0,
+            'older': 0
+        }
+        
+        for txn in local_transactions:
+            txn_date_str = txn.get('date')
+            if txn_date_str:
+                # Convert to date object (not datetime) for consistent comparison
+                if isinstance(txn_date_str, str):
+                    txn_date = datetime.strptime(txn_date_str, '%Y-%m-%d').date()
+                elif isinstance(txn_date_str, datetime):
+                    txn_date = txn_date_str.date()
+                else:
+                    txn_date = txn_date_str  # Already a date object
+                    
+                days_ago = (today - txn_date).days
+                
+                if days_ago <= 7:
+                    date_buckets['last_7_days'] += 1
+                elif days_ago <= 30:
+                    date_buckets['last_30_days'] += 1
+                elif days_ago <= 90:
+                    date_buckets['last_90_days'] += 1
+                else:
+                    date_buckets['older'] += 1
+        
+        # Sample of oldest and newest transactions
+        sorted_txns = sorted(local_transactions, key=lambda x: x.get('date', ''), reverse=True)
+        newest_5 = [{'id': t.get('transaction_id'), 'date': t.get('date'), 'amount': t.get('amount'), 'description': t.get('description'), 'ntropy_enriched': t.get('ntropy_enriched_at') is not None} for t in sorted_txns[:5]]
+        oldest_5 = [{'id': t.get('transaction_id'), 'date': t.get('date'), 'amount': t.get('amount'), 'description': t.get('description'), 'ntropy_enriched': t.get('ntropy_enriched_at') is not None} for t in sorted_txns[-5:]]
+        
+        # Count enriched transactions
+        enriched_count = sum(1 for t in local_transactions if t.get('ntropy_enriched_at'))
+        
+        return jsonify({
+            'status': 'success',
+            'total_transactions': len(local_transactions),
+            'enriched_count': enriched_count,
+            'duplicate_count': len(duplicates),
+            'duplicates': duplicates,
+            'date_distribution': date_buckets,
+            'newest_5': newest_5,
+            'oldest_5': oldest_5
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in transaction diagnostics: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/check-ntropy-data', methods=['GET'])
+@login_required
+def quiltt_check_ntropy_data():
+    """Check if Ntropy enrichment data is actually available from Quiltt"""
+    try:
+        profile = get_quiltt_profile(current_user.id)
+        if not profile or not profile.get('session_token'):
+            return jsonify({'status': 'error', 'message': 'No active session'}), 400
+        
+        # Get one account
+        accounts = get_quiltt_accounts(current_user.id) or []
+        sync_account = next((a for a in accounts if a.get('sync_transactions') == 1), None)
+        
+        if not sync_account:
+            return jsonify({'status': 'error', 'message': 'No sync-enabled accounts'}), 400
+        
+        # Fetch just 3 transactions with Ntropy data
+        from datetime import datetime, timedelta
+        start_date = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        
+        transactions = quiltt_client.get_transactions_with_ntropy(
+            session_token=profile['session_token'],
+            account_ids=[sync_account['account_id']],
+            start_date=start_date,
+            end_date=end_date,
+            limit=3
+        )
+        
+        if not transactions:
+            return jsonify({'status': 'error', 'message': 'No transactions returned'}), 400
+        
+        # Show first transaction's full structure
+        sample = transactions[0]
+        
+        # Extract Ntropy info if present
+        ntropy_present = False
+        ntropy_sample = None
+        remote_data = sample.get('remoteData', {})
+        if remote_data:
+            ntropy = remote_data.get('ntropy', {})
+            if ntropy:
+                ntropy_present = True
+                ntropy_sample = ntropy
+        
+        return jsonify({
+            'status': 'success',
+            'ntropy_available': ntropy_present,
+            'sample_transaction': {
+                'id': sample.get('id'),
+                'date': sample.get('date'),
+                'amount': sample.get('amount'),
+                'description': sample.get('description'),
+                'has_remoteData': 'remoteData' in sample,
+                'remoteData_keys': list(remote_data.keys()) if remote_data else [],
+                'ntropy_data': ntropy_sample
+            },
+            'total_fetched': len(transactions)
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error checking Ntropy data: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/clear-transaction-cache', methods=['POST'])
+@login_required
+def quiltt_clear_transaction_cache():
+    """Clear Redis cache for quiltt_transactions to force re-fetch from MySQL"""
+    try:
+        import redis
+        r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
+        
+        cache_key = f'quiltt_transactions:v1:{current_user.id}'
+        deleted = r.delete(cache_key)
+        
+        app.logger.info(f"Cleared transaction cache for user {current_user.id}, deleted: {deleted}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Cache cleared (deleted {deleted} key)',
+            'next_step': 'Run /quiltt/transaction-diagnostics to see updated enriched_count'
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error clearing transaction cache: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/check-mysql-ntropy', methods=['GET'])
+@login_required
+def quiltt_check_mysql_ntropy():
+    """Check MySQL directly for ntropy enrichment data"""
+    try:
+        from db_connections import get_db_pool
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # Get all transactions with ntropy fields
+            cursor.execute("""
+                SELECT 
+                    transaction_id,
+                    date,
+                    amount,
+                    description,
+                    ntropy_enriched_at,
+                    ntropy_labels,
+                    ntropy_recurrence
+                FROM quiltt_transactions 
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT 10
+            """, (current_user.id,))
+            
+            transactions = cursor.fetchall()
+            cursor.close()
+            
+            # Count enriched
+            enriched = sum(1 for t in transactions if t.get('ntropy_enriched_at'))
+            
+            return jsonify({
+                'status': 'success',
+                'total_in_mysql': len(transactions),
+                'enriched_in_mysql': enriched,
+                'sample_transactions': [
+                    {
+                        'transaction_id': t.get('transaction_id'),
+                        'date': str(t.get('date')),
+                        'amount': float(t.get('amount')) if t.get('amount') else None,
+                        'description': t.get('description'),
+                        'ntropy_enriched_at': str(t.get('ntropy_enriched_at')) if t.get('ntropy_enriched_at') else None,
+                        'ntropy_labels': t.get('ntropy_labels'),
+                        'ntropy_recurrence': t.get('ntropy_recurrence')
+                    }
+                    for t in transactions[:5]
+                ]
+            })
+        
+    except Exception as e:
+        app.logger.error(f"Error checking MySQL ntropy data: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/force-flush-transactions', methods=['POST'])
+@login_required
+def quiltt_force_flush_transactions():
+    """Force immediate flush of transactions from Redis to MySQL"""
+    try:
+        import redis
+        r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+        
+        # Mark quiltt_transactions as dirty to trigger flush
+        dirty_key = f'dirty_tables:{current_user.id}'
+        r.sadd(dirty_key, 'quiltt_transactions')
+        r.expire(dirty_key, 604800)  # 7 days
+        
+        app.logger.info(f"Marked quiltt_transactions as dirty for user {current_user.id}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Transactions marked for flush',
+            'note': 'Background worker will flush within 15 seconds. Check /quiltt/check-mysql-ntropy after waiting.'
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error forcing transaction flush: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/check-redis-data', methods=['GET'])
+@login_required
+def quiltt_check_redis_data():
+    """Check what's actually in Redis for transactions"""
+    try:
+        import redis
+        import json
+        r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
+        
+        cache_key = f'quiltt_transactions:v1:{current_user.id}'
+        redis_data = r.get(cache_key)
+        
+        if not redis_data:
+            return jsonify({
+                'status': 'success',
+                'message': 'No data in Redis',
+                'has_data': False
+            })
+        
+        # Decode the Redis data
+        transactions = json.loads(redis_data)
+        
+        # Check first few transactions for ntropy fields
+        sample = transactions[:3] if len(transactions) >= 3 else transactions
+        
+        sample_output = []
+        for txn in sample:
+            sample_output.append({
+                'transaction_id': txn.get('transaction_id'),
+                'has_ntropy_enriched_at': 'ntropy_enriched_at' in txn,
+                'ntropy_enriched_at': txn.get('ntropy_enriched_at'),
+                'has_ntropy_labels': 'ntropy_labels' in txn,
+                'ntropy_labels': txn.get('ntropy_labels'),
+                'has_ntropy_recurrence': 'ntropy_recurrence' in txn,
+                'ntropy_recurrence': txn.get('ntropy_recurrence'),
+                'all_keys': list(txn.keys())
+            })
+        
+        enriched_count = sum(1 for t in transactions if t.get('ntropy_enriched_at'))
+        
+        return jsonify({
+            'status': 'success',
+            'has_data': True,
+            'total_in_redis': len(transactions),
+            'enriched_in_redis': enriched_count,
+            'sample': sample_output
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error checking Redis data: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name_lower=''):
