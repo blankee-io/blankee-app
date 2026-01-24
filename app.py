@@ -14507,6 +14507,73 @@ def add_notification(user_id, message, notification_date=None):
     
     return notification_id
 
+
+def _create_pending_transactions_notification(user_id, new_count):
+    """
+    Create a notification for pending transactions waiting for categorization.
+    Removes any previous pending transaction notifications before creating new one.
+    
+    Args:
+        user_id: The user ID to create the notification for
+        new_count: Number of new transactions that were auto-imported
+    """
+    # Get total count of pending transactions (entries with pending=1)
+    total_pending = 0
+    
+    try:
+        if app.config.get('REDIS_OK'):
+            # Count pending income entries
+            income_key = f"income_entries:v1:{user_id}"
+            cached = _redis_client.get(income_key)
+            if cached:
+                entries = json.loads(cached)
+                total_pending += sum(1 for e in entries if e.get('pending') == 1)
+            
+            # Count pending expense entries
+            expense_key = f"expense_entries:v1:{user_id}"
+            cached = _redis_client.get(expense_key)
+            if cached:
+                entries = json.loads(cached)
+                total_pending += sum(1 for e in entries if e.get('pending') == 1)
+            
+            # Count pending c_expense entries
+            c_expense_key = f"c_expense_entries:v1:{user_id}"
+            cached = _redis_client.get(c_expense_key)
+            if cached:
+                entries = json.loads(cached)
+                total_pending += sum(1 for e in entries if e.get('pending') == 1)
+    except Exception as e:
+        app.logger.error(f"Error counting pending transactions: {e}")
+        # Use the new_count as fallback
+        total_pending = new_count
+    
+    if total_pending <= 0:
+        return
+    
+    # Delete any previous pending transaction notifications for this user
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM notifications
+            WHERE user_id = %s
+            AND message LIKE %s
+        """, (user_id, '%pending transaction%synced from your bank%'))
+        deleted_count = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        if deleted_count > 0:
+            app.logger.info(f"Deleted {deleted_count} old pending transaction notification(s) for user {user_id}")
+    
+    # Build message with link to pending transactions page
+    txn_word = "transaction" if total_pending == 1 else "transactions"
+    need_word = "needs" if total_pending == 1 else "need"
+    message = f'You have {total_pending} pending {txn_word} synced from your bank accounts that {need_word} to be categorized. <a href="/pending-transactions">Click here to categorize</a>.'
+    
+    # Create new notification
+    add_notification(user_id, message)
+    app.logger.info(f"Created pending transactions notification for user {user_id}: {total_pending} pending")
+
+
 def check_negative_remainders(user_id):
     """
     Check for negative remainders in the future and create notifications.
@@ -14560,46 +14627,28 @@ def check_negative_remainders(user_id):
         pass
         return
     
-    # Check if we already have a notification for this date
+    # Delete any previous negative remainder notifications for this user
     with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-        
-        # Get existing notifications for balance projection warnings
+        cursor = conn.cursor()
         cursor.execute("""
-            SELECT message FROM notifications
+            DELETE FROM notifications
             WHERE user_id = %s
             AND message LIKE %s
-            AND is_read = 0
-            AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        """, (user_id, 'Projected balance on%'))
-        existing_notifications = cursor.fetchall()
-        
-        
-        # Check if we already have a notification for this specific date
-        already_notified = False
-        for notif in existing_notifications:
-            try:
-                date_str = notif['message'].split('Projected balance on ')[1].split(':')[0]
-                notif_date = datetime.strptime(date_str, '%B %d, %Y').date()
-                if notif_date == first_negative_date:
-                    already_notified = True
-                    break
-            except Exception as e:
-                app.logger.error(f"[NOTIFICATIONS] Error parsing notification date: {e}")
-                pass
-        
+        """, (user_id, '%remainder shows below $0%'))
+        deleted_count = cursor.rowcount
+        conn.commit()
         cursor.close()
+        if deleted_count > 0:
+            app.logger.info(f"Deleted {deleted_count} old negative remainder notification(s) for user {user_id}")
     
-    # Create notification if not already exists
-    if not already_notified:
-        formatted_date = first_negative_date.strftime('%B %d, %Y')
-        message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
-        try:
-            notification_id = add_notification(user_id, message)
-        except Exception as e:
-            app.logger.error(f"[NOTIFICATIONS] Error creating notification: {e}")
-    else:
-        pass
+    # Create new notification
+    formatted_date = first_negative_date.strftime('%B %d, %Y')
+    message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
+    try:
+        notification_id = add_notification(user_id, message)
+        app.logger.info(f"Created negative remainder notification for user {user_id}: {formatted_date}")
+    except Exception as e:
+        app.logger.error(f"[NOTIFICATIONS] Error creating notification: {e}")
 
 def check_and_hide_bud_category(bud_id):
     """
@@ -18893,6 +18942,14 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             message += f' ({updated_count} updated with Ntropy enrichment)'
         if total_imported > 0:
             message += f', {total_imported} auto-imported to budget'
+        
+        # --- CREATE NOTIFICATION FOR PENDING TRANSACTIONS ---
+        if total_imported > 0:
+            try:
+                _create_pending_transactions_notification(user_id, total_imported)
+            except Exception as notif_err:
+                app.logger.error(f"Error creating pending transactions notification: {notif_err}")
+        # --- END NOTIFICATION ---
         
         return (True, total_synced, message)
         

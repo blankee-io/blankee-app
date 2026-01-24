@@ -5189,11 +5189,16 @@ td:has(.bucket-progress-container) {
     }
     
     #dashboard-m-calendar td {
-        overflow: hidden;
+        overflow: visible;
     }
     
     .dashboard-m-date {
         margin: 3px 0 0 0;
+        overflow: visible;
+    }
+    
+    .dashboard-m-day-label {
+        overflow: visible;
     }
     
     .dashboard-m-day-label,
@@ -5236,6 +5241,14 @@ td:has(.bucket-progress-container) {
     .dashboard-m-ca-balance,
     .dashboard-m-savings {
         font-size: 7px !important;
+    }
+    
+    .dashboard-m-day-label .member-since-badge {
+        top: -4px;
+        left: -4px;
+        width: 15px;
+        height: 15px;
+        font-size: 7px;
     }
     
     .dashboard-m-today::after {

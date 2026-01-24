@@ -1098,7 +1098,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             'recurring_id': recurring_id,
                             'is_bucket': int(row.get('is_bucket', 0)),
                             'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
-                            'processed': int(row.get('processed', 0))
+                            'processed': int(row.get('processed', 0)),
+                            'pending': int(row.get('pending', 0))
                         })
                         continue
                     
@@ -1110,7 +1111,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         recurring_id,
                         int(row.get('is_bucket', 0)),
                         float(row.get('original_amount')) if row.get('original_amount') is not None else None,
-                        int(row.get('processed', 0))
+                        int(row.get('processed', 0)),
+                        int(row.get('pending', 0))
                     ))
                 
                 if skipped_count > 0:
