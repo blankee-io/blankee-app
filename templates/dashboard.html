@@ -265,7 +265,7 @@
                                     <button class="ca-collapse-toggle" data-account-id="{{ account.id }}" aria-label="Expand/Collapse">
                                         <i class="fa-solid fa-chevron-down"></i>
                                     </button>
-                                    <span class="ca-categories-title">{{ account.name }}</span>
+                                    <span class="ca-categories-title">Credit Categories</span>
                                 </th>
                             </tr>
                         </thead>
@@ -1288,6 +1288,50 @@
                     if (isBeforeMemberSince) thCa.classList.add('before-member-since');
                     caHeaderRow.appendChild(thCa);
                 });
+            });
+
+            // Set the first th in each CA header row to show the account name
+            document.querySelectorAll('tr[id^="cas-header-row-"]').forEach(caHeaderRow => {
+                const firstTh = caHeaderRow.querySelector('th:first-child');
+                const lastTh = caHeaderRow.querySelector('th:last-child');
+                if (firstTh && lastTh) {
+                    const accountId = caHeaderRow.id.replace('cas-header-row-', '');
+                    const account = credit_accounts.find(a => a.id == accountId);
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = account && account.name ? account.name : '';
+                    nameSpan.style.position = 'absolute';
+                    nameSpan.style.left = 'calc(.2px + 0.9vw)';
+                    nameSpan.style.top = '50%';
+                    nameSpan.style.transform = 'translateY(-50%)';
+                    nameSpan.style.whiteSpace = 'nowrap';
+                    nameSpan.style.color = 'white';
+                    nameSpan.style.zIndex = '10';
+                    nameSpan.style.fontSize = 'clamp(13px, calc(1.13vw + 4.65px), 14px)';
+                    nameSpan.style.overflow = 'hidden';
+                    nameSpan.style.textOverflow = 'ellipsis';
+                    // Calculate max-width to stop before the last th
+                    const rowWidth = caHeaderRow.offsetWidth;
+                    const lastThWidth = lastTh.offsetWidth;
+                    nameSpan.style.maxWidth = (rowWidth - lastThWidth - 5) + 'px';
+                    firstTh.style.position = 'relative';
+                    firstTh.classList.add('ca-name-header');
+                    firstTh.appendChild(nameSpan);
+                }
+            });
+
+            // Set the last th in each CA header row to show the mask
+            document.querySelectorAll('tr[id^="cas-header-row-"]').forEach(caHeaderRow => {
+                const lastTh = caHeaderRow.querySelector('th:last-child');
+                if (lastTh) {
+                    const accountId = caHeaderRow.id.replace('cas-header-row-', '');
+                    const account = credit_accounts.find(a => a.id == accountId);
+                    lastTh.textContent = account && account.mask ? '...' + account.mask.slice(-4) : '';
+                    lastTh.classList.add('ca-mask-header');
+                    lastTh.style.color = 'white';
+                    lastTh.style.textAlign = 'right';
+                    lastTh.style.paddingRight = 'calc(.2px + 0.9vw)';
+                    lastTh.style.fontSize = 'clamp(13px, calc(1.13vw + 4.65px), 14px)';
+                }
             });
         }
 

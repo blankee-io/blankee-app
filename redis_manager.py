@@ -807,6 +807,53 @@ def _flush_table_to_mysql(table: str, user_id: int):
             # Just return 0
             return 0
         
+        elif table == 'quiltt_webhook_events_deleted':
+            # Delete webhook events for deleted connections
+            logger.info(f"[FLUSH] Processing quiltt_webhook_events_deleted for user {user_id}")
+            
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                
+                delete_key = f"pending_webhook_deletes:{user_id}"
+                connection_ids = _redis_client.smembers(delete_key)
+                
+                logger.info(f"[FLUSH] Found {len(connection_ids) if connection_ids else 0} connection webhook events to delete")
+                
+                if not connection_ids:
+                    _redis_client.delete(delete_key)
+                    logger.info(f"[FLUSH] No webhook events to delete, cleared deletion set")
+                    return 0
+                
+                deleted_count = 0
+                for conn_id in connection_ids:
+                    conn_id_str = conn_id.decode('utf-8') if isinstance(conn_id, bytes) else conn_id
+                    
+                    # Delete webhook events for this connection
+                    cursor.execute("""
+                        DELETE FROM quiltt_webhook_events 
+                        WHERE connection_id = %s
+                    """, (conn_id_str,))
+                    
+                    deleted_count += cursor.rowcount
+                    logger.info(f"[FLUSH] Deleted {cursor.rowcount} webhook events for connection {conn_id_str}")
+                
+                conn.commit()
+                
+                # Clear the deletion set
+                _redis_client.delete(delete_key)
+                
+                # Also remove webhook events from Redis cache
+                webhook_events_key = f"quiltt_webhook_events:v1:{user_id}"
+                cached_events = _redis_client.get(webhook_events_key)
+                if cached_events:
+                    events = json.loads(cached_events)
+                    conn_ids_to_remove = {c.decode('utf-8') if isinstance(c, bytes) else c for c in connection_ids}
+                    events = [e for e in events if e.get('connection_id') not in conn_ids_to_remove]
+                    _redis_client.setex(webhook_events_key, 604800, json.dumps(events, cls=DecimalEncoder))
+                
+                cursor.close()
+                return deleted_count
+        
         # Regular table flush logic
         redis_key = _get_redis_key(table, user_id)
         logger.info(f"[FLUSH] Looking for Redis key: {redis_key}")
@@ -1051,7 +1098,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             'recurring_id': recurring_id,
                             'is_bucket': int(row.get('is_bucket', 0)),
                             'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
-                            'processed': int(row.get('processed', 0))
+                            'processed': int(row.get('processed', 0)),
+                            'pending': int(row.get('pending', 0))
                         })
                         continue
                     
@@ -1063,7 +1111,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         recurring_id,
                         int(row.get('is_bucket', 0)),
                         float(row.get('original_amount')) if row.get('original_amount') is not None else None,
-                        int(row.get('processed', 0))
+                        int(row.get('processed', 0)),
+                        int(row.get('pending', 0))
                     ))
                 
                 if skipped_count > 0:
@@ -1080,8 +1129,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     for entry in temp_id_entries:
                         cursor.execute("""
-                            INSERT INTO income_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO income_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             entry['category_id'],
                             entry['date'],
@@ -1089,7 +1138,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             entry['recurring_id'],
                             entry['is_bucket'],
                             entry['original_amount'],
-                            entry['processed']
+                            entry['processed'],
+                            entry['pending']
                         ))
                         new_id = cursor.lastrowid
                         if entry['temp_id'] is None:
@@ -1119,17 +1169,18 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 if batch_data:
                     # Log the first few rows for debugging
                     for i, data in enumerate(batch_data[:5]):
-                        logger.info(f"[FLUSH DEBUG] income_entries row {i}: id={data[0]}, category={data[1]}, date={data[2]}, amount={data[3]}, recurring_id={data[4]} (type: {type(data[4])}), is_bucket={data[5]}, original_amount={data[6]}, processed={data[7]}")
+                        logger.info(f"[FLUSH DEBUG] income_entries row {i}: id={data[0]}, category={data[1]}, date={data[2]}, amount={data[3]}, recurring_id={data[4]} (type: {type(data[4])}), is_bucket={data[5]}, original_amount={data[6]}, processed={data[7]}, pending={data[8]}")
                     
                     cursor.executemany("""
-                        INSERT INTO income_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO income_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             amount = VALUES(amount),
                             processed = VALUES(processed),
                             recurring_id = VALUES(recurring_id),
                             is_bucket = VALUES(is_bucket),
-                            original_amount = VALUES(original_amount)
+                            original_amount = VALUES(original_amount),
+                            pending = VALUES(pending)
                     """, batch_data)
                 
                 # Update Redis with real IDs if we inserted temp entries
@@ -1208,7 +1259,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             'is_bucket': int(row.get('is_bucket', 0)),
                             'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                             'processed': int(row.get('processed', 0)),
-                            'bud_item_id': row.get('bud_item_id')
+                            'bud_item_id': row.get('bud_item_id'),
+                            'pending': int(row.get('pending', 0))
                         })
                         continue
                     
@@ -1221,7 +1273,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         int(row.get('is_bucket', 0)),
                         float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                         int(row.get('processed', 0)),
-                        row.get('bud_item_id')
+                        row.get('bud_item_id'),
+                        int(row.get('pending', 0))
                     ))
                 
                 if skipped_count > 0:
@@ -1238,8 +1291,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     for entry in temp_id_entries:
                         cursor.execute("""
-                            INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id, pending)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             entry['category_id'],
                             entry['date'],
@@ -1248,7 +1301,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             entry['is_bucket'],
                             entry['original_amount'],
                             entry['processed'],
-                            entry['bud_item_id']
+                            entry['bud_item_id'],
+                            entry['pending']
                         ))
                         new_id = cursor.lastrowid
                         if entry['temp_id'] is None:
@@ -1275,15 +1329,16 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 if batch_data:
                     cursor.executemany("""
-                        INSERT INTO expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id, pending)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             amount = VALUES(amount),
                             processed = VALUES(processed),
                             recurring_id = VALUES(recurring_id),
                             is_bucket = VALUES(is_bucket),
                             original_amount = VALUES(original_amount),
-                            bud_item_id = VALUES(bud_item_id)
+                            bud_item_id = VALUES(bud_item_id),
+                            pending = VALUES(pending)
                     """, batch_data)
                 
                 # Update Redis with real IDs if we inserted temp entries
@@ -1367,7 +1422,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             'is_bucket': int(row.get('is_bucket', 0)),
                             'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                             'processed': int(row.get('processed', 0)),
-                            'bud_item_id': row.get('bud_item_id')
+                            'bud_item_id': row.get('bud_item_id'),
+                            'pending': int(row.get('pending', 0))
                         })
                         continue
                     
@@ -1380,7 +1436,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         int(row.get('is_bucket', 0)),
                         float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                         int(row.get('processed', 0)),
-                        row.get('bud_item_id')
+                        row.get('bud_item_id'),
+                        int(row.get('pending', 0))
                     ))
                 
                 if skipped_count > 0:
@@ -1397,8 +1454,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     for entry in temp_id_entries:
                         cursor.execute("""
-                            INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id, pending)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             entry['category_id'],
                             entry['date'],
@@ -1407,7 +1464,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             entry['is_bucket'],
                             entry['original_amount'],
                             entry['processed'],
-                            entry['bud_item_id']
+                            entry['bud_item_id'],
+                            entry['pending']
                         ))
                         new_id = cursor.lastrowid
                         if entry['temp_id'] is None:
@@ -1434,15 +1492,16 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 if batch_data:
                     cursor.executemany("""
-                        INSERT INTO c_expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO c_expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id, pending)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             amount = VALUES(amount),
                             processed = VALUES(processed),
                             recurring_id = VALUES(recurring_id),
                             is_bucket = VALUES(is_bucket),
                             original_amount = VALUES(original_amount),
-                            bud_item_id = VALUES(bud_item_id)
+                            bud_item_id = VALUES(bud_item_id),
+                            pending = VALUES(pending)
                     """, batch_data)
                 
                 # Update Redis with real IDs if we inserted temp entries
@@ -3045,6 +3104,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         row.get('merchant_name'),
                         row.get('transaction_type'),
                         row.get('imported_to_entry_id'),
+                        row.get('imported_entry_type'),
                         row.get('imported_at'),
                         # Ntropy enrichment fields
                         row.get('ntropy_labels'),
@@ -3071,13 +3131,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 cursor.executemany("""
                     INSERT INTO quiltt_transactions
                     (user_id, account_id, transaction_id, date, description, amount, category, pending, merchant_name,
-                     transaction_type, imported_to_entry_id, imported_at,
+                     transaction_type, imported_to_entry_id, imported_entry_type, imported_at,
                      ntropy_labels, ntropy_merchant_id, ntropy_logo, ntropy_website, ntropy_mcc,
                      ntropy_location, ntropy_location_city, ntropy_location_state, ntropy_location_country,
                      ntropy_recurrence, ntropy_recurrence_group_id, ntropy_periodicity, ntropy_periodicity_days,
                      ntropy_avg_amount, ntropy_first_payment_date, ntropy_latest_payment_date,
                      ntropy_person, ntropy_transaction_type, ntropy_enriched_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         description = VALUES(description),
                         amount = VALUES(amount),
@@ -3086,6 +3146,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         merchant_name = VALUES(merchant_name),
                         transaction_type = VALUES(transaction_type),
                         imported_to_entry_id = VALUES(imported_to_entry_id),
+                        imported_entry_type = VALUES(imported_entry_type),
                         imported_at = VALUES(imported_at),
                         ntropy_labels = VALUES(ntropy_labels),
                         ntropy_merchant_id = VALUES(ntropy_merchant_id),
@@ -3788,12 +3849,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     if is_temp:
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
-                            INSERT INTO credit_accounts (id, user_id, name, mask, interest_rate, starting_balance, is_card, is_line, is_quiltt)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO credit_accounts (id, user_id, name, mask, quiltt_account_id, interest_rate, starting_balance, is_card, is_line, is_quiltt)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
                             row.get('name'),
                             row.get('mask'),
+                            row.get('quiltt_account_id'),
                             float(row.get('interest_rate', 0)) if row.get('interest_rate') else None,
                             float(row.get('starting_balance', 0)),
                             int(row.get('is_card', 0)),
@@ -3806,11 +3868,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
-                            INSERT INTO credit_accounts (id, user_id, name, mask, interest_rate, starting_balance, is_card, is_line, is_quiltt)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO credit_accounts (id, user_id, name, mask, quiltt_account_id, interest_rate, starting_balance, is_card, is_line, is_quiltt)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 mask = VALUES(mask),
+                                quiltt_account_id = VALUES(quiltt_account_id),
                                 interest_rate = VALUES(interest_rate),
                                 starting_balance = VALUES(starting_balance),
                                 is_card = VALUES(is_card),
@@ -3821,6 +3884,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             user_id,
                             row.get('name'),
                             row.get('mask'),
+                            row.get('quiltt_account_id'),
                             float(row.get('interest_rate', 0)) if row.get('interest_rate') else None,
                             float(row.get('starting_balance', 0)),
                             int(row.get('is_card', 0)),

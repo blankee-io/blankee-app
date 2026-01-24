@@ -1365,7 +1365,12 @@ button#autobalance-submit:active {
     padding: 10px;
 
     /* visual */
-    background-color: #f5fffe;
+    background-color: #f2f7f7;
+    box-shadow: none;
+    transition: box-shadow 0.2s ease;
+}
+
+.calendarnav.scrolled {
     box-shadow: 0 2px 5px rgb(0 0 0 / 20%);
 }
 
@@ -1375,20 +1380,10 @@ button#autobalance-submit:active {
     display: none !important;
 }
 
-/* Make calendarnav invisible (but keep back button) on back-button-only pages */
-#recurring-i-body .calendarnav,
-#credit-accounts-body .calendarnav,
-#notifications-body .calendarnav,
-#profile-body .calendarnav,
-#buds-body .calendarnav {
-    padding: 0;
-    background-color: transparent;
-    box-shadow: none;
-}
-
 #recurring-i-body .calendarnavbuttonscontainer,
 #credit-accounts-body .calendarnavbuttonscontainer,
 #notifications-body .calendarnavbuttonscontainer,
+#pending-transactions-body .calendarnavbuttonscontainer,
 #profile-body .calendarnavbuttonscontainer,
 #buds-body .calendarnavbuttonscontainer {
     justify-content: flex-start;
@@ -2973,6 +2968,10 @@ tr[data-category-id] td.before-member-since {
     box-sizing: border-box;
 }
 
+.dashboard-d-credit-name-row{
+    padding-left: 5px;
+}
+
 .dashboard-d-credit-balance {
     padding: 0px;
 }
@@ -3265,7 +3264,7 @@ tr[data-category-id] td.before-member-since {
     animation: slideRight 0.4s ease-out;
 }
 
-@media (max-width: 400px) {
+@media (max-width: 450px) {
     .main-container {
         padding: 5px;
     }
@@ -3425,6 +3424,19 @@ tr[data-category-id] td.before-member-since {
     font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
     user-select: none;
     pointer-events: none;
+}
+
+.cas-table thead {
+    overflow: visible;
+}
+
+.cas-table th.ca-name-header {
+    overflow: visible !important;
+    white-space: nowrap;
+    text-align: left;
+    position: relative;
+    z-index: 10;
+    clip: unset;
 }
 
 .dashboard-this-week-bottom td {
@@ -4614,7 +4626,7 @@ td:has(.bucket-progress-container) {
     box-sizing: border-box;
 }
 
-@media (max-width: 400px) {
+@media (max-width: 450px) {
     .current-week-outline {
         border: 2px solid #E45F1C;
         border-radius: 5px;
@@ -4645,7 +4657,7 @@ td:has(.bucket-progress-container) {
     }
 }
 
-@media (max-width: 400px) {
+@media (max-width: 450px) {
     .current-week-flag {
         font-size: 9px;
         padding: 1px 5px;
@@ -4869,21 +4881,6 @@ td:has(.bucket-progress-container) {
     .month-dropdown,
     .year-dropdown {
         font-size: 19px;
-    }
-}
-
-@media (width <= 400px) {
-
-    #last-remainder-row td,
-    #income-total-row td
-    #expense-total-row td,
-    #savings-row td,
-    #remainder-row td,
-    .income-categories-title,
-    .expense-categories-title,
-    .ca-categories-title,
-    .ca-total-row td {
-        text-align: center;
     }
 }
 
@@ -5157,6 +5154,13 @@ td:has(.bucket-progress-container) {
     text-align: left;
 }
 
+.dashboard-m-calendar-container {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+}
+
 #dashboard-m-calendar {
     justify-content: center;
     align-items: center;
@@ -5177,9 +5181,24 @@ td:has(.bucket-progress-container) {
     }
 }
 
-@media (max-width: 350px) {
+@media (max-width: 450px) {
     #dashboard-m-calendar {
-        min-width: 100%;
+        min-width: unset;
+        width: 100%;
+        table-layout: fixed;
+    }
+    
+    #dashboard-m-calendar td {
+        overflow: visible;
+    }
+    
+    .dashboard-m-date {
+        margin: 3px 0 0 0;
+        overflow: visible;
+    }
+    
+    .dashboard-m-day-label {
+        overflow: visible;
     }
     
     .dashboard-m-day-label,
@@ -5189,9 +5208,64 @@ td:has(.bucket-progress-container) {
     .dashboard-m-remainder,
     .dashboard-m-ca-balance,
     .dashboard-m-savings,
-    .dashboard-m-ca-divider-text,
+    .dashboard-m-ca-account-divider,
+    .dashboard-m-s-divider {
+        border-left-width: 1px;
+        border-right-width: 1px;
+    }
+    
+    .dashboard-m-ca-account-divider,
+    .dashboard-m-s-divider {
+        padding: 0px !important;
+    }
+    
+    .dashboard-m-ca-account-divider::before,
+    .dashboard-m-ca-account-divider::after,
+    .dashboard-m-s-divider::before,
+    .dashboard-m-s-divider::after {
+        margin: 0 0.1em;
+        height: 1px !important;
+    }
+    
+    .dashboard-m-ca-account-text,
     .dashboard-m-s-divider-text {
-        font-size: 6px !important;
+        letter-spacing: 0 !important;
+        font-size: 5px !important;
+    }
+    
+    .dashboard-m-day-label,
+    .dashboard-m-date-number,
+    .dashboard-m-income-total,
+    .dashboard-m-expense-total,
+    .dashboard-m-remainder,
+    .dashboard-m-ca-balance,
+    .dashboard-m-savings {
+        font-size: 7px !important;
+    }
+    
+    .dashboard-m-day-label .member-since-badge {
+        top: -4px;
+        left: -4px;
+        width: 15px;
+        height: 15px;
+        font-size: 7px;
+    }
+    
+    .dashboard-m-today::after {
+        border-width: 2px !important;
+    }
+    
+    .dashboard-y-today {
+        border-width: 2px !important;
+    }
+    
+    .dashboard-d-today-container {
+        height: 10px;
+        font-size: 10px !important;
+    }
+    
+    .today-outline {
+        outline-width: 2px;
     }
 }
 
@@ -5291,12 +5365,12 @@ td:has(.bucket-progress-container) {
     align-items: center;
     margin: 0;
     padding: 0;
-    background-color: #59D6D4;
+    background-color: transparent;
     border-left: 2px solid #A9A9A9;
     border-right: 2px solid #A9A9A9;
 
     /* Adjust text color if needed */
-    color: #575757; 
+    color: #2AAAA8; 
 
     font-size: clamp(3px, 2vw, 14px);
 
@@ -5324,12 +5398,12 @@ td:has(.bucket-progress-container) {
     align-items: center;
     margin: 0;
     padding: 0;
-    background-color: #EF9F77;
+    background-color: transparent;
     border-left: 2px solid #A9A9A9;
     border-right: 2px solid #A9A9A9;
 
     /* Adjust text color if needed */
-    color: #575757; 
+    color: #E45F1C; 
 
     font-size: clamp(3px, 2vw, 14px);
 
@@ -5371,7 +5445,35 @@ td:has(.bucket-progress-container) {
     text-align: center; 
 }
 
-.dashboard-m-ca-divider,
+/* Credit Account Divider - per account with initials and mask */
+.dashboard-m-ca-account-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 100%;
+    padding: 2px 4px;
+    text-align: center;
+    border-left: 2px solid #A9A9A9;
+    border-right: 2px solid #A9A9A9;
+}
+
+.dashboard-m-ca-account-divider::before,
+.dashboard-m-ca-account-divider::after {
+    content: '';
+    flex: 1;
+    height: 2px;
+    background: #A9A9A9;
+    margin: 0 0.3em;
+}
+
+.dashboard-m-ca-account-text {
+    color: #A9A9A9;
+    font-size: clamp(7px, 2vw, 12px);
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
 .dashboard-m-s-divider {
     display: flex;
     align-items: center;
@@ -5383,8 +5485,6 @@ td:has(.bucket-progress-container) {
     border-right: 2px solid #A9A9A9;
 }
 
-.dashboard-m-ca-divider::before,
-.dashboard-m-ca-divider::after,
 .dashboard-m-s-divider::before,
 .dashboard-m-s-divider::after {
     content: '';
@@ -5393,17 +5493,14 @@ td:has(.bucket-progress-container) {
     background: #2AAAA8;
 }
 
-.dashboard-m-ca-divider::before,
 .dashboard-m-s-divider::before {
     margin: 0.3em;
 }
 
-.dashboard-m-ca-divider::after,
 .dashboard-m-s-divider::after {
     margin: 0.3em;
 }
 
-.dashboard-m-ca-divider-text,
 .dashboard-m-s-divider-text {
     /* No background-color needed! */
     color: #2AAAA8;
@@ -5422,10 +5519,10 @@ td:has(.bucket-progress-container) {
     align-items: center;
     margin: 0;
     padding: 0;
-    background-color: #676767;
+    background-color: transparent;
 
     /* Adjust text color if needed */
-    color: white; 
+    color: #575757; 
 
     font-size: clamp(3px, 2vw, 14px);
 
@@ -5434,6 +5531,8 @@ td:has(.bucket-progress-container) {
 
     /* Horizontally center the text */
     text-align: center; 
+    border-left: 2px solid #A9A9A9;
+    border-right: 2px solid #A9A9A9;
 }
 
 .dashboard-m-savings {
@@ -5463,6 +5562,7 @@ td:has(.bucket-progress-container) {
 }
 
 .dashboard-m-label {
+    display: none;
     flex: 0 0 10%;
     padding-left: 2px;
     text-align: left;
@@ -5471,8 +5571,8 @@ td:has(.bucket-progress-container) {
 
 .dashboard-m-value {
     flex: 1 1 auto;
-    padding-right: 2px;
-    text-align: right;
+    padding: 0px;
+    text-align: center;
     justify-self: flex-end;
 }
 
@@ -5626,93 +5726,6 @@ td:has(.bucket-progress-container) {
     display: none !important;
 }
 
-@media (max-width: 400px) {
-    .dashboard-m-today::after {
-        top: 4px;
-        left: 0px;
-        right: 0px;
-        bottom: -2px;
-        border: 2px solid #E45F1C;
-        border-radius: .6em;
-    }
-
-    .dashboard-m-date {
-        margin: 8px 0px -2px;
-    }
-
-    .dashboard-d-today-container {
-        height: 14px;
-        font-size: .85em;
-        font-weight: 900;
-        text-transform: uppercase;
-    }
-
-    .dashboard-m-income-total {
-        padding: 2px;
-    }
-
-    .dashboard-m-label {
-        display: none;
-    }
-
-    .dashboard-m-value {
-        text-align: center;
-        padding: 0px;
-    }
-
-    .dashboard-m-expense-total {
-        padding: 2px;
-    }
-
-    .dashboard-m-remainder {
-        padding: 2px;
-    }
-
-    .dashboard-m-ca-divider::before,
-    .dashboard-m-ca-divider::after,
-    .dashboard-m-s-divider::before,
-    .dashboard-m-s-divider::after {
-        height: 1px;
-    }
-
-    .dashboard-m-ca-divider::before,
-    .dashboard-m-s-divider::before {
-        margin: 0.25em;
-    }
-
-    .dashboard-m-ca-divider::after,
-    .dashboard-m-s-divider::after {
-        margin: 0.25em;
-    }
-
-    .dashboard-m-ca-divider-text,
-    .dashboard-m-s-divider-text {
-        letter-spacing: .1em;
-        padding-top: 2px;
-    }
-
-    .dashboard-m-ca-balance {
-        padding: 2px;
-        padding-top: 0;
-        padding-bottom: 0;
-        background-color: #f2f7f7;
-        color: #676767;
-        border-left: 2px solid #a9a9a9;
-        border-right: 2px solid #a9a9a9;
-    }
-
-    .dashboard-m-savings {
-        padding: 2px;
-        padding-top: 0;
-        padding-bottom: 3px;
-        border-bottom: 2px solid #A9A9A9;
-        border-left: 2px solid #a9a9a9;
-        border-right: 2px solid #a9a9a9;
-        color: #2aaaa8;
-        background-color: #f2f7f7
-    }
-}
-
 /* /////////////////////////// Dashboard Year //////////////////////////////////// */
 
 /* Center the calendar and make it responsive */
@@ -5854,7 +5867,6 @@ td:has(.bucket-progress-container) {
     width: 100%;
     max-width: 750px;
     padding-top: 25px;
-    margin-top: 2em;
     margin-left: auto;
     margin-right: auto;    
     background-color: transparent;
@@ -6638,7 +6650,7 @@ td:has(.bucket-progress-container) {
     max-width: 100%;
     box-sizing: border-box;
     box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
-    overflow: hidden;
+    overflow: visible;
 }
 
 .data-section {
@@ -6656,7 +6668,7 @@ td:has(.bucket-progress-container) {
     max-width: 100%;
     box-sizing: border-box;
     box-shadow: 0 -6px 8px rgb(0 0 0 / 3%);
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* Profile label */
@@ -6680,12 +6692,12 @@ td:has(.bucket-progress-container) {
     content: "Bank Connections";
 }
 
-/* Notifications section label override */
-#notification-section::before {
-    content: "Notifications";
+/* Notification item label override (singular for notifications page) */
+#notifications-body .notification-section::before {
+    content: "Notification";
 }
 
-/* Data label */
+/* Settings section label */
 .data-section::before {
     position: absolute;
     top: -25px;
@@ -6698,7 +6710,7 @@ td:has(.bucket-progress-container) {
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 0.5px;
-    content: "Data";
+    content: "Settings";
 }
 
 .section-liner {
@@ -11565,7 +11577,7 @@ html.modal-open {
 }
 
 /* Category Recommendations Modal - Small Screen (under 400px) */
-@media (max-width: 400px) {
+@media (max-width: 450px) {
     #category-recommendations-modal-setup h2 {
         font-size: 1.25rem;
     }
@@ -11669,4 +11681,267 @@ html.modal-open {
     .verification-success-subtext {
         font-size: 14px;
     }
+}
+
+/* ============================================
+   PENDING TRANSACTIONS PAGE
+   ============================================ */
+
+.pending-transaction-item {
+    background-color: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 10px;
+    overflow: visible;
+    position: relative;
+    z-index: 1;
+}
+
+.pending-transaction-item:focus-within {
+    z-index: 100;
+}
+
+.pending-transaction-item::before {
+    content: "Transaction";
+}
+
+.pending-transaction-item.confirmed {
+    opacity: 0.6;
+    background-color: #f5f5f5;
+}
+
+.transaction-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.transaction-info {
+    flex: 1;
+}
+
+.transaction-merchant {
+    font-weight: 600;
+    font-size: 1.1em;
+    color: #333;
+    margin-bottom: 4px;
+    margin-right: 5px;
+}
+
+.transaction-description {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 4px;
+}
+
+.transaction-date {
+    font-size: 0.85em;
+    color: #888;
+}
+
+.transaction-amount {
+    font-weight: 700;
+    font-size: 1.2em;
+    text-align: right;
+}
+
+.transaction-amount.expense {
+    color: #E45F1C;
+}
+
+.transaction-amount.income {
+    color: #2AAAA8;
+}
+
+.ntropy-suggestion {
+    background-color: #f0f7ff;
+    border: 1px solid #d0e3f7;
+    border-radius: 6px;
+    padding: 10px;
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ntropy-suggestion i {
+    color: #3b82f6;
+}
+
+.ntropy-label {
+    font-size: 0.9em;
+    color: #1e40af;
+    font-weight: 500;
+}
+
+.category-select-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    position: relative;
+    z-index: 10;
+}
+
+.category-select-row label {
+    font-size: 0.9em;
+    color: #555;
+    white-space: nowrap;
+}
+
+.category-input-wrapper {
+    flex: 1;
+    position: relative;
+    z-index: 1;
+}
+
+.category-input-wrapper:focus-within {
+    z-index: 9999;
+}
+
+.category-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 0.95em;
+    background-color: #fff;
+    box-sizing: border-box;
+}
+
+.pending-transactions-category-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: #fff;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    max-height: 50vh;
+    overflow-y: auto;
+    z-index: 9999;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Override any inherited overflow styles for pending transactions page */
+#pending-transactions-body .profile-section {
+    overflow: visible !important;
+}
+
+#pending-transactions-body .profile-actions {
+    overflow: visible !important;
+}
+
+#pending-transactions-body .profile-content {
+    overflow: visible !important;
+}
+
+#pending-transactions-body .profile-box {
+    overflow: visible !important;
+}
+
+.pending-transactions-category-dropdown-item {
+    padding: 10px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #eee;
+    text-align: left;
+}
+
+.pending-transactions-category-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.pending-transactions-category-dropdown-item:hover {
+    background-color: #f5f5f5;
+}
+
+.pending-transactions-category-dropdown-item.create-new-category {
+    color: #3b82f6;
+    font-weight: 500;
+}
+
+.pending-transactions-category-dropdown-item.create-new-category i {
+    margin-right: 6px;
+}
+
+.confirm-btn {
+    background-color: #2AAAA8;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background-color 0.2s;
+}
+
+.confirm-btn:hover {
+    background-color: #59d6d4;
+}
+
+.confirm-btn:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+.confirm-btn.confirmed {
+    background-color: #888;
+}
+
+.account-badge {
+    display: inline-block;
+    background-color: #e8e8e8;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    color: #555;
+    margin-left: 8px;
+}
+
+.no-pending-message {
+    text-align: center;
+    color: #666;
+    padding: 40px 20px;
+}
+
+.no-pending-message i {
+    font-size: 3em;
+    color: #69b578;
+    margin-bottom: 15px;
+}
+
+.no-pending-message h3 {
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.confirm-all-btn {
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.confirm-all-btn:hover {
+    background-color: #2563eb;
+}
+
+.pending-count-badge {
+    background-color: #f37c6e;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.85em;
+    margin-left: 8px;
 }

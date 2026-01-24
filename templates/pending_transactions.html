@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Pending Transactions</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="pending-transactions-body">
+    {% include 'nav.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+            {% if pending_transactions %}
+                <button class="nav-button mark-all-read-button" onclick="confirmAllTransactions()">
+                    <i class="fa-solid fa-check-double"></i>
+                    <span class="nav-tooltip">Confirm All</span>
+                </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <div class="profile-box" id="pending-transactions-box">
+            <div class="profile-content">
+                <div class="profile-actions" id="transactions-container">
+                    {% if pending_transactions %}
+                        {% for txn in pending_transactions %}
+                            <div class="profile-section pending-transaction-item" 
+                                 data-transaction-id="{{ txn.transaction_id }}"
+                                 data-entry-id="{{ txn.imported_to_entry_id }}"
+                                 data-entry-type="{{ txn.imported_entry_type }}">
+                                <div class="transaction-header">
+                                    <div class="transaction-info">
+                                        <div class="transaction-merchant">
+                                            {{ txn.merchant_name or txn.description or 'Unknown Merchant' }}
+                                            <span class="account-badge">{{ txn.account_name or 'Account' }}</span>
+                                        </div>
+                                        {% if txn.merchant_name and txn.description and txn.merchant_name != txn.description %}
+                                            <div class="transaction-description">{{ txn.description }}</div>
+                                        {% endif %}
+                                        <div class="transaction-date">{{ txn.date }}</div>
+                                    </div>
+                                    <div class="transaction-amount {{ 'expense' if txn.is_expense else 'income' }}">
+                                        {{ currency_symbol }}{{ "%.2f"|format(txn.amount|abs) }}
+                                    </div>
+                                </div>
+                                
+                                {% if txn.ntropy_labels %}
+                                    <div class="ntropy-suggestion">
+                                        <i class="fa-solid fa-lightbulb"></i>
+                                        <span class="ntropy-label">Suggested: {{ txn.ntropy_labels }}</span>
+                                    </div>
+                                {% endif %}
+                                
+                                <div class="category-select-row">
+                                    <label>Category:</label>
+                                    <div class="category-input-wrapper">
+                                        <input type="text" class="category-input" 
+                                               data-transaction-id="{{ txn.transaction_id }}"
+                                               data-is-expense="{{ 'true' if txn.is_expense else 'false' }}"
+                                               data-entry-type="{{ txn.imported_entry_type }}"
+                                               data-account-id="{{ txn.account_id or '' }}"
+                                               data-credit-account-id="{{ txn.credit_account_id or '' }}"
+                                               placeholder="Type to search..."
+                                               autocomplete="off"
+                                               value="{{ txn.current_category_name or '' }}">
+                                        <input type="hidden" class="category-hidden" 
+                                               data-transaction-id="{{ txn.transaction_id }}"
+                                               value="{{ txn.current_category_id or '' }}">
+                                        <div class="pending-transactions-category-dropdown" style="display: none;"></div>
+                                    </div>
+                                    <button class="confirm-btn" onclick="confirmTransaction('{{ txn.transaction_id }}')">
+                                        <i class="fa-solid fa-check"></i>
+                                        Confirm
+                                    </button>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="profile-section no-pending-message">
+                            <i class="fa-solid fa-circle-check"></i>
+                            <h3>All caught up!</h3>
+                            <p>You have no pending transactions to review.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include 'loading_modals.html' %}
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script type="text/javascript">
+        document.getElementById('loading-screen').style.display = 'none';
+
+        // Store categories from server
+        const incomeCategories = {{ income_categories | tojson | safe }};
+        const expenseCategories = {{ expense_categories | tojson | safe }};
+        const cExpenseCategories = {{ c_expense_categories | tojson | safe }};
+
+        // Get the appropriate categories based on entry type and credit account
+        function getCategoriesForInput(input) {
+            const entryType = input.dataset.entryType;
+            const creditAccountId = input.dataset.creditAccountId;
+            
+            if (entryType === 'c_expense') {
+                // For credit account expenses, filter by account_id
+                if (creditAccountId) {
+                    return cExpenseCategories.filter(cat => 
+                        String(cat.account_id) === String(creditAccountId)
+                    );
+                }
+                return cExpenseCategories;
+            } else if (entryType === 'expense') {
+                return expenseCategories;
+            } else {
+                return incomeCategories;
+            }
+        }
+
+        // Category dropdown functionality
+        function showCategoryDropdown(input, searchText = '') {
+            const wrapper = input.closest('.category-input-wrapper');
+            const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
+            const hiddenInput = wrapper.querySelector('.category-hidden');
+            const categories = getCategoriesForInput(input);
+            
+            dropdown.innerHTML = '';
+            const searchLower = searchText.toLowerCase();
+            const filtered = searchText.length === 0 
+                ? categories 
+                : categories.filter(cat => cat.name.toLowerCase().includes(searchLower));
+
+            // Check if there's an exact match
+            const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
+            const hasMatches = filtered.length > 0;
+
+            if (hasMatches) {
+                dropdown.style.display = 'block';
+                filtered.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.textContent = cat.name;
+                    div.className = 'pending-transactions-category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+            }
+
+            // Show "Create new..." option if there's text and no exact match
+            if (searchText.length > 0 && !exactMatch) {
+                dropdown.style.display = 'block';
+                const createDiv = document.createElement('div');
+                createDiv.className = 'pending-transactions-category-dropdown-item create-new-category';
+                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+                createDiv.addEventListener('click', function() {
+                    createPendingCategory(input, searchText);
+                });
+                dropdown.appendChild(createDiv);
+            }
+
+            if (!hasMatches && searchText.length === 0) {
+                dropdown.style.display = 'none';
+            }
+        }
+
+        // Create new category
+        function createPendingCategory(input, categoryName) {
+            if (!categoryName || categoryName.trim().length === 0) return;
+            
+            const wrapper = input.closest('.category-input-wrapper');
+            const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
+            const hiddenInput = wrapper.querySelector('.category-hidden');
+            const entryType = input.dataset.entryType;
+            const creditAccountId = input.dataset.creditAccountId;
+            
+            let url, categoriesArray;
+            
+            if (entryType === 'c_expense') {
+                // For credit account expenses, use add_ca_category endpoint
+                url = "{{ url_for('add_ca_category') }}";
+                categoriesArray = cExpenseCategories;
+            } else if (entryType === 'expense') {
+                url = "{{ url_for('add_expense_category') }}";
+                categoriesArray = expenseCategories;
+            } else {
+                url = "{{ url_for('add_income_category') }}";
+                categoriesArray = incomeCategories;
+            }
+            
+            // Build data object
+            const postData = { name: categoryName.trim() };
+            if (entryType === 'c_expense' && creditAccountId) {
+                postData.account_id = creditAccountId;
+            }
+            
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: postData,
+                success: function(response) {
+                    if (response.id) {
+                        // Add to categories array (with account_id for c_expense)
+                        const newCat = { id: response.id, name: categoryName.trim() };
+                        if (entryType === 'c_expense' && creditAccountId) {
+                            newCat.account_id = parseInt(creditAccountId);
+                        }
+                        categoriesArray.push(newCat);
+                        // Sort alphabetically
+                        categoriesArray.sort((a, b) => a.name.localeCompare(b.name));
+                        // Set the input values
+                        input.value = categoryName.trim();
+                        hiddenInput.value = response.id;
+                        dropdown.style.display = 'none';
+                    } else {
+                        alert('Failed to create category');
+                    }
+                },
+                error: function() {
+                    alert('Failed to create category');
+                }
+            });
+        }
+
+        // Initialize event listeners for all category inputs
+        document.querySelectorAll('.category-input').forEach(input => {
+            input.addEventListener('input', function() {
+                const wrapper = this.closest('.category-input-wrapper');
+                const hiddenInput = wrapper.querySelector('.category-hidden');
+                if (this.value.length === 0) {
+                    hiddenInput.value = '';
+                }
+                showCategoryDropdown(this, this.value);
+            });
+
+            input.addEventListener('focus', function() {
+                // Close all other dropdowns first
+                document.querySelectorAll('.pending-transactions-category-dropdown').forEach(dropdown => {
+                    dropdown.style.display = 'none';
+                });
+                
+                // Raise z-index of parent transaction item when dropdown is active
+                document.querySelectorAll('.pending-transaction-item').forEach(item => {
+                    item.style.zIndex = '';
+                });
+                const parentItem = this.closest('.pending-transaction-item');
+                if (parentItem) {
+                    parentItem.style.zIndex = '100';
+                }
+                showCategoryDropdown(this, this.value);
+            });
+        });
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.category-input-wrapper')) {
+                document.querySelectorAll('.pending-transactions-category-dropdown').forEach(dropdown => {
+                    dropdown.style.display = 'none';
+                });
+                // Reset z-index on all transaction items
+                document.querySelectorAll('.pending-transaction-item').forEach(item => {
+                    item.style.zIndex = '';
+                });
+            }
+        });
+
+        function confirmTransaction(transactionId) {
+            const item = $(`[data-transaction-id="${transactionId}"].pending-transaction-item`);
+            const entryId = item.data('entry-id');
+            const entryType = item.data('entry-type');
+            const categoryId = item.find('.category-hidden').val();
+            const confirmBtn = item.find('.confirm-btn');
+            
+            if (!categoryId) {
+                alert('Please select a category');
+                return;
+            }
+            
+            // Disable button while processing
+            confirmBtn.prop('disabled', true);
+            confirmBtn.html('<i class="fa-solid fa-spinner fa-spin"></i> Confirming...');
+            
+            $.ajax({
+                url: '/quiltt/confirm-transaction',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    transaction_id: transactionId,
+                    entry_id: entryId,
+                    entry_type: entryType,
+                    category_id: categoryId
+                }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Mark as confirmed with animation
+                        item.addClass('confirmed');
+                        confirmBtn.html('<i class="fa-solid fa-check"></i> Confirmed');
+                        confirmBtn.addClass('confirmed');
+                        
+                        // Fade out after a moment
+                        setTimeout(function() {
+                            item.fadeOut(300, function() {
+                                $(this).remove();
+                                checkIfEmpty();
+                            });
+                        }, 1000);
+                    } else {
+                        alert('Error: ' + response.message);
+                        confirmBtn.prop('disabled', false);
+                        confirmBtn.html('<i class="fa-solid fa-check"></i> Confirm');
+                    }
+                },
+                error: function() {
+                    alert('Failed to confirm transaction. Please try again.');
+                    confirmBtn.prop('disabled', false);
+                    confirmBtn.html('<i class="fa-solid fa-check"></i> Confirm');
+                }
+            });
+        }
+        
+        function confirmAllTransactions() {
+            const items = $('.pending-transaction-item:not(.confirmed)');
+            
+            if (items.length === 0) {
+                return;
+            }
+            
+            // Collect all transaction data
+            const transactions = [];
+            items.each(function() {
+                const item = $(this);
+                transactions.push({
+                    transaction_id: item.data('transaction-id'),
+                    entry_id: item.data('entry-id'),
+                    entry_type: item.data('entry-type'),
+                    category_id: item.find('.category-hidden').val()
+                });
+            });
+            
+            // Disable all confirm buttons
+            items.find('.confirm-btn').prop('disabled', true);
+            
+            $.ajax({
+                url: '/quiltt/confirm-all-transactions',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ transactions: transactions }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Mark all as confirmed
+                        items.each(function() {
+                            const item = $(this);
+                            item.addClass('confirmed');
+                            item.find('.confirm-btn').html('<i class="fa-solid fa-check"></i> Confirmed');
+                        });
+                        
+                        // Fade out all
+                        setTimeout(function() {
+                            items.fadeOut(300, function() {
+                                $(this).remove();
+                                checkIfEmpty();
+                            });
+                        }, 1000);
+                    } else {
+                        alert('Error: ' + response.message);
+                        items.find('.confirm-btn').prop('disabled', false);
+                    }
+                },
+                error: function() {
+                    alert('Failed to confirm transactions. Please try again.');
+                    items.find('.confirm-btn').prop('disabled', false);
+                }
+            });
+        }
+        
+        function checkIfEmpty() {
+            if ($('.pending-transaction-item').length === 0) {
+                $('#transactions-container').html(`
+                    <div class="profile-section no-pending-message">
+                        <i class="fa-solid fa-circle-check"></i>
+                        <h3>All caught up!</h3>
+                        <p>You have no pending transactions to review.</p>
+                    </div>
+                `);
+                // Hide confirm all button
+                $('.confirm-all-btn').hide();
+            }
+        }
+    </script>
+</body>
+</html>
