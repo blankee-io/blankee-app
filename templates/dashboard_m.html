@@ -440,15 +440,29 @@
                     mainSectionsWrapper.appendChild(expenseTotalDiv);
                     mainSectionsWrapper.appendChild(remainderDiv);
 
-                    // Add teal divider for CA section
-                    const caDivider = document.createElement('div');
-                    caDivider.className = 'dashboard-m-ca-divider';
-                    caDivider.innerHTML = `<span class="dashboard-m-ca-divider-text">CA</span>`;
-                    mainSectionsWrapper.appendChild(caDivider);
-
                     // dateStr already declared above
 
                     credit_accounts.forEach(account => {
+                        // Add divider for this credit account
+                        const caAccountDivider = document.createElement('div');
+                        caAccountDivider.className = 'dashboard-m-ca-account-divider';
+                        let initials = '';
+                        if (account.name) {
+                            const words = account.name.split(' ').filter(w => w.length > 0);
+                            if (words.length === 1) {
+                                // Single word: take first 2 characters
+                                initials = words[0].slice(0, 2).toUpperCase();
+                            } else {
+                                // Multiple words: take first letter of each, up to 2
+                                initials = words.map(word => word[0].toUpperCase()).join('').slice(0, 2);
+                            }
+                        } else {
+                            initials = 'CA';
+                        }
+                        const maskDisplay = account.mask ? account.mask.slice(-4) : '';
+                        caAccountDivider.innerHTML = `<span class="dashboard-m-ca-account-text">${initials}${maskDisplay}</span>`;
+                        mainSectionsWrapper.appendChild(caAccountDivider);
+
                         const caBalance = ca_balances_d.find(item => {
                             let itemDateStr;
                             if (item.date.includes('GMT')) {
@@ -459,20 +473,11 @@
                             return itemDateStr === dateStr && item.account_id == account.id;
                         });
 
-                        let initials = '';
-                        if (account.name) {
-                            initials = account.name.split(' ')
-                                .map(word => word[0].toUpperCase())
-                                .join('');
-                        } else {
-                            initials = 'CA';
-                        }
-
                         const balanceValue = caBalance ? formatNumberWithCommas(parseFloat(caBalance.balance)) : '0.00';
 
                         const caBalanceDiv = document.createElement('div');
                         caBalanceDiv.classList.add('dashboard-m-ca-balance');
-                        caBalanceDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-ca">${initials}</span> <span class="dashboard-m-value">${currencySymbol}${balanceValue}</span>`;
+                        caBalanceDiv.innerHTML = `<span class="dashboard-m-value">${currencySymbol}${balanceValue}</span>`;
                         mainSectionsWrapper.appendChild(caBalanceDiv);
                     });
 

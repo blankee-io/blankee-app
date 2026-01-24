@@ -336,8 +336,8 @@ def get_quiltt_accounts(user_id: Optional[int] = None, connection_db_id: Optiona
                     AND (
                         (account_type = 'CREDIT')
                         OR (account_type = 'DEPOSITORY' AND (
-                            LOWER(account_name) LIKE '%checking%' 
-                            OR LOWER(account_name) LIKE '%savings%'
+                            LOWER(account_name) LIKE '%%checking%%' 
+                            OR LOWER(account_name) LIKE '%%savings%%'
                         ))
                     )
                 """, (user_id, connection_db_id))
@@ -348,8 +348,8 @@ def get_quiltt_accounts(user_id: Optional[int] = None, connection_db_id: Optiona
                     AND (
                         (account_type = 'CREDIT')
                         OR (account_type = 'DEPOSITORY' AND (
-                            LOWER(account_name) LIKE '%checking%' 
-                            OR LOWER(account_name) LIKE '%savings%'
+                            LOWER(account_name) LIKE '%%checking%%' 
+                            OR LOWER(account_name) LIKE '%%savings%%'
                         ))
                     )
                 """, (user_id,))
@@ -698,6 +698,12 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
         redis_client.sadd(delete_key, connection_id)
         redis_client.expire(delete_key, 300)  # Expire in 5 minutes
         
+        # Also track webhook events to delete by this connection
+        webhook_delete_key = f"pending_webhook_deletes:{user_id}"
+        redis_client.sadd(webhook_delete_key, connection_id)
+        redis_client.expire(webhook_delete_key, 604800)  # 7 days TTL
+        redis_client.sadd(dirty_key, 'quiltt_webhook_events_deleted')
+        
         logger.info(f"Marked Quiltt connection {connection_id} for deletion (user {user_id})")
         
         # Check if this was the last connection - if so, delete the Quiltt profile
@@ -722,18 +728,21 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
                     if success:
                         logger.info(f"Successfully deleted Quiltt profile {profile['profile_id']} for user {user_id}")
                         
-                        # Delete quiltt_profiles record from database
+                        # Delete quiltt_profiles and webhook_events records from database
                         with get_db_pool().get_connection() as conn:
                             cursor = conn.cursor()
+                            cursor.execute("DELETE FROM quiltt_webhook_events WHERE profile_id = %s", (profile['profile_id'],))
                             cursor.execute("DELETE FROM quiltt_profiles WHERE user_id = %s", (user_id,))
                             conn.commit()
                             cursor.close()
                         
-                        # Delete quiltt_profiles from Redis cache
+                        # Delete quiltt_profiles and webhook_events from Redis cache
                         profiles_key = f"quiltt_profiles:v1:{user_id}"
+                        webhook_events_key = f"quiltt_webhook_events:v1:{user_id}"
                         redis_client.delete(profiles_key)
+                        redis_client.delete(webhook_events_key)
                         
-                        logger.info(f"Deleted quiltt_profiles record and Redis cache for user {user_id}")
+                        logger.info(f"Deleted quiltt_profiles, webhook_events record and Redis cache for user {user_id}")
                     else:
                         logger.warning(f"Failed to delete Quiltt profile {profile['profile_id']} for user {user_id}")
                 else:
@@ -1124,3 +1133,190 @@ def delete_quiltt_webhook_events_for_connection(connection_id: str, user_id: int
         logger.error(f"Error deleting webhook events for connection: {e}", exc_info=True)
         return False
 
+
+def get_uncategorized_category_id(user_id: int, entry_type: str, account_id: int = None) -> Optional[int]:
+    """
+    Get the "Uncategorized" category ID for a user.
+    
+    Args:
+        user_id: User ID
+        entry_type: One of 'income', 'expense', 'c_expense', 'c_payment'
+        account_id: Required for c_expense (the credit account ID in Blankee)
+        
+    Returns:
+        Category ID for "Uncategorized" or None if not found
+    """
+    try:
+        if entry_type == 'income':
+            # Get income categories from Redis
+            redis_key = f"income_categories:v1:{user_id}"
+            redis_client = _get_redis_client()
+            cached = redis_client.get(redis_key) if redis_client else None
+            
+            if cached:
+                categories = json.loads(cached)
+            else:
+                # Fallback to MySQL
+                from db_connections import get_db_pool
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT * FROM income_categories WHERE user_id = %s", (user_id,))
+                    categories = cursor.fetchall()
+                    cursor.close()
+            
+            # Find Uncategorized
+            for cat in categories:
+                if cat.get('name') == 'Uncategorized':
+                    return cat.get('id')
+            
+            logger.warning(f"Uncategorized income category not found for user {user_id}")
+            return None
+            
+        elif entry_type == 'expense':
+            # Get expense categories from Redis
+            redis_key = f"expense_categories:v1:{user_id}"
+            redis_client = _get_redis_client()
+            cached = redis_client.get(redis_key) if redis_client else None
+            
+            if cached:
+                categories = json.loads(cached)
+            else:
+                # Fallback to MySQL
+                from db_connections import get_db_pool
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT * FROM expense_categories WHERE user_id = %s", (user_id,))
+                    categories = cursor.fetchall()
+                    cursor.close()
+            
+            # Find Uncategorized
+            for cat in categories:
+                if cat.get('name') == 'Uncategorized':
+                    return cat.get('id')
+            
+            logger.warning(f"Uncategorized expense category not found for user {user_id}")
+            return None
+            
+        elif entry_type == 'c_expense':
+            if not account_id:
+                logger.error("account_id is required for c_expense entry type")
+                return None
+            
+            # Get c_expense_categories from Redis (keyed by user_id, filter by account_id)
+            redis_key = f"c_expense_categories:v1:{user_id}"
+            redis_client = _get_redis_client()
+            cached = redis_client.get(redis_key) if redis_client else None
+            
+            if cached:
+                categories = json.loads(cached)
+            else:
+                # Fallback to MySQL
+                from db_connections import get_db_pool
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT * FROM c_expense_categories WHERE account_id = %s", (account_id,))
+                    categories = cursor.fetchall()
+                    cursor.close()
+            
+            # Find Uncategorized for this specific account
+            for cat in categories:
+                if cat.get('name') == 'Uncategorized' and cat.get('account_id') == account_id:
+                    return cat.get('id')
+            
+            logger.warning(f"Uncategorized c_expense category not found for account {account_id}")
+            return None
+            
+        elif entry_type == 'c_payment':
+            # c_payment_entries don't have categories - they are tied directly to credit accounts
+            # Return the account_id itself as it's used in the c_payment_entries table
+            if not account_id:
+                logger.error("account_id is required for c_payment entry type")
+                return None
+            return account_id
+            
+        else:
+            logger.error(f"Unknown entry type: {entry_type}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error getting Uncategorized category: {e}", exc_info=True)
+        return None
+
+
+def get_blankee_credit_account_for_quiltt_account(user_id: int, quiltt_account_id: str) -> Optional[Dict]:
+    """
+    Find the Blankee credit account that corresponds to a Quiltt account.
+    
+    Strategy:
+    1. First, check for direct quiltt_account_id match (most reliable)
+    2. Fallback to mask matching (last 4 digits)
+    
+    Args:
+        user_id: User ID
+        quiltt_account_id: The Quiltt account_id (e.g., 'acct_xxx')
+        
+    Returns:
+        Dict with credit account info or None if not found
+    """
+    try:
+        # Get credit accounts from Redis or MySQL
+        redis_key = f"credit_accounts:v1:{user_id}"
+        redis_client = _get_redis_client()
+        cached = redis_client.get(redis_key) if redis_client else None
+        
+        if cached:
+            credit_accounts = json.loads(cached)
+        else:
+            # Fallback to MySQL
+            from db_connections import get_db_pool
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s", (user_id,))
+                credit_accounts = cursor.fetchall()
+                cursor.close()
+        
+        # Strategy 1: Direct quiltt_account_id match (most reliable)
+        for ca in credit_accounts:
+            if ca.get('quiltt_account_id') == quiltt_account_id:
+                logger.info(f"Found credit account {ca.get('id')} via direct quiltt_account_id match")
+                return ca
+        
+        # Strategy 2: Fallback to mask matching
+        # First, get the Quiltt account to find its mask
+        quiltt_accounts = get_quiltt_accounts(user_id)
+        quiltt_account = None
+        for qa in quiltt_accounts:
+            if qa.get('account_id') == quiltt_account_id:
+                quiltt_account = qa
+                break
+        
+        if not quiltt_account:
+            logger.warning(f"Quiltt account {quiltt_account_id} not found for user {user_id}")
+            return None
+        
+        mask = quiltt_account.get('mask')
+        if not mask:
+            logger.warning(f"Quiltt account {quiltt_account_id} has no mask")
+            return None
+        
+        # Find credit account with matching mask
+        # Quiltt mask format may be "XXXX-XXXX-XXXX-7691" while Blankee stores just "7691"
+        # Extract last 4 digits for comparison
+        quiltt_last4 = mask[-4:] if mask and len(mask) >= 4 else mask
+        
+        for ca in credit_accounts:
+            ca_mask = ca.get('mask')
+            if not ca_mask:
+                continue
+            # Compare last 4 digits
+            ca_last4 = ca_mask[-4:] if len(ca_mask) >= 4 else ca_mask
+            if ca_last4 == quiltt_last4:
+                logger.info(f"Found credit account {ca.get('id')} via mask match (last4: {ca_last4})")
+                return ca
+        
+        logger.warning(f"No Blankee credit account found with mask ending in {quiltt_last4} for user {user_id}")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error finding Blankee credit account: {e}", exc_info=True)
+        return None

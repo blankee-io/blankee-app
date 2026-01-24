@@ -10742,6 +10742,341 @@ def notifications():
         notifications=notifications
     )
 
+
+@app.route('/pending-transactions', methods=['GET'])
+@login_required
+def pending_transactions():
+    """Show pending transactions that need category confirmation"""
+    # Try to get user settings from Redis first
+    redis_key = f"users:v1:{current_user.id}"
+    user_data = None
+    
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+        except Exception as e:
+            pass
+    
+    # If not in Redis, load from MySQL
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT profile_picture, landing_page, currency_type
+                FROM users 
+                WHERE id = %s
+            """, (current_user.id,))
+            result = cursor.fetchone()
+            cursor.close()
+            
+            if result:
+                user_data = result
+
+    profile_picture = user_data.get('profile_picture') if user_data else None
+    landing_page = user_data.get('landing_page', 'dashboard_3m') if user_data else 'dashboard_3m'
+    currency_type = user_data.get('currency_type', 'USD') if user_data else 'USD'
+    
+    # Currency symbol mapping
+    currency_symbols = {
+        'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CAD': 'C$', 
+        'AUD': 'A$', 'CHF': 'Fr', 'CNY': '¥', 'INR': '₹', 'MXN': 'Mex$'
+    }
+    currency_symbol = currency_symbols.get(currency_type, '$')
+    
+    # Get quiltt transactions that have been imported but are pending review
+    # A transaction is pending review when:
+    # 1. It has been imported (imported_to_entry_id is not NULL)
+    # 2. The corresponding budget entry has pending=1
+    pending_txns = []
+    
+    from quiltt_redis import get_quiltt_transactions, get_quiltt_accounts
+    quiltt_transactions = get_quiltt_transactions(current_user.id)
+    quiltt_accounts = get_quiltt_accounts(current_user.id)
+    
+    # Build account lookup
+    account_lookup = {acc.get('account_id'): acc for acc in (quiltt_accounts or [])}
+    
+    # Get all entries that are pending (pending=1) and imported from Quiltt
+    # Check income_entries, expense_entries, c_expense_entries
+    pending_entry_ids = {'income': set(), 'expense': set(), 'c_expense': set()}
+    
+    # Build entry lookup to get category_id for each entry
+    entry_category_lookup = {'income': {}, 'expense': {}, 'c_expense': {}}
+    
+    # Get income entries with category_id
+    redis_key = f"income_entries:v1:{current_user.id}"
+    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+    if cached:
+        income_entries = json.loads(cached)
+        for entry in income_entries:
+            if entry.get('pending') == 1:
+                pending_entry_ids['income'].add(entry.get('id'))
+                entry_category_lookup['income'][entry.get('id')] = entry.get('category_id')
+    
+    # Get expense entries with category_id
+    redis_key = f"expense_entries:v1:{current_user.id}"
+    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+    if cached:
+        expense_entries = json.loads(cached)
+        for entry in expense_entries:
+            if entry.get('pending') == 1:
+                pending_entry_ids['expense'].add(entry.get('id'))
+                entry_category_lookup['expense'][entry.get('id')] = entry.get('category_id')
+    
+    # Get c_expense entries with category_id
+    redis_key = f"c_expense_entries:v1:{current_user.id}"
+    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+    if cached:
+        c_expense_entries = json.loads(cached)
+        for entry in c_expense_entries:
+            if entry.get('pending') == 1:
+                pending_entry_ids['c_expense'].add(entry.get('id'))
+                entry_category_lookup['c_expense'][entry.get('id')] = entry.get('category_id')
+    
+    # Load categories BEFORE processing transactions (needed for credit_account_id lookup)
+    expense_categories = []
+    income_categories = []
+    c_expense_categories = []
+    
+    redis_key = f"expense_categories:v1:{current_user.id}"
+    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+    if cached:
+        expense_categories = [c for c in json.loads(cached) if not c.get('hidden')]
+    
+    redis_key = f"income_categories:v1:{current_user.id}"
+    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+    if cached:
+        income_categories = [c for c in json.loads(cached) if not c.get('hidden')]
+    
+    redis_key = f"c_expense_categories:v1:{current_user.id}"
+    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+    if cached:
+        # Filter out hidden categories and "Starting Balance" category
+        c_expense_categories = [c for c in json.loads(cached) 
+                               if not c.get('hidden') and c.get('name', '').lower() != 'starting balance']
+    
+    # Find quiltt transactions that link to these pending entries
+    for txn in (quiltt_transactions or []):
+        imported_entry_id = txn.get('imported_to_entry_id')
+        entry_type = txn.get('imported_entry_type')
+        
+        if not imported_entry_id or not entry_type:
+            continue
+        
+        # Check if this entry is pending
+        if entry_type in pending_entry_ids and imported_entry_id in pending_entry_ids[entry_type]:
+            # Get account info
+            account_info = account_lookup.get(txn.get('account_id'), {})
+            
+            # Parse ntropy labels
+            ntropy_labels_raw = txn.get('ntropy_labels')
+            ntropy_labels = None
+            if ntropy_labels_raw:
+                try:
+                    labels = json.loads(ntropy_labels_raw) if isinstance(ntropy_labels_raw, str) else ntropy_labels_raw
+                    if isinstance(labels, list):
+                        ntropy_labels = ', '.join(labels)
+                except:
+                    ntropy_labels = str(ntropy_labels_raw)
+            
+            # Determine if expense based on entry type
+            is_expense = entry_type in ('expense', 'c_expense')
+            
+            # Get current category_id from entry
+            current_category_id = entry_category_lookup.get(entry_type, {}).get(imported_entry_id)
+            
+            # Get credit_account_id for c_expense entries (need to look up from category)
+            credit_account_id = None
+            if entry_type == 'c_expense' and current_category_id:
+                # Look up the credit account id from the category
+                for cat in c_expense_categories if c_expense_categories else []:
+                    if cat.get('id') == current_category_id:
+                        credit_account_id = cat.get('account_id')
+                        break
+            
+            pending_txns.append({
+                'transaction_id': txn.get('transaction_id'),
+                'merchant_name': txn.get('merchant_name'),
+                'description': txn.get('description'),
+                'amount': float(txn.get('amount', 0)),
+                'date': txn.get('date'),
+                'account_id': txn.get('account_id'),  # Quiltt account_id
+                'account_name': account_info.get('account_name', 'Unknown'),
+                'ntropy_labels': ntropy_labels,
+                'imported_to_entry_id': imported_entry_id,
+                'imported_entry_type': entry_type,
+                'is_expense': is_expense,
+                'current_category_id': current_category_id,
+                'credit_account_id': credit_account_id,  # Blankee credit account id
+                'current_category_name': None  # Will be set after categories are loaded
+            })
+    
+    # Build category name lookup
+    category_name_lookup = {}
+    for cat in income_categories:
+        category_name_lookup[('income', cat.get('id'))] = cat.get('name')
+    for cat in expense_categories:
+        category_name_lookup[('expense', cat.get('id'))] = cat.get('name')
+    for cat in c_expense_categories:
+        category_name_lookup[('c_expense', cat.get('id'))] = cat.get('name')
+    
+    # Set current_category_name for each pending transaction
+    for txn in pending_txns:
+        cat_id = txn.get('current_category_id')
+        entry_type = txn.get('imported_entry_type')
+        if cat_id:
+            txn['current_category_name'] = category_name_lookup.get((entry_type, cat_id), '')
+    
+    # Sort by date (newest first)
+    pending_txns.sort(key=lambda x: x['date'], reverse=True)
+
+    return render_template(
+        'pending_transactions.html',
+        profile_picture=profile_picture,
+        landing_page=landing_page,
+        currency_symbol=currency_symbol,
+        pending_transactions=pending_txns,
+        expense_categories=expense_categories,
+        income_categories=income_categories,
+        c_expense_categories=c_expense_categories
+    )
+
+
+@app.route('/quiltt/confirm-transaction', methods=['POST'])
+@login_required
+def confirm_transaction():
+    """Confirm a pending transaction's category"""
+    data = request.get_json()
+    transaction_id = data.get('transaction_id')
+    entry_id = data.get('entry_id')
+    entry_type = data.get('entry_type')
+    category_id = data.get('category_id')
+    
+    if not all([transaction_id, entry_id, entry_type, category_id]):
+        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+    
+    try:
+        entry_id = int(entry_id)
+        category_id = int(category_id)
+    except ValueError:
+        return jsonify({'status': 'error', 'message': 'Invalid ID format'}), 400
+    
+    # Determine the Redis key based on entry type
+    table_map = {
+        'income': 'income_entries',
+        'expense': 'expense_entries',
+        'c_expense': 'c_expense_entries'
+    }
+    
+    if entry_type not in table_map:
+        return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
+    
+    table_name = table_map[entry_type]
+    redis_key = f"{table_name}:v1:{current_user.id}"
+    
+    try:
+        # Get entries from Redis
+        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+        if not cached:
+            return jsonify({'status': 'error', 'message': 'No entries found'}), 404
+        
+        entries = json.loads(cached)
+        
+        # Find and update the entry
+        found = False
+        for entry in entries:
+            if entry.get('id') == entry_id:
+                entry['category_id'] = category_id
+                entry['pending'] = 0  # Mark as confirmed
+                found = True
+                break
+        
+        if not found:
+            return jsonify({'status': 'error', 'message': 'Entry not found'}), 404
+        
+        # Save back to Redis
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+        
+        # Mark as dirty
+        dirty_key = f"dirty_tables:{current_user.id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        return jsonify({'status': 'success'})
+        
+    except Exception as e:
+        app.logger.error(f"Error confirming transaction: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+
+
+@app.route('/quiltt/confirm-all-transactions', methods=['POST'])
+@login_required
+def confirm_all_transactions():
+    """Confirm multiple pending transactions at once"""
+    data = request.get_json()
+    transactions = data.get('transactions', [])
+    
+    if not transactions:
+        return jsonify({'status': 'error', 'message': 'No transactions provided'}), 400
+    
+    try:
+        # Group by entry type
+        by_type = {'income': [], 'expense': [], 'c_expense': []}
+        for txn in transactions:
+            entry_type = txn.get('entry_type')
+            if entry_type in by_type:
+                by_type[entry_type].append({
+                    'entry_id': int(txn.get('entry_id')),
+                    'category_id': int(txn.get('category_id'))
+                })
+        
+        table_map = {
+            'income': 'income_entries',
+            'expense': 'expense_entries',
+            'c_expense': 'c_expense_entries'
+        }
+        
+        # Process each entry type
+        for entry_type, items in by_type.items():
+            if not items:
+                continue
+            
+            table_name = table_map[entry_type]
+            redis_key = f"{table_name}:v1:{current_user.id}"
+            
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            if not cached:
+                continue
+            
+            entries = json.loads(cached)
+            
+            # Build lookup of updates
+            updates = {item['entry_id']: item['category_id'] for item in items}
+            
+            # Apply updates
+            for entry in entries:
+                entry_id = entry.get('id')
+                if entry_id in updates:
+                    entry['category_id'] = updates[entry_id]
+                    entry['pending'] = 0
+            
+            # Save back to Redis
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+            
+            # Mark as dirty
+            dirty_key = f"dirty_tables:{current_user.id}"
+            _redis_client.sadd(dirty_key, table_name)
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        return jsonify({'status': 'success'})
+        
+    except Exception as e:
+        app.logger.error(f"Error confirming all transactions: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+
+
 @app.route('/mark-notification-read', methods=['POST'])
 @login_required
 def mark_notification_read():
@@ -11604,6 +11939,12 @@ def delete_user(username):
             
             if quiltt_profile and quiltt_profile[0]:
                 quiltt_profile_id = quiltt_profile[0]
+                # Delete webhook events for this profile from database
+                with get_db_pool().get_connection() as conn2:
+                    cursor2 = conn2.cursor()
+                    cursor2.execute("DELETE FROM quiltt_webhook_events WHERE profile_id = %s", (quiltt_profile_id,))
+                    conn2.commit()
+                    cursor2.close()
                 # Delete profile from Quiltt's side
                 quiltt_client.delete_profile(quiltt_profile_id)
     except Exception as e:
@@ -14166,6 +14507,73 @@ def add_notification(user_id, message, notification_date=None):
     
     return notification_id
 
+
+def _create_pending_transactions_notification(user_id, new_count):
+    """
+    Create a notification for pending transactions waiting for categorization.
+    Removes any previous pending transaction notifications before creating new one.
+    
+    Args:
+        user_id: The user ID to create the notification for
+        new_count: Number of new transactions that were auto-imported
+    """
+    # Get total count of pending transactions (entries with pending=1)
+    total_pending = 0
+    
+    try:
+        if app.config.get('REDIS_OK'):
+            # Count pending income entries
+            income_key = f"income_entries:v1:{user_id}"
+            cached = _redis_client.get(income_key)
+            if cached:
+                entries = json.loads(cached)
+                total_pending += sum(1 for e in entries if e.get('pending') == 1)
+            
+            # Count pending expense entries
+            expense_key = f"expense_entries:v1:{user_id}"
+            cached = _redis_client.get(expense_key)
+            if cached:
+                entries = json.loads(cached)
+                total_pending += sum(1 for e in entries if e.get('pending') == 1)
+            
+            # Count pending c_expense entries
+            c_expense_key = f"c_expense_entries:v1:{user_id}"
+            cached = _redis_client.get(c_expense_key)
+            if cached:
+                entries = json.loads(cached)
+                total_pending += sum(1 for e in entries if e.get('pending') == 1)
+    except Exception as e:
+        app.logger.error(f"Error counting pending transactions: {e}")
+        # Use the new_count as fallback
+        total_pending = new_count
+    
+    if total_pending <= 0:
+        return
+    
+    # Delete any previous pending transaction notifications for this user
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM notifications
+            WHERE user_id = %s
+            AND message LIKE %s
+        """, (user_id, '%pending transaction%synced from your bank%'))
+        deleted_count = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        if deleted_count > 0:
+            app.logger.info(f"Deleted {deleted_count} old pending transaction notification(s) for user {user_id}")
+    
+    # Build message with link to pending transactions page
+    txn_word = "transaction" if total_pending == 1 else "transactions"
+    need_word = "needs" if total_pending == 1 else "need"
+    message = f'You have {total_pending} pending {txn_word} synced from your bank accounts that {need_word} to be categorized. <a href="/pending-transactions">Click here to categorize</a>.'
+    
+    # Create new notification
+    add_notification(user_id, message)
+    app.logger.info(f"Created pending transactions notification for user {user_id}: {total_pending} pending")
+
+
 def check_negative_remainders(user_id):
     """
     Check for negative remainders in the future and create notifications.
@@ -14219,46 +14627,28 @@ def check_negative_remainders(user_id):
         pass
         return
     
-    # Check if we already have a notification for this date
+    # Delete any previous negative remainder notifications for this user
     with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-        
-        # Get existing notifications for balance projection warnings
+        cursor = conn.cursor()
         cursor.execute("""
-            SELECT message FROM notifications
+            DELETE FROM notifications
             WHERE user_id = %s
             AND message LIKE %s
-            AND is_read = 0
-            AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        """, (user_id, 'Projected balance on%'))
-        existing_notifications = cursor.fetchall()
-        
-        
-        # Check if we already have a notification for this specific date
-        already_notified = False
-        for notif in existing_notifications:
-            try:
-                date_str = notif['message'].split('Projected balance on ')[1].split(':')[0]
-                notif_date = datetime.strptime(date_str, '%B %d, %Y').date()
-                if notif_date == first_negative_date:
-                    already_notified = True
-                    break
-            except Exception as e:
-                app.logger.error(f"[NOTIFICATIONS] Error parsing notification date: {e}")
-                pass
-        
+        """, (user_id, '%remainder shows below $0%'))
+        deleted_count = cursor.rowcount
+        conn.commit()
         cursor.close()
+        if deleted_count > 0:
+            app.logger.info(f"Deleted {deleted_count} old negative remainder notification(s) for user {user_id}")
     
-    # Create notification if not already exists
-    if not already_notified:
-        formatted_date = first_negative_date.strftime('%B %d, %Y')
-        message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
-        try:
-            notification_id = add_notification(user_id, message)
-        except Exception as e:
-            app.logger.error(f"[NOTIFICATIONS] Error creating notification: {e}")
-    else:
-        pass
+    # Create new notification
+    formatted_date = first_negative_date.strftime('%B %d, %Y')
+    message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
+    try:
+        notification_id = add_notification(user_id, message)
+        app.logger.info(f"Created negative remainder notification for user {user_id}: {formatted_date}")
+    except Exception as e:
+        app.logger.error(f"[NOTIFICATIONS] Error creating notification: {e}")
 
 def check_and_hide_bud_category(bud_id):
     """
@@ -16313,6 +16703,8 @@ def delete_credit_account():
         account_name = None
         actual_id_to_delete = None
         
+        app.logger.info(f"[DELETE_CA] Deleting credit account id={account_id} for user {current_user.id}")
+        
         # Delete from Redis first
         if app.config.get('REDIS_OK'):
             redis_key = f"credit_accounts:v1:{current_user.id}"
@@ -16320,6 +16712,7 @@ def delete_credit_account():
             
             if cached:
                 accounts = json.loads(cached)
+                app.logger.info(f"[DELETE_CA] Found {len(accounts)} credit accounts in Redis: {[a.get('id') for a in accounts]}")
                 
                 # First, try to find exact ID match
                 account_to_delete = None
@@ -16331,6 +16724,7 @@ def delete_credit_account():
                 # If not found and account_id is negative (temp ID), find by position
                 # The account may have been flushed and now has a real ID
                 if not account_to_delete and account_id < 0:
+                    app.logger.info(f"[DELETE_CA] Account {account_id} not found, checking MySQL for temp ID mapping")
                     # Get the account name from MySQL if it exists there
                     with get_db_pool().get_connection() as conn:
                         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -16355,13 +16749,16 @@ def delete_credit_account():
                         if account_to_delete:
                             break
                 
-                # If still not found, just take the first account (fallback)
-                if not account_to_delete and accounts:
-                    account_to_delete = accounts[0]
+                # REMOVED: Dangerous fallback that picked first account if not found
+                # This was causing wrong account deletions
+                
+                if not account_to_delete:
+                    app.logger.warning(f"[DELETE_CA] Account {account_id} not found in Redis")
                 
                 if account_to_delete:
                     account_name = account_to_delete.get('name')
                     actual_id_to_delete = account_to_delete.get('id')
+                    app.logger.info(f"[DELETE_CA] Found account to delete: id={actual_id_to_delete}, name={account_name}")
                     
                     # Remove from Redis array
                     filtered_accounts = [acc for acc in accounts if acc.get('id') != actual_id_to_delete]
@@ -16430,7 +16827,10 @@ def delete_credit_account():
                     balances_cached = _redis_client.get(balances_key)
                     if balances_cached:
                         balances = json.loads(balances_cached)
+                        before_count = len(balances)
                         filtered_balances = [b for b in balances if b.get('account_id') != actual_id_to_delete]
+                        after_count = len(filtered_balances)
+                        app.logger.info(f"[DELETE_CA] c_a_balances: {before_count} -> {after_count} (removed {before_count - after_count} for account_id={actual_id_to_delete})")
                         _redis_client.setex(balances_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_balances, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'c_a_balances')
                     
@@ -16439,7 +16839,10 @@ def delete_credit_account():
                     balances_d_cached = _redis_client.get(balances_d_key)
                     if balances_d_cached:
                         balances_d = json.loads(balances_d_cached)
+                        before_count = len(balances_d)
                         filtered_balances_d = [b for b in balances_d if b.get('account_id') != actual_id_to_delete]
+                        after_count = len(filtered_balances_d)
+                        app.logger.info(f"[DELETE_CA] c_a_balances_d: {before_count} -> {after_count} (removed {before_count - after_count} for account_id={actual_id_to_delete})")
                         _redis_client.setex(balances_d_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_balances_d, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'c_a_balances_d')
                     
@@ -16448,7 +16851,10 @@ def delete_credit_account():
                     balances_m_cached = _redis_client.get(balances_m_key)
                     if balances_m_cached:
                         balances_m = json.loads(balances_m_cached)
+                        before_count = len(balances_m)
                         filtered_balances_m = [b for b in balances_m if b.get('account_id') != actual_id_to_delete]
+                        after_count = len(filtered_balances_m)
+                        app.logger.info(f"[DELETE_CA] c_a_balances_m: {before_count} -> {after_count} (removed {before_count - after_count} for account_id={actual_id_to_delete})")
                         _redis_client.setex(balances_m_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_balances_m, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'c_a_balances_m')
                     
@@ -17138,24 +17544,24 @@ def quiltt_delete():
         # Before deleting, get all accounts for this connection to update credit accounts
         quiltt_accounts = get_quiltt_accounts(current_user.id)
         connection_db_id = connection.get('id')  # MySQL ID
-        accounts_to_update = []
+        quiltt_account_ids_to_clear = []
         
         for acc in quiltt_accounts or []:
             if acc.get('connection_id') == connection_db_id and acc.get('account_type', '').upper() == 'CREDIT':
-                account_mask = acc.get('mask')
-                if account_mask:
-                    accounts_to_update.append(account_mask)
+                quiltt_account_ids_to_clear.append(acc.get('account_id'))
         
-        # Set is_quiltt=0 for all credit accounts that match these masks
-        if accounts_to_update:
+        # Set is_quiltt=0 and clear quiltt_account_id for matching credit accounts
+        if quiltt_account_ids_to_clear:
             redis_key = f"credit_accounts:v1:{current_user.id}"
             cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
             credit_accounts = json.loads(cached) if cached else []
             
             updated_count = 0
             for i, ca in enumerate(credit_accounts):
-                if ca.get('mask') in accounts_to_update:
+                # Match by quiltt_account_id
+                if ca.get('quiltt_account_id') in quiltt_account_ids_to_clear:
                     credit_accounts[i]['is_quiltt'] = 0
+                    credit_accounts[i]['quiltt_account_id'] = None  # Clear the link
                     updated_count += 1
             
             if updated_count > 0:
@@ -17171,7 +17577,7 @@ def quiltt_delete():
                 _redis_client.sadd(dirty_key, 'credit_accounts')
                 _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                 
-                app.logger.info(f"Set is_quiltt=0 for {updated_count} credit accounts after deleting connection {connection_id}")
+                app.logger.info(f"Set is_quiltt=0 and cleared quiltt_account_id for {updated_count} credit accounts after deleting connection {connection_id}")
         
         # Check if there are any remaining connections (before deleting this one)
         remaining_connections = [c for c in (connections or []) if c.get('connection_id') != connection_id]
@@ -17489,12 +17895,27 @@ def quiltt_sync_profile():
                     cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
                     credit_accounts = json.loads(cached) if cached else []
                     
-                    # Look for existing credit account with matching mask (or name if no mask)
+                    # If Redis is empty, also check MySQL for existing accounts
+                    if not credit_accounts:
+                        with get_db_pool().get_connection() as conn:
+                            cursor = conn.cursor(pymysql.cursors.DictCursor)
+                            cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s", (current_user.id,))
+                            credit_accounts = list(cursor.fetchall())
+                            cursor.close()
+                            # Cache in Redis if we got data from MySQL
+                            if credit_accounts and app.config.get('REDIS_OK'):
+                                _redis_client.setex(
+                                    redis_key,
+                                    PERSISTENT_CACHE_TTL,
+                                    json.dumps(credit_accounts, cls=DecimalEncoder)
+                                )
+                    
+                    # Look for existing credit account with matching quiltt_account_id first, then mask
                     existing_account = None
                     for i, acc in enumerate(credit_accounts):
-                        if account_mask and acc.get('mask') == account_mask:
+                        # First try quiltt_account_id match (most reliable)
+                        if acc.get('quiltt_account_id') == account_id:
                             existing_account = acc
-                            # If found existing account with matching mask, set is_quiltt=1
                             credit_accounts[i]['is_quiltt'] = 1
                             
                             # Save back to Redis
@@ -17509,7 +17930,41 @@ def quiltt_sync_profile():
                             _redis_client.sadd(dirty_key, 'credit_accounts')
                             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                             
-                            app.logger.info(f"Found existing credit account with mask {account_mask}, setting is_quiltt=1")
+                            app.logger.info(f"Found existing credit account with quiltt_account_id {account_id}, setting is_quiltt=1")
+                            
+                            # Create auto-adjustment entry to sync balance with bank
+                            auto_success, auto_msg = _create_credit_account_auto_adjustment(
+                                current_user.id,
+                                account_id,  # quiltt_account_id
+                                starting_balance,  # bank balance (already converted to positive above)
+                                account_mask
+                            )
+                            if auto_success:
+                                app.logger.info(f"[SYNC-PROFILE] Credit account auto-adjustment: {auto_msg}")
+                            else:
+                                app.logger.warning(f"[SYNC-PROFILE] Credit account auto-adjustment failed: {auto_msg}")
+                            
+                            break
+                        # Then try mask match (fallback)
+                        elif account_mask and acc.get('mask') == account_mask and not acc.get('quiltt_account_id'):
+                            existing_account = acc
+                            # Set both is_quiltt=1 AND quiltt_account_id for future matches
+                            credit_accounts[i]['is_quiltt'] = 1
+                            credit_accounts[i]['quiltt_account_id'] = account_id
+                            
+                            # Save back to Redis
+                            _redis_client.setex(
+                                redis_key,
+                                PERSISTENT_CACHE_TTL,
+                                json.dumps(credit_accounts, cls=DecimalEncoder)
+                            )
+                            
+                            # Mark as dirty
+                            dirty_key = f"dirty_tables:{current_user.id}"
+                            _redis_client.sadd(dirty_key, 'credit_accounts')
+                            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                            
+                            app.logger.info(f"Found existing credit account with mask {account_mask}, setting is_quiltt=1 and quiltt_account_id={account_id}")
                             
                             # Create auto-adjustment entry to sync balance with bank
                             auto_success, auto_msg = _create_credit_account_auto_adjustment(
@@ -17530,16 +17985,17 @@ def quiltt_sync_profile():
                     
                     # Only create if doesn't exist
                     if not existing_account:
-                        app.logger.info(f"Creating credit account for Quiltt account: {account_name} (mask: {account_mask}) with balance ${starting_balance}")
+                        app.logger.info(f"Creating credit account for Quiltt account: {account_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${starting_balance}")
                         
                         # Determine if it's a card or line of credit based on name/type
                         is_card = 1 if 'card' in account_name.lower() else 0
                         is_line = 1 if 'line' in account_name.lower() else 0
                         
-                        # Add credit account to Redis
+                        # Add credit account to Redis (including quiltt_account_id for direct linking)
                         account_data = {
                             'name': account_name,
                             'mask': account_mask,
+                            'quiltt_account_id': account_id,  # Store quiltt account ID for direct linking
                             'interest_rate': interest_rate,
                             'is_card': is_card,
                             'is_line': is_line,
@@ -17971,7 +18427,157 @@ def quiltt_get_connections():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, specific_account_id=None):
+def _auto_import_transaction_to_entry(user_id, entry_type, category_id, amount, date, transaction_id, blankee_credit_account_id=None):
+    """
+    Auto-import a Quiltt transaction to the appropriate budget entry table.
+    
+    Args:
+        user_id: User ID
+        entry_type: One of 'income', 'expense', 'c_expense', 'c_payment'
+        category_id: The category ID (or account_id for c_payment)
+        amount: Transaction amount (already positive)
+        date: Transaction date (YYYY-MM-DD string)
+        transaction_id: The Quiltt transaction_id for logging
+        blankee_credit_account_id: For c_payment, the Blankee credit account ID
+        
+    Returns:
+        Entry ID if successful, None otherwise
+    """
+    try:
+        import time
+        
+        if entry_type == 'income':
+            # Add to income_entries via Redis
+            redis_key = f"income_entries:v1:{user_id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            entries = json.loads(cached) if cached else []
+            
+            # Generate temporary ID
+            temp_id = int(time.time() * 1000) % 1000000
+            
+            new_entry = {
+                'id': temp_id,
+                'category_id': category_id,
+                'date': date,
+                'amount': str(amount),
+                'recurring_id': None,
+                'is_bucket': 0,
+                'original_amount': None,
+                'processed': 0,
+                'pending': 1  # needs category confirmation
+            }
+            entries.append(new_entry)
+            
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+            
+            # Mark as dirty
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, 'income_entries')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            
+            app.logger.info(f"Created income_entry {temp_id} for transaction {transaction_id} (pending=1)")
+            return temp_id
+            
+        elif entry_type == 'expense':
+            # Add to expense_entries via Redis
+            redis_key = f"expense_entries:v1:{user_id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            entries = json.loads(cached) if cached else []
+            
+            temp_id = int(time.time() * 1000) % 1000000
+            
+            new_entry = {
+                'id': temp_id,
+                'category_id': category_id,
+                'date': date,
+                'amount': str(amount),
+                'recurring_id': None,
+                'is_bucket': 0,
+                'original_amount': None,
+                'processed': 0,
+                'pending': 1,  # needs category confirmation
+                'bud_item_id': None
+            }
+            entries.append(new_entry)
+            
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+            
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, 'expense_entries')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            
+            app.logger.info(f"Created expense_entry {temp_id} for transaction {transaction_id} (pending=1)")
+            return temp_id
+            
+        elif entry_type == 'c_expense':
+            # Add to c_expense_entries via Redis
+            redis_key = f"c_expense_entries:v1:{user_id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            entries = json.loads(cached) if cached else []
+            
+            temp_id = int(time.time() * 1000) % 1000000
+            
+            new_entry = {
+                'id': temp_id,
+                'category_id': category_id,
+                'date': date,
+                'amount': str(amount),
+                'recurring_id': None,
+                'is_bucket': 0,
+                'original_amount': None,
+                'processed': 0,
+                'pending': 1,  # needs category confirmation
+                'bud_item_id': None
+            }
+            entries.append(new_entry)
+            
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+            
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, 'c_expense_entries')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            
+            app.logger.info(f"Created c_expense_entry {temp_id} for transaction {transaction_id} (pending=1)")
+            return temp_id
+            
+        elif entry_type == 'c_payment':
+            # Add to c_payment_entries via Redis
+            # c_payment_entries use account_id, not category_id
+            redis_key = f"c_payment_entries:v1:{user_id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            entries = json.loads(cached) if cached else []
+            
+            temp_id = int(time.time() * 1000) % 1000000
+            
+            new_entry = {
+                'id': temp_id,
+                'account_id': blankee_credit_account_id,  # c_payment uses account_id
+                'date': date,
+                'amount': str(amount),
+                'recurring_id': None,
+                'processed': 0
+            }
+            entries.append(new_entry)
+            
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+            
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, 'c_payment_entries')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            
+            app.logger.info(f"Created c_payment_entry {temp_id} for transaction {transaction_id}")
+            return temp_id
+            
+        else:
+            app.logger.error(f"Unknown entry_type: {entry_type}")
+            return None
+            
+    except Exception as e:
+        app.logger.error(f"Error creating {entry_type} entry for transaction {transaction_id}: {e}", exc_info=True)
+        return None
+
+
+def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, specific_account_id=None, skip_auto_import=False):
     """
     Internal function to sync transactions for a specific user
     
@@ -17980,6 +18586,8 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         start_date: Optional start date (YYYY-MM-DD) from webhook metadata
         end_date: Optional end date (YYYY-MM-DD) from webhook metadata
         specific_account_id: Optional Quiltt account_id to sync only that account (e.g., "acct_xxx")
+        skip_auto_import: If True, only store transactions in quiltt_transactions without
+                          creating income/expense entries (used during initial setup)
     
     Returns tuple: (success: bool, synced_count: int, error_message: str)
     """
@@ -17994,6 +18602,44 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             return (False, 0, 'No active Quiltt session')
         
         session_token = profile['session_token']
+        
+        # Check if session token is expired and refresh if needed
+        session_expires_at = profile.get('session_expires_at')
+        if session_expires_at:
+            from datetime import datetime
+            # Parse expiration time - handle both string and datetime objects
+            if isinstance(session_expires_at, str):
+                try:
+                    expires_at = datetime.strptime(session_expires_at, '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    expires_at = datetime.now()  # Force refresh if can't parse
+            else:
+                expires_at = session_expires_at
+            
+            # If token expires within 5 minutes, refresh it
+            if expires_at <= datetime.now():
+                app.logger.info(f"Session token expired for user {user_id} (expired at {session_expires_at}), refreshing...")
+                
+                # Get user's username for refresh - we need to look it up since this is called from webhook
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+                    user_row = cursor.fetchone()
+                    cursor.close()
+                
+                if user_row and user_row.get('username'):
+                    refresh_success = _refresh_quiltt_session_token(user_id, user_row['username'])
+                    if refresh_success:
+                        # Re-fetch profile to get new token
+                        profile = get_quiltt_profile(user_id)
+                        session_token = profile.get('session_token')
+                        app.logger.info(f"Successfully refreshed session token for user {user_id}")
+                    else:
+                        app.logger.error(f"Failed to refresh expired session token for user {user_id}")
+                        return (False, 0, 'Session token expired and refresh failed')
+                else:
+                    app.logger.error(f"Could not find username for user {user_id} to refresh token")
+                    return (False, 0, 'Session token expired and could not refresh')
         
         # Get accounts with sync enabled from Redis
         accounts = get_quiltt_accounts(user_id)
@@ -18040,19 +18686,31 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             pass
             return (False, 0, 'Uncategorized category not found')
         
-        total_synced = 0
+        # Build a mapping of Quiltt account_id → account info for determining account type
+        from quiltt_redis import get_uncategorized_category_id, get_blankee_credit_account_for_quiltt_account
+        quiltt_account_map = {acc.get('account_id'): acc for acc in sync_enabled_accounts}
         
-        # Use provided dates from webhook metadata, or default to last 30 days
+        total_synced = 0
+        total_imported = 0
+        
+        # Use provided dates from webhook metadata, or default to last 1 day
         from datetime import datetime, timedelta
         if not start_date or not end_date:
-            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
             end_date = datetime.now().strftime('%Y-%m-%d')
+            app.logger.info(f"No date range provided, using default: {start_date} to {end_date}")
         else:
-            pass
+            app.logger.info(f"Using webhook date range: {start_date} to {end_date}")
         
         # Get existing transactions from Redis to check for duplicates
         existing_transactions = get_quiltt_transactions(user_id)
         existing_txn_ids = {txn.get('transaction_id') for txn in existing_transactions}
+        
+        # IMPORTANT: Capture the set of transaction IDs that existed BEFORE this sync
+        # This is used to determine which transactions are truly NEW vs already synced
+        # Only truly NEW transactions should be auto-imported to budget entries
+        pre_sync_txn_ids = set(existing_txn_ids)  # Copy the set before we modify it
+        app.logger.info(f"Pre-sync transaction count: {len(pre_sync_txn_ids)}, skip_auto_import={skip_auto_import}")
         
         # Get all account IDs for batch fetch with Ntropy data
         account_ids = [acc['account_id'] for acc in sync_enabled_accounts]
@@ -18185,6 +18843,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 'pending': 0,
                 'transaction_type': 'expense' if is_expense else 'income',
                 'imported_to_entry_id': None,
+                'imported_entry_type': None,
                 'expense_category_id': default_expense_category_id,
                 'imported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 **ntropy_data  # Include all Ntropy fields
@@ -18199,12 +18858,98 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             if txn_db_id:
                 total_synced += 1
                 app.logger.info(f"Successfully stored {txn_id}")
+                
+                # --- AUTO-IMPORT TO BUDGET ENTRIES (Phase 2.2) ---
+                # Only auto-import if:
+                # 1. skip_auto_import is False (not during explicit setup flows like initial connection)
+                # 2. Transaction is TRULY NEW (not in pre_sync_txn_ids - the set before this sync)
+                # 
+                # This ensures:
+                # - Initial bank connection: skip_auto_import=True (via connection age check)
+                # - Historical transactions from initial sync: in pre_sync_txn_ids, won't be imported
+                # - Truly new transactions from daily sync: not in pre_sync_txn_ids, will be imported
+                is_new_transaction = txn_id not in pre_sync_txn_ids
+                
+                if not skip_auto_import and is_new_transaction:
+                    app.logger.info(f"Auto-importing NEW transaction {txn_id}")
+                    try:
+                        # Determine account type and route to correct table
+                        quiltt_account_info = quiltt_account_map.get(account_id, {})
+                        account_type = quiltt_account_info.get('account_type', '').upper()
+                        
+                        entry_type = None
+                        category_id = None
+                        blankee_credit_account_id = None
+                        
+                        if account_type == 'CREDIT':
+                            # Credit account - find the corresponding Blankee credit account
+                            blankee_account = get_blankee_credit_account_for_quiltt_account(user_id, account_id)
+                            if blankee_account:
+                                blankee_credit_account_id = blankee_account.get('id')
+                                if is_expense:
+                                    # Negative amount on credit = expense charged to card
+                                    entry_type = 'c_expense'
+                                    category_id = get_uncategorized_category_id(user_id, 'c_expense', account_id=blankee_credit_account_id)
+                                else:
+                                    # Positive amount on credit = payment to card
+                                    entry_type = 'c_payment'
+                                    # c_payment uses account_id, not category_id
+                                    category_id = blankee_credit_account_id
+                            else:
+                                app.logger.warning(f"No Blankee credit account found for Quiltt account {account_id}, skipping auto-import")
+                        else:
+                            # Depository account (checking/savings)
+                            if is_expense:
+                                entry_type = 'expense'
+                                category_id = get_uncategorized_category_id(user_id, 'expense')
+                            else:
+                                entry_type = 'income'
+                                category_id = get_uncategorized_category_id(user_id, 'income')
+                        
+                        if entry_type and category_id:
+                            # Create the entry with processed=0 (pending categorization)
+                            entry_id = _auto_import_transaction_to_entry(
+                                user_id=user_id,
+                                entry_type=entry_type,
+                                category_id=category_id,
+                                amount=amount,
+                                date=date,
+                                transaction_id=txn_id,
+                                blankee_credit_account_id=blankee_credit_account_id
+                            )
+                            
+                            if entry_id:
+                                # Update the quiltt_transaction with imported_to_entry_id
+                                transaction_data['imported_to_entry_id'] = entry_id
+                                transaction_data['imported_entry_type'] = entry_type
+                                upsert_quiltt_transaction(transaction_data, user_id)
+                                total_imported += 1
+                                app.logger.info(f"Auto-imported {txn_id} to {entry_type} entry {entry_id}")
+                            else:
+                                app.logger.error(f"Failed to auto-import {txn_id} to {entry_type}")
+                        else:
+                            app.logger.warning(f"Skipping auto-import for {txn_id}: entry_type={entry_type}, category_id={category_id}")
+                    
+                    except Exception as import_err:
+                        app.logger.error(f"Error auto-importing transaction {txn_id}: {import_err}", exc_info=True)
+                        # Don't fail the whole sync if auto-import fails
+                # --- END AUTO-IMPORT ---
             else:
                 app.logger.error(f"Failed to store transaction {txn_id} in Redis")
         
         message = f'Synced {total_synced} transactions'
         if updated_count > 0:
             message += f' ({updated_count} updated with Ntropy enrichment)'
+        if total_imported > 0:
+            message += f', {total_imported} auto-imported to budget'
+        
+        # --- CREATE NOTIFICATION FOR PENDING TRANSACTIONS ---
+        if total_imported > 0:
+            try:
+                _create_pending_transactions_notification(user_id, total_imported)
+            except Exception as notif_err:
+                app.logger.error(f"Error creating pending transactions notification: {notif_err}")
+        # --- END NOTIFICATION ---
         
         return (True, total_synced, message)
         
@@ -18217,13 +18962,141 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
 @login_required
 def quiltt_sync_transactions():
     """Manually sync transactions from Quiltt for accounts with sync enabled"""
-    success, count, message = _sync_quiltt_transactions_for_user(current_user.id)
+    # skip_auto_import=True - transactions are stored but don't auto-create budget entries
+    # Users can manually import transactions via the Transactions page
+    success, count, message = _sync_quiltt_transactions_for_user(current_user.id, skip_auto_import=True)
     
     if success:
         return jsonify({
             'status': 'success',
             'transactions_synced': count,
             'message': message
+        })
+    else:
+        return jsonify({'status': 'error', 'message': message}), 400
+
+
+@app.route('/quiltt/link-credit-account', methods=['POST'])
+@login_required
+def quiltt_link_credit_account():
+    """Link a Quiltt account to a Blankee credit account
+    
+    Request body:
+        quiltt_account_id: The Quiltt account ID (e.g., 'acct_xxx')
+        credit_account_id: The Blankee credit account ID (integer)
+    """
+    data = request.get_json() or {}
+    quiltt_account_id = data.get('quiltt_account_id')
+    credit_account_id = data.get('credit_account_id')
+    
+    if not quiltt_account_id or not credit_account_id:
+        return jsonify({'status': 'error', 'message': 'quiltt_account_id and credit_account_id are required'}), 400
+    
+    try:
+        # Verify the credit account belongs to this user
+        redis_key = f"credit_accounts:v1:{current_user.id}"
+        redis_client = cache_utils.get_redis_client()
+        cached = redis_client.get(redis_key) if redis_client else None
+        
+        credit_accounts = []
+        if cached:
+            credit_accounts = json.loads(cached)
+        else:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s", (current_user.id,))
+                credit_accounts = cursor.fetchall()
+                cursor.close()
+        
+        # Find the credit account
+        credit_account = None
+        for ca in credit_accounts:
+            if int(ca.get('id')) == int(credit_account_id):
+                credit_account = ca
+                break
+        
+        if not credit_account:
+            return jsonify({'status': 'error', 'message': 'Credit account not found'}), 404
+        
+        # Verify the Quiltt account exists and belongs to this user
+        from quiltt_redis import get_quiltt_accounts
+        quiltt_accounts = get_quiltt_accounts(current_user.id)
+        quiltt_account = None
+        for qa in quiltt_accounts:
+            if qa.get('account_id') == quiltt_account_id:
+                quiltt_account = qa
+                break
+        
+        if not quiltt_account:
+            return jsonify({'status': 'error', 'message': 'Quiltt account not found'}), 404
+        
+        # Update Redis
+        if cached:
+            for ca in credit_accounts:
+                if int(ca.get('id')) == int(credit_account_id):
+                    ca['quiltt_account_id'] = quiltt_account_id
+                    break
+            redis_client.setex(redis_key, 604800, json.dumps(credit_accounts, cls=DecimalEncoder))
+            # Mark dirty for flush to MySQL
+            dirty_key = f"dirty_tables:{current_user.id}"
+            redis_client.sadd(dirty_key, 'credit_accounts')
+            redis_client.expire(dirty_key, 604800)
+        
+        app.logger.info(f"Linked Quiltt account {quiltt_account_id} to credit account {credit_account_id} for user {current_user.id}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f"Linked {quiltt_account.get('account_name')} to {credit_account.get('name')}"
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error linking Quiltt account: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/sync-transactions-range', methods=['POST'])
+@login_required
+def quiltt_sync_transactions_range():
+    """Manually sync transactions from Quiltt with custom date range
+    
+    Request body:
+        start_date: YYYY-MM-DD format (required)
+        end_date: YYYY-MM-DD format (required)
+        auto_import: boolean - if true, auto-imports to budget entries with pending=1 (optional, default false)
+    """
+    data = request.get_json() or {}
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    auto_import = data.get('auto_import', False)
+    
+    if not start_date or not end_date:
+        return jsonify({'status': 'error', 'message': 'start_date and end_date are required'}), 400
+    
+    # Validate date format
+    from datetime import datetime
+    try:
+        datetime.strptime(start_date, '%Y-%m-%d')
+        datetime.strptime(end_date, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'status': 'error', 'message': 'Dates must be in YYYY-MM-DD format'}), 400
+    
+    # skip_auto_import is the opposite of auto_import
+    skip_auto_import = not auto_import
+    
+    success, count, message = _sync_quiltt_transactions_for_user(
+        current_user.id, 
+        start_date=start_date, 
+        end_date=end_date,
+        skip_auto_import=skip_auto_import
+    )
+    
+    if success:
+        return jsonify({
+            'status': 'success',
+            'transactions_synced': count,
+            'message': message,
+            'date_range': {'start': start_date, 'end': end_date},
+            'auto_import_enabled': auto_import
         })
     else:
         return jsonify({'status': 'error', 'message': message}), 400
@@ -18484,6 +19357,95 @@ def quiltt_clear_transaction_cache():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/quiltt/test-sync-debug', methods=['GET'])
+@login_required
+def quiltt_test_sync_debug():
+    """Debug endpoint to see what transactions Quiltt returns vs what we have"""
+    try:
+        from quiltt_redis import get_quiltt_profile, get_quiltt_accounts, get_quiltt_transactions
+        from quiltt_utils import QuilttClient
+        from datetime import datetime, timedelta
+        
+        profile = get_quiltt_profile(current_user.id)
+        if not profile or not profile.get('session_token'):
+            return jsonify({'status': 'error', 'message': 'No active session'}), 400
+        
+        session_token = profile['session_token']
+        
+        # Get sync-enabled accounts
+        accounts = get_quiltt_accounts(current_user.id) or []
+        sync_enabled = [acc for acc in accounts if acc.get('sync_transactions') == 1 and acc.get('is_active') == 1]
+        
+        # Get existing transactions from Redis
+        existing = get_quiltt_transactions(current_user.id)
+        existing_ids = {t.get('transaction_id') for t in existing}
+        
+        # Fetch from Quiltt API
+        quiltt_client = QuilttClient()
+        account_ids = [acc['account_id'] for acc in sync_enabled]
+        
+        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        
+        api_transactions = quiltt_client.get_transactions_with_ntropy(
+            session_token=session_token,
+            account_ids=account_ids,
+            start_date=start_date,
+            end_date=end_date,
+            limit=1000
+        )
+        
+        # Find transactions from today
+        today = datetime.now().strftime('%Y-%m-%d')
+        today_txns = [t for t in (api_transactions or []) if t.get('date') == today]
+        
+        # Check which would be skipped
+        results = []
+        for txn in today_txns:
+            txn_id = txn.get('id')
+            status = txn.get('status')
+            in_existing = txn_id in existing_ids
+            
+            # Find existing to check enriched_at
+            existing_txn = None
+            if in_existing:
+                for e in existing:
+                    if e.get('transaction_id') == txn_id:
+                        existing_txn = e
+                        break
+            
+            has_enriched = existing_txn and existing_txn.get('ntropy_enriched_at') if existing_txn else False
+            imported_id = existing_txn.get('imported_to_entry_id') if existing_txn else None
+            
+            would_skip = status == 'PENDING' or (in_existing and has_enriched)
+            
+            results.append({
+                'transaction_id': txn_id,
+                'date': txn.get('date'),
+                'amount': txn.get('amount'),
+                'description': txn.get('description', '')[:50],
+                'status': status,
+                'in_existing_redis': in_existing,
+                'has_ntropy_enriched_at': bool(has_enriched),
+                'imported_to_entry_id': imported_id,
+                'would_skip': would_skip,
+                'skip_reason': 'PENDING' if status == 'PENDING' else ('already enriched' if has_enriched else 'none')
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'sync_enabled_accounts': len(sync_enabled),
+            'existing_transactions_in_redis': len(existing),
+            'api_transactions_total': len(api_transactions or []),
+            'today_transactions': len(today_txns),
+            'today_details': results
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in sync debug: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/quiltt/check-mysql-ntropy', methods=['GET'])
 @login_required
 def quiltt_check_mysql_ntropy():
@@ -18614,6 +19576,70 @@ def quiltt_check_redis_data():
         
     except Exception as e:
         app.logger.error(f"Error checking Redis data: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/test-uncategorized-helper', methods=['GET'])
+@login_required
+def quiltt_test_uncategorized_helper():
+    """Test the get_uncategorized_category_id helper function"""
+    try:
+        from quiltt_redis import get_uncategorized_category_id, get_blankee_credit_account_for_quiltt_account, get_quiltt_accounts
+        
+        results = {
+            'user_id': current_user.id,
+            'income_uncategorized': None,
+            'expense_uncategorized': None,
+            'credit_accounts': []
+        }
+        
+        # Test income uncategorized
+        income_cat_id = get_uncategorized_category_id(current_user.id, 'income')
+        results['income_uncategorized'] = {
+            'category_id': income_cat_id,
+            'found': income_cat_id is not None
+        }
+        
+        # Test expense uncategorized
+        expense_cat_id = get_uncategorized_category_id(current_user.id, 'expense')
+        results['expense_uncategorized'] = {
+            'category_id': expense_cat_id,
+            'found': expense_cat_id is not None
+        }
+        
+        # Test credit account mapping (if user has Quiltt credit accounts)
+        quiltt_accounts = get_quiltt_accounts(current_user.id)
+        credit_accounts = [qa for qa in quiltt_accounts if qa.get('account_type', '').upper() == 'CREDIT']
+        
+        for qa in credit_accounts[:3]:  # Limit to first 3
+            quiltt_account_id = qa.get('account_id')
+            blankee_account = get_blankee_credit_account_for_quiltt_account(current_user.id, quiltt_account_id)
+            
+            c_expense_cat_id = None
+            if blankee_account:
+                c_expense_cat_id = get_uncategorized_category_id(
+                    current_user.id, 
+                    'c_expense', 
+                    account_id=blankee_account.get('id')
+                )
+            
+            results['credit_accounts'].append({
+                'quiltt_account_id': quiltt_account_id,
+                'quiltt_account_name': qa.get('account_name'),
+                'quiltt_mask': qa.get('mask'),
+                'blankee_account_found': blankee_account is not None,
+                'blankee_account_id': blankee_account.get('id') if blankee_account else None,
+                'blankee_account_name': blankee_account.get('name') if blankee_account else None,
+                'c_expense_uncategorized_id': c_expense_cat_id
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'results': results
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error testing uncategorized helper: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -18865,9 +19891,9 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
     
     Args:
         user_id: User ID
-        quiltt_account_id: Quiltt account ID
+        quiltt_account_id: Quiltt account ID (used as primary lookup)
         bank_balance: Current balance from the bank
-        account_mask: Account mask to match with credit_accounts
+        account_mask: Account mask (fallback for matching)
         
     Returns: (success: bool, message: str)
     """
@@ -18876,9 +19902,9 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
         today = date_class.today()
         today_str = today.strftime('%Y-%m-%d')
         
-        app.logger.info(f"[CA-AUTO-ADJUST] Creating adjustment for user {user_id}, mask {account_mask}: bank balance ${bank_balance}")
+        app.logger.info(f"[CA-AUTO-ADJUST] Creating adjustment for user {user_id}, quiltt_id {quiltt_account_id}, mask {account_mask}: bank balance ${bank_balance}")
         
-        # Find the credit account by mask
+        # Find the credit account - first by quiltt_account_id, then by mask
         credit_accounts = None
         redis_key = f"credit_accounts:v1:{user_id}"
         if app.config.get('REDIS_OK'):
@@ -18896,16 +19922,22 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                 credit_accounts = list(cursor.fetchall())
                 cursor.close()
         
-        # Find the matching credit account
+        # Find the matching credit account - quiltt_account_id first, then mask
         target_account = None
         for ca in credit_accounts:
-            if ca.get('mask') == account_mask:
+            # Primary: match by quiltt_account_id
+            if ca.get('quiltt_account_id') == quiltt_account_id:
                 target_account = ca
+                app.logger.info(f"[CA-AUTO-ADJUST] Found credit account by quiltt_account_id {quiltt_account_id}")
                 break
+            # Fallback: match by mask
+            elif ca.get('mask') == account_mask and not target_account:
+                target_account = ca
+                app.logger.info(f"[CA-AUTO-ADJUST] Found credit account by mask {account_mask}")
         
         if not target_account:
-            app.logger.warning(f"[CA-AUTO-ADJUST] No credit account found with mask {account_mask}")
-            return False, f"No credit account found with mask {account_mask}"
+            app.logger.warning(f"[CA-AUTO-ADJUST] No credit account found for quiltt_id {quiltt_account_id} or mask {account_mask}")
+            return False, f"No credit account found for quiltt_id {quiltt_account_id} or mask {account_mask}"
         
         account_id = target_account.get('id')
         starting_balance = float(target_account.get('starting_balance', 0))
@@ -18985,14 +20017,33 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
             
             # Find auto adjustment category for this account
             auto_cat = None
-            for cat in c_expense_categories:
+            for cat in (c_expense_categories or []):
                 if str(cat.get('account_id')) == str(account_id) and cat.get('is_auto_adjustment') == 1:
                     auto_cat = cat
                     break
             
             if not auto_cat:
-                app.logger.warning(f"[CA-AUTO-ADJUST] No Uncategorized category found for account {account_id}")
-                return False, f"No Uncategorized category found for credit account"
+                # Create the Uncategorized category if it doesn't exist
+                app.logger.info(f"[CA-AUTO-ADJUST] Creating missing Uncategorized category for account {account_id}")
+                new_cat_id = _add_category_to_redis('c_expense_categories', user_id, {
+                    'account_id': account_id,
+                    'name': 'Uncategorized',
+                    'display_order': 0,
+                    'group_id': None,
+                    'is_recurring': 0,
+                    'no_end_date': 0,
+                    'hidden': 0,
+                    'is_bud': 0,
+                    'is_interest': 0,
+                    'is_auto_adjustment': 1
+                })
+                
+                if new_cat_id:
+                    app.logger.info(f"[CA-AUTO-ADJUST] Created Uncategorized category with ID {new_cat_id}")
+                    auto_cat = {'id': new_cat_id, 'account_id': account_id, 'is_auto_adjustment': 1}
+                else:
+                    app.logger.error(f"[CA-AUTO-ADJUST] Failed to create Uncategorized category for account {account_id}")
+                    return False, f"Failed to create Uncategorized category for credit account"
             
             category_id = auto_cat.get('id')
             
@@ -19142,14 +20193,39 @@ def quiltt_toggle_sync():
                         cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
                         credit_accounts = json.loads(cached) if cached else []
                         
-                        # Look for existing credit account with matching mask
+                        # If Redis is empty, also check MySQL for existing accounts
+                        if not credit_accounts:
+                            with get_db_pool().get_connection() as conn:
+                                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s", (current_user.id,))
+                                credit_accounts = list(cursor.fetchall())
+                                cursor.close()
+                                # Cache in Redis if we got data from MySQL
+                                if credit_accounts and app.config.get('REDIS_OK'):
+                                    _redis_client.setex(
+                                        redis_key,
+                                        PERSISTENT_CACHE_TTL,
+                                        json.dumps(credit_accounts, cls=DecimalEncoder)
+                                    )
+                        
+                        # Look for existing credit account - first by quiltt_account_id, then by mask
                         existing_account = None
                         updated = False
                         for i, ca in enumerate(credit_accounts):
-                            if ca.get('mask') == account_mask:
+                            # First check quiltt_account_id (most reliable)
+                            if ca.get('quiltt_account_id') == account_id:
                                 existing_account = ca
                                 credit_accounts[i]['is_quiltt'] = 1
                                 updated = True
+                                app.logger.info(f"Found credit account by quiltt_account_id {account_id} (toggle-sync enable)")
+                                break
+                            # Fallback to mask matching (and set quiltt_account_id for future)
+                            elif ca.get('mask') == account_mask and not ca.get('quiltt_account_id'):
+                                existing_account = ca
+                                credit_accounts[i]['is_quiltt'] = 1
+                                credit_accounts[i]['quiltt_account_id'] = account_id  # Link for future
+                                updated = True
+                                app.logger.info(f"Found credit account by mask {account_mask}, linking quiltt_account_id {account_id}")
                                 break
                         
                         if updated:
@@ -19165,20 +20241,21 @@ def quiltt_toggle_sync():
                             _redis_client.sadd(dirty_key, 'credit_accounts')
                             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                             
-                            app.logger.info(f"Set is_quiltt=1 for credit account with mask {account_mask} (toggle-sync enable)")
+                            app.logger.info(f"Set is_quiltt=1 for credit account (toggle-sync enable)")
                         
                         elif not existing_account:
                             # Credit account doesn't exist - create it (mirror bank connection logic)
-                            app.logger.info(f"Creating credit account for Quiltt account: {account_name} (mask: {account_mask}) with balance ${current_balance}")
+                            app.logger.info(f"Creating credit account for Quiltt account: {account_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${current_balance}")
                             
                             # Determine if it's a card or line of credit based on name/type
                             is_card = 1 if 'card' in account_name.lower() else 0
                             is_line = 1 if 'line' in account_name.lower() else 0
                             
-                            # Add credit account to Redis
+                            # Add credit account to Redis (including quiltt_account_id)
                             account_data = {
                                 'name': account_name,
                                 'mask': account_mask,
+                                'quiltt_account_id': account_id,  # Store for direct linking
                                 'interest_rate': 0.0,
                                 'is_card': is_card,
                                 'is_line': is_line,
@@ -19322,11 +20399,14 @@ def quiltt_toggle_sync():
                 
                 
                 # Resync transactions for this specific account only
+                # Skip auto-import - only store transactions for historical record
+                # Balance adjustment handles syncing the budget to match bank balance
                 try:
                     pass
                     success, count, message = _sync_quiltt_transactions_for_user(
                         current_user.id, 
-                        specific_account_id=account_id
+                        specific_account_id=account_id,
+                        skip_auto_import=True
                     )
                     
                     # Check if this is a checking account and create auto-adjustment
@@ -19430,36 +20510,47 @@ def quiltt_toggle_sync():
                         quiltt_account = qa
                         break
                 
-                # If this is a credit account, set is_quiltt=0 on the credit account
+                # If this is a credit account, set is_quiltt=0 and clear quiltt_account_id
                 if quiltt_account and quiltt_account.get('account_type', '').upper() == 'CREDIT':
+                    # Find and update the credit account by quiltt_account_id first
+                    redis_key = f"credit_accounts:v1:{current_user.id}"
+                    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                    credit_accounts = json.loads(cached) if cached else []
+                    
                     account_mask = quiltt_account.get('mask')
-                    if account_mask:
-                        # Find and update the credit account
-                        redis_key = f"credit_accounts:v1:{current_user.id}"
-                        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-                        credit_accounts = json.loads(cached) if cached else []
+                    # Extract last 4 digits for comparison (Quiltt may store full mask like XXXX-XXXX-XXXX-7691)
+                    quiltt_last4 = account_mask[-4:] if account_mask and len(account_mask) >= 4 else account_mask
+                    
+                    updated = False
+                    for i, ca in enumerate(credit_accounts):
+                        # Match by quiltt_account_id first
+                        if ca.get('quiltt_account_id') == account_id:
+                            credit_accounts[i]['is_quiltt'] = 0
+                            credit_accounts[i]['quiltt_account_id'] = None  # Clear the link
+                            updated = True
+                            app.logger.info(f"Set is_quiltt=0 and cleared quiltt_account_id for credit account (toggle-sync off, quiltt_id={account_id})")
+                            break
+                        # Fallback: match by last 4 digits of mask
+                        ca_mask = ca.get('mask')
+                        ca_last4 = ca_mask[-4:] if ca_mask and len(ca_mask) >= 4 else ca_mask
+                        if quiltt_last4 and ca_last4 and ca_last4 == quiltt_last4:
+                            credit_accounts[i]['is_quiltt'] = 0
+                            updated = True
+                            app.logger.info(f"Set is_quiltt=0 for credit account by mask last4 {ca_last4} (toggle-sync off)")
+                            break
+                    
+                    if updated:
+                        # Save back to Redis
+                        _redis_client.setex(
+                            redis_key,
+                            PERSISTENT_CACHE_TTL,
+                            json.dumps(credit_accounts, cls=DecimalEncoder)
+                        )
                         
-                        updated = False
-                        for i, ca in enumerate(credit_accounts):
-                            if ca.get('mask') == account_mask:
-                                credit_accounts[i]['is_quiltt'] = 0
-                                updated = True
-                                break
-                        
-                        if updated:
-                            # Save back to Redis
-                            _redis_client.setex(
-                                redis_key,
-                                PERSISTENT_CACHE_TTL,
-                                json.dumps(credit_accounts, cls=DecimalEncoder)
-                            )
-                            
-                            # Mark as dirty
-                            dirty_key = f"dirty_tables:{current_user.id}"
-                            _redis_client.sadd(dirty_key, 'credit_accounts')
-                            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-                            
-                            app.logger.info(f"Set is_quiltt=0 for credit account with mask {account_mask} (toggle-sync)")
+                        # Mark as dirty
+                        dirty_key = f"dirty_tables:{current_user.id}"
+                        _redis_client.sadd(dirty_key, 'credit_accounts')
+                        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                 
                 # Delete all transactions for this account from Redis and MySQL
                 try:
@@ -19518,34 +20609,45 @@ def quiltt_update_account():
                     break
             
             if quiltt_account and quiltt_account.get('account_type', '').upper() == 'CREDIT':
+                # Find and update the credit account by quiltt_account_id first
+                redis_key = f"credit_accounts:v1:{current_user.id}"
+                cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+                credit_accounts = json.loads(cached) if cached else []
+                
                 account_mask = quiltt_account.get('mask')
-                if account_mask:
-                    # Find and update the credit account
-                    redis_key = f"credit_accounts:v1:{current_user.id}"
-                    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-                    credit_accounts = json.loads(cached) if cached else []
+                # Extract last 4 digits for comparison
+                quiltt_last4 = account_mask[-4:] if account_mask and len(account_mask) >= 4 else account_mask
+                
+                updated = False
+                for i, ca in enumerate(credit_accounts):
+                    # Match by quiltt_account_id first
+                    if ca.get('quiltt_account_id') == account_id:
+                        credit_accounts[i]['is_quiltt'] = 0
+                        credit_accounts[i]['quiltt_account_id'] = None  # Clear the link
+                        updated = True
+                        app.logger.info(f"Set is_quiltt=0 and cleared quiltt_account_id (update-account, quiltt_id={account_id})")
+                        break
+                    # Fallback: match by last 4 digits of mask
+                    ca_mask = ca.get('mask')
+                    ca_last4 = ca_mask[-4:] if ca_mask and len(ca_mask) >= 4 else ca_mask
+                    if quiltt_last4 and ca_last4 and ca_last4 == quiltt_last4:
+                        credit_accounts[i]['is_quiltt'] = 0
+                        updated = True
+                        app.logger.info(f"Set is_quiltt=0 for credit account by mask last4 {ca_last4} (update-account)")
+                        break
+                
+                if updated:
+                    # Save back to Redis
+                    _redis_client.setex(
+                        redis_key,
+                        PERSISTENT_CACHE_TTL,
+                        json.dumps(credit_accounts, cls=DecimalEncoder)
+                    )
                     
-                    updated = False
-                    for i, ca in enumerate(credit_accounts):
-                        if ca.get('mask') == account_mask:
-                            credit_accounts[i]['is_quiltt'] = 0
-                            updated = True
-                            break
-                    
-                    if updated:
-                        # Save back to Redis
-                        _redis_client.setex(
-                            redis_key,
-                            PERSISTENT_CACHE_TTL,
-                            json.dumps(credit_accounts, cls=DecimalEncoder)
-                        )
-                        
-                        # Mark as dirty
-                        dirty_key = f"dirty_tables:{current_user.id}"
-                        _redis_client.sadd(dirty_key, 'credit_accounts')
-                        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-                        
-                        app.logger.info(f"Set is_quiltt=0 for credit account with mask {account_mask}")
+                    # Mark as dirty
+                    dirty_key = f"dirty_tables:{current_user.id}"
+                    _redis_client.sadd(dirty_key, 'credit_accounts')
+                    _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
         return jsonify({'status': 'success'})
         
@@ -19570,7 +20672,8 @@ def quiltt_sync_transactions_setup():
         for account_id in account_ids:
             success, count, message = _sync_quiltt_transactions_for_user(
                 current_user.id,
-                specific_account_id=account_id
+                specific_account_id=account_id,
+                skip_auto_import=True  # During setup, only store transactions without creating entries
             )
             if success:
                 total_synced += count
@@ -20054,6 +21157,7 @@ def quiltt_webhook():
                 current_time = int(time.time())
                 webhook_time = int(quiltt_timestamp)
                 if abs(current_time - webhook_time) > 300:  # 5 minutes
+                    app.logger.warning(f"Quiltt webhook timestamp expired: webhook_time={webhook_time}, current_time={current_time}, diff={abs(current_time - webhook_time)}s")
                     return '', 204
                 
                 # Verify signature
@@ -20072,12 +21176,14 @@ def quiltt_webhook():
                     return '', 204
                 
         
+        # Log incoming webhook for debugging
+        app.logger.info(f"Quiltt webhook received: eventTypes={payload.get('eventTypes', [])}, events_count={len(payload.get('events', []))}")
         
         event_types = payload.get('eventTypes', [])
         events = payload.get('events', [])
         
         if not events:
-            pass
+            app.logger.warning(f"Quiltt webhook had no events. Full payload: {payload}")
             return '', 204
         
         with get_db_pool().get_connection() as conn:
@@ -20102,7 +21208,7 @@ def quiltt_webhook():
                 user_id = get_user_id_by_profile_id(profile_id)
                 
                 if not user_id:
-                    pass
+                    app.logger.warning(f"Quiltt webhook: No user found for profile_id={profile_id}, event_type={event_type}")
                     continue
                 
                 # Store webhook event in Redis (will flush to MySQL periodically)
@@ -20150,17 +21256,39 @@ def quiltt_webhook():
                     start_date = metadata_obj.get('startDate')
                     end_date = metadata_obj.get('endDate')
                     
-                    if start_date and end_date:
-                        pass
-                        # Trigger automatic transaction sync with date range
-                        success, count, message = _sync_quiltt_transactions_for_user(user_id, start_date, end_date)
-                        
-                        if success:
-                            pass
-                        else:
-                            app.logger.error(f"Transaction sync failed: {message}")
+                    # If no date range provided, default to last 1 day
+                    if not start_date or not end_date:
+                        from datetime import datetime, timedelta
+                        end_date = datetime.now().strftime('%Y-%m-%d')
+                        start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+                        app.logger.info(f"Webhook: No date range in metadata, using default: {start_date} to {end_date}")
+                    
+                    # Determine if this is the initial connection or a subsequent sync
+                    # Check when the connection was created - if within last 10 minutes, skip auto-import
+                    # This prevents auto-importing during initial bank connection setup
+                    skip_auto_import = False
+                    if connection_id:
+                        cursor.execute("""
+                            SELECT created_at FROM quiltt_connections 
+                            WHERE user_id = %s AND connection_id = %s
+                        """, (user_id, connection_id))
+                        conn_row = cursor.fetchone()
+                        if conn_row and conn_row.get('created_at'):
+                            from datetime import datetime, timedelta
+                            created_at = conn_row['created_at']
+                            minutes_since_creation = (datetime.now() - created_at).total_seconds() / 60
+                            if minutes_since_creation < 10:
+                                skip_auto_import = True
+                                app.logger.info(f"Webhook: Connection {connection_id} created {minutes_since_creation:.1f} mins ago - skipping auto-import")
+                            else:
+                                app.logger.info(f"Webhook: Connection {connection_id} created {minutes_since_creation:.1f} mins ago - enabling auto-import")
+                    
+                    success, count, message = _sync_quiltt_transactions_for_user(user_id, start_date, end_date, skip_auto_import=skip_auto_import)
+                    
+                    if success:
+                        app.logger.info(f"Webhook transaction sync: {message}")
                     else:
-                        pass
+                        app.logger.error(f"Transaction sync failed: {message}")
                 
                 # ===== CONNECTION ERROR EVENTS =====
                 elif event_type and event_type.startswith('connection.synced.errored'):
@@ -20259,9 +21387,21 @@ def quiltt_webhook():
                     end_date = metadata_obj.get('endDate')
                     
                     if conn_id_in_metadata and start_date and end_date:
-                        pass
-                        # Trigger transaction sync
-                        success, count, message = _sync_quiltt_transactions_for_user(user_id, start_date, end_date)
+                        # Check if connection was recently created (within 10 mins) to skip auto-import
+                        skip_auto_import = False
+                        cursor.execute("""
+                            SELECT created_at FROM quiltt_connections 
+                            WHERE user_id = %s AND connection_id = %s
+                        """, (user_id, conn_id_in_metadata))
+                        conn_row = cursor.fetchone()
+                        if conn_row and conn_row.get('created_at'):
+                            from datetime import datetime, timedelta
+                            created_at = conn_row['created_at']
+                            minutes_since_creation = (datetime.now() - created_at).total_seconds() / 60
+                            if minutes_since_creation < 10:
+                                skip_auto_import = True
+                        
+                        success, count, message = _sync_quiltt_transactions_for_user(user_id, start_date, end_date, skip_auto_import=skip_auto_import)
                         if success:
                             pass
                 

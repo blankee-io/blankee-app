@@ -2061,20 +2061,12 @@
                     );
                 });
                 
-                // Wait for all updates to complete
+                // Wait for all account updates to complete
                 Promise.all(updatePromises)
                     .then(function() {
-                        // Sync transactions for selected accounts
-                        return $.ajax({
-                            url: '/quiltt/sync-transactions-setup',
-                            method: 'POST',
-                            contentType: 'application/json',
-                            data: JSON.stringify({
-                                account_ids: selectedAccountIds
-                            })
-                        });
-                    })
-                    .then(function() {
+                        // Skip transaction sync here - let the webhook handle it in background
+                        // The webhook will fire after connection.synced.successful and sync transactions
+                        // This makes the connection flow much faster for the user
                         // Poll for balances before proceeding
                         // Auto-adjustment will be triggered after balances are confirmed
                         pollForBalances(selectedAccountIds);
