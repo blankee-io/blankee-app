@@ -946,9 +946,10 @@
                     // Account name row
                     const accountNameRow = document.createElement('div');
                     accountNameRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-name-row');
+                    const maskDisplay = account.mask ? '...' + account.mask.slice(-4) : '';
                     accountNameRow.innerHTML = `
                         <div class="dashboard-d-label-cell">${account.name}</div>
-                        <div class="dashboard-d-amount-cell"></div>
+                        <div class="dashboard-d-amount-cell">${maskDisplay}</div>
                     `;
                     caDiv.appendChild(accountNameRow);
 

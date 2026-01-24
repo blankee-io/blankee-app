@@ -1,5 +1,22 @@
 // General Functions
 
+// Calendarnav shadow on scroll
+(function() {
+    const calendarnav = document.querySelector('.calendarnav');
+    if (calendarnav) {
+        function updateCalendarnavShadow() {
+            if (window.scrollY > 0) {
+                calendarnav.classList.add('scrolled');
+            } else {
+                calendarnav.classList.remove('scrolled');
+            }
+        }
+        window.addEventListener('scroll', updateCalendarnavShadow);
+        // Run once immediately in case page is already scrolled
+        updateCalendarnavShadow();
+    }
+})();
+
 // Format a number with commas and 2 decimal places (e.g., 1234567.89 -> "1,234,567.89")
 function formatNumberWithCommas(value) {
     const num = parseFloat(value) || 0;
