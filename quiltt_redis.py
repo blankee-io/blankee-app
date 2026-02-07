@@ -1014,7 +1014,10 @@ def get_quiltt_webhook_events(user_id: Optional[int] = None) -> List[Dict[str, A
 
 def upsert_quiltt_webhook_event(event_data: Dict[str, Any], user_id: int) -> bool:
     """
-    Insert or update a Quiltt webhook event (Redis-first).
+    Insert or update a Quiltt webhook event.
+    
+    If user is hydrated: Write to Redis (standard Redis-first pattern)
+    If user is NOT hydrated: Write directly to MySQL to avoid losing the event
     
     Args:
         event_data: Dict with event fields (event_id, event_type, profile_id, connection_id, payload)
@@ -1024,39 +1027,78 @@ def upsert_quiltt_webhook_event(event_data: Dict[str, Any], user_id: int) -> boo
         True if successful
     """
     try:
-        # Get existing events from Redis or MySQL
-        cached_data = _get_from_redis('quiltt_webhook_events', user_id)
-        
-        if cached_data is None:
-            # Not in Redis - load from MySQL
-            cached_data = get_quiltt_webhook_events(user_id)
-        
-        if not isinstance(cached_data, list):
-            cached_data = []
-        
         event_id = event_data.get('event_id')
+        event_type = event_data.get('event_type')
+        profile_id = event_data.get('profile_id')
+        connection_id = event_data.get('connection_id')
+        payload = event_data.get('payload', {})
+        processed = event_data.get('processed', 0)
         
-        # Check if event already exists
-        existing_idx = None
-        for i, evt in enumerate(cached_data):
-            if evt.get('event_id') == event_id:
-                existing_idx = i
-                break
+        # Check if user is hydrated in Redis
+        if is_user_hydrated(user_id):
+            # User is hydrated - use Redis-first pattern
+            cached_data = _get_from_redis('quiltt_webhook_events', user_id)
+            
+            if cached_data is None:
+                cached_data = get_quiltt_webhook_events(user_id)
+            
+            if not isinstance(cached_data, list):
+                cached_data = []
+            
+            # Check if event already exists
+            existing_idx = None
+            for i, evt in enumerate(cached_data):
+                if evt.get('event_id') == event_id:
+                    existing_idx = i
+                    break
+            
+            if existing_idx is not None:
+                # Update existing
+                cached_data[existing_idx].update(event_data)
+            else:
+                # Add new - generate temp ID
+                next_id = max((e.get('id', 0) for e in cached_data), default=0) + 1
+                if next_id < 1000000000:
+                    next_id = 1000000000 + len(cached_data)
+                event_data['id'] = next_id
+                event_data['created_at'] = datetime.now().isoformat()
+                cached_data.append(event_data)
+            
+            # Save to Redis and mark dirty
+            result = _set_to_redis('quiltt_webhook_events', user_id, cached_data)
+            logger.info(f"Stored webhook event {event_id} in Redis for hydrated user {user_id}: {result}")
+            return result
         
-        if existing_idx is not None:
-            # Update existing
-            cached_data[existing_idx].update(event_data)
         else:
-            # Add new - generate temp ID
-            next_id = max((e.get('id', 0) for e in cached_data), default=0) + 1
-            if next_id < 1000000000:
-                next_id = 1000000000 + len(cached_data)
-            event_data['id'] = next_id
-            event_data['created_at'] = datetime.now().isoformat()
-            cached_data.append(event_data)
-        
-        # Save to Redis
-        return _set_to_redis('quiltt_webhook_events', user_id, cached_data)
+            # User is NOT hydrated - write directly to MySQL to avoid losing the event
+            logger.info(f"User {user_id} not hydrated - writing webhook event {event_id} directly to MySQL")
+            
+            # Convert payload to JSON string if needed
+            if isinstance(payload, dict):
+                payload_json = json.dumps(payload, cls=DecimalEncoder)
+            else:
+                payload_json = payload
+            
+            pool = get_db_pool()
+            conn = pool.get_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        INSERT INTO quiltt_webhook_events 
+                        (event_id, event_type, profile_id, connection_id, payload, processed, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                        ON DUPLICATE KEY UPDATE
+                            event_type = VALUES(event_type),
+                            profile_id = VALUES(profile_id),
+                            connection_id = VALUES(connection_id),
+                            payload = VALUES(payload),
+                            processed = VALUES(processed)
+                    """, (event_id, event_type, profile_id, connection_id, payload_json, processed))
+                    conn.commit()
+                    logger.info(f"Stored webhook event {event_id} directly to MySQL for non-hydrated user {user_id}")
+                    return True
+            finally:
+                conn.close()
         
     except Exception as e:
         logger.error(f"Error upserting Quiltt webhook event: {e}", exc_info=True)

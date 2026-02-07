@@ -10290,6 +10290,10 @@ html.modal-open {
     color: #dc3545;
 }
 
+.connection-status.error {
+    color: #dc3545;
+}
+
 .connection-status.syncing {
     color: #ffc107;
 }
@@ -10439,9 +10443,8 @@ html.modal-open {
     display: flex;
     align-items: center;
     gap: 12px;
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
-    max-width: calc(100% - 60px);
     margin-right: 10px;
     overflow: hidden;
 }
@@ -10460,15 +10463,15 @@ html.modal-open {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
-    max-width: 100%;
+    width: 0;
     text-align: left;
     display: block;
 }
 
 .account-info label strong {
-    display: block;
+    display: inline;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -10515,7 +10518,7 @@ html.modal-open {
     padding: 20px 0px;
     background: #f8f9fa;
     border-radius: 8px;
-    min-width: 345px;
+    min-width: 0;
 }
 
 .no-connections i {

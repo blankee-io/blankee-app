@@ -556,6 +556,8 @@ def _dehydrate_user_data(user_id: int):
                           'recurring_income_buckets', 'recurring_expense_buckets', 'recurring_c_expense_buckets']:
                 pending_key = f"pending_deletes:{table}:{user_id}"
                 _redis_client.delete(pending_key)
+            # Clean up Quiltt-related keys
+            _redis_client.delete(f"pending_webhook_deletes:{user_id}")
             
             elapsed = time.time() - start_time
             logger.info(f"[DEHYDRATION] ✓ User {user_id} dehydrated: {len(keys_to_delete)} Redis keys deleted in {elapsed:.2f}s")
