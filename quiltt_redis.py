@@ -1079,26 +1079,20 @@ def upsert_quiltt_webhook_event(event_data: Dict[str, Any], user_id: int) -> boo
             else:
                 payload_json = payload
             
-            pool = get_db_pool()
-            conn = pool.get_connection()
-            try:
-                with conn.cursor() as cursor:
-                    cursor.execute("""
-                        INSERT INTO quiltt_webhook_events 
-                        (event_id, event_type, profile_id, connection_id, payload, processed, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                        ON DUPLICATE KEY UPDATE
-                            event_type = VALUES(event_type),
-                            profile_id = VALUES(profile_id),
-                            connection_id = VALUES(connection_id),
-                            payload = VALUES(payload),
-                            processed = VALUES(processed)
-                    """, (event_id, event_type, profile_id, connection_id, payload_json, processed))
-                    conn.commit()
-                    logger.info(f"Stored webhook event {event_id} directly to MySQL for non-hydrated user {user_id}")
-                    return True
-            finally:
-                conn.close()
+            with get_db_pool().get_cursor(commit=True, dictionary=True) as cursor:
+                cursor.execute("""
+                    INSERT INTO quiltt_webhook_events 
+                    (event_id, event_type, profile_id, connection_id, payload, processed, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        event_type = VALUES(event_type),
+                        profile_id = VALUES(profile_id),
+                        connection_id = VALUES(connection_id),
+                        payload = VALUES(payload),
+                        processed = VALUES(processed)
+                """, (event_id, event_type, profile_id, connection_id, payload_json, processed))
+                logger.info(f"Stored webhook event {event_id} directly to MySQL for non-hydrated user {user_id}")
+                return True
         
     except Exception as e:
         logger.error(f"Error upserting Quiltt webhook event: {e}", exc_info=True)

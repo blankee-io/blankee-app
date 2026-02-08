@@ -62,6 +62,9 @@ def _get_user_categories(user_id: int) -> Dict[str, List[str]]:
     """
     Get all categories for a user, organized for Ntropy.
     
+    Note: "Uncategorized" and "Starting Balance" are NOT sent to Ntropy.
+    This ensures Ntropy only suggests these as fallbacks.
+    
     Returns:
         {
             "incoming": ["Wages", "Variable", ...],
@@ -71,35 +74,32 @@ def _get_user_categories(user_id: int) -> Dict[str, List[str]]:
     incoming = []
     outgoing = []
     
-    # Get income categories -> incoming
+    # Categories to exclude from Ntropy
+    excluded_names = {'uncategorized', 'starting balance'}
+    
+    # Get income categories -> incoming (exclude Uncategorized, Starting Balance)
     income_cats = _get_categories_from_redis('income_categories', user_id)
     if income_cats:
         for cat in income_cats:
             name = cat.get('name')
-            if name and name not in incoming:
+            if name and name not in incoming and name.lower() not in excluded_names:
                 incoming.append(name)
     
-    # Get expense categories -> outgoing
+    # Get expense categories -> outgoing (exclude Uncategorized, Starting Balance)
     expense_cats = _get_categories_from_redis('expense_categories', user_id)
     if expense_cats:
         for cat in expense_cats:
             name = cat.get('name')
-            if name and name not in outgoing:
+            if name and name not in outgoing and name.lower() not in excluded_names:
                 outgoing.append(name)
     
-    # Get credit expense categories -> outgoing (merged)
+    # Get credit expense categories -> outgoing (merged, exclude Uncategorized, Starting Balance)
     c_expense_cats = _get_categories_from_redis('c_expense_categories', user_id)
     if c_expense_cats:
         for cat in c_expense_cats:
             name = cat.get('name')
-            if name and name not in outgoing:
+            if name and name not in outgoing and name.lower() not in excluded_names:
                 outgoing.append(name)
-    
-    # Always include Uncategorized as catch-all
-    if "Uncategorized" not in incoming:
-        incoming.append("Uncategorized")
-    if "Uncategorized" not in outgoing:
-        outgoing.append("Uncategorized")
     
     return {
         "incoming": incoming,
@@ -236,6 +236,200 @@ def get_ntropy_category_set(user_id: int) -> Optional[Dict[str, List[str]]]:
     except Exception as e:
         logger.error(f"Error fetching Ntropy categories: {e}", exc_info=True)
         return None
+
+
+def enrich_transaction_with_custom_categories(
+    user_id: int,
+    transaction_id: str,
+    description: str,
+    amount: float,
+    date: str,
+    entry_type: str,  # 'incoming' or 'outgoing'
+    currency: str = 'USD'
+) -> Optional[Dict[str, Any]]:
+    """
+    Enrich a transaction using Ntropy with the user's custom categories.
+    
+    This calls Ntropy directly (not through Quiltt) to get enrichment
+    using our custom category set for this user.
+    
+    Args:
+        user_id: The Blankee user ID (used to look up account_holder_id)
+        transaction_id: Unique transaction identifier
+        description: Transaction description from bank
+        amount: Transaction amount (absolute value)
+        date: Transaction date in YYYY-MM-DD format
+        entry_type: 'incoming' or 'outgoing'
+        currency: Currency code (default: USD)
+        
+    Returns:
+        Enrichment response with categories using custom labels, or None on error
+        Response includes: entities, categories, location
+    """
+    try:
+        if not NTROPY_API_KEY:
+            logger.warning("NTROPY_API_KEY not set, skipping enrichment")
+            return None
+            
+        account_holder_id = f"blankee_user_{user_id}"
+        url = f"{NTROPY_API_BASE}/transactions"
+        
+        payload = {
+            "id": transaction_id,
+            "description": description,
+            "date": date,
+            "amount": abs(amount),  # Ntropy expects positive amount
+            "entry_type": entry_type,
+            "currency": currency,
+            "account_holder_id": account_holder_id
+        }
+        
+        response = requests.post(url, headers=_get_api_headers(), json=payload)
+        
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"Ntropy enrichment for txn {transaction_id}: categories={result.get('categories')}")
+            return result
+        else:
+            logger.warning(f"Ntropy enrichment failed for txn {transaction_id}: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error enriching transaction {transaction_id}: {e}", exc_info=True)
+        return None
+
+
+def suggest_category_for_transaction(
+    user_id: int,
+    transaction: Dict[str, Any],
+    account_type: str  # 'DEPOSITORY' or 'CREDIT'
+) -> Dict[str, Any]:
+    """
+    Get category suggestion for a transaction.
+    
+    Calls Ntropy to enrich the transaction with user's custom categories,
+    then maps the returned category to the appropriate category_id.
+    
+    Args:
+        user_id: The Blankee user ID
+        transaction: Quiltt transaction dict with: id, description, amount, date, transaction_type
+        account_type: 'DEPOSITORY' or 'CREDIT' (determines which category table to use)
+        
+    Returns:
+        Dict with:
+            - suggested_category: Category name from Ntropy
+            - suggested_category_id: Matching category ID, or None if no match
+            - category_type: 'income', 'expense', 'c_expense', or 'c_payment'
+            - confidence: 'high' if exact match, 'low' if Uncategorized fallback
+    """
+    try:
+        amount = float(transaction.get('amount', 0))
+        
+        # Use transaction_type field if available (most reliable)
+        # Otherwise fall back to amount-based inference
+        txn_type = transaction.get('transaction_type', '').lower()
+        
+        if txn_type == 'expense':
+            entry_type = 'outgoing'
+        elif txn_type == 'income':
+            entry_type = 'incoming'
+        else:
+            # Fallback: infer from account type and amount
+            if account_type == 'CREDIT':
+                entry_type = 'outgoing' if amount > 0 else 'incoming'
+            else:
+                entry_type = 'incoming' if amount > 0 else 'outgoing'
+        
+        # Call Ntropy for enrichment with custom categories
+        enrichment = enrich_transaction_with_custom_categories(
+            user_id=user_id,
+            transaction_id=transaction.get('id', transaction.get('transaction_id', '')),
+            description=transaction.get('description', ''),
+            amount=amount,
+            date=transaction.get('date', ''),
+            entry_type=entry_type
+        )
+        
+        # Extract suggested category from enrichment
+        suggested_category = None
+        if enrichment and enrichment.get('categories'):
+            suggested_category = enrichment['categories'].get('general')
+        
+        # Determine which table to look up based on entry_type (already calculated correctly)
+        if account_type == 'CREDIT':
+            if entry_type == 'incoming':
+                # Payment to credit card
+                category_type = 'c_payment'
+                suggested_category_id = None  # Payments don't have categories
+            else:
+                # Charge to credit card (outgoing/expense)
+                category_type = 'c_expense'
+                suggested_category_id = _find_category_id(
+                    user_id, suggested_category, 'c_expense_categories'
+                ) if suggested_category else None
+        else:  # DEPOSITORY
+            if entry_type == 'incoming':
+                category_type = 'income'
+                suggested_category_id = _find_category_id(
+                    user_id, suggested_category, 'income_categories'
+                ) if suggested_category else None
+            else:
+                category_type = 'expense'
+                suggested_category_id = _find_category_id(
+                    user_id, suggested_category, 'expense_categories'
+                ) if suggested_category else None
+        
+        # Determine confidence
+        if suggested_category_id:
+            confidence = 'high'
+        elif suggested_category:
+            confidence = 'medium'  # Ntropy gave category but no match in user's list
+        else:
+            confidence = 'low'
+        
+        return {
+            'suggested_category': suggested_category or 'Uncategorized',
+            'suggested_category_id': suggested_category_id,
+            'category_type': category_type,
+            'confidence': confidence
+        }
+        
+    except Exception as e:
+        logger.error(f"Error suggesting category for transaction: {e}", exc_info=True)
+        return {
+            'suggested_category': 'Uncategorized',
+            'suggested_category_id': None,
+            'category_type': 'expense' if account_type == 'DEPOSITORY' else 'c_expense',
+            'confidence': 'low'
+        }
+
+
+def _find_category_id(user_id: int, category_name: str, table_name: str) -> Optional[int]:
+    """
+    Find a category ID by name in the user's categories.
+    
+    Args:
+        user_id: User ID
+        category_name: Category name to match (case-insensitive)
+        table_name: 'income_categories', 'expense_categories', or 'c_expense_categories'
+        
+    Returns:
+        Category ID if found, None otherwise
+    """
+    if not category_name:
+        return None
+        
+    categories = _get_categories_from_redis(table_name, user_id)
+    if not categories:
+        return None
+    
+    # Case-insensitive match
+    category_name_lower = category_name.lower()
+    for cat in categories:
+        if cat.get('name', '').lower() == category_name_lower:
+            return cat.get('id')
+    
+    return None
 
 
 def delete_ntropy_user_data(user_id: int) -> bool:

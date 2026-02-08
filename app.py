@@ -32,7 +32,7 @@ from quiltt_redis import (
     upsert_quiltt_connection, upsert_quiltt_account, update_quiltt_account_field, 
     delete_quiltt_connection, get_quiltt_transactions, upsert_quiltt_transaction
 )
-from bucket_utils import process_manual_entry_with_bucket
+from bucket_utils import process_manual_entry_with_bucket, restore_bucket_for_category_change
 from push_notifications import apns_enabled, send_apns_notification
 
 app = Flask(__name__)
@@ -2127,25 +2127,68 @@ def dashboard_d_add_entry():
         else:
             recurring_info = None
         
-        
-        if recurring_info:
-            # Process bucket depletion
-            process_manual_entry_with_bucket(
-                table_name, category_id, entry_date, 
-                float(amount), current_user.id, recurring_info
-            )
+        # Parse entry_date for comparison
+        from datetime import date as date_type
+        if isinstance(entry_date, str):
+            entry_date_parsed = date_type.fromisoformat(entry_date)
         else:
-            pass
+            entry_date_parsed = entry_date
+        today = date_type.today()
+        
+        # PHASE 3 (Feb 2026): Future-dated entries become buckets
+        entry_is_bucket = entry_date_parsed > today
+        
+        if entry_is_bucket:
+            app.logger.info(f"[BUCKET] Future entry date {entry_date} > today {today}, will create as bucket")
+        else:
+            # PHASE 2 (Feb 2026): Process bucket reduction for today/past entries
+            # Works for BOTH recurring categories and non-recurring categories with manual buckets
+            from bucket_utils import find_next_bucket_for_category
+            
+            # Check if there's any bucket to reduce (regardless of whether category is recurring)
+            next_bucket = find_next_bucket_for_category(table_name, category_id, current_user.id)
+            if next_bucket:
+                app.logger.info(f"[BUCKET] Found bucket to reduce: date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
+                process_manual_entry_with_bucket(
+                    table_name, category_id, entry_date, 
+                    float(amount), current_user.id, recurring_info
+                )
     except Exception as e:
         app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
         app.logger.exception(e)
         # Continue with normal entry creation even if bucket processing fails
+        entry_is_bucket = False  # Fallback to non-bucket on error
     
     if existing_entry:
         new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(amount)
-        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(new_amount))
+        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(new_amount),
+                              is_bucket=entry_is_bucket, original_amount=float(new_amount) if entry_is_bucket else None)
     else:
-        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(amount))
+        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(amount),
+                              is_bucket=entry_is_bucket, original_amount=float(amount) if entry_is_bucket else None)
+    
+    # Create bucket record for future entries
+    if entry_is_bucket:
+        try:
+            from recurring_bucket_manager import create_bucket_record
+            # Determine account_id for credit expense entries
+            account_id = None
+            if entry_type == 'ca':
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("""
+                        SELECT account_id FROM c_expense_categories WHERE id = %s
+                    """, (category_id,))
+                    cat_row = cursor.fetchone()
+                    if cat_row:
+                        account_id = cat_row['account_id']
+                    cursor.close()
+            
+            create_bucket_record(table_name, current_user.id, category_id, entry_date, float(amount), account_id=account_id)
+            app.logger.info(f"[BUCKET] Created bucket record for future entry: category={category_id}, date={entry_date}, amount={amount}")
+        except Exception as e:
+            app.logger.error(f"[BUCKET] Error creating bucket record: {e}")
+            app.logger.exception(e)
 
     # Check if this is a savings category - update savings if so
     is_savings_category = False
@@ -3564,6 +3607,7 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
         # Also track which entry IDs are being deleted
         deleted_ids = []
         deleted_entries_for_bucket_restore = []  # Track entries that need bucket restoration
+        deleted_bucket_entries = []  # Track bucket entries that need their bucket record deleted
         filtered_entries = []
         for entry in entries:
             entry_cat = int(entry.get('category_id', 0))
@@ -3572,59 +3616,66 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
                 # This entry is being deleted
                 if 'id' in entry:
                     deleted_ids.append(entry['id'])
-                    # If category is recurring and this is NOT a bucket entry, track for restoration
-                    if category_is_recurring and not entry.get('is_bucket'):
-                        pass
-                        deleted_entries_for_bucket_restore.append(entry)
+                    is_bucket_val = entry.get('is_bucket')
+                    # NEW LOGIC (Feb 2026): Track ALL non-bucket entries for restoration
+                    # The restore function will check if there's a bucket to restore to
+                    # Check for is_bucket being 1, True, or "1"
+                    if is_bucket_val in (1, True, "1"):
+                        # PHASE 4 (Feb 2026): Track bucket entries - need to delete bucket record too
+                        deleted_bucket_entries.append(entry)
                     else:
-                        pass
+                        deleted_entries_for_bucket_restore.append(entry)
             else:
                 # Keep this entry
                 filtered_entries.append(entry)
         
         
-        # Restore bucket amounts for deleted entries in recurring categories
+        # Restore bucket amounts for deleted entries
+        # NEW LOGIC (Feb 2026): Use simplified v2 function that finds NEXT bucket, not cadence-based
         updated_bucket_ids = set()  # Track which buckets were updated
-        if deleted_entries_for_bucket_restore and recurring_info:
-            from bucket_utils import restore_bucket_for_deleted_entry, find_bucket_for_entry
+        if deleted_entries_for_bucket_restore:
+            from bucket_utils import restore_bucket_for_deleted_entry_v2, find_next_bucket_for_category
             
             for entry in deleted_entries_for_bucket_restore:
                 try:
-                    # Smart bucket restoration - checks if today is within cadence period
                     entry_amount = Decimal(str(entry.get('amount', 0)))
-                    entry_date = entry.get('date')
-                    if isinstance(entry_date, str):
-                        entry_date = date.fromisoformat(entry_date)
                     
-                    # Find which bucket would be affected
-                    bucket = find_bucket_for_entry(table_name, category_id, entry_date, user_id, recurring_info)
+                    # Find which bucket would be affected (the next bucket in category)
+                    bucket = find_next_bucket_for_category(table_name, category_id, user_id)
                     
-                    restored = restore_bucket_for_deleted_entry(
+                    restored = restore_bucket_for_deleted_entry_v2(
                         table_name,
                         category_id,
-                        entry_date,
                         entry_amount,
-                        user_id,
-                        recurring_info
+                        user_id
                     )
-                    
-                    # If bucket was restored/recreated, find it again (it might have been recreated)
-                    if restored:
-                        # Refetch the bucket since it may have been recreated
-                        bucket = find_bucket_for_entry(table_name, category_id, entry_date, user_id, recurring_info)
                     
                     if restored and bucket:
                         # Track that this bucket was updated so we can refresh entries
                         updated_bucket_ids.add(bucket.get('id'))
                     elif restored:
-                        # Bucket was restored but couldn't find it (might have been recreated with temp ID)
-                        # Still need to refresh entries
+                        # Bucket was restored but couldn't find it
                         # Force a refresh by adding a dummy ID
                         updated_bucket_ids.add(-1)
-                    else:
-                        pass
                 except Exception as e:
-                    pass
+                    app.logger.error(f"[DELETE ENTRY] Error restoring bucket: {e}")
+        
+        # PHASE 4 (Feb 2026): Delete bucket records for deleted bucket entries
+        if deleted_bucket_entries:
+            from bucket_utils import delete_bucket_record_for_entry
+            
+            for entry in deleted_bucket_entries:
+                try:
+                    entry_date = entry.get('date', '')
+                    delete_bucket_record_for_entry(
+                        table_name,
+                        category_id,
+                        entry_date,
+                        user_id
+                    )
+                    app.logger.info(f"[DELETE ENTRY] Deleted bucket record for category {category_id}, date {entry_date}")
+                except Exception as e:
+                    app.logger.error(f"[DELETE ENTRY] Error deleting bucket record: {e}")
         
         # If buckets were updated, refresh the filtered_entries list from Redis to get updated bucket amounts
         if updated_bucket_ids:
@@ -10888,12 +10939,13 @@ def pending_transactions():
     # Build account lookup
     account_lookup = {acc.get('account_id'): acc for acc in (quiltt_accounts or [])}
     
-    # Get all entries that are pending (pending=1) and imported from Quiltt
+    # Get all entries that are pending (pending=1) OR auto_confirmed (auto_confirmed=1) and imported from Quiltt
     # Check income_entries, expense_entries, c_expense_entries
     pending_entry_ids = {'income': set(), 'expense': set(), 'c_expense': set()}
     
-    # Build entry lookup to get category_id for each entry
+    # Build entry lookup to get category_id and auto_confirmed status for each entry
     entry_category_lookup = {'income': {}, 'expense': {}, 'c_expense': {}}
+    entry_auto_confirmed_lookup = {'income': {}, 'expense': {}, 'c_expense': {}}
     
     # Get income entries with category_id
     redis_key = f"income_entries:v1:{current_user.id}"
@@ -10901,9 +10953,11 @@ def pending_transactions():
     if cached:
         income_entries = json.loads(cached)
         for entry in income_entries:
-            if entry.get('pending') == 1:
+            # Include if pending=1 OR auto_confirmed=1
+            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
                 pending_entry_ids['income'].add(entry.get('id'))
                 entry_category_lookup['income'][entry.get('id')] = entry.get('category_id')
+                entry_auto_confirmed_lookup['income'][entry.get('id')] = entry.get('auto_confirmed', 0)
     
     # Get expense entries with category_id
     redis_key = f"expense_entries:v1:{current_user.id}"
@@ -10911,9 +10965,11 @@ def pending_transactions():
     if cached:
         expense_entries = json.loads(cached)
         for entry in expense_entries:
-            if entry.get('pending') == 1:
+            # Include if pending=1 OR auto_confirmed=1
+            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
                 pending_entry_ids['expense'].add(entry.get('id'))
                 entry_category_lookup['expense'][entry.get('id')] = entry.get('category_id')
+                entry_auto_confirmed_lookup['expense'][entry.get('id')] = entry.get('auto_confirmed', 0)
     
     # Get c_expense entries with category_id
     redis_key = f"c_expense_entries:v1:{current_user.id}"
@@ -10921,9 +10977,11 @@ def pending_transactions():
     if cached:
         c_expense_entries = json.loads(cached)
         for entry in c_expense_entries:
-            if entry.get('pending') == 1:
+            # Include if pending=1 OR auto_confirmed=1
+            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
                 pending_entry_ids['c_expense'].add(entry.get('id'))
                 entry_category_lookup['c_expense'][entry.get('id')] = entry.get('category_id')
+                entry_auto_confirmed_lookup['c_expense'][entry.get('id')] = entry.get('auto_confirmed', 0)
     
     # Load categories BEFORE processing transactions (needed for credit_account_id lookup)
     expense_categories = []
@@ -10986,6 +11044,15 @@ def pending_transactions():
                         credit_account_id = cat.get('account_id')
                         break
             
+            # Get cached custom category suggestion (from Ntropy direct API)
+            custom_category_suggestion = txn.get('custom_category_suggestion')
+            custom_category_id = txn.get('custom_category_id')
+            custom_category_type = txn.get('custom_category_type')
+            custom_category_confidence = txn.get('custom_category_confidence')
+            
+            # Check if this entry was auto-confirmed
+            is_auto_confirmed = entry_auto_confirmed_lookup.get(entry_type, {}).get(imported_entry_id, 0) == 1
+            
             pending_txns.append({
                 'transaction_id': txn.get('transaction_id'),
                 'merchant_name': txn.get('merchant_name'),
@@ -11000,7 +11067,13 @@ def pending_transactions():
                 'is_expense': is_expense,
                 'current_category_id': current_category_id,
                 'credit_account_id': credit_account_id,  # Blankee credit account id
-                'current_category_name': None  # Will be set after categories are loaded
+                'current_category_name': None,  # Will be set after categories are loaded
+                'is_auto_confirmed': is_auto_confirmed,  # Track if auto-confirmed by system
+                # Cached AI category suggestion
+                'custom_category_suggestion': custom_category_suggestion,
+                'custom_category_id': custom_category_id,
+                'custom_category_type': custom_category_type,
+                'custom_category_confidence': custom_category_confidence
             })
     
     # Build category name lookup
@@ -11060,6 +11133,18 @@ def confirm_transaction():
         'c_expense': 'c_expense_entries'
     }
     
+    recurring_table_map = {
+        'income': 'recurring_income',
+        'expense': 'recurring_expense',
+        'c_expense': 'recurring_c_expense'
+    }
+    
+    bucket_table_map = {
+        'income': 'recurring_income_buckets',
+        'expense': 'recurring_expense_buckets',
+        'c_expense': 'recurring_c_expense_buckets'
+    }
+    
     if entry_type not in table_map:
         return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
     
@@ -11076,10 +11161,20 @@ def confirm_transaction():
         
         # Find and update the entry
         found = False
+        entry_date = None
+        entry_amount = None
+        old_category_id = None
+        was_auto_confirmed = False
+        
         for entry in entries:
             if entry.get('id') == entry_id:
+                old_category_id = entry.get('category_id')
+                was_auto_confirmed = entry.get('auto_confirmed', 0) == 1
                 entry['category_id'] = category_id
                 entry['pending'] = 0  # Mark as confirmed
+                entry['auto_confirmed'] = 0  # Clear auto-confirmed flag
+                entry_date = entry.get('date')
+                entry_amount = float(entry.get('amount', 0))
                 found = True
                 break
         
@@ -11093,6 +11188,36 @@ def confirm_transaction():
         dirty_key = f"dirty_tables:{current_user.id}"
         _redis_client.sadd(dirty_key, table_name)
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        # Handle bucket reduction for recurring categories
+        try:
+            recurring_table = recurring_table_map.get(entry_type)
+            bucket_table = bucket_table_map.get(entry_type)
+            
+            if recurring_table and entry_date and entry_amount:
+                # If category changed and was auto-confirmed, we need to undo the old bucket reduction
+                if was_auto_confirmed and old_category_id and old_category_id != category_id:
+                    old_recurring_info = _get_recurring_info_from_redis(recurring_table, current_user.id, old_category_id)
+                    if old_recurring_info:
+                        app.logger.info(f"[CONFIRM TXN] Restoring bucket for old category {old_category_id}")
+                        # Restore bucket (add back the amount)
+                        restore_bucket_for_category_change(
+                            bucket_table, old_category_id, entry_date,
+                            entry_amount, current_user.id, entry_type
+                        )
+                
+                # Reduce bucket for the new category (only if not already reduced by auto-confirm to same category)
+                if not was_auto_confirmed or old_category_id != category_id:
+                    new_recurring_info = _get_recurring_info_from_redis(recurring_table, current_user.id, category_id)
+                    if new_recurring_info:
+                        app.logger.info(f"[CONFIRM TXN] Category {category_id} is recurring, processing bucket reduction")
+                        process_manual_entry_with_bucket(
+                            table_name, category_id, entry_date,
+                            entry_amount, current_user.id, new_recurring_info
+                        )
+        except Exception as e:
+            app.logger.error(f"[CONFIRM TXN] Error processing bucket reduction: {e}")
+            # Continue even if bucket processing fails
         
         return jsonify({'status': 'success'})
         
@@ -11128,12 +11253,19 @@ def confirm_all_transactions():
             'c_expense': 'c_expense_entries'
         }
         
+        recurring_table_map = {
+            'income': 'recurring_income',
+            'expense': 'recurring_expense',
+            'c_expense': 'recurring_c_expense'
+        }
+        
         # Process each entry type
         for entry_type, items in by_type.items():
             if not items:
                 continue
             
             table_name = table_map[entry_type]
+            recurring_table = recurring_table_map[entry_type]
             redis_key = f"{table_name}:v1:{current_user.id}"
             
             cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
@@ -11145,12 +11277,22 @@ def confirm_all_transactions():
             # Build lookup of updates
             updates = {item['entry_id']: item['category_id'] for item in items}
             
+            # Track entries that need bucket reduction
+            bucket_reductions = []
+            
             # Apply updates
             for entry in entries:
                 entry_id = entry.get('id')
                 if entry_id in updates:
-                    entry['category_id'] = updates[entry_id]
+                    new_category_id = updates[entry_id]
+                    entry['category_id'] = new_category_id
                     entry['pending'] = 0
+                    # Track for bucket reduction
+                    bucket_reductions.append({
+                        'category_id': new_category_id,
+                        'date': entry.get('date'),
+                        'amount': float(entry.get('amount', 0))
+                    })
             
             # Save back to Redis
             _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
@@ -11159,6 +11301,22 @@ def confirm_all_transactions():
             dirty_key = f"dirty_tables:{current_user.id}"
             _redis_client.sadd(dirty_key, table_name)
             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            
+            # Process bucket reductions for recurring categories
+            for reduction in bucket_reductions:
+                try:
+                    recurring_info = _get_recurring_info_from_redis(
+                        recurring_table, current_user.id, reduction['category_id']
+                    )
+                    if recurring_info and reduction['date'] and reduction['amount']:
+                        app.logger.info(f"[CONFIRM ALL] Category {reduction['category_id']} is recurring, processing bucket")
+                        process_manual_entry_with_bucket(
+                            table_name, reduction['category_id'], reduction['date'],
+                            reduction['amount'], current_user.id, recurring_info
+                        )
+                except Exception as e:
+                    app.logger.error(f"[CONFIRM ALL] Error processing bucket reduction: {e}")
+                    # Continue even if bucket processing fails
         
         return jsonify({'status': 'success'})
         
@@ -14098,25 +14256,68 @@ def footer_add_entry():
         else:
             recurring_info = None
         
-        
-        if recurring_info:
-            # Process bucket depletion
-            process_manual_entry_with_bucket(
-                table_name, category_id, entry_date, 
-                float(amount), current_user.id, recurring_info
-            )
+        # Parse entry_date for comparison
+        from datetime import date as date_type
+        if isinstance(entry_date, str):
+            entry_date_parsed = date_type.fromisoformat(entry_date)
         else:
-            pass
+            entry_date_parsed = entry_date
+        today = date_type.today()
+        
+        # PHASE 3 (Feb 2026): Future-dated entries become buckets
+        entry_is_bucket = entry_date_parsed > today
+        
+        if entry_is_bucket:
+            app.logger.info(f"[BUCKET] Future entry date {entry_date} > today {today}, will create as bucket")
+        else:
+            # PHASE 2 (Feb 2026): Process bucket reduction for today/past entries
+            # Works for BOTH recurring categories and non-recurring categories with manual buckets
+            from bucket_utils import find_next_bucket_for_category
+            
+            # Check if there's any bucket to reduce (regardless of whether category is recurring)
+            next_bucket = find_next_bucket_for_category(table_name, category_id, current_user.id)
+            if next_bucket:
+                app.logger.info(f"[BUCKET] Found bucket to reduce: date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
+                process_manual_entry_with_bucket(
+                    table_name, category_id, entry_date, 
+                    float(amount), current_user.id, recurring_info
+                )
     except Exception as e:
         app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
         app.logger.exception(e)
         # Continue with normal entry creation even if bucket processing fails
+        entry_is_bucket = False  # Fallback to non-bucket on error
     
     if existing_entry:
         new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(amount)
-        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(new_amount))
+        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(new_amount),
+                              is_bucket=entry_is_bucket, original_amount=float(new_amount) if entry_is_bucket else None)
     else:
-        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(amount))
+        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(amount),
+                              is_bucket=entry_is_bucket, original_amount=float(amount) if entry_is_bucket else None)
+    
+    # Create bucket record for future entries
+    if entry_is_bucket:
+        try:
+            from recurring_bucket_manager import create_bucket_record
+            # Determine account_id for credit expense entries
+            account_id = None
+            if entry_type.startswith('ca_') or entry_type == 'ca':
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("""
+                        SELECT account_id FROM c_expense_categories WHERE id = %s
+                    """, (category_id,))
+                    cat_row = cursor.fetchone()
+                    if cat_row:
+                        account_id = cat_row['account_id']
+                    cursor.close()
+            
+            create_bucket_record(table_name, current_user.id, category_id, entry_date, float(amount), account_id=account_id)
+            app.logger.info(f"[BUCKET] Created bucket record for future entry: category={category_id}, date={entry_date}, amount={amount}")
+        except Exception as e:
+            app.logger.error(f"[BUCKET] Error creating bucket record: {e}")
+            app.logger.exception(e)
 
     # Check if this is a savings category - update savings if so
     is_savings_category = False
@@ -19004,6 +19205,40 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 **ntropy_data  # Include all Ntropy fields
             }
             
+            # --- CUSTOM CATEGORY SUGGESTION (Phase 3.2) ---
+            # Get custom category suggestion from Ntropy using user's own categories
+            # Only fetch if we don't have a cached suggestion yet
+            try:
+                from ntropy_utils import suggest_category_for_transaction
+                
+                # Determine account type for category lookup
+                quiltt_account_info = quiltt_account_map.get(account_id, {})
+                acct_type = quiltt_account_info.get('account_type', '').upper()
+                ntropy_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
+                
+                suggestion = suggest_category_for_transaction(
+                    user_id=user_id,
+                    transaction={
+                        'id': txn_id,
+                        'transaction_id': txn_id,
+                        'description': txn.get('description', ''),
+                        'amount': amount,
+                        'date': date,
+                        'transaction_type': 'expense' if is_expense else 'income'  # Pass expense/income indicator
+                    },
+                    account_type=ntropy_account_type
+                )
+                if suggestion and suggestion.get('suggested_category'):
+                    transaction_data['custom_category_suggestion'] = suggestion.get('suggested_category')
+                    transaction_data['custom_category_id'] = suggestion.get('suggested_category_id')
+                    transaction_data['custom_category_type'] = suggestion.get('category_type')
+                    transaction_data['custom_category_confidence'] = suggestion.get('confidence')
+                    transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    app.logger.info(f"Custom category suggestion for {txn_id}: {suggestion.get('suggested_category')} (id={suggestion.get('suggested_category_id')})")
+            except Exception as suggest_err:
+                app.logger.warning(f"Failed to get custom category suggestion for {txn_id}: {suggest_err}")
+            # --- END CUSTOM CATEGORY SUGGESTION ---
+            
             app.logger.info(f"transaction_data keys: {list(transaction_data.keys())}")
             app.logger.info(f"ntropy_enriched_at value: {transaction_data.get('ntropy_enriched_at')}")
             app.logger.info(f"ntropy_labels value: {transaction_data.get('ntropy_labels')}")
@@ -19511,6 +19746,398 @@ def quiltt_check_ntropy_data():
         
     except Exception as e:
         app.logger.error(f"Error checking Ntropy data: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/test-ntropy-custom-enrichment', methods=['POST'])
+@login_required
+def quiltt_test_ntropy_custom_enrichment():
+    """
+    Test Ntropy enrichment using user's custom categories.
+    
+    This calls Ntropy directly (not through Quiltt) to verify
+    that custom categories are being used.
+    
+    POST body:
+        transaction_id: Optional ID (defaults to test_xxx)
+        description: Transaction description to test
+        amount: Transaction amount (negative = expense, positive = income)
+        date: Transaction date (YYYY-MM-DD), defaults to today
+    """
+    try:
+        from ntropy_utils import enrich_transaction_with_custom_categories
+        from datetime import datetime
+        import uuid
+        
+        data = request.json or {}
+        
+        # Get test parameters
+        txn_id = data.get('transaction_id', f'test_{uuid.uuid4().hex[:8]}')
+        description = data.get('description', 'TEST GROCERY STORE PURCHASE')
+        amount = float(data.get('amount', -45.00))
+        date = data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
+        entry_type = 'incoming' if amount > 0 else 'outgoing'
+        
+        result = enrich_transaction_with_custom_categories(
+            user_id=current_user.id,
+            transaction_id=txn_id,
+            description=description,
+            amount=amount,
+            date=date,
+            entry_type=entry_type
+        )
+        
+        if result:
+            return jsonify({
+                'status': 'success',
+                'test_input': {
+                    'transaction_id': txn_id,
+                    'description': description,
+                    'amount': amount,
+                    'date': date,
+                    'entry_type': entry_type,
+                    'account_holder_id': f'blankee_user_{current_user.id}'
+                },
+                'enrichment_result': result,
+                'category_returned': result.get('categories', {}).get('general', 'none')
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Enrichment returned no result - check server logs'
+            }), 400
+        
+    except Exception as e:
+        app.logger.error(f"Error testing Ntropy custom enrichment: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/suggest-category', methods=['POST'])
+@login_required
+def quiltt_suggest_category():
+    """
+    Get category suggestion for a pending transaction using Ntropy custom categories.
+    
+    POST body:
+        transaction_id: Quiltt transaction ID
+        description: Transaction description
+        amount: Transaction amount
+        date: Transaction date (YYYY-MM-DD)
+        account_type: 'DEPOSITORY' or 'CREDIT'
+        entry_type: 'income', 'expense', or 'c_expense'
+        credit_account_id: (optional) Blankee credit account ID for c_expense
+        
+    Returns:
+        suggested_category: Category name from Ntropy
+        suggested_category_id: Matching category ID in user's categories
+        confidence: 'high', 'medium', or 'low'
+    """
+    try:
+        from ntropy_utils import suggest_category_for_transaction
+        
+        data = request.json or {}
+        
+        transaction_id = data.get('transaction_id', '')
+        description = data.get('description', '')
+        amount = float(data.get('amount', 0))
+        date = data.get('date', '')
+        account_type = data.get('account_type', 'DEPOSITORY')
+        entry_type = data.get('entry_type', 'expense')
+        credit_account_id = data.get('credit_account_id')
+        
+        if not description:
+            return jsonify({
+                'status': 'error',
+                'message': 'Description is required'
+            }), 400
+        
+        # Build transaction dict for suggestion function
+        transaction = {
+            'id': transaction_id,
+            'transaction_id': transaction_id,
+            'description': description,
+            'amount': amount,
+            'date': date
+        }
+        
+        suggestion = suggest_category_for_transaction(
+            user_id=current_user.id,
+            transaction=transaction,
+            account_type=account_type
+        )
+        
+        # For c_expense, we need to filter to the specific credit account
+        if entry_type == 'c_expense' and credit_account_id and suggestion.get('suggested_category_id'):
+            # Get c_expense_categories to verify the suggested ID is for this account
+            redis_key = f"c_expense_categories:v1:{current_user.id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            if cached:
+                c_expense_cats = json.loads(cached)
+                suggested_id = suggestion['suggested_category_id']
+                
+                # Check if suggested category belongs to this credit account
+                matching_cat = next(
+                    (c for c in c_expense_cats 
+                     if c.get('id') == suggested_id and str(c.get('account_id')) == str(credit_account_id)),
+                    None
+                )
+                
+                if not matching_cat:
+                    # Suggested category is for wrong account - find one with same name on this account
+                    suggested_name = suggestion.get('suggested_category', '').lower()
+                    matching_cat = next(
+                        (c for c in c_expense_cats 
+                         if c.get('name', '').lower() == suggested_name 
+                         and str(c.get('account_id')) == str(credit_account_id)),
+                        None
+                    )
+                    if matching_cat:
+                        suggestion['suggested_category_id'] = matching_cat['id']
+                    else:
+                        # No matching category on this account
+                        suggestion['suggested_category_id'] = None
+                        suggestion['confidence'] = 'low'
+        
+        return jsonify({
+            'status': 'success',
+            **suggestion
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error suggesting category: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/clear-suggestions', methods=['POST'])
+@login_required
+def quiltt_clear_suggestions():
+    """Clear cached suggestions to allow re-backfilling."""
+    try:
+        from quiltt_redis import get_quiltt_transactions
+        
+        transactions = get_quiltt_transactions(current_user.id) or []
+        cleared = 0
+        
+        for txn in transactions:
+            if txn.get('custom_suggestion_at'):
+                txn['custom_category_suggestion'] = None
+                txn['custom_category_id'] = None
+                txn['custom_category_type'] = None
+                txn['custom_category_confidence'] = None
+                txn['custom_suggestion_at'] = None
+                cleared += 1
+        
+        # Save back to Redis
+        redis_key = f"quiltt_transactions:v1:{current_user.id}"
+        _redis_client.set(redis_key, json.dumps(transactions, cls=DecimalEncoder))
+        _redis_client.sadd(f"dirty_tables:{current_user.id}", "quiltt_transactions")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Cleared {cleared} suggestions',
+            'cleared': cleared
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/backfill-suggestions', methods=['POST'])
+@login_required
+def quiltt_backfill_suggestions():
+    """
+    Backfill custom category suggestions for existing pending transactions.
+    Call multiple times until remaining=0.
+    
+    Query params:
+        limit: Max transactions to process (default 10)
+    """
+    try:
+        from ntropy_utils import suggest_category_for_transaction
+        from quiltt_redis import get_quiltt_transactions, get_quiltt_accounts, upsert_quiltt_transaction
+        
+        limit = request.args.get('limit', 10, type=int)
+        
+        transactions = get_quiltt_transactions(current_user.id) or []
+        accounts = get_quiltt_accounts(current_user.id) or []
+        
+        # Build account lookup for determining account type
+        account_lookup = {acc.get('account_id'): acc for acc in accounts}
+        
+        # Find transactions without cached suggestions
+        to_backfill = [
+            txn for txn in transactions 
+            if txn.get('imported_to_entry_id') and not txn.get('custom_suggestion_at')
+        ]
+        
+        total_remaining = len(to_backfill)
+        
+        if not to_backfill:
+            return jsonify({
+                'status': 'success',
+                'message': 'No transactions need backfilling',
+                'backfilled': 0,
+                'remaining': 0
+            })
+        
+        # Only process up to limit
+        to_process = to_backfill[:limit]
+        
+        backfilled = 0
+        for txn in to_process:
+            try:
+                description = txn.get('description') or txn.get('merchant_name', '')
+                amount = float(txn.get('amount', 0))
+                date = txn.get('date', '')
+                txn_id = txn.get('transaction_id', '')
+                
+                if not description:
+                    continue
+                
+                # Determine account type
+                account_info = account_lookup.get(txn.get('account_id'), {})
+                acct_type = account_info.get('account_type', '').upper()
+                ntropy_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
+                
+                suggestion = suggest_category_for_transaction(
+                    user_id=current_user.id,
+                    transaction={
+                        'id': txn_id,
+                        'transaction_id': txn_id,
+                        'description': description,
+                        'amount': amount,
+                        'date': date,
+                        'transaction_type': txn.get('transaction_type', '')  # Pass expense/income indicator
+                    },
+                    account_type=ntropy_account_type
+                )
+                
+                if suggestion and suggestion.get('suggested_category'):
+                    # Update the transaction with cached suggestion
+                    txn['custom_category_suggestion'] = suggestion.get('suggested_category')
+                    txn['custom_category_id'] = suggestion.get('suggested_category_id')
+                    txn['custom_category_type'] = suggestion.get('category_type')
+                    txn['custom_category_confidence'] = suggestion.get('confidence')
+                    txn['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    upsert_quiltt_transaction(txn, current_user.id)
+                    backfilled += 1
+                    app.logger.info(f"Backfilled: {description[:30]} -> {suggestion.get('suggested_category')}")
+                    
+            except Exception as e:
+                app.logger.warning(f"Error backfilling {txn.get('transaction_id')}: {e}")
+                continue
+        
+        remaining = total_remaining - backfilled
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Backfilled {backfilled}, {remaining} remaining' + (' - run again!' if remaining > 0 else ''),
+            'backfilled': backfilled,
+            'remaining': remaining
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error backfilling suggestions: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/suggest-categories-batch', methods=['POST'])
+@login_required  
+def quiltt_suggest_categories_batch():
+    """
+    Get category suggestions for multiple transactions at once.
+    More efficient than calling /suggest-category multiple times.
+    
+    POST body:
+        transactions: Array of {transaction_id, description, amount, date, account_type, entry_type, credit_account_id}
+        
+    Returns:
+        suggestions: Object mapping transaction_id to suggestion result
+    """
+    try:
+        from ntropy_utils import suggest_category_for_transaction
+        
+        data = request.json or {}
+        transactions = data.get('transactions', [])
+        
+        if not transactions:
+            return jsonify({'status': 'error', 'message': 'No transactions provided'}), 400
+        
+        # Pre-load c_expense_categories for efficiency
+        c_expense_cats = []
+        redis_key = f"c_expense_categories:v1:{current_user.id}"
+        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+        if cached:
+            c_expense_cats = json.loads(cached)
+        
+        suggestions = {}
+        
+        for txn in transactions:
+            transaction_id = txn.get('transaction_id', '')
+            description = txn.get('description', '')
+            amount = float(txn.get('amount', 0))
+            date = txn.get('date', '')
+            account_type = txn.get('account_type', 'DEPOSITORY')
+            entry_type = txn.get('entry_type', 'expense')
+            credit_account_id = txn.get('credit_account_id')
+            
+            if not description:
+                suggestions[transaction_id] = {
+                    'suggested_category': 'Uncategorized',
+                    'suggested_category_id': None,
+                    'confidence': 'low'
+                }
+                continue
+            
+            # Build transaction dict
+            transaction = {
+                'id': transaction_id,
+                'transaction_id': transaction_id,
+                'description': description,
+                'amount': amount,
+                'date': date
+            }
+            
+            suggestion = suggest_category_for_transaction(
+                user_id=current_user.id,
+                transaction=transaction,
+                account_type=account_type
+            )
+            
+            # For c_expense, filter to specific credit account
+            if entry_type == 'c_expense' and credit_account_id and suggestion.get('suggested_category_id'):
+                suggested_id = suggestion['suggested_category_id']
+                
+                matching_cat = next(
+                    (c for c in c_expense_cats 
+                     if c.get('id') == suggested_id and str(c.get('account_id')) == str(credit_account_id)),
+                    None
+                )
+                
+                if not matching_cat:
+                    suggested_name = suggestion.get('suggested_category', '').lower()
+                    matching_cat = next(
+                        (c for c in c_expense_cats 
+                         if c.get('name', '').lower() == suggested_name 
+                         and str(c.get('account_id')) == str(credit_account_id)),
+                        None
+                    )
+                    if matching_cat:
+                        suggestion['suggested_category_id'] = matching_cat['id']
+                    else:
+                        suggestion['suggested_category_id'] = None
+                        suggestion['confidence'] = 'low'
+            
+            suggestions[transaction_id] = suggestion
+        
+        return jsonify({
+            'status': 'success',
+            'suggestions': suggestions
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error suggesting categories batch: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 

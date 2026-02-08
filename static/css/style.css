@@ -9950,7 +9950,7 @@ td.credit-account-action-cell button {
     position: absolute;
     z-index: 1000;
     width: calc(100% - 2px);
-    max-height: 200px;
+    max-height: 60vh; /* fallback, JS overrides dynamically */
     margin-top: 2px;
     overflow-y: auto;
     background-color: #fff;
@@ -11714,6 +11714,33 @@ html.modal-open {
     background-color: #f5f5f5;
 }
 
+/* Auto-confirmed transactions (categorized by overnight cron job) */
+.pending-transaction-item.auto-confirmed-item {
+    border-left: 4px solid #f5a623;
+    background-color: #fffef8;
+}
+
+.pending-transaction-item.auto-confirmed-item::before {
+    content: "Auto-Categorized";
+    color: #b07d00;
+}
+
+.auto-confirmed-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.75em;
+    color: #b07d00;
+    background-color: #fff3cd;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-top: 5px;
+}
+
+.auto-confirmed-badge i {
+    font-size: 0.9em;
+}
+
 .transaction-header {
     display: flex;
     justify-content: space-between;
@@ -11767,6 +11794,20 @@ html.modal-open {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ntropy-suggestion.has-suggestion {
+    background-color: #f0fdf4;
+    border-color: #bbf7d0;
+}
+
+.ntropy-suggestion.has-suggestion i {
+    color: #16a34a;
+}
+
+.ntropy-suggestion.has-suggestion .ntropy-label {
+    color: #166534;
 }
 
 .ntropy-suggestion i {
@@ -11777,6 +11818,29 @@ html.modal-open {
     font-size: 0.9em;
     color: #1e40af;
     font-weight: 500;
+}
+
+.confidence-badge {
+    font-size: 0.75em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.confidence-badge.confidence-high {
+    background-color: #dcfce7;
+    color: #166534;
+}
+
+.confidence-badge.confidence-medium {
+    background-color: #fef9c3;
+    color: #854d0e;
+}
+
+.confidence-badge.confidence-low {
+    background-color: #fee2e2;
+    color: #991b1b;
 }
 
 .category-select-row {
@@ -11822,7 +11886,7 @@ html.modal-open {
     background-color: #fff;
     border: 1px solid #ccc;
     border-radius: 6px;
-    max-height: 50vh;
+    max-height: 60vh;
     overflow-y: auto;
     z-index: 9999;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
@@ -11867,6 +11931,78 @@ html.modal-open {
 
 .pending-transactions-category-dropdown-item.create-new-category i {
     margin-right: 6px;
+}
+
+.pending-transactions-category-dropdown-item.ai-suggestion {
+    background-color: #f0fdf4;
+    color: #166534;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pending-transactions-category-dropdown-item.ai-suggestion:hover {
+    background-color: #dcfce7;
+}
+
+.pending-transactions-category-dropdown-item.ai-suggestion i {
+    color: #16a34a;
+}
+
+.pending-transactions-category-dropdown-item.search-result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+}
+
+.pending-transactions-category-dropdown-item.search-result .search-icon {
+    color: #9ca3af;
+    font-size: 0.85em;
+}
+
+/* Footer category dropdown search results */
+.category-dropdown-item.search-result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+}
+
+.category-dropdown-item.search-result .search-icon {
+    color: #9ca3af;
+    font-size: 0.85em;
+}
+
+.dropdown-separator {
+    height: 1px;
+    background-color: #e5e7eb;
+    margin: 4px 0;
+}
+
+.ai-badge {
+    background-color: #16a34a;
+    color: white;
+    font-size: 0.7em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    margin-left: auto;
+}
+
+.ai-badge.confidence-high {
+    background-color: #16a34a; /* Green - high confidence */
+}
+
+.ai-badge.confidence-medium {
+    background-color: #f59e0b; /* Orange/amber - medium confidence */
+}
+
+.dropdown-separator {
+    height: 1px;
+    background-color: #e5e7eb;
+    margin: 4px 0;
 }
 
 .confirm-btn {

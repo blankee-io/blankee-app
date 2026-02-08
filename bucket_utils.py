@@ -147,6 +147,63 @@ def get_interval_bounds(entry_date, cadence_unit, cadence_interval, start_date, 
     return (start_date, entry_date)
 
 
+def find_next_bucket_for_category(table, category_id, user_id):
+    """
+    Find the next bucket entry in a category from today's date.
+    
+    This is the NEW bucket selection logic that replaces cadence-based selection.
+    Simply finds the bucket entry (is_bucket=1) with the earliest date > today.
+    
+    Args:
+        table: 'income_entries', 'expense_entries', or 'c_expense_entries'
+        category_id: The category ID
+        user_id: The user ID
+        
+    Returns:
+        Dictionary with bucket entry data, or None if no future bucket exists
+    """
+    from flask import current_app
+    
+    today = date.today()
+    
+    current_app.logger.info(f"[FIND NEXT BUCKET] Looking for next bucket: table={table}, category_id={category_id}, user_id={user_id}, today={today}")
+    
+    # Get all entries from Redis
+    from app import _get_entries_from_redis
+    entries = _get_entries_from_redis(table, user_id)
+    
+    if not entries:
+        current_app.logger.info(f"[FIND NEXT BUCKET] No entries in Redis for user {user_id}, table {table}")
+        return None
+    
+    # Filter to get only bucket entries for this category with amount > 0 and date > today
+    future_buckets = []
+    for entry in entries:
+        if (entry.get('category_id') == int(category_id) and
+            entry.get('is_bucket') == 1 and
+            float(entry.get('amount', 0)) > 0):
+            
+            entry_date = entry.get('date')
+            if isinstance(entry_date, str):
+                entry_date = date.fromisoformat(entry_date)
+            
+            # Only include buckets with date > today
+            if entry_date > today:
+                future_buckets.append(entry)
+    
+    if not future_buckets:
+        current_app.logger.info(f"[FIND NEXT BUCKET] No future buckets found for category {category_id}")
+        return None
+    
+    # Sort by date ascending and return the earliest one
+    future_buckets.sort(key=lambda x: x.get('date', ''))
+    
+    next_bucket = future_buckets[0]
+    current_app.logger.info(f"[FIND NEXT BUCKET] Found next bucket: id={next_bucket.get('id')}, date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
+    
+    return next_bucket
+
+
 def find_bucket_for_entry(table, category_id, entry_date, user_id, cadence_info):
     """
     Find the active bucket entry for a given category and date by matching the entry_date
@@ -771,9 +828,110 @@ def cleanup_unfilled_buckets(table, user_id, cutoff_date=None):
         return 0
 
 
-def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amount, user_id, cadence_info):
+def restore_bucket_for_category_change(bucket_table, category_id, entry_date, entry_amount, user_id, entry_type):
+    """
+    Restore bucket amount when an auto-confirmed entry's category is changed.
+    
+    When auto-confirm reduces a bucket for category A, and user later changes to category B,
+    we need to add the amount back to category A's bucket.
+    
+    Args:
+        bucket_table: The bucket table name (e.g., 'recurring_income_buckets')
+        category_id: The OLD category ID (the one being restored)
+        entry_date: Date of the entry
+        entry_amount: Amount to restore to the bucket
+        user_id: The user ID
+        entry_type: 'income', 'expense', or 'c_expense'
+        
+    Returns:
+        True if bucket was restored, False otherwise
+    """
+    from flask import current_app
+    from datetime import date as date_type
+    
+    current_app.logger.info(f"[RESTORE BUCKET CHANGE] Starting: bucket_table={bucket_table}, category={category_id}, date={entry_date}, amount={entry_amount}")
+    
+    if not bucket_table:
+        current_app.logger.info(f"[RESTORE BUCKET CHANGE] No bucket table for entry_type={entry_type}")
+        return False
+    
+    try:
+        entry_amount = Decimal(str(entry_amount))
+        
+        # Parse entry_date if string
+        if isinstance(entry_date, str):
+            entry_date = date_type.fromisoformat(entry_date)
+        
+        # Get bucket records from Redis
+        bucket_key = f"{bucket_table}:v1:{user_id}"
+        bucket_data = redis_manager._redis_client.get(bucket_key) if redis_manager._redis_client else None
+        
+        if not bucket_data:
+            current_app.logger.info(f"[RESTORE BUCKET CHANGE] No bucket data found for {bucket_key}")
+            return False
+        
+        buckets = json.loads(bucket_data)
+        
+        # Find bucket for this category whose period contains the entry date
+        bucket_found = None
+        bucket_idx = None
+        
+        for idx, bucket in enumerate(buckets):
+            if bucket.get('category_id') != int(category_id):
+                continue
+            
+            bucket_date = bucket.get('bucket_date')
+            if isinstance(bucket_date, str):
+                bucket_date = date_type.fromisoformat(bucket_date)
+            
+            # Simple check: entry_date should be <= bucket_date
+            # (bucket_date is the END of the period)
+            if entry_date <= bucket_date:
+                bucket_found = bucket
+                bucket_idx = idx
+                current_app.logger.info(f"[RESTORE BUCKET CHANGE] Found bucket at idx {idx}, bucket_date={bucket_date}")
+                break
+        
+        if not bucket_found:
+            current_app.logger.info(f"[RESTORE BUCKET CHANGE] No matching bucket found for category {category_id}")
+            return False
+        
+        # Add the amount back to the bucket (cap at original_amount)
+        current_amount = Decimal(str(bucket_found.get('amount', 0)))
+        original_amount = Decimal(str(bucket_found.get('original_amount', 0)))
+        new_amount = current_amount + entry_amount
+        
+        # Don't exceed original amount
+        if new_amount > original_amount:
+            new_amount = original_amount
+        
+        current_app.logger.info(f"[RESTORE BUCKET CHANGE] Updating bucket: current={current_amount}, adding={entry_amount}, new={new_amount}, max={original_amount}")
+        
+        # Update the bucket in Redis
+        buckets[bucket_idx]['amount'] = float(new_amount)
+        redis_manager._redis_client.setex(bucket_key, 604800, json.dumps(buckets))
+        
+        # Mark bucket table as dirty
+        dirty_key = f"dirty_tables:{user_id}"
+        redis_manager._redis_client.sadd(dirty_key, bucket_table)
+        redis_manager._redis_client.expire(dirty_key, 604800)
+        
+        current_app.logger.info(f"[RESTORE BUCKET CHANGE] Successfully restored {entry_amount} to bucket for category {category_id}")
+        return True
+        
+    except Exception as e:
+        current_app.logger.error(f"[RESTORE BUCKET CHANGE] Error: {e}", exc_info=True)
+        return False
+
+
+def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amount, user_id, cadence_info=None):
     """
     Process a manual entry by checking for and depleting bucket entries.
+    
+    NEW LOGIC (Feb 2026):
+    - Only reduces bucket if entry_date <= today
+    - Finds the NEXT bucket in the category (earliest date > today)
+    - Does NOT use cadence-based period matching
     
     Args:
         table: 'income_entries', 'expense_entries', or 'c_expense_entries'
@@ -781,18 +939,29 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
         entry_date: Date of the manual entry (date object or string)
         entry_amount: Amount of the manual entry (Decimal or float)
         user_id: The user ID
-        cadence_info: Dictionary with cadence details (cadence_unit, cadence_interval, etc.)
+        cadence_info: (DEPRECATED) Dictionary with cadence details - no longer used
     """
     import logging
     from flask import current_app
+    from datetime import date as date_type
+    
+    # Parse entry_date
+    if isinstance(entry_date, str):
+        entry_date = date_type.fromisoformat(entry_date)
+    
+    today = date_type.today()
     
     current_app.logger.info(f"[BUCKET DEBUG] process_manual_entry_with_bucket called: table={table}, category_id={category_id}, entry_date={entry_date}, entry_amount={entry_amount}, user_id={user_id}")
-    current_app.logger.info(f"[BUCKET DEBUG] cadence_info={cadence_info}")
     
-    # Find the bucket for this category/date
-    bucket = find_bucket_for_entry(table, category_id, entry_date, user_id, cadence_info)
+    # NEW LOGIC: Only reduce bucket if entry_date <= today
+    if entry_date > today:
+        current_app.logger.info(f"[BUCKET DEBUG] Entry date {entry_date} is in the future (> {today}), skipping bucket reduction")
+        return
     
-    current_app.logger.info(f"[BUCKET DEBUG] Found bucket: {bucket}")
+    # Find the NEXT bucket for this category (earliest bucket with date > today)
+    bucket = find_next_bucket_for_category(table, category_id, user_id)
+    
+    current_app.logger.info(f"[BUCKET DEBUG] Found next bucket: {bucket}")
     
     if bucket:
         # First subtract from the bucket RECORD (tracks overspending)
@@ -800,7 +969,6 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
         bucket_table = get_bucket_table_for_entry_table(table)
         bucket_date = bucket.get('date')
         if isinstance(bucket_date, str):
-            from datetime import date as date_type
             bucket_date = date_type.fromisoformat(bucket_date)
         
         # All bucket tables now use user_id consistently for Redis key
@@ -840,7 +1008,132 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
                     redis_manager._redis_client.expire(f"pending_deletes:{table}:{user_id}", 604800)
                     current_app.logger.info(f"[BUCKET DEBUG] Forced bucket entry deletion complete")
     else:
-        current_app.logger.info(f"[BUCKET DEBUG] No bucket found for this entry")
+        current_app.logger.info(f"[BUCKET DEBUG] No future bucket found for this entry")
+
+
+def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount, user_id):
+    """
+    Simplified bucket restoration when a manual entry is deleted.
+    
+    NEW LOGIC (Feb 2026):
+    - Finds the NEXT bucket in the category (earliest date > today)
+    - Adds the deleted amount back to that bucket
+    - If bucket entry was deleted (went negative), recreate it from bucket record
+    - Does NOT use cadence-based logic
+    
+    Args:
+        table: 'income_entries', 'expense_entries', or 'c_expense_entries'
+        category_id: The category ID
+        deleted_entry_amount: Amount of the deleted entry
+        user_id: The user ID
+        
+    Returns:
+        Tuple of (success: bool, bucket: dict or None)
+    """
+    from flask import current_app
+    from datetime import date as date_type
+    from recurring_bucket_manager import add_to_bucket_record_by_category_date, get_bucket_table_for_entry_table, get_bucket_records_for_category
+    
+    current_app.logger.info(f"[RESTORE BUCKET V2] Attempting restore: table={table}, category={category_id}, amount={deleted_entry_amount}")
+    
+    # Find the next bucket ENTRY for this category
+    bucket = find_next_bucket_for_category(table, category_id, user_id)
+    
+    bucket_table = get_bucket_table_for_entry_table(table)
+    
+    if bucket:
+        # Bucket entry exists - just add to it
+        bucket_id = bucket.get('id')
+        bucket_date = bucket.get('date')
+        if isinstance(bucket_date, str):
+            bucket_date = date_type.fromisoformat(bucket_date)
+        
+        current_app.logger.info(f"[RESTORE BUCKET V2] Found bucket entry to restore: id={bucket_id}, date={bucket_date}")
+        
+        # Add amount back to bucket entry
+        add_to_bucket(table, bucket_id, Decimal(str(deleted_entry_amount)), user_id)
+        
+        # Also add back to bucket record
+        if bucket_table:
+            add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
+            current_app.logger.info(f"[RESTORE BUCKET V2] Restored bucket record for category {category_id}, date {bucket_date}")
+        
+        # Re-fetch the bucket to get updated amount
+        updated_bucket = find_next_bucket_for_category(table, category_id, user_id)
+        return (True, updated_bucket)
+    
+    else:
+        # No bucket entry found - check if bucket RECORD exists (entry was deleted when it went negative)
+        current_app.logger.info(f"[RESTORE BUCKET V2] No bucket entry found, checking for bucket records...")
+        
+        if not bucket_table:
+            current_app.logger.info(f"[RESTORE BUCKET V2] No bucket table for {table}")
+            return (False, None)
+        
+        # Get all bucket records for this category
+        bucket_records = get_bucket_records_for_category(bucket_table, category_id, user_id)
+        
+        if not bucket_records:
+            current_app.logger.info(f"[RESTORE BUCKET V2] No bucket records found")
+            return (False, None)
+        
+        # Find the next bucket record (date > today)
+        today = date_type.today()
+        future_records = []
+        for record in bucket_records:
+            record_date = record.get('bucket_date')
+            if isinstance(record_date, str):
+                record_date = date_type.fromisoformat(record_date)
+            if record_date > today:
+                future_records.append((record_date, record))
+        
+        if not future_records:
+            current_app.logger.info(f"[RESTORE BUCKET V2] No future bucket records found")
+            return (False, None)
+        
+        # Get the earliest future bucket record
+        future_records.sort(key=lambda x: x[0])
+        bucket_date, bucket_record = future_records[0]
+        
+        current_app.logger.info(f"[RESTORE BUCKET V2] Found bucket record to restore: date={bucket_date}, current_amount={bucket_record.get('amount')}")
+        
+        # Add the deleted amount to the bucket record first
+        add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
+        
+        # Re-fetch the bucket record to get the new amount
+        updated_records = get_bucket_records_for_category(bucket_table, category_id, user_id)
+        updated_record = next((r for r in updated_records if r.get('bucket_date') == bucket_date.isoformat() or r.get('bucket_date') == bucket_date), None)
+        
+        if updated_record:
+            new_amount = float(updated_record.get('amount', 0))
+            original_amount = float(updated_record.get('original_amount', new_amount))
+            
+            current_app.logger.info(f"[RESTORE BUCKET V2] Updated bucket record amount: {new_amount}")
+            
+            # If amount is now positive, recreate the bucket entry
+            if new_amount > 0:
+                current_app.logger.info(f"[RESTORE BUCKET V2] Amount is positive, recreating bucket entry")
+                
+                # Create the bucket entry
+                from app import _update_entry_in_redis
+                _update_entry_in_redis(
+                    table, user_id, int(category_id), 
+                    bucket_date.isoformat() if isinstance(bucket_date, date_type) else bucket_date,
+                    new_amount,
+                    is_bucket=True,
+                    original_amount=original_amount
+                )
+                
+                current_app.logger.info(f"[RESTORE BUCKET V2] Recreated bucket entry for {bucket_date} with amount {new_amount}")
+                
+                # Re-fetch and return the recreated bucket
+                updated_bucket = find_next_bucket_for_category(table, category_id, user_id)
+                return (True, updated_bucket)
+            else:
+                current_app.logger.info(f"[RESTORE BUCKET V2] Amount still non-positive ({new_amount}), not recreating entry yet")
+                return (True, None)
+        
+        return (False, None)
 
 
 def restore_bucket_for_deleted_entry(table, category_id, deleted_entry_date, deleted_entry_amount, user_id, cadence_info):
@@ -1235,3 +1528,93 @@ def restore_bucket_for_deleted_entry(table, category_id, deleted_entry_date, del
                         break
         
         return entry_was_recreated
+
+
+def delete_bucket_record_for_entry(table, category_id, entry_date, user_id):
+    """
+    PHASE 4 (Feb 2026): Delete the bucket record when a bucket entry is deleted.
+    
+    When a user deletes an entry that was created as a bucket (is_bucket=1),
+    we also need to delete the corresponding record in recurring_*_buckets.
+    
+    Args:
+        table: 'income_entries', 'expense_entries', or 'c_expense_entries'
+        category_id: The category ID
+        entry_date: Date of the bucket entry (string or date object)
+        user_id: The user ID
+        
+    Returns:
+        True if bucket record was deleted, False otherwise
+    """
+    from flask import current_app
+    from datetime import date as date_type
+    import json
+    
+    current_app.logger.info(f"[DELETE BUCKET RECORD] Starting: table={table}, category={category_id}, date={entry_date}")
+    
+    # Get the bucket table name
+    from recurring_bucket_manager import get_bucket_table_for_entry_table
+    bucket_table = get_bucket_table_for_entry_table(table)
+    
+    if not bucket_table:
+        current_app.logger.warning(f"[DELETE BUCKET RECORD] No bucket table found for {table}")
+        return False
+    
+    # Normalize entry_date to string
+    if isinstance(entry_date, date_type):
+        entry_date_str = entry_date.isoformat()
+    else:
+        entry_date_str = str(entry_date)
+    
+    # Get bucket records from Redis
+    bucket_records_key = f"{bucket_table}:v1:{user_id}"
+    bucket_records_data = redis_manager._redis_client.get(bucket_records_key) if redis_manager._redis_client else None
+    
+    if not bucket_records_data:
+        current_app.logger.info(f"[DELETE BUCKET RECORD] No bucket records found in Redis for {bucket_table}")
+        return False
+    
+    bucket_records = json.loads(bucket_records_data)
+    original_count = len(bucket_records)
+    
+    # Find and remove ALL bucket records that match category_id and bucket_date
+    filtered_records = []
+    deleted_record_ids = []
+    
+    for record in bucket_records:
+        record_cat = int(record.get('category_id', 0))
+        record_date = record.get('bucket_date', '')
+        
+        if record_cat == int(category_id) and record_date == entry_date_str:
+            deleted_record_ids.append(record.get('id'))
+            current_app.logger.info(f"[DELETE BUCKET RECORD] Found matching record: id={record.get('id')}")
+            # Skip this record (don't add to filtered list)
+        else:
+            filtered_records.append(record)
+    
+    if not deleted_record_ids:
+        current_app.logger.info(f"[DELETE BUCKET RECORD] No matching bucket record found for category {category_id}, date {entry_date_str}")
+        return False
+    
+    # Save filtered records back to Redis
+    CACHE_TTL = 604800  # 7 days
+    redis_manager._redis_client.setex(
+        bucket_records_key,
+        CACHE_TTL,
+        json.dumps(filtered_records, cls=redis_manager.DecimalEncoder)
+    )
+    
+    # Mark as dirty for flush
+    redis_manager._redis_client.sadd(f"dirty_tables:{user_id}", bucket_table)
+    redis_manager._redis_client.expire(f"dirty_tables:{user_id}", CACHE_TTL)
+    
+    # Track pending deletions (only for positive IDs that exist in MySQL)
+    pending_key = f"pending_deletes:{bucket_table}:{user_id}"
+    for deleted_id in deleted_record_ids:
+        if deleted_id is not None and int(deleted_id) > 0:
+            redis_manager._redis_client.sadd(pending_key, deleted_id)
+    redis_manager._redis_client.expire(pending_key, CACHE_TTL)
+    
+    current_app.logger.info(f"[DELETE BUCKET RECORD] Deleted {len(deleted_record_ids)} bucket record(s): {deleted_record_ids}, remaining={len(filtered_records)}/{original_count}")
+    
+    return True

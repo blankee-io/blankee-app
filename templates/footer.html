@@ -764,20 +764,60 @@
     const footerCategoryHidden = document.getElementById('footer-category');
     const footerDropdown = document.getElementById('footer-category-dropdown');
 
+    function positionDropdown(inputEl, dropdownEl) {
+        // Calculate available space below the input
+        const inputRect = inputEl.getBoundingClientRect();
+        const availableBelow = window.innerHeight - inputRect.bottom - 20; // 20px padding from bottom
+        
+        // Set max-height to available space, minimum 150px
+        const maxHeight = Math.max(150, availableBelow);
+        dropdownEl.style.maxHeight = maxHeight + 'px';
+    }
+
     function showFooterCategoryDropdown(searchText = '') {
         footerDropdown.innerHTML = '';
-        const searchLower = searchText.toLowerCase();
-        const filtered = searchText.length === 0 
-            ? footerCategories 
-            : footerCategories.filter(cat => cat.name.toLowerCase().includes(searchLower));
+        const searchLower = searchText.toLowerCase().trim();
+        
+        // Separate matching and non-matching categories
+        const matchingCategories = searchLower.length > 0 
+            ? footerCategories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+            : [];
+        const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+        const nonMatchingCategories = searchLower.length > 0
+            ? footerCategories.filter(cat => !matchingIds.has(cat.id))
+            : footerCategories;
 
         // Check if there's an exact match
-        const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
-        const hasMatches = filtered.length > 0;
+        const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
 
-        if (hasMatches) {
+        // Show search results with magnifying glass (if user is typing)
+        if (searchLower.length > 0 && matchingCategories.length > 0) {
             footerDropdown.style.display = 'block';
-            filtered.forEach(cat => {
+            matchingCategories.forEach(cat => {
+                const div = document.createElement('div');
+                div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                div.className = 'category-dropdown-item search-result';
+                div.addEventListener('click', function() {
+                    footerCategoryInput.value = cat.name;
+                    footerCategoryHidden.value = cat.id;
+                    footerDropdown.style.display = 'none';
+                });
+                footerDropdown.appendChild(div);
+            });
+            
+            // Add separator between search results and all categories
+            if (nonMatchingCategories.length > 0) {
+                const separator = document.createElement('div');
+                separator.className = 'dropdown-separator';
+                footerDropdown.appendChild(separator);
+            }
+        }
+
+        // Show all other categories (non-matching or all if no search)
+        if (nonMatchingCategories.length > 0 || (searchLower.length === 0 && footerCategories.length > 0)) {
+            const catsToShow = searchLower.length > 0 ? nonMatchingCategories : footerCategories;
+            footerDropdown.style.display = 'block';
+            catsToShow.forEach(cat => {
                 const div = document.createElement('div');
                 div.textContent = cat.name;
                 div.className = 'category-dropdown-item';
@@ -802,8 +842,11 @@
             footerDropdown.appendChild(createDiv);
         }
 
-        if (!hasMatches && searchText.length === 0) {
+        if (footerDropdown.children.length === 0) {
             footerDropdown.style.display = 'none';
+        } else {
+            // Position dropdown based on available screen space
+            positionDropdown(footerCategoryInput, footerDropdown);
         }
     }
 
@@ -816,7 +859,8 @@
 
     footerCategoryInput.addEventListener('focus', function() {
         if (footerCategories.length > 0) {
-            showFooterCategoryDropdown(this.value);
+            // On focus, show all categories (don't treat pre-filled value as search)
+            showFooterCategoryDropdown('');
         }
     });
 
@@ -885,18 +929,48 @@
 
     function showFooterCaCategoryDropdown(searchText = '') {
         footerCaDropdown.innerHTML = '';
-        const searchLower = searchText.toLowerCase();
-        const filtered = searchText.length === 0 
-            ? footerCaCategories 
-            : footerCaCategories.filter(cat => cat.name.toLowerCase().includes(searchLower));
+        const searchLower = searchText.toLowerCase().trim();
+        
+        // Separate matching and non-matching categories
+        const matchingCategories = searchLower.length > 0 
+            ? footerCaCategories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+            : [];
+        const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+        const nonMatchingCategories = searchLower.length > 0
+            ? footerCaCategories.filter(cat => !matchingIds.has(cat.id))
+            : footerCaCategories;
 
         // Check if there's an exact match
-        const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
-        const hasMatches = filtered.length > 0;
+        const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
 
-        if (hasMatches) {
+        // Show search results with magnifying glass (if user is typing)
+        if (searchLower.length > 0 && matchingCategories.length > 0) {
             footerCaDropdown.style.display = 'block';
-            filtered.forEach(cat => {
+            matchingCategories.forEach(cat => {
+                const div = document.createElement('div');
+                div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                div.className = 'category-dropdown-item search-result';
+                div.addEventListener('click', function() {
+                    footerCaCategoryInput.value = cat.name;
+                    footerCaCategoryHidden.value = cat.id;
+                    footerCaDropdown.style.display = 'none';
+                });
+                footerCaDropdown.appendChild(div);
+            });
+            
+            // Add separator between search results and all categories
+            if (nonMatchingCategories.length > 0) {
+                const separator = document.createElement('div');
+                separator.className = 'dropdown-separator';
+                footerCaDropdown.appendChild(separator);
+            }
+        }
+
+        // Show all other categories (non-matching or all if no search)
+        if (nonMatchingCategories.length > 0 || (searchLower.length === 0 && footerCaCategories.length > 0)) {
+            const catsToShow = searchLower.length > 0 ? nonMatchingCategories : footerCaCategories;
+            footerCaDropdown.style.display = 'block';
+            catsToShow.forEach(cat => {
                 const div = document.createElement('div');
                 div.textContent = cat.name;
                 div.className = 'category-dropdown-item';
@@ -921,8 +995,11 @@
             footerCaDropdown.appendChild(createDiv);
         }
 
-        if (!hasMatches && searchText.length === 0) {
+        if (footerCaDropdown.children.length === 0) {
             footerCaDropdown.style.display = 'none';
+        } else {
+            // Position dropdown based on available screen space
+            positionDropdown(footerCaCategoryInput, footerCaDropdown);
         }
     }
 
@@ -935,7 +1012,8 @@
 
     footerCaCategoryInput.addEventListener('focus', function() {
         if (footerCaCategories.length > 0) {
-            showFooterCaCategoryDropdown(this.value);
+            // On focus, show all categories (don't treat pre-filled value as search)
+            showFooterCaCategoryDropdown('');
         }
     });
 

@@ -92,7 +92,7 @@ DESCRIBE quiltt_transactions;
 
 ---
 
-## Phase 3: Ntropy Category Suggestion ⏳ IN PROGRESS (Sync Complete, Suggestion Function Pending)
+## Phase 3: Ntropy Category Suggestion ✅ COMPLETE
 
 ### 3.1 Research Ntropy Custom Labels API ✅ COMPLETE
 - [x] Review Quiltt Ntropy docs: https://www.quiltt.dev/integrations/enrichment/ntropy
@@ -173,26 +173,30 @@ All category creation, update, and delete endpoints now sync to Ntropy.
 | `/delete-recurring-expense/<id>` | Delete | ✅ |
 | `/delete-recurring-ca-expense/<id>` | Delete | ✅ |
 
-### 3.5 Create Category Suggestion Function
-- [ ] Create `suggest_category_for_transaction(user_id, quiltt_transaction)` in `ntropy_utils.py`
-- [ ] Logic:
-  1. Get transaction's Ntropy-assigned category (from ntropy_labels)
+### 3.5 Create Category Suggestion Function ✅ COMPLETE
+- [x] Create `enrich_transaction_with_custom_categories()` in `ntropy_utils.py`
+- [x] Create `suggest_category_for_transaction(user_id, transaction, account_type)` in `ntropy_utils.py`
+- [x] Logic:
+  1. Call Ntropy directly with user's `account_holder_id` to get enrichment with custom categories
   2. Look up corresponding `category_id` in user's categories (exact match)
-  3. Return suggested `category_id` and match type
-- [ ] Handle case where no good match found → return "Uncategorized"
+  3. Return suggested `category_id`, category name, type, and confidence level
+- [x] Handle case where no good match found → return "Uncategorized"
+- [x] Test endpoint: `/quiltt/test-ntropy-custom-enrichment`
 
 ### 3.6 API Access Decision ✅ COMPLETE
 - [x] **Option B selected**: Direct Ntropy API access
 - [x] API key stored in `.env` as `NTROPY_API_KEY` on all servers
 - [x] ntropy_utils.py created with all sync functions
 
-### 3.7 Testing Plan
-- [ ] Create test user with custom categories → sign up and create categories
-- [ ] Verify Ntropy sync call succeeds (check error logs)
-- [ ] Verify Ntropy category set created via `/quiltt/check-ntropy-categories` endpoint
-- [ ] Import bank transaction after categories synced
-- [ ] Verify Ntropy returns user's custom category label (not generic)
-- [ ] Verify category suggestion function matches user's actual category_id
+### 3.7 Testing Plan ✅ COMPLETE (Feb 6, 2026)
+- [x] Sync user categories via `/quiltt/sync-ntropy-categories`
+- [x] Verify Ntropy category set created via `/quiltt/check-ntropy-categories`
+- [x] Test enrichment returns custom category names:
+  - "KROGER GROCERY STORE" → **Groceries** ✅
+  - "DUKE ENERGY ELECTRIC BILL" → **Utilities** ✅
+  - "PAYROLL DEPOSIT ACME CORP" → **Wages** ✅
+  - "SHELL OIL STATION" → **Gas** ✅
+- [x] Custom categories confirmed working with direct Ntropy API
 
 ---
 
@@ -216,8 +220,26 @@ All category creation, update, and delete endpoints now sync to Ntropy.
 
 ### 4.3 Category Dropdown
 - [x] Populate dropdown with user's categories (income OR expense based on transaction type)
-- [ ] Pre-select the Ntropy-suggested category (pending Phase 3)
+- [x] Pre-select the Ntropy-suggested category ✅ (Feb 6, 2026)
 - [x] Group categories by income_category_groups / expense_category_groups if applicable
+
+### 4.4 Ntropy Suggestion Caching ✅ COMPLETE (Feb 6, 2026)
+- [x] Add caching columns to `quiltt_transactions` table:
+  - `custom_category_suggestion` (VARCHAR 100)
+  - `custom_category_id` (INT)
+  - `custom_category_type` (ENUM: income, expense, c_expense, c_payment)
+  - `custom_category_confidence` (DECIMAL 3,2)
+  - `custom_suggestion_at` (DATETIME)
+- [x] Migration applied to dev servers (.44, .45)
+- [x] Update `redis_manager.py` flush logic to include new columns
+- [x] Cache suggestions during transaction sync (not on page load)
+- [x] Pre-load suggestions in `/pending-transactions` route
+- [x] Template uses `data-suggested-category` and `data-suggested-category-id` attributes
+- [x] Backfill endpoint: `/quiltt/backfill-suggestions` (processes 10 at a time)
+- [x] Clear endpoint: `/quiltt/clear-suggestions` (resets for re-backfill)
+- [x] **Consistency verified**: Ntropy returns identical results on re-backfill (MD5 match)
+
+**Performance**: Page load no longer calls Ntropy API - suggestions pre-loaded from cache
 
 ---
 
@@ -246,9 +268,9 @@ All category creation, update, and delete endpoints now sync to Ntropy.
 
 ---
 
-## Phase 6: Bucket Reduction for Recurring Categories 🔜 NEXT
+## Phase 6: Bucket Reduction for Recurring Categories ✅ COMPLETE
 
-**Context**: Currently bucket logic works for manually-added entries. Need to ensure it also works when entries are auto-imported via webhook and then categorized to a recurring category.
+**Context**: When a webhook-imported transaction is confirmed to a recurring category, reduce the corresponding bucket amount (same as manual entries).
 
 ### 6.1 Understand Bucket Structure
 - [x] Document current bucket entry flow:
@@ -256,61 +278,182 @@ All category creation, update, and delete endpoints now sync to Ntropy.
   - These track expected amounts for future recurring entries
   - `income_entries` / `expense_entries` with `is_bucket=1` are generated from these
 
-### 6.2 Find Matching Bucket Entry
-- [ ] When webhook-imported transaction is confirmed to a recurring category:
-  1. Get the recurring record for that category
-  2. Find bucket entry (`is_bucket=1`) for transaction date's cadence period
-  3. If amount matches (within tolerance?) → reduce or remove bucket
+### 6.2 Integrate Bucket Reduction into Confirm Endpoints (Feb 6, 2026)
+- [x] Updated `/quiltt/confirm-transaction` endpoint:
+  - After updating category_id and setting pending=0
+  - Check if new category is recurring via `_get_recurring_info_from_redis()`
+  - If recurring, call `process_manual_entry_with_bucket()` to reduce bucket
+- [x] Updated `/quiltt/confirm-all-transactions` endpoint:
+  - Same logic, but tracks all entries needing bucket reduction
+  - Processes bucket reductions after updating all entries
 
-### 6.3 Implement Bucket Reduction for Webhook Entries
-- [ ] Ensure `reduce_bucket_for_transaction(category_id, transaction_date, amount)` works for:
-  - Manually added entries (existing behavior)
-  - Webhook-imported entries confirmed to recurring category (new behavior)
-- [ ] Logic:
-  1. Find `recurring_xxx_bucket` record for this category and date
-  2. Reduce `amount` by transaction amount
-  3. If amount becomes 0 or negative → delete the bucket record
-  4. Find corresponding `is_bucket=1` entry and reduce/delete
+### 6.3 Implementation Details
+- Reused existing `process_manual_entry_with_bucket()` from `bucket_utils.py`
+- Reused existing `_get_recurring_info_from_redis()` helper
+- Bucket reduction is non-blocking - errors are logged but don't fail confirmation
 
-**Testing**: 
-- Create recurring expense with bucket
-- Import bank transaction via webhook to that category
-- Verify bucket amount reduced correctly
-
-### 6.4 Edge Cases
-- [ ] Transaction amount > bucket amount (overpaid bill?)
-- [ ] Transaction amount < bucket amount (partial payment?)
-- [ ] No bucket exists for this period (late payment?)
-- [ ] Multiple transactions matching same bucket
-- [ ] Transaction date doesn't match bucket date exactly (within cadence window?)
+### 6.4 Edge Cases (Handled by existing bucket logic)
+- [x] Transaction amount > bucket amount → bucket goes negative (tracks overspending)
+- [x] Transaction amount < bucket amount → partial reduction
+- [x] No bucket exists for this period → no reduction attempted
+- [x] Multiple transactions matching same bucket → each reduces independently
 
 ---
 
-## Phase 7: Balance Reconciliation (Brainstorm Later)
+## Phase 10: Ntropy Improvements (TODO)
 
-### 7.1 Compare Blankee vs Bank Balance
+### 10.1 Separate Credit Account vs Checking Categories
+- [ ] **INVESTIGATE**: Currently Ntropy merges all expense categories (checking + credit) into one "outgoing" list
+- [ ] Credit account transactions are being suggested categories from checking expenses
+- [ ] Need to determine how to tell Ntropy which categories belong to which account type
+- [ ] Options to explore:
+  - Separate category sets per account type?
+  - Prefix category names with account type?
+  - Use Ntropy's account_type parameter differently?
+  - Filter suggestions based on transaction's account type after Ntropy returns?
+
+### 10.2 Credit Card Payment Duplication
+- [ ] **INVESTIGATE**: Credit card payments appear on BOTH accounts:
+  - On checking account: Shows as expense (money leaving checking)
+  - On credit account: Shows as payment (reducing credit balance)
+- [ ] Need to determine how to handle this to avoid double-counting
+- [ ] Options to explore:
+  - Auto-link the two transactions as a "transfer"?
+  - Only import one side and mark the other as "linked"?
+  - Let user manually mark as transfer/linked?
+  - Detect matching amounts on same date between checking expense and credit payment?
+
+---
+
+## Console Commands Reference
+
+### Ntropy Suggestion Backfill
+```javascript
+// Backfill all transactions with Ntropy suggestions (runs until done)
+async function backfillAll() {
+    let remaining = 1, total = 0;
+    while (remaining > 0) {
+        const res = await fetch('/quiltt/backfill-suggestions', {method: 'POST'}).then(r => r.json());
+        console.log(res);
+        remaining = res.remaining || 0;
+        total += res.backfilled || 0;
+    }
+    console.log(`Done! Total: ${total}`);
+}
+backfillAll();
+
+// Backfill in batches of 10 (manual, run multiple times)
+fetch('/quiltt/backfill-suggestions', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({limit: 10})}).then(r => r.json()).then(d => console.log(d));
+
+// Clear all cached suggestions (forces re-fetch on next backfill)
+fetch('/quiltt/clear-suggestions', {method: 'POST'}).then(r => r.json()).then(d => console.log(d));
+```
+
+### Category Sync to Ntropy
+```javascript
+// Sync all categories to Ntropy (run after adding/renaming categories)
+fetch('/quiltt/sync-ntropy-categories', {method: 'POST'}).then(r => r.json()).then(d => console.log(d));
+
+// Get manual suggestion for a specific transaction
+fetch('/quiltt/suggest-category', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({transaction_id: 'txn_xxx'})
+}).then(r => r.json()).then(d => console.log(d));
+```
+
+---
+
+## Phase 7: Auto-Confirm Unreviewed Transactions ✅ COMPLETE (Feb 8, 2026)
+
+**Goal**: If user doesn't review pending transactions by end of day, auto-confirm to Ntropy's best guess. Keeps budget accurate even if user neglects review.
+
+### 7.1 Database Changes ✅ COMPLETE
+- [x] Add `auto_confirmed` column to entry tables (income_entries, expense_entries, c_expense_entries, c_payment_entries)
+  - `auto_confirmed=1` means system auto-categorized, needs user review
+  - `auto_confirmed=0` means user manually confirmed (or was never auto-confirmed)
+- [x] Update Redis flush logic to include new column
+- [x] Migration file: `migrations/add_auto_confirmed_column.sql`
+- [x] Deployed to all 3 servers (dev44, dev45, AWS prod)
+
+### 7.2 Auto-Confirm Logic ✅ COMPLETE
+- [x] Create cron job: `auto_confirm_transactions.py`
+- [x] Runs at midnight via cron: `0 0 * * * cd /var/www/html/budget && /usr/bin/python3 auto_confirm_transactions.py`
+- [x] Find all entries with `pending=1` (unconfirmed)
+- [x] For each entry:
+  1. Get Ntropy suggestion from `quiltt_transactions.custom_category_suggestion`
+  2. If suggestion exists and is not "Uncategorized":
+     - Update `category_id` to suggested category
+     - Set `pending=0, auto_confirmed=1`
+     - Call `process_manual_entry_with_bucket()` if recurring
+  3. If no suggestion or "Uncategorized":
+     - Confirm to Uncategorized with `auto_confirmed=1`
+- [x] Tested: Successfully confirmed 75 entries for user 271 (25 fallback to Uncategorized)
+
+### 7.3 Pending Transactions UI Updates ✅ COMPLETE
+- [x] `/pending-transactions` route shows entries where `pending=1` OR `auto_confirmed=1`
+- [x] Visual indicator: Yellow badge with robot icon: "Auto-categorized by Blankee • Please review"
+- [x] Auto-confirmed items have left yellow border and different background
+- [x] CSS class `.auto-confirmed-item` and `.auto-confirmed-badge` added to style.css
+
+### 7.4 Bucket Undo/Redo Logic ✅ COMPLETE
+- [x] Created `restore_bucket_for_category_change()` function in `bucket_utils.py`
+- [x] When user confirms auto-confirmed entry:
+  - If same category → just set `auto_confirmed=0` and `pending=0`
+  - If different category → restore bucket for old category, reduce bucket for new category
+- [x] `/quiltt/confirm-transaction` endpoint updated to handle auto_confirmed entries
+- [x] Edge cases handled:
+  - Old category not recurring → no bucket to restore
+  - Bucket amount capped at original_amount
+
+### 7.5 Trigger Mechanism ✅ COMPLETE
+- [x] **Decision: Midnight cron job** - Runs daily regardless of user activity
+- [x] Created `auto_confirm_transactions.py` cron script
+- [x] Schedule: `0 0 * * *` (midnight server time)
+- [x] Deployed to all servers
+
+### 7.6 Confidence Handling ✅ COMPLETE
+- [x] **Decision: Auto-confirm regardless of confidence** - Better to have a guess than Uncategorized
+
+### 7.7 Visual Indicator for Auto-Confirmed ✅ COMPLETE
+- [x] Text: "Auto-categorized by Blankee • Please review"
+- [x] Style: Yellow badge with robot icon, subtle but noticeable
+- [x] Left yellow border on auto-confirmed transaction items
+- [x] Disappears after user manually confirms
+
+### 7.8 Edge Cases ✅ HANDLED
+- [x] Transaction imported late at night - will auto-confirm next midnight
+- [x] Multiple transactions to same recurring category - each reduces bucket independently
+- [x] Low confidence suggestions - still auto-confirmed (user can review)
+- [x] Category change restores old bucket before reducing new bucket
+
+---
+
+## Phase 8: Balance Reconciliation (Brainstorm Later)
+
+### 8.1 Compare Blankee vs Bank Balance
 - [ ] Calculate Blankee's balance from entries
 - [ ] Get bank balance from `quiltt_accounts.current_balance`
 - [ ] Show discrepancy if any
 
-### 7.2 Handle Discrepancies
+### 8.2 Handle Discrepancies
 - [ ] TBD: Auto-adjustment? Manual review? Notification?
 - [ ] Need to brainstorm approach
 
 ---
 
-## Phase 8: Polish & Testing
+## Phase 9: Polish & Testing
 
-### 8.1 Error Handling
+### 9.1 Error Handling
 - [ ] Handle network errors in UI
 - [ ] Handle concurrent modifications
 - [ ] Add retry logic for failed API calls
 
-### 8.2 Performance
+### 9.2 Performance
 - [ ] Pagination for pending transactions list
 - [ ] Lazy loading for large transaction counts
 
-### 8.3 End-to-End Testing
+### 9.3 End-to-End Testing
 - [ ] Test full flow: webhook → auto-import → categorize → bucket reduction
 - [ ] Test with checking, savings, and credit accounts
 - [ ] Test with income and expense transactions
@@ -322,10 +465,14 @@ All category creation, update, and delete endpoints now sync to Ntropy.
 | File | Purpose |
 |------|---------|
 | `migrations/add_quiltt_transaction_link.sql` | New columns for linking |
+| `migrations/add_auto_confirmed_column.sql` | Auto-confirmed tracking column |
 | `app.py` | Endpoints, auto-import logic |
 | `quiltt_redis.py` | Helper functions |
 | `quiltt_utils.py` | Category suggestion logic |
+| `ntropy_utils.py` | Ntropy API integration |
 | `redis_manager.py` | Flush worker updates |
+| `bucket_utils.py` | Bucket restoration for category changes |
+| `auto_confirm_transactions.py` | Midnight cron job |
 | `templates/pending_transactions.html` | New UI page |
 | `templates/nav.html` | Add nav link |
 | `static/css/style.css` | Styling for new page |
@@ -334,12 +481,11 @@ All category creation, update, and delete endpoints now sync to Ntropy.
 
 ## Current Status
 
-**Phase**: Phases 1-5 Complete, Phase 8 Implemented, Waiting on Quiltt for Phase 3, Phase 6 Next  
-**Last Updated**: February 2, 2026  
-**Blockers**: 
-1. Awaiting Quiltt response about custom Ntropy labels per user
+**Phase**: Phases 1-7 Complete, Phase 8 (Balance Reconciliation) Remaining  
+**Last Updated**: February 8, 2026  
+**Blockers**: None - Auto-confirm fully operational
 
-### Verified Working (as of Feb 2):
+### Verified Working (as of Feb 8, 2026):
 - ✅ Webhooks firing correctly after orphan profile cleanup
 - ✅ Auto-import creates entries with `processed=0` for NEW transactions
 - ✅ Credit account transactions route to correct tables (c_expense_entries, c_payment_entries)
@@ -350,6 +496,34 @@ All category creation, update, and delete endpoints now sync to Ntropy.
 - ✅ **Bank reconnection flow** - Error webhooks create notification with auto-reconnect link
 - ✅ **Periodic connection checker** - Cron job runs every 6 hours to catch missed webhooks
 - ✅ **Transaction sync on reconnect** - 9 new transactions imported after reconnecting Capital One
+- ✅ **Custom Ntropy categories** - Direct Ntropy API syncs user's categories
+- ✅ **Category suggestions cached** - Pre-loaded on sync, no API calls on page load
+- ✅ **Bucket reduction on confirm** - Confirming to recurring category reduces bucket
+- ✅ **Auto-confirm cron job** - Runs at midnight, confirmed 75 entries in test
+- ✅ **Auto-confirmed UI badge** - Yellow badge with robot icon for auto-categorized entries
+- ✅ **Bucket undo/redo** - Category changes restore old bucket and reduce new bucket
+
+### Bug Fixes (Feb 8, 2026):
+**Issue: Webhook storage failing silently**
+- **Problem**: `upsert_quiltt_webhook_event()` using `pool.get_connection()` without `with` context manager
+- **Error**: `'_GeneratorContextManager' object has no attribute 'close'`
+- **Fix**: Use `with pool.get_connection() as conn:` pattern
+- **File**: `quiltt_redis.py`
+- **Fixed**: ✅
+
+### Bug Fixes (Feb 6, 2026):
+**Issue 1: custom_category_type ENUM missing 'c_payment'**
+- **Problem**: Flush failed with "Data truncated for column 'custom_category_type'"
+- **Fix**: `ALTER TABLE quiltt_transactions MODIFY COLUMN custom_category_type ENUM('income','expense','c_expense','c_payment')`
+- **File**: MySQL schema on .44 server
+- **Fixed**: ✅
+
+**Issue 2: entry_type logic using amount sign**
+- **Problem**: All transactions getting income category suggestions (Wages) instead of expense
+- **Root cause**: Amount is always stored as positive, can't determine income/expense from sign
+- **Fix**: Use `transaction_type` field ('expense' or 'income') directly
+- **Files**: `ntropy_utils.py`, `app.py` (backfill and sync functions)
+- **Fixed**: ✅
 
 ### Bug Fix (Feb 3, 2026): Webhook Events Not Persisting to MySQL
 - **Problem**: Webhook events stored in Redis but lost when user not hydrated (Redis expired before flush)
@@ -395,10 +569,9 @@ ssh root@192.0.2.44 "tail -50 /var/log/apache2/quiltt_checker.log"
 ```
 
 ### Other Pending Items:
-- ⏳ **Notification deletion** - Should be deleted after reconnect (bug fixed Feb 2)
-- ⏳ **Auto-adjust timing** - Balance should match checking account after reconnect (bug fixed Feb 2)
-- ⏳ **Phase 3**: Waiting on Quiltt to confirm if we can provide user's categories to Ntropy for custom label matching
-- 🔜 **Phase 6**: Bucket reduction needs to work with webhook-triggered entries (not just manual)
+- ✅ **Phase 7**: Auto-confirm unreviewed transactions at EOD - COMPLETE
+- 🔜 **Phase 8**: Balance Reconciliation (brainstorm approach)
+- 🔜 **Phase 9**: Polish & Testing
 
 ---
 

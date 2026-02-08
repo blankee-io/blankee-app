@@ -40,10 +40,11 @@
                 <div class="profile-actions" id="transactions-container">
                     {% if pending_transactions %}
                         {% for txn in pending_transactions %}
-                            <div class="profile-section pending-transaction-item" 
+                            <div class="profile-section pending-transaction-item{% if txn.is_auto_confirmed %} auto-confirmed-item{% endif %}" 
                                  data-transaction-id="{{ txn.transaction_id }}"
                                  data-entry-id="{{ txn.imported_to_entry_id }}"
-                                 data-entry-type="{{ txn.imported_entry_type }}">
+                                 data-entry-type="{{ txn.imported_entry_type }}"
+                                 data-auto-confirmed="{{ 'true' if txn.is_auto_confirmed else 'false' }}">
                                 <div class="transaction-header">
                                     <div class="transaction-info">
                                         <div class="transaction-merchant">
@@ -54,18 +55,16 @@
                                             <div class="transaction-description">{{ txn.description }}</div>
                                         {% endif %}
                                         <div class="transaction-date">{{ txn.date }}</div>
+                                        {% if txn.is_auto_confirmed %}
+                                            <div class="auto-confirmed-badge">
+                                                <i class="fa-solid fa-robot"></i> Auto-categorized by Blankee • Please review
+                                            </div>
+                                        {% endif %}
                                     </div>
                                     <div class="transaction-amount {{ 'expense' if txn.is_expense else 'income' }}">
                                         {{ currency_symbol }}{{ "%.2f"|format(txn.amount|abs) }}
                                     </div>
                                 </div>
-                                
-                                {% if txn.ntropy_labels %}
-                                    <div class="ntropy-suggestion">
-                                        <i class="fa-solid fa-lightbulb"></i>
-                                        <span class="ntropy-label">Suggested: {{ txn.ntropy_labels }}</span>
-                                    </div>
-                                {% endif %}
                                 
                                 <div class="category-select-row">
                                     <label>Category:</label>
@@ -76,12 +75,15 @@
                                                data-entry-type="{{ txn.imported_entry_type }}"
                                                data-account-id="{{ txn.account_id or '' }}"
                                                data-credit-account-id="{{ txn.credit_account_id or '' }}"
+                                               data-suggested-category="{{ txn.custom_category_suggestion or '' }}"
+                                               data-suggested-category-id="{{ txn.custom_category_id or '' }}"
+                                               data-suggested-confidence="{{ txn.custom_category_confidence or '' }}"
                                                placeholder="Type to search..."
                                                autocomplete="off"
-                                               value="{{ txn.current_category_name or '' }}">
+                                               value="{{ txn.custom_category_suggestion if (txn.custom_category_suggestion and (not txn.current_category_name or txn.current_category_name == 'Uncategorized')) else (txn.current_category_name or '') }}">
                                         <input type="hidden" class="category-hidden" 
                                                data-transaction-id="{{ txn.transaction_id }}"
-                                               value="{{ txn.current_category_id or '' }}">
+                                               value="{{ txn.custom_category_id if (txn.custom_category_id and (not txn.current_category_id or txn.current_category_name == 'Uncategorized')) else (txn.current_category_id or '') }}">
                                         <div class="pending-transactions-category-dropdown" style="display: none;"></div>
                                     </div>
                                     <button class="confirm-btn" onclick="confirmTransaction('{{ txn.transaction_id }}')">
@@ -136,25 +138,100 @@
         }
 
         // Category dropdown functionality
-        function showCategoryDropdown(input, searchText = '') {
+        function showCategoryDropdown(input, searchText = '', isTyping = false) {
             const wrapper = input.closest('.category-input-wrapper');
             const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
             const hiddenInput = wrapper.querySelector('.category-hidden');
             const categories = getCategoriesForInput(input);
             
+            // Get AI suggestion from data attributes
+            const suggestedCategory = input.dataset.suggestedCategory;
+            const suggestedCategoryId = input.dataset.suggestedCategoryId;
+            const suggestedConfidence = input.dataset.suggestedConfidence;
+            
             dropdown.innerHTML = '';
-            const searchLower = searchText.toLowerCase();
-            const filtered = searchText.length === 0 
-                ? categories 
-                : categories.filter(cat => cat.name.toLowerCase().includes(searchLower));
+            const searchLower = searchText.toLowerCase().trim();
+            
+            // Separate matching and non-matching categories
+            const matchingCategories = searchLower.length > 0 
+                ? categories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+                : [];
+            const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+            const nonMatchingCategories = searchLower.length > 0
+                ? categories.filter(cat => !matchingIds.has(cat.id))
+                : categories;
 
-            // Check if there's an exact match
-            const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
-            const hasMatches = filtered.length > 0;
+            // Check if there's an exact match for "Create new" option
+            const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
 
-            if (hasMatches) {
+            // Show AI suggestion at the top if we have one and no search text (or search matches suggestion)
+            const showAiSuggestion = suggestedCategory && suggestedCategoryId && 
+                (searchLower.length === 0 || suggestedCategory.toLowerCase().includes(searchLower));
+            
+            if (showAiSuggestion) {
                 dropdown.style.display = 'block';
-                filtered.forEach(cat => {
+                const aiDiv = document.createElement('div');
+                aiDiv.className = 'pending-transactions-category-dropdown-item ai-suggestion';
+                // Show confidence level in badge
+                const confidenceClass = suggestedConfidence === 'high' ? 'confidence-high' : 'confidence-medium';
+                const confidenceLabel = suggestedConfidence === 'high' ? 'AI' : 'AI ?';
+                aiDiv.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${suggestedCategory} <span class="ai-badge ${confidenceClass}">${confidenceLabel}</span>`;
+                aiDiv.addEventListener('click', function() {
+                    input.value = suggestedCategory;
+                    hiddenInput.value = suggestedCategoryId;
+                    dropdown.style.display = 'none';
+                });
+                dropdown.appendChild(aiDiv);
+            }
+
+            // Show search results with magnifying glass (if user is typing)
+            if (searchLower.length > 0 && matchingCategories.length > 0) {
+                // Add separator after AI suggestion if present
+                if (showAiSuggestion) {
+                    const separator = document.createElement('div');
+                    separator.className = 'dropdown-separator';
+                    dropdown.appendChild(separator);
+                }
+                
+                dropdown.style.display = 'block';
+                matchingCategories.forEach(cat => {
+                    // Skip the AI suggested category since it's already shown
+                    if (suggestedCategoryId && String(cat.id) === String(suggestedCategoryId)) {
+                        return;
+                    }
+                    const div = document.createElement('div');
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                    div.className = 'pending-transactions-category-dropdown-item search-result';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+                
+                // Add separator between search results and all categories
+                if (nonMatchingCategories.length > 0) {
+                    const separator = document.createElement('div');
+                    separator.className = 'dropdown-separator';
+                    dropdown.appendChild(separator);
+                }
+            } else if (showAiSuggestion) {
+                // Add separator after AI suggestion if no search results
+                const separator = document.createElement('div');
+                separator.className = 'dropdown-separator';
+                dropdown.appendChild(separator);
+            }
+
+            // Show all other categories (non-matching or all if no search)
+            if (nonMatchingCategories.length > 0 || (searchLower.length === 0 && categories.length > 0)) {
+                const catsToShow = searchLower.length > 0 ? nonMatchingCategories : categories;
+                dropdown.style.display = 'block';
+                catsToShow.forEach(cat => {
+                    // Skip the suggested category since it's already at the top
+                    if (suggestedCategoryId && String(cat.id) === String(suggestedCategoryId) && searchLower.length === 0) {
+                        return;
+                    }
                     const div = document.createElement('div');
                     div.textContent = cat.name;
                     div.className = 'pending-transactions-category-dropdown-item';
@@ -168,7 +245,7 @@
             }
 
             // Show "Create new..." option if there's text and no exact match
-            if (searchText.length > 0 && !exactMatch) {
+            if (searchLower.length > 0 && !exactMatch) {
                 dropdown.style.display = 'block';
                 const createDiv = document.createElement('div');
                 createDiv.className = 'pending-transactions-category-dropdown-item create-new-category';
@@ -179,7 +256,7 @@
                 dropdown.appendChild(createDiv);
             }
 
-            if (!hasMatches && searchText.length === 0) {
+            if (dropdown.children.length === 0) {
                 dropdown.style.display = 'none';
             }
         }
@@ -267,7 +344,8 @@
                 if (parentItem) {
                     parentItem.style.zIndex = '100';
                 }
-                showCategoryDropdown(this, this.value);
+                // On focus, show all categories (don't treat pre-filled value as search)
+                showCategoryDropdown(this, '');
             });
         });
 
@@ -406,6 +484,84 @@
                 $('.confirm-all-btn').hide();
             }
         }
+        
+        // Note: fetchNtropySuggestions is kept for manual refresh if needed,
+        // but suggestions are now pre-loaded from server during sync
+        function fetchNtropySuggestions() {
+            const items = document.querySelectorAll('.pending-transaction-item');
+            if (items.length === 0) return;
+            
+            // Build batch request
+            const transactions = [];
+            items.forEach(item => {
+                const input = item.querySelector('.category-input');
+                const transactionId = item.dataset.transactionId;
+                const entryType = item.dataset.entryType;
+                const description = item.querySelector('.transaction-merchant')?.textContent?.trim() || '';
+                const amountText = item.querySelector('.transaction-amount')?.textContent?.trim() || '0';
+                const amount = parseFloat(amountText.replace(/[^0-9.-]/g, '')) || 0;
+                const isExpense = item.querySelector('.transaction-amount')?.classList.contains('expense');
+                const creditAccountId = input?.dataset?.creditAccountId || '';
+                const dateText = item.querySelector('.transaction-date')?.textContent?.trim() || '';
+                
+                // Determine account type
+                const accountType = (entryType === 'c_expense') ? 'CREDIT' : 'DEPOSITORY';
+                
+                transactions.push({
+                    transaction_id: transactionId,
+                    description: description,
+                    amount: isExpense ? -Math.abs(amount) : Math.abs(amount),
+                    date: dateText,
+                    account_type: accountType,
+                    entry_type: entryType,
+                    credit_account_id: creditAccountId
+                });
+            });
+            
+            if (transactions.length === 0) return;
+            
+            // Fetch suggestions
+            fetch('/quiltt/suggest-categories-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transactions: transactions })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success' && data.suggestions) {
+                    applySuggestions(data.suggestions);
+                }
+            })
+            .catch(error => {
+                console.log('Could not fetch Ntropy suggestions:', error);
+            });
+        }
+        
+        // Apply suggestions to the UI (kept for compatibility but suggestions now come pre-loaded from server)
+        function applySuggestions(suggestions) {
+            Object.entries(suggestions).forEach(([transactionId, suggestion]) => {
+                const item = document.querySelector(`.pending-transaction-item[data-transaction-id="${transactionId}"]`);
+                if (!item) return;
+                
+                const input = item.querySelector('.category-input');
+                const hiddenInput = item.querySelector('.category-hidden');
+                
+                // Store suggestion in data attributes for dropdown display
+                if (suggestion.suggested_category && suggestion.suggested_category_id) {
+                    input.dataset.suggestedCategory = suggestion.suggested_category;
+                    input.dataset.suggestedCategoryId = suggestion.suggested_category_id;
+                    
+                    // Pre-fill if input is currently empty or Uncategorized
+                    if (input.value === '' || input.value === 'Uncategorized') {
+                        input.value = suggestion.suggested_category;
+                        hiddenInput.value = suggestion.suggested_category_id;
+                    }
+                }
+            });
+        }
+        
+        // Suggestions are now pre-loaded from server via cached Ntropy data
+        // No need to call API on page load - instant page render!
     </script>
 </body>
 </html>
