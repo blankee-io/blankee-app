@@ -597,10 +597,17 @@
         document.documentElement.classList.remove('modal-open');
     }
 
-    // Populate credit account dropdown
+    // Populate credit account dropdown (excludes Quiltt-linked accounts)
     function populateCaAccountDropdown() {
         caAccountDropdown.innerHTML = '<option value="">Select Account</option>';
         credit_accounts.forEach(account => {
+            // Skip Quiltt-linked accounts - entries are synced from bank
+            if (typeof quiltt_flags !== 'undefined' && 
+                quiltt_flags && 
+                quiltt_flags.quiltt_credit_ids && 
+                quiltt_flags.quiltt_credit_ids.includes(account.id)) {
+                return; // Skip this account
+            }
             const option = document.createElement('option');
             option.value = account.id;
             option.textContent = account.name;
@@ -1067,5 +1074,61 @@
             }
         });
     }
+
+    /**
+     * Apply Quiltt-based footer restrictions.
+     * Called after page load when quiltt_flags is available.
+     * - Hides Income/Expense/AutoBalance buttons if user has checking account linked
+     * - Hides Credit Entry button if all credit accounts are Quiltt-linked
+     */
+    function applyQuilttFooterRestrictions() {
+        // Check if quiltt_flags is defined (set by dashboard templates)
+        if (typeof quiltt_flags === 'undefined' || !quiltt_flags) {
+            return;
+        }
+
+        // If user has checking account linked, hide Income/Expense/AutoBalance buttons
+        // (All income/expense entries sync with bank - manual entry would desync)
+        if (quiltt_flags.has_checking) {
+            const incomeBtn = document.getElementById('footer-income-button');
+            const incomeLbl = document.getElementById('footer-income-label');
+            const expenseBtn = document.getElementById('footer-expense-button');
+            const expenseLbl = document.getElementById('footer-expense-label');
+            const autobalBtn = document.getElementById('footer-autobalance-button');
+            const autobalLbl = document.getElementById('footer-autobalance-label');
+
+            if (incomeBtn) incomeBtn.style.display = 'none';
+            if (incomeLbl) incomeLbl.style.display = 'none';
+            if (expenseBtn) expenseBtn.style.display = 'none';
+            if (expenseLbl) expenseLbl.style.display = 'none';
+            if (autobalBtn) autobalBtn.style.display = 'none';
+            if (autobalLbl) autobalLbl.style.display = 'none';
+        }
+
+        // Check if all credit accounts are Quiltt-linked
+        // If so, hide the Credit Entry button entirely
+        if (typeof credit_accounts !== 'undefined' && 
+            credit_accounts && 
+            credit_accounts.length > 0 && 
+            quiltt_flags.quiltt_credit_ids && 
+            quiltt_flags.quiltt_credit_ids.length > 0) {
+            
+            // Check if any non-Quiltt credit account exists
+            const hasNonQuilttAccount = credit_accounts.some(account => 
+                !quiltt_flags.quiltt_credit_ids.includes(account.id)
+            );
+
+            if (!hasNonQuilttAccount) {
+                // All credit accounts are Quiltt-linked, hide credit entry button
+                const caBtn = document.getElementById('footer-ca-button');
+                const caLbl = document.getElementById('footer-ca-label');
+                if (caBtn) caBtn.style.display = 'none';
+                if (caLbl) caLbl.style.display = 'none';
+            }
+        }
+    }
+
+    // Apply restrictions after page is fully loaded (quiltt_flags defined by then)
+    window.addEventListener('load', applyQuilttFooterRestrictions);
 
 </script>

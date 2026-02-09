@@ -1356,3 +1356,173 @@ def get_blankee_credit_account_for_quiltt_account(user_id: int, quiltt_account_i
     except Exception as e:
         logger.error(f"Error finding Blankee credit account: {e}", exc_info=True)
         return None
+
+
+# ============================================================================
+# QUILTT ENTRY LOCKING HELPERS
+# ============================================================================
+
+def get_user_quiltt_account_flags(user_id: int) -> Dict[str, Any]:
+    """
+    Determine what Quiltt account types a user has connected.
+    Used for entry locking - entries linked to bank accounts cannot be edited.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Dict with:
+        - has_checking: bool - True if user has a checking account connected
+        - has_savings: bool - True if user has a savings account connected  
+        - quiltt_credit_ids: List[int] - Blankee credit_accounts.id where is_quiltt=1
+        - savings_income_category_id: int|None - ID of "Savings" income category
+        - savings_expense_category_id: int|None - ID of "Savings" expense category
+    """
+    result = {
+        'has_checking': False,
+        'has_savings': False,
+        'quiltt_credit_ids': [],
+        'savings_income_category_id': None,
+        'savings_expense_category_id': None
+    }
+    
+    try:
+        # Get all quiltt accounts for user
+        quiltt_accounts = get_quiltt_accounts(user_id)
+        
+        for account in quiltt_accounts:
+            account_type = account.get('account_type', '').upper()
+            account_name = account.get('account_name', '').lower()
+            
+            if account_type == 'DEPOSITORY':
+                if 'checking' in account_name:
+                    result['has_checking'] = True
+                if 'savings' in account_name:
+                    result['has_savings'] = True
+            # CREDIT accounts are handled separately via credit_accounts table
+        
+        # Get Quiltt-linked credit accounts from credit_accounts table
+        result['quiltt_credit_ids'] = get_quiltt_credit_account_ids(user_id)
+        
+        # Get Savings category IDs
+        savings_ids = get_savings_category_ids(user_id)
+        result['savings_income_category_id'] = savings_ids.get('income_savings_id')
+        result['savings_expense_category_id'] = savings_ids.get('expense_savings_id')
+        
+        logger.info(f"Quiltt account flags for user {user_id}: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting Quiltt account flags for user {user_id}: {e}", exc_info=True)
+        return result
+
+
+def get_quiltt_credit_account_ids(user_id: int) -> List[int]:
+    """
+    Get list of Blankee credit_accounts.id where is_quiltt=1.
+    These credit accounts are linked to bank and their entries should be locked.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        List of credit_accounts.id that are Quiltt-linked
+    """
+    try:
+        redis_client = _get_redis_client()
+        redis_key = f"credit_accounts:v1:{user_id}"
+        cached = redis_client.get(redis_key) if redis_client else None
+        
+        if cached:
+            credit_accounts = json.loads(cached)
+        else:
+            # Fallback to MySQL
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT id, is_quiltt FROM credit_accounts WHERE user_id = %s", (user_id,))
+                credit_accounts = cursor.fetchall()
+                cursor.close()
+        
+        # Return IDs where is_quiltt = 1
+        quiltt_ids = []
+        for ca in credit_accounts:
+            if ca.get('is_quiltt') == 1 or ca.get('is_quiltt') == True:
+                quiltt_ids.append(ca.get('id'))
+        
+        return quiltt_ids
+        
+    except Exception as e:
+        logger.error(f"Error getting Quiltt credit account IDs for user {user_id}: {e}", exc_info=True)
+        return []
+
+
+def get_savings_category_ids(user_id: int) -> Dict[str, Optional[int]]:
+    """
+    Get the category IDs for "Savings" in income_categories and expense_categories.
+    Used for locking only the Savings category when user has Quiltt savings account.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Dict with income_savings_id and expense_savings_id (or None if not found)
+    """
+    result = {
+        'income_savings_id': None,
+        'expense_savings_id': None
+    }
+    
+    try:
+        redis_client = _get_redis_client()
+        
+        # Check income_categories
+        income_key = f"income_categories:v1:{user_id}"
+        income_cached = redis_client.get(income_key) if redis_client else None
+        
+        if income_cached:
+            income_categories = json.loads(income_cached)
+            for cat in income_categories:
+                if cat.get('name', '').lower() == 'savings':
+                    result['income_savings_id'] = cat.get('id')
+                    break
+        else:
+            # Fallback to MySQL for income
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute(
+                    "SELECT id FROM income_categories WHERE user_id = %s AND LOWER(name) = 'savings' LIMIT 1",
+                    (user_id,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    result['income_savings_id'] = row['id']
+                cursor.close()
+        
+        # Check expense_categories
+        expense_key = f"expense_categories:v1:{user_id}"
+        expense_cached = redis_client.get(expense_key) if redis_client else None
+        
+        if expense_cached:
+            expense_categories = json.loads(expense_cached)
+            for cat in expense_categories:
+                if cat.get('name', '').lower() == 'savings':
+                    result['expense_savings_id'] = cat.get('id')
+                    break
+        else:
+            # Fallback to MySQL for expense
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute(
+                    "SELECT id FROM expense_categories WHERE user_id = %s AND LOWER(name) = 'savings' LIMIT 1",
+                    (user_id,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    result['expense_savings_id'] = row['id']
+                cursor.close()
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting Savings category IDs for user {user_id}: {e}", exc_info=True)
+        return result

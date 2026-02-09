@@ -12084,3 +12084,108 @@ html.modal-open {
     font-size: 0.85em;
     margin-left: 8px;
 }
+
+/* ===== Alert Modal Styles ===== */
+.alert-modal-content {
+    max-width: 420px;
+    text-align: center;
+    padding: 30px;
+}
+
+.alert-modal-icon {
+    font-size: 48px;
+    color: #E45F1C;
+    margin-bottom: 15px;
+}
+
+.alert-modal-content h2 {
+    margin: 0 0 10px 0;
+    font-size: 1.4em;
+    color: #E45F1C;
+}
+
+.alert-modal-content p {
+    margin: 0 0 20px 0;
+    color: #6b7280;
+    font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.alert-modal-details {
+    background: #E45F1C;
+    border-radius: 8px;
+    padding: 12px 15px;
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+.alert-modal-details .bank-name {
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.alert-modal-details .bank-status {
+    font-size: 0.85em;
+    color: #fde8e0;
+    margin-top: 4px;
+}
+
+.alert-modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.alert-modal-buttons .btn {
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.95em;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+}
+
+.alert-modal-buttons .btn-secondary {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.alert-modal-buttons .btn-secondary:hover {
+    background: #d1d5db;
+}
+
+.alert-modal-buttons .btn-primary {
+    background: #2AAAA8;
+    color: white;
+}
+
+.alert-modal-buttons .btn-primary:hover {
+    background: #239997;
+}
+
+.alert-modal-buttons .btn-primary i {
+    margin-right: 6px;
+}
+
+/* Dark mode support for alert modals */
+@media (prefers-color-scheme: dark) {
+    .alert-modal-content h2 {
+        color: #E45F1C;
+    }
+    
+    .alert-modal-content p {
+        color: #9ca3af;
+    }
+    
+    .alert-modal-details {
+        background: #E45F1C;
+    }
+    
+    .alert-modal-details .bank-name {
+        color: #ffffff;
+    }
+    
+    .alert-modal-details .bank-status {
+        color: #fde8e0;
+    }
+}

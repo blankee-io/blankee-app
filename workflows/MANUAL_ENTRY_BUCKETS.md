@@ -222,14 +222,16 @@
 |------|---------|
 | `bucket_utils.py` | Added `find_next_bucket_for_category()`, `restore_bucket_for_deleted_entry_v2()`, `delete_bucket_record_for_entry()` |
 | `recurring_bucket_manager.py` | Added `get_bucket_records_for_category()` |
-| `app.py` | Updated `/dashboard-d/add_entry`, `/footer_add_entry` for bucket logic; Updated `_delete_entry_in_redis()` for bucket deletion |
+| `app.py` | Updated `/dashboard-d/add_entry`, `/footer_add_entry`, `/update-week-entry` for bucket logic; Updated `_delete_entry_in_redis()` for bucket deletion |
+| `templates/dashboard.html` | Remove progress bar on entry deletion |
+| `templates/dashboard_3m.html` | Remove progress bar on entry deletion |
 
 ---
 
 ## Current Status
 
 **Status**: ✅ FEATURE COMPLETE  
-**Last Updated**: February 8, 2026  
+**Completed**: February 8, 2026  
 
 ### All Phases Completed:
 1. ✅ Phase 1 - Understand Current Bucket System
@@ -244,7 +246,9 @@
 - **Future-dated entries** (date > today) → automatically become buckets
 - **Today/past entries** → reduce the **nearest future bucket** in that category
 - Works for **ALL categories** (recurring AND non-recurring)
+- Works in **ALL dashboards** (daily, weekly, 3-month views)
 - Deleting a bucket entry also deletes the bucket record
 - Deleting a reducing entry restores the bucket amount
 - **Negative bucket restoration**: If bucket goes negative and entry is deleted, bucket entry is recreated
 - UI displays progress bars for manual buckets identical to recurring buckets
+- Progress bar removed immediately when entry is deleted (no reload needed)

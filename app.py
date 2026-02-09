@@ -30,7 +30,8 @@ from quiltt_utils import QuilttClient, map_quiltt_transaction_to_entry, get_defa
 from quiltt_redis import (
     get_quiltt_profile, update_quiltt_profile, get_quiltt_connections, get_quiltt_accounts,
     upsert_quiltt_connection, upsert_quiltt_account, update_quiltt_account_field, 
-    delete_quiltt_connection, get_quiltt_transactions, upsert_quiltt_transaction
+    delete_quiltt_connection, get_quiltt_transactions, upsert_quiltt_transaction,
+    get_user_quiltt_account_flags
 )
 from bucket_utils import process_manual_entry_with_bucket, restore_bucket_for_category_change
 from push_notifications import apns_enabled, send_apns_notification
@@ -1992,6 +1993,9 @@ def dashboard_d():
             recurring_expense = list(cursor.fetchall())
             cursor.close()
 
+    # Get Quiltt account flags for entry locking
+    quiltt_flags = get_user_quiltt_account_flags(current_user.id)
+
     # Render the template, passing necessary data including selected date, goofy_week_mode, entries, and totals/remainders
     return render_template('dashboard_d.html', 
         selected_date=selected_date, 
@@ -2014,7 +2018,8 @@ def dashboard_d():
         c_expense_entries=c_expense_entries,
         c_a_balances_d=c_a_balances_d,
         recurring_income=recurring_income,
-        recurring_expense=recurring_expense
+        recurring_expense=recurring_expense,
+        quiltt_flags=quiltt_flags
     )
 
 @app.route('/dashboard-d/add_entry', methods=['POST'])
@@ -7410,6 +7415,9 @@ def dashboard():
     currency_type = user_data.get('currency_type', 'USD') if user_data else 'USD'
     landing_page = user_data.get('landing_page', 'dashboard') if user_data else 'dashboard'
 
+    # Get Quiltt account flags for entry locking
+    quiltt_flags = get_user_quiltt_account_flags(current_user.id)
+
     return render_template(
         'dashboard.html',
         fridays_by_month=fridays_by_month,
@@ -7433,7 +7441,8 @@ def dashboard():
         credit_accounts=credit_accounts,
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
-        c_a_balances=c_a_balances
+        c_a_balances=c_a_balances,
+        quiltt_flags=quiltt_flags
     )
 
 @app.route('/get_total_income', methods=['GET'])
@@ -8761,8 +8770,17 @@ def update_week_entry():
     # Delete old entries and add new entry to Redis only - flush worker will persist
     _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
     
-    # Check for bucket entries and deplete them if this is a recurring category
-    if float(amount) != 0:
+    # Check if this is a future-dated entry (should become a bucket)
+    from datetime import date as date_type
+    if isinstance(friday_date, str):
+        friday_date_parsed = date_type.fromisoformat(friday_date)
+    else:
+        friday_date_parsed = friday_date
+    today = date_type.today()
+    entry_is_bucket = friday_date_parsed > today
+    
+    # Check for bucket entries and deplete them if this is a recurring category OR has manual buckets
+    if float(amount) != 0 and not entry_is_bucket:
         pass
         try:
             # Get recurring info for this category to determine cadence from Redis
@@ -8796,15 +8814,15 @@ def update_week_entry():
             else:
                 recurring_info = None
             
-            
-            if recurring_info:
-                # Process bucket depletion for the weekly aggregate amount
+            # Process bucket reduction - works for both recurring and non-recurring categories with buckets
+            from bucket_utils import find_next_bucket_for_category
+            next_bucket = find_next_bucket_for_category(table_name, category_id, current_user.id)
+            if next_bucket:
+                app.logger.info(f"[BUCKET] /update-week-entry: Found bucket to reduce: date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
                 process_manual_entry_with_bucket(
                     table_name, category_id, friday_date, 
                     float(amount), current_user.id, recurring_info
                 )
-            else:
-                pass
         except Exception as e:
             app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
             app.logger.exception(e)
@@ -8857,7 +8875,37 @@ def update_week_entry():
     # If amount is 0, don't create a new entry (just delete old ones)
     if float(amount) != 0:
         pass
-        _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, float(amount))
+        _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, float(amount),
+                              is_bucket=entry_is_bucket, original_amount=float(amount) if entry_is_bucket else None)
+        
+        # Create bucket record for future-dated entries
+        if entry_is_bucket:
+            try:
+                from recurring_bucket_manager import create_bucket_record
+                # Determine account_id for credit expense entries
+                account_id_for_bucket = None
+                if entry_type == 'ca':
+                    if category_id < 0:
+                        # Temp category - search in Redis
+                        cats = _get_categories_from_redis('c_expense_categories', current_user.id)
+                        if cats:
+                            matching_cat = next((cat for cat in cats if cat.get('id') == category_id), None)
+                            if matching_cat:
+                                account_id_for_bucket = matching_cat.get('account_id')
+                    else:
+                        # Real category - query MySQL
+                        with get_db_pool().get_connection() as conn:
+                            cursor = conn.cursor(pymysql.cursors.DictCursor)
+                            cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (category_id,))
+                            result = cursor.fetchone()
+                            account_id_for_bucket = result['account_id'] if result else None
+                            cursor.close()
+                
+                create_bucket_record(table_name, current_user.id, category_id, friday_date, float(amount), account_id=account_id_for_bucket)
+                app.logger.info(f"[BUCKET] /update-week-entry: Created bucket record for future entry: category={category_id}, date={friday_date}, amount={amount}")
+            except Exception as e:
+                app.logger.error(f"[BUCKET] Error creating bucket record: {e}")
+                app.logger.exception(e)
     else:
         pass
 
@@ -9253,6 +9301,9 @@ def dashboard_3m():
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
     landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard_3m'
 
+    # Get Quiltt account flags for entry locking
+    quiltt_flags = get_user_quiltt_account_flags(current_user.id)
+
     return render_template(
         'dashboard_3m.html',
         fridays_by_month=fridays_by_month,
@@ -9276,7 +9327,8 @@ def dashboard_3m():
         credit_accounts=credit_accounts,
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
-        c_a_balances_m=c_a_balances_m
+        c_a_balances_m=c_a_balances_m,
+        quiltt_flags=quiltt_flags
     )
 
 @app.route('/get_ca_balance_3m', methods=['GET'])
@@ -11455,6 +11507,36 @@ def get_unread_notification_count():
         unread_count = result[0] if result else 0
     
     return jsonify({'count': unread_count})
+
+
+@app.route('/api/check-quiltt-reconnect', methods=['GET'])
+@login_required
+def check_quiltt_reconnect():
+    """Check if any Quiltt connections need reconnection"""
+    try:
+        connections = get_quiltt_connections(current_user.id)
+        
+        # Find connections that need reconnection
+        error_statuses = ('DISCONNECTED', 'ERROR', 'ERROR_REPAIRABLE', 'ERROR_INSTITUTION', 'ERROR_PROVIDER', 'ERROR_SERVICE')
+        needs_reconnect = []
+        
+        for conn in connections:
+            status = conn.get('status', '').upper()
+            if status in error_statuses:
+                needs_reconnect.append({
+                    'connection_id': conn.get('connection_id'),
+                    'institution_name': conn.get('institution_name', 'Unknown Bank'),
+                    'status': status
+                })
+        
+        return jsonify({
+            'needs_reconnect': len(needs_reconnect) > 0,
+            'connections': needs_reconnect
+        })
+    except Exception as e:
+        app.logger.error(f"Error checking Quiltt reconnect status: {e}")
+        return jsonify({'needs_reconnect': False, 'connections': []})
+
 
 @app.route('/settings', methods=['GET'])
 @login_required
@@ -18820,7 +18902,8 @@ def _auto_import_transaction_to_entry(user_id, entry_type, category_id, amount, 
                 'is_bucket': 0,
                 'original_amount': None,
                 'processed': 0,
-                'pending': 1  # needs category confirmation
+                'pending': 1,  # needs category confirmation
+                'auto_confirmed': 0  # not auto-categorized
             }
             entries.append(new_entry)
             
@@ -18852,6 +18935,7 @@ def _auto_import_transaction_to_entry(user_id, entry_type, category_id, amount, 
                 'original_amount': None,
                 'processed': 0,
                 'pending': 1,  # needs category confirmation
+                'auto_confirmed': 0,  # not auto-categorized
                 'bud_item_id': None
             }
             entries.append(new_entry)
@@ -18883,6 +18967,7 @@ def _auto_import_transaction_to_entry(user_id, entry_type, category_id, amount, 
                 'original_amount': None,
                 'processed': 0,
                 'pending': 1,  # needs category confirmation
+                'auto_confirmed': 0,  # not auto-categorized
                 'bud_item_id': None
             }
             entries.append(new_entry)

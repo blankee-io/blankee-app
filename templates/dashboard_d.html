@@ -26,6 +26,7 @@
 <body id="dashboard-d-body">
     <!-- Include the navigation bar -->
     {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
 
     <!-- Calendar navigation for moving between months -->
     <div class="calendarnav">
@@ -212,6 +213,59 @@
         }
 
         const memberSince = {{ member_since | tojson }};
+
+        // Quiltt account flags for entry locking
+        let quiltt_flags = {{ quiltt_flags | tojson | safe }};
+
+        /**
+         * Check if an entry should be locked due to Quiltt bank account sync.
+         * Locked entries are from today or before, based on which accounts are linked.
+         * @param {string} entryDate - The date of the entry (YYYY-MM-DD format)
+         * @param {number|string} categoryId - The category ID of the entry
+         * @param {string} entryType - 'income', 'expense', or 'ca' (credit account)
+         * @param {number|string} [accountId] - For CA entries, the credit account ID
+         * @returns {boolean} - True if entry should be locked
+         */
+        function isEntryLockedByQuiltt(entryDate, categoryId, entryType, accountId = null) {
+            // If no quiltt flags, nothing is locked
+            if (!quiltt_flags) return false;
+            
+            // Get today's date at midnight for comparison
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            // Parse entry date
+            const entryDateObj = new Date(entryDate);
+            entryDateObj.setHours(0, 0, 0, 0);
+            
+            // Only lock entries from today or before
+            if (entryDateObj > today) return false;
+            
+            // Credit account entries - check if this specific account is Quiltt-linked
+            if (entryType === 'ca' && accountId !== null) {
+                const accountIdNum = parseInt(accountId, 10);
+                return quiltt_flags.quiltt_credit_ids && 
+                       quiltt_flags.quiltt_credit_ids.includes(accountIdNum);
+            }
+            
+            // If user has checking account linked, ALL income/expense entries are locked
+            if (quiltt_flags.has_checking && (entryType === 'income' || entryType === 'expense')) {
+                return true;
+            }
+            
+            // If user has savings account linked, only Savings category entries are locked
+            if (quiltt_flags.has_savings) {
+                const catIdNum = parseInt(categoryId, 10);
+                if (entryType === 'income' && catIdNum === quiltt_flags.savings_income_category_id) {
+                    return true;
+                }
+                if (entryType === 'expense' && catIdNum === quiltt_flags.savings_expense_category_id) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
 
         const savingsEntries = {{ savings_entries | tojson }};
 
@@ -777,7 +831,8 @@
                     const catObj = incomeCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
                     const isStartingBalance = entry.category_name === 'Starting Balance' || (catObj && catObj.name === 'Starting Balance');
-                    const isReadonly = isBud || isStartingBalance;
+                    const isQuilttLocked = isEntryLockedByQuiltt(date, entry.category_id, 'income');
+                    const isReadonly = isBud || isStartingBalance || isQuilttLocked;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                     if (isStartingBalance) {
                         iconHtml = '<i class="fa-solid fa-flag-checkered category-icon"></i>';
@@ -798,7 +853,7 @@
                         </div>
                         <div class="dashboard-d-amount-cell ${paidClass}">
                             <input type="text"
-                                class="income-cell-input"
+                                class="income-cell-input${isReadonly ? ' auto-disable' : ''}"
                                 data-processed="${dataProcessed}"
                                 value="${formatCurrency(entry.amount)}"
                                 data-entry-id="${entry.id}"
@@ -852,6 +907,8 @@
                     
                     const catObj = expenseCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
+                    const isExpenseQuilttLocked = isEntryLockedByQuiltt(date, entry.category_id, 'expense');
+                    const isExpenseReadonly = isBud || isExpenseQuilttLocked;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                     if (catObj) {
                         if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
@@ -860,7 +917,7 @@
                         else if (catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
                     }
                     expenseRow.innerHTML = `
-                        ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
+                        ${!isExpenseReadonly ? `<span class="dashboard-d-move-btn" title="Move to date">
                             <span class="calendar-icon">
                             <i class="fa-solid fa-up-down-left-right"></i>
                             </span>
@@ -871,13 +928,13 @@
                         </div>
                         <div class="dashboard-d-amount-cell ${paidClass}">
                             <input type="text"
-                                class="expense-cell-input"
+                                class="expense-cell-input${isExpenseReadonly ? ' auto-disable' : ''}"
                                 data-processed="${dataProcessed}"
                                 value="${formatCurrency(entry.amount)}"
                                 data-entry-id="${entry.id}"
                                 data-category-id="${entry.category_id}"
                                 data-date="${date}"
-                                ${isBud ? 'readonly tabindex="-1"' : ''}
+                                ${isExpenseReadonly ? 'readonly tabindex="-1"' : ''}
                             />
                         </div>
                     `;
@@ -969,6 +1026,8 @@
                         const catObj = c_expense_categories.find(cat => cat.id == entry.category_id);
                         if (catObj && catObj.name === "Starting Balance") return;
                         const isBud = catObj && catObj.is_bud;
+                        const isCaQuilttLocked = isEntryLockedByQuiltt(date, entry.category_id, 'ca', account.id);
+                        const isCaReadonly = isBud || isCaQuilttLocked;
                         let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                         if (catObj) {
                             if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
@@ -986,7 +1045,7 @@
                         const dataProcessed = entry.processed == 1 ? '1' : '0';
                         const paidClass = entry.processed == 1 ? 'paid' : '';
                         entryRow.innerHTML = `
-                            ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
+                            ${!isCaReadonly ? `<span class="dashboard-d-move-btn" title="Move to date">
                                 <span class="calendar-icon">
                                     <i class="fa-solid fa-up-down-left-right"></i>
                                 </span>
@@ -997,13 +1056,13 @@
                             </div>
                             <div class="dashboard-d-amount-cell ${paidClass}">
                                 <input type="text"
-                                    class="ca-cell-input"
+                                    class="ca-cell-input${isCaReadonly ? ' auto-disable' : ''}"
                                     data-processed="${dataProcessed}"
                                     value="${formatCurrency(entry.amount)}"
                                     data-entry-id="${entry.id}"
                                     data-category-id="${entry.category_id}"
                                     data-date="${date}"
-                                    ${isBud ? 'readonly tabindex="-1"' : ''}
+                                    ${isCaReadonly ? 'readonly tabindex="-1"' : ''}
                                 />
                             </div>
                         `;

@@ -1,5 +1,97 @@
 // General Functions
 
+// ===== Quiltt Reconnection Alert =====
+// Check for bank connections needing reconnection on page load
+(function() {
+    // Only run on pages that have the reconnect modal
+    if (!document.getElementById('quiltt-reconnect-modal')) return;
+    
+    // Check localStorage to see if user already saw this today
+    const dismissedKey = 'quiltt_reconnect_dismissed_date';
+    const dismissedDate = localStorage.getItem(dismissedKey);
+    const today = new Date().toDateString();
+    if (dismissedDate === today) {
+        return; // Already shown today
+    }
+    
+    // TESTING MODE - show modal with mock data
+    const testMode = true;
+    if (testMode) {
+        showReconnectModal([
+            { connection_id: 'conn_test123', institution_name: 'Chase Bank', status: 'ERROR_REPAIRABLE' },
+            { connection_id: 'conn_test456', institution_name: 'Bank of America', status: 'DISCONNECTED' }
+        ]);
+        // Mark as shown for today
+        localStorage.setItem(dismissedKey, today);
+        return;
+    }
+    
+    // Check for connections needing reconnection
+    fetch('/api/check-quiltt-reconnect')
+        .then(response => response.json())
+        .then(data => {
+            if (data.needs_reconnect && data.connections && data.connections.length > 0) {
+                showReconnectModal(data.connections);
+                // Mark as shown for today
+                localStorage.setItem(dismissedKey, today);
+            }
+        })
+        .catch(err => console.error('Error checking reconnect status:', err));
+})();
+
+// Store reconnect data globally for the modal
+window._quilttReconnectData = null;
+
+function showReconnectModal(connections) {
+    window._quilttReconnectData = connections;
+    
+    const modal = document.getElementById('quiltt-reconnect-modal');
+    const detailsDiv = document.getElementById('reconnect-modal-details');
+    const messageEl = document.getElementById('reconnect-modal-message');
+    
+    if (!modal || !detailsDiv) return;
+    
+    // Build details HTML
+    let detailsHtml = '';
+    connections.forEach(conn => {
+        detailsHtml += `
+            <div class="bank-name"><i class="fa-solid fa-building-columns"></i> ${conn.institution_name}</div>
+            <div class="bank-status">Disconnected</div>
+        `;
+    });
+    detailsDiv.innerHTML = detailsHtml;
+    
+    // Update message if multiple
+    if (connections.length > 1) {
+        messageEl.textContent = `${connections.length} bank connections need to be reconnected to continue syncing transactions.`;
+    } else {
+        messageEl.textContent = 'One of your bank connections needs to be reconnected to continue syncing transactions.';
+    }
+    
+    // Show modal
+    modal.style.display = 'flex';
+}
+
+function dismissReconnectModal() {
+    const modal = document.getElementById('quiltt-reconnect-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    // Already marked as shown for today when modal appeared
+}
+
+function goToReconnect() {
+    if (window._quilttReconnectData && window._quilttReconnectData.length > 0) {
+        // Go to profile page with reconnect parameter for first connection
+        const connectionId = window._quilttReconnectData[0].connection_id;
+        window.location.href = '/profile?reconnect=' + encodeURIComponent(connectionId);
+    } else {
+        window.location.href = '/profile';
+    }
+}
+
+// ===== End Quiltt Reconnection Alert =====
+
 // Calendarnav shadow on scroll
 (function() {
     const calendarnav = document.querySelector('.calendarnav');

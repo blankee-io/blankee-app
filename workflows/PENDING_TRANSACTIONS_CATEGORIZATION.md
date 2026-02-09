@@ -429,16 +429,67 @@ fetch('/quiltt/suggest-category', {
 
 ---
 
-## Phase 8: Balance Reconciliation (Brainstorm Later)
+## Phase 8: Balance Reconciliation ✅ COMPLETE (Feb 8, 2026)
 
-### 8.1 Compare Blankee vs Bank Balance
-- [ ] Calculate Blankee's balance from entries
-- [ ] Get bank balance from `quiltt_accounts.current_balance`
-- [ ] Show discrepancy if any
+**Goal**: Automatically sync bank balances and reconcile with Blankee's remainder every night.
 
-### 8.2 Handle Discrepancies
-- [ ] TBD: Auto-adjustment? Manual review? Notification?
-- [ ] Need to brainstorm approach
+### 8.1 Design Decision
+- **Approach**: Nightly cron job at 00:05 (after auto_confirm_transactions runs at 00:00)
+- **Script**: `nightly_sync.py`
+- **Sequence**:
+  1. Auto-confirm runs first (00:00) → categorizes pending transactions
+  2. Nightly sync runs second (00:05) → fetches balances, imports new transactions, auto-adjusts
+
+### 8.2 Nightly Sync Script ✅ COMPLETE
+- [x] Created `nightly_sync.py` with full sync logic
+- [x] Gets all users with `quiltt_enabled=1`
+- [x] For each user:
+  1. Refresh Quiltt session token if expired
+  2. Fetch latest account balances from Quiltt API
+  3. Sync new transactions from each account
+  4. Auto-import new transactions as `pending=1, auto_confirmed=0`
+  5. Create auto-adjustment entry (income or expense) to match bank balance
+  6. Update savings balance from bank
+  7. Recalculate `totals_remainders_d` and `savings_entries`
+
+### 8.3 Auto-Adjustment Logic ✅ COMPLETE
+- [x] Delete any existing auto-adjustment entries for today (clean slate)
+- [x] Calculate "natural" remainder (excluding auto-adjustments)
+- [x] Compare natural remainder vs bank balance
+- [x] Create single adjustment entry:
+  - If bank > remainder → income entry for the difference
+  - If bank < remainder → expense entry for the difference
+- [x] Idempotent: Running multiple times produces same result
+
+### 8.4 Cron Job Configuration ✅ COMPLETE
+```bash
+# Order matters - auto_confirm first, then nightly_sync
+0 0 * * * cd /var/www/html/budget && /usr/bin/python3 auto_confirm_transactions.py >> /var/log/apache2/auto_confirm.log 2>&1
+5 0 * * * cd /var/www/html/budget && /usr/bin/python3 nightly_sync.py >> /var/log/apache2/nightly_sync.log 2>&1
+```
+
+### 8.5 Environment File Support ✅ COMPLETE
+- [x] Both scripts check multiple `.env` locations:
+  - `/var/www/budget_env/.env` (dev servers)
+  - `/var/www/blankee/.env` (AWS prod)
+
+### 8.6 Deployment ✅ COMPLETE
+- [x] Dev server 192.0.2.44 - cron jobs configured
+- [x] Dev server 192.0.2.45 - cron jobs configured
+- [x] AWS production - cron jobs configured, scripts copied
+
+### 8.7 Import Flags ✅ COMPLETE
+- [x] `nightly_sync.py` imports transactions with `pending=1, auto_confirmed=0`
+- [x] `app.py` webhook imports transactions with `pending=1, auto_confirmed=0`
+- [x] Ensures new transactions appear in pending queue for review
+
+### 8.8 Testing Results (Feb 8, 2026)
+- Ran nightly_sync.py manually
+- Bank balance: $2,076.83
+- Natural remainder: $1,814.50
+- Created income adjustment: $262.33
+- Final remainder: $2,076.83 ✅ (matches bank)
+- Idempotent: Re-running creates same single adjustment
 
 ---
 
@@ -472,7 +523,8 @@ fetch('/quiltt/suggest-category', {
 | `ntropy_utils.py` | Ntropy API integration |
 | `redis_manager.py` | Flush worker updates |
 | `bucket_utils.py` | Bucket restoration for category changes |
-| `auto_confirm_transactions.py` | Midnight cron job |
+| `auto_confirm_transactions.py` | Midnight cron job for auto-categorization |
+| `nightly_sync.py` | Midnight cron job for balance sync |
 | `templates/pending_transactions.html` | New UI page |
 | `templates/nav.html` | Add nav link |
 | `static/css/style.css` | Styling for new page |
@@ -481,13 +533,13 @@ fetch('/quiltt/suggest-category', {
 
 ## Current Status
 
-**Phase**: Phases 1-7 Complete, Phase 8 (Balance Reconciliation) Remaining  
+**Phase**: Phases 1-8 Complete, Phase 9 (Polish & Testing) Remaining  
 **Last Updated**: February 8, 2026  
-**Blockers**: None - Auto-confirm fully operational
+**Blockers**: None - Nightly sync fully operational
 
 ### Verified Working (as of Feb 8, 2026):
 - ✅ Webhooks firing correctly after orphan profile cleanup
-- ✅ Auto-import creates entries with `processed=0` for NEW transactions
+- ✅ Auto-import creates entries with `pending=1, auto_confirmed=0` for NEW transactions
 - ✅ Credit account transactions route to correct tables (c_expense_entries, c_payment_entries)
 - ✅ Ntropy enrichment data stored in quiltt_transactions
 - ✅ Pending transactions notification created when uncategorized entries exist
@@ -502,6 +554,13 @@ fetch('/quiltt/suggest-category', {
 - ✅ **Auto-confirm cron job** - Runs at midnight, confirmed 75 entries in test
 - ✅ **Auto-confirmed UI badge** - Yellow badge with robot icon for auto-categorized entries
 - ✅ **Bucket undo/redo** - Category changes restore old bucket and reduce new bucket
+- ✅ **Nightly balance sync** - Bank balance fetched at 00:05, auto-adjustment created
+- ✅ **Balance reconciliation** - Remainder matches bank balance exactly after sync
+
+### Other Pending Items:
+- ✅ **Phase 7**: Auto-confirm unreviewed transactions at EOD - COMPLETE
+- ✅ **Phase 8**: Balance Reconciliation - COMPLETE
+- 🔜 **Phase 9**: Polish & Testing
 
 ### Bug Fixes (Feb 8, 2026):
 **Issue: Webhook storage failing silently**
