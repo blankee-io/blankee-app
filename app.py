@@ -1291,8 +1291,7 @@ def login_mfa():
         landing_page = user[4] if len(user) > 4 and user[4] else 'dashboard'
         return redirect(url_for(landing_page))
     else:
-        flash('Invalid MFA code.')
-        return render_template('login.html', mfa_step=True, username=user[1])
+        return render_template('login.html', mfa_step=True, username=user[1], mfa_error='Incorrect code')
 
 ############################## Login Add One Year of Data ######################################
 
@@ -11969,8 +11968,8 @@ def enable_mfa():
         # Generate a new secret
         secret = pyotp.random_base32()
         
-        # Update in Redis only - flush worker will persist to MySQL
-        _update_user_setting_in_redis(current_user.id, 'mfa_secret', secret)
+        # Store in session until verified (not in database)
+        session['pending_mfa_secret'] = secret
 
         # Generate provisioning URI for Google Authenticator
         uri = pyotp.totp.TOTP(secret).provisioning_uri(name=current_user.username, issuer_name="Blankee")
@@ -11991,37 +11990,18 @@ def enable_mfa():
 def verify_mfa():
     code = request.form.get('code')
     
-    # Get mfa_secret from Redis first
-    redis_key = f"users:v1:{current_user.id}"
-    user_data = None
-    secret = None
-    
-    if app.config.get('REDIS_OK'):
-        try:
-            cached = _redis_client.get(redis_key)
-            if cached:
-                user_data = json.loads(cached)
-                secret = user_data.get('mfa_secret')
-        except Exception as e:
-            app.logger.error(f"[REDIS ERROR] verify_mfa lookup: {str(e)}")
-    
-    # Fallback to MySQL if not in Redis
-    if not secret:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT mfa_secret FROM users WHERE id = %s", (current_user.id,))
-            result = cursor.fetchone()
-            cursor.close()
-            
-            if result and result[0]:
-                secret = result[0]
+    # Get pending secret from session
+    secret = session.get('pending_mfa_secret')
         
     if not secret:
-        return jsonify({'status': 'error', 'message': 'No MFA secret set'}), 400
+        return jsonify({'status': 'error', 'message': 'No pending MFA setup'}), 400
     
     totp = pyotp.TOTP(secret)
     if totp.verify(code):
-        # Optionally set a session flag for MFA
+        # Verification successful - now save to database
+        _update_user_setting_in_redis(current_user.id, 'mfa_secret', secret)
+        # Clear from session
+        session.pop('pending_mfa_secret', None)
         return jsonify({'status': 'success'})
     else:
         return jsonify({'status': 'error', 'message': 'Invalid code'}), 400
@@ -12037,8 +12017,8 @@ def disable_mfa():
 @app.route('/cancel_mfa', methods=['POST'])
 @login_required
 def cancel_mfa():
-    # Clear the MFA secret if user cancels setup before verification
-    _update_user_setting_in_redis(current_user.id, 'mfa_secret', None)
+    # Clear the pending MFA secret from session
+    session.pop('pending_mfa_secret', None)
     
     return jsonify({'status': 'success'})
 
