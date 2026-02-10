@@ -26,6 +26,7 @@
 <body id="dashboard">
     <!-- Include the navigation bar (sidenav) from a separate HTML file -->
     {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
 
     <!-- Calendar navigation for moving between months -->
     <div class="calendarnav">
@@ -627,6 +628,59 @@
 
         // Add this near the other server-side variables
         let member_since = {{ member_since | tojson | safe }};
+
+        // Quiltt account flags for entry locking
+        let quiltt_flags = {{ quiltt_flags | tojson | safe }};
+
+        /**
+         * Check if an entry should be locked due to Quiltt bank account sync.
+         * Locked entries are from today or before, based on which accounts are linked.
+         * @param {Date|string} entryDate - The date of the entry
+         * @param {number|string} categoryId - The category ID of the entry
+         * @param {string} entryType - 'income', 'expense', or 'ca' (credit account)
+         * @param {number|string} [accountId] - For CA entries, the credit account ID
+         * @returns {boolean} - True if entry should be locked
+         */
+        function isEntryLockedByQuiltt(entryDate, categoryId, entryType, accountId = null) {
+            // If no quiltt flags, nothing is locked
+            if (!quiltt_flags) return false;
+            
+            // Get today's date at midnight for comparison
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            // Parse entry date
+            const entryDateObj = typeof entryDate === 'string' ? new Date(entryDate) : new Date(entryDate);
+            entryDateObj.setHours(0, 0, 0, 0);
+            
+            // Only lock entries from today or before
+            if (entryDateObj > today) return false;
+            
+            // Credit account entries - check if this specific account is Quiltt-linked
+            if (entryType === 'ca' && accountId !== null) {
+                const accountIdNum = parseInt(accountId, 10);
+                return quiltt_flags.quiltt_credit_ids && 
+                       quiltt_flags.quiltt_credit_ids.includes(accountIdNum);
+            }
+            
+            // If user has checking account linked, ALL income/expense entries are locked
+            if (quiltt_flags.has_checking && (entryType === 'income' || entryType === 'expense')) {
+                return true;
+            }
+            
+            // If user has savings account linked, only Savings category entries are locked
+            if (quiltt_flags.has_savings) {
+                const catIdNum = parseInt(categoryId, 10);
+                if (entryType === 'income' && catIdNum === quiltt_flags.savings_income_category_id) {
+                    return true;
+                }
+                if (entryType === 'expense' && catIdNum === quiltt_flags.savings_expense_category_id) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
 
         // Helper function to check if a month is before member_since
         function isMonthBeforeMemberSince(monthDate) {
@@ -1497,11 +1551,21 @@
                     input.style.textAlign = 'right';
 
                     // If the date is older than the cutoff OR before member_since, disable the input
+                    // If locked by Quiltt, use readonly instead to maintain keyboard navigation
                     const monthDate = new Date(monthObj.date);
+                    const isQuilttLocked = isEntryLockedByQuiltt(monthObj.date, categoryId, 'income');
                     if (monthDate < cutoffDate || isMonthBeforeMemberSince(monthObj.date)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
+                    } else if (isQuilttLocked) {
+                        input.readOnly = true;
+                        input.classList.add('auto-disable');
+                        td.classList.add('readonly-cell');
+                        // Attach only keyboard navigation for readonly inputs
+                        input.addEventListener('keydown', function(event) {
+                            handleInputKeyNavigation(event, input);
+                        });
                     } else {
                         handleInputEdit(input, 'income');
                     }
@@ -1560,11 +1624,21 @@
                     input.style.textAlign = 'right';
 
                     // If the date is older than the cutoff OR before member_since, disable the input
+                    // If locked by Quiltt, use readonly instead to maintain keyboard navigation
                     const monthDate = new Date(monthObj.date);
+                    const isExpenseQuilttLocked = isEntryLockedByQuiltt(monthObj.date, categoryId, 'expense');
                     if (monthDate < cutoffDate || isMonthBeforeMemberSince(monthObj.date)) {
                         input.disabled = true;
                         input.classList.add('auto-disable');
                         td.classList.add('readonly-cell');
+                    } else if (isExpenseQuilttLocked) {
+                        input.readOnly = true;
+                        input.classList.add('auto-disable');
+                        td.classList.add('readonly-cell');
+                        // Attach only keyboard navigation for readonly inputs
+                        input.addEventListener('keydown', function(event) {
+                            handleInputKeyNavigation(event, input);
+                        });
                     } else if (!(catObj && catObj.is_bud == 1)) {
                         // Only attach handler if NOT a Bud category
                         handleInputEdit(input, 'expense');
@@ -1633,11 +1707,21 @@
                         input.style.textAlign = 'right';
 
                         // If the date is older than the cutoff OR before member_since, disable the input
+                        // If locked by Quiltt, use readonly instead to maintain keyboard navigation
                         const monthDate = new Date(monthObj.date);
+                        const isCaQuilttLocked = isEntryLockedByQuiltt(monthObj.date, categoryId, 'ca', accountId);
                         if (monthDate < cutoffDate || isMonthBeforeMemberSince(monthObj.date)) {
                             input.disabled = true;
                             input.classList.add('auto-disable');
                             td.classList.add('readonly-cell');
+                        } else if (isCaQuilttLocked) {
+                            input.readOnly = true;
+                            input.classList.add('auto-disable');
+                            td.classList.add('readonly-cell');
+                            // Attach only keyboard navigation for readonly inputs
+                            input.addEventListener('keydown', function(event) {
+                                handleInputKeyNavigation(event, input);
+                            });
                         } else if (!(catObj && catObj.is_bud == 1)) {
                             // Only attach handler if NOT a Bud category
                             handleInputEdit(input, 'ca');
@@ -3729,6 +3813,12 @@
                             td.setAttribute('data-processed', '0');
                             td.classList.remove('paid');
                             
+                            // Remove any bucket progress bar from the deleted cell
+                            const existingBar = td.querySelector('.bucket-progress-container');
+                            if (existingBar) {
+                                existingBar.remove();
+                            }
+                            
                             updateLocalState(type, categoryId, startDate, 0, true, endDate);
                             
                             // Update bucket entries if returned from server
@@ -3885,6 +3975,11 @@
                                 td.removeAttribute('data-processed');
                                 td.setAttribute('data-processed', '0');
                                 td.classList.remove('paid');
+                                // Remove any bucket progress bar from the deleted cell
+                                const existingBar = td.querySelector('.bucket-progress-container');
+                                if (existingBar) {
+                                    existingBar.remove();
+                                }
                             } else {
                                 // Always format the value with currency symbol
                                 const rounded = formatNumberWithCommas(amount);

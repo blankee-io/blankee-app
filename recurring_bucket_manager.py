@@ -164,6 +164,41 @@ def get_bucket_record_by_category_date(bucket_table, category_id, bucket_date, u
         return None
 
 
+def get_bucket_records_for_category(bucket_table, category_id, user_id):
+    """
+    Get ALL bucket records for a category.
+    
+    Args:
+        bucket_table: 'recurring_income_buckets', 'recurring_expense_buckets', or 'recurring_c_expense_buckets'
+        category_id: The category ID
+        user_id: The user ID
+    
+    Returns:
+        List of bucket record dicts for this category
+    """
+    from flask import current_app
+    
+    # Get bucket records from Redis
+    redis_key = f"{bucket_table}:v1:{user_id}"
+    redis_data = redis_manager._redis_client.get(redis_key) if redis_manager._redis_client else None
+    
+    if not redis_data:
+        return []
+    
+    try:
+        bucket_list = json.loads(redis_data)
+        
+        # Ensure category_id is an integer for comparison
+        search_category_id = int(category_id) if category_id else None
+        
+        # Find all bucket records for this category
+        return [record for record in bucket_list if record.get('category_id') == search_category_id]
+        
+    except Exception as e:
+        current_app.logger.error(f"[GET BUCKET RECORDS FOR CATEGORY] Error: {e}")
+        return []
+
+
 def subtract_from_bucket_record(bucket_table, bucket_id, subtract_amount, user_id):
     """
     Subtract amount from a bucket record (same pattern as subtract_from_bucket).

@@ -9,7 +9,7 @@ This module provides Flask-specific utilities for automatic Redis hydration:
 
 import logging
 from functools import wraps
-from flask import request, session, jsonify, g
+from flask import request, session, jsonify, g, current_app
 from flask_login import current_user
 from redis_manager import (
     track_user_activity,
@@ -35,6 +35,7 @@ def init_redis_middleware(app):
         """
         Track user activity before each request.
         This automatically triggers hydration if needed and waits for it to complete.
+        Also checks if nightly sync ran and triggers recalculation if needed.
         """
         # Only track authenticated users
         if current_user.is_authenticated:
