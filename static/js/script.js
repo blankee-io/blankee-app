@@ -14,18 +14,6 @@
         return; // Already shown today
     }
     
-    // TESTING MODE - show modal with mock data
-    const testMode = true;
-    if (testMode) {
-        showReconnectModal([
-            { connection_id: 'conn_test123', institution_name: 'Chase Bank', status: 'ERROR_REPAIRABLE' },
-            { connection_id: 'conn_test456', institution_name: 'Bank of America', status: 'DISCONNECTED' }
-        ]);
-        // Mark as shown for today
-        localStorage.setItem(dismissedKey, today);
-        return;
-    }
-    
     // Check for connections needing reconnection
     fetch('/api/check-quiltt-reconnect')
         .then(response => response.json())
