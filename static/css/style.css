@@ -1083,8 +1083,10 @@ body {
     font-size: 1.5rem;
 }
 
+#dashboard-d-entryType-input,
 #dashboard-d-category-input,
 #footer-category-input,
+#footer-ca-account-input,
 #footer-ca-category-input {
     width: 100%;
     height: 38px;
@@ -1093,6 +1095,17 @@ body {
     border-radius: 8px;
     box-sizing: border-box;
 }
+
+#dashboard-d-entryType-input:focus,
+#dashboard-d-category-input:focus,
+#footer-category-input:focus,
+#footer-ca-account-input:focus,
+#footer-ca-category-input:focus {
+    outline: none;
+    border-color: #2AAAA8;
+    box-shadow: 0 0 0 2px rgba(42, 170, 168, 0.25);
+}
+
 /* Form group */
 .footer-form-group {
     position: relative;
@@ -11876,6 +11889,12 @@ html.modal-open {
     font-size: 0.95em;
     background-color: #fff;
     box-sizing: border-box;
+}
+
+.category-input:focus {
+    outline: none;
+    border-color: #2AAAA8;
+    box-shadow: 0 0 0 2px rgba(42, 170, 168, 0.25);
 }
 
 .pending-transactions-category-dropdown {

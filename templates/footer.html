@@ -79,9 +79,9 @@
             <!-- Credit Account Dropdown -->
             <div class="footer-form-group">
                 <label for="footer-ca-account">Credit Account:</label>
-                <select id="footer-ca-account" name="account" required>
-                    <option value="">Select Account</option>
-                </select>
+                <input type="text" id="footer-ca-account-input" placeholder="Type to search..." autocomplete="off">
+                <input type="hidden" id="footer-ca-account" name="account" required>
+                <div id="footer-ca-account-dropdown" class="category-dropdown" style="display: none;"></div>
             </div>
             <!-- Category Dropdown -->
             <div class="footer-form-group">
@@ -568,8 +568,13 @@
     const caButton = document.getElementById('footer-ca-button');
     const caLabel = document.getElementById('footer-ca-label');
     const caModal = document.getElementById('footer-caEntryModal');
-    const caAccountDropdown = document.getElementById('footer-ca-account');
+    const caAccountHidden = document.getElementById('footer-ca-account');
     const caCategoryDropdown = document.getElementById('footer-ca-category');
+
+    // Credit account searchable dropdown elements
+    let footerCaAccounts = [];
+    const footerCaAccountInput = document.getElementById('footer-ca-account-input');
+    const footerCaAccountDropdown = document.getElementById('footer-ca-account-dropdown');
 
     // Show modal when button or label is clicked
     caButton.addEventListener('click', openCaEntryModal);
@@ -582,9 +587,19 @@
         populateCaAccountDropdown();
         document.getElementById('footer-ca-entryDate').value = getTodayDate();
         caModal.style.display = 'flex';
-        caCategoryDropdown.disabled = true;
-        caAccountDropdown.value = '';
-        caCategoryDropdown.innerHTML = '<option value="">Select Category</option>';
+        
+        // Reset account dropdown
+        footerCaAccountInput.value = '';
+        caAccountHidden.value = '';
+        footerCaAccountDropdown.style.display = 'none';
+        
+        // Reset category dropdown
+        document.getElementById('footer-ca-category-input').value = '';
+        document.getElementById('footer-ca-category-input').disabled = true;
+        document.getElementById('footer-ca-category').value = '';
+        document.getElementById('footer-ca-category-dropdown').style.display = 'none';
+        footerCaCategories = [];
+        
         document.getElementById('footer-bar').classList.remove('active');
         document.body.classList.add('modal-open');
         document.documentElement.classList.add('modal-open');
@@ -597,9 +612,9 @@
         document.documentElement.classList.remove('modal-open');
     }
 
-    // Populate credit account dropdown (excludes Quiltt-linked accounts)
+    // Populate credit account array (excludes Quiltt-linked accounts)
     function populateCaAccountDropdown() {
-        caAccountDropdown.innerHTML = '<option value="">Select Account</option>';
+        footerCaAccounts = [];
         credit_accounts.forEach(account => {
             // Skip Quiltt-linked accounts - entries are synced from bank
             if (typeof quiltt_flags !== 'undefined' && 
@@ -608,16 +623,105 @@
                 quiltt_flags.quiltt_credit_ids.includes(account.id)) {
                 return; // Skip this account
             }
-            const option = document.createElement('option');
-            option.value = account.id;
-            option.textContent = account.name;
-            caAccountDropdown.appendChild(option);
+            footerCaAccounts.push({ id: account.id, name: account.name });
         });
     }
 
-    // Update category dropdown for credit accounts (footer-ca-category)
-    caAccountDropdown.addEventListener('change', function() {
-        const accountId = caAccountDropdown.value;
+    function positionCaAccountDropdown() {
+        const inputRect = footerCaAccountInput.getBoundingClientRect();
+        const availableBelow = window.innerHeight - inputRect.bottom - 20;
+        const maxHeight = Math.max(150, availableBelow);
+        footerCaAccountDropdown.style.maxHeight = maxHeight + 'px';
+    }
+
+    function showCaAccountDropdown(searchText = '') {
+        footerCaAccountDropdown.innerHTML = '';
+        const searchLower = searchText.toLowerCase().trim();
+        
+        // Separate matching and non-matching accounts
+        const matchingAccounts = searchLower.length > 0 
+            ? footerCaAccounts.filter(acc => acc.name.toLowerCase().includes(searchLower))
+            : [];
+        const matchingIds = new Set(matchingAccounts.map(acc => acc.id));
+        const nonMatchingAccounts = searchLower.length > 0
+            ? footerCaAccounts.filter(acc => !matchingIds.has(acc.id))
+            : footerCaAccounts;
+
+        // Show search results with magnifying glass (if user is typing)
+        if (searchLower.length > 0 && matchingAccounts.length > 0) {
+            footerCaAccountDropdown.style.display = 'block';
+            matchingAccounts.forEach(acc => {
+                const div = document.createElement('div');
+                div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${acc.name}`;
+                div.className = 'category-dropdown-item search-result';
+                div.addEventListener('click', function() {
+                    footerCaAccountInput.value = acc.name;
+                    caAccountHidden.value = acc.id;
+                    footerCaAccountDropdown.style.display = 'none';
+                    onCaAccountSelected(acc.id);
+                });
+                footerCaAccountDropdown.appendChild(div);
+            });
+            
+            // Add separator between search results and all accounts
+            if (nonMatchingAccounts.length > 0) {
+                const separator = document.createElement('div');
+                separator.className = 'dropdown-separator';
+                footerCaAccountDropdown.appendChild(separator);
+            }
+        }
+
+        // Show all other accounts (non-matching or all if no search)
+        if (nonMatchingAccounts.length > 0 || (searchLower.length === 0 && footerCaAccounts.length > 0)) {
+            const accountsToShow = searchLower.length > 0 ? nonMatchingAccounts : footerCaAccounts;
+            footerCaAccountDropdown.style.display = 'block';
+            accountsToShow.forEach(acc => {
+                const div = document.createElement('div');
+                div.textContent = acc.name;
+                div.className = 'category-dropdown-item';
+                div.addEventListener('click', function() {
+                    footerCaAccountInput.value = acc.name;
+                    caAccountHidden.value = acc.id;
+                    footerCaAccountDropdown.style.display = 'none';
+                    onCaAccountSelected(acc.id);
+                });
+                footerCaAccountDropdown.appendChild(div);
+            });
+        }
+
+        if (footerCaAccountDropdown.children.length === 0) {
+            footerCaAccountDropdown.style.display = 'none';
+        } else {
+            positionCaAccountDropdown();
+        }
+    }
+
+    footerCaAccountInput.addEventListener('input', function() {
+        if (this.value.length === 0) {
+            caAccountHidden.value = '';
+            // Reset category dropdown when account is cleared
+            footerCaCategories = [];
+            document.getElementById('footer-ca-category-input').value = '';
+            document.getElementById('footer-ca-category-input').disabled = true;
+            document.getElementById('footer-ca-category').value = '';
+        }
+        showCaAccountDropdown(this.value);
+    });
+
+    footerCaAccountInput.addEventListener('focus', function() {
+        if (footerCaAccounts.length > 0) {
+            showCaAccountDropdown('');
+        }
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!footerCaAccountInput.contains(e.target) && !footerCaAccountDropdown.contains(e.target)) {
+            footerCaAccountDropdown.style.display = 'none';
+        }
+    });
+
+    // Called when a credit account is selected
+    function onCaAccountSelected(accountId) {
         const caCategoryInput = document.getElementById('footer-ca-category-input');
         const caCategoryHidden = document.getElementById('footer-ca-category');
         const caDropdown = document.getElementById('footer-ca-category-dropdown');
@@ -644,7 +748,7 @@
                 footerCaCategories.push({ id: category.id, name: category.name });
             }
         });
-    });
+    }
 
     // Submit credit entry
     $('#footer-caEntryForm').on('submit', function(e) {
@@ -752,11 +856,19 @@
     }
 
     function resetCaEntryForm() {
+        // Reset account dropdown
+        document.getElementById('footer-ca-account-input').value = '';
         document.getElementById('footer-ca-account').value = '';
+        document.getElementById('footer-ca-account-dropdown').style.display = 'none';
+        footerCaAccounts = [];
+        
+        // Reset category dropdown
         document.getElementById('footer-ca-category-input').value = '';
         document.getElementById('footer-ca-category').value = '';
         document.getElementById('footer-ca-category-input').disabled = true;
         document.getElementById('footer-ca-category-dropdown').style.display = 'none';
+        footerCaCategories = [];
+        
         document.getElementById('footer-ca-amount').value = '';
         // Reset date to today
         document.getElementById('footer-ca-entryDate').value = getTodayDate();
