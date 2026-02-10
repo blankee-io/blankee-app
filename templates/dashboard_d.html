@@ -267,6 +267,38 @@
             return false;
         }
 
+        /**
+         * Check if we should show the add button for a given date.
+         * For dates today or before, only show if there are non-Quiltt entry options.
+         * @param {string} dateStr - The date string (YYYY-MM-DD format)
+         * @returns {boolean} - True if add button should be shown
+         */
+        function shouldShowAddButton(dateStr) {
+            // If no quiltt flags, always show
+            if (!quiltt_flags) return true;
+            
+            // Get today's date string in YYYY-MM-DD format for reliable comparison
+            const today = new Date();
+            const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD
+            
+            // Simple string comparison works because YYYY-MM-DD sorts correctly
+            // Future dates - always show add button
+            if (dateStr > todayStr) return true;
+            
+            // For today and past dates, check if there are any valid entry options
+            
+            // If no checking account linked, income/expense are available
+            if (!quiltt_flags.has_checking) return true;
+            
+            // Check if there are any non-Quiltt credit accounts
+            const hasNonQuilttCreditAccounts = credit_accounts.some(account => {
+                return !quiltt_flags.quiltt_credit_ids || 
+                       !quiltt_flags.quiltt_credit_ids.includes(account.id);
+            });
+            
+            return hasNonQuilttCreditAccounts;
+        }
+
         const savingsEntries = {{ savings_entries | tojson }};
 
         let baseTotalsRemainders = {{ totals_remainders_d | tojson }};
@@ -381,7 +413,7 @@
 
         // Function to open the modal and set the date
         function addEntry(date) {
-            populateEntryTypeDropdown();
+            populateEntryTypeDropdown(date);
             document.getElementById('dashboard-d-entryDate').value = date;
             document.getElementById('dashboard-d-addEntryModal').style.display = 'flex';
             document.body.classList.add('modal-open');
@@ -758,9 +790,10 @@
                     memberSinceIcon = '<div class="member-since-badge" title="Member Since"><i class="fa-solid fa-flag-checkered"></i></div>';
                 }
                 
-                // Hide add button if date is before member_since
+                // Hide add button if date is before member_since OR if no valid entry types available (Quiltt locking)
                 const isBeforeMemberSince = normalizedMemberSinceDate && date < normalizedMemberSinceDate;
-                const addButton = isBeforeMemberSince ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-solid fa-plus"></i><span class="nav-tooltip">Add New Entry</span></button>`;
+                const hasValidEntryTypes = shouldShowAddButton(date);
+                const addButton = (isBeforeMemberSince || !hasValidEntryTypes) ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-solid fa-plus"></i><span class="nav-tooltip">Add New Entry</span></button>`;
                 
                 dayHeader.innerHTML = `${formattedDate} ${addButton}${memberSinceIcon}`;
                 container.appendChild(dayHeader);
@@ -2723,16 +2756,35 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             window.setupDashboardDInputFocus = setupDashboardDInputFocus;
         });
 
-        function populateEntryTypeDropdown() {
+        function populateEntryTypeDropdown(dateStr) {
             const entryTypeDropdown = document.getElementById('dashboard-d-entryType');
-            entryTypeDropdown.innerHTML = `
-                <option value="">Select Type</option>
-                <option value="income">Income</option>
-                <option value="expense">Expense</option>
-            `;
+            entryTypeDropdown.innerHTML = '<option value="">Select Type</option>';
+            
+            // Determine if this is a locked date (today or before)
+            let isLockedDate = false;
+            if (quiltt_flags && dateStr) {
+                const today = new Date();
+                const todayStr = today.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+                isLockedDate = dateStr <= todayStr;
+            }
+            
+            // For future dates or if no checking linked, show Income/Expense options
+            if (!isLockedDate || !quiltt_flags || !quiltt_flags.has_checking) {
+                entryTypeDropdown.innerHTML += '<option value="income">Income</option>';
+                entryTypeDropdown.innerHTML += '<option value="expense">Expense</option>';
+            }
+            
             // Add each credit account as an option
+            // For locked dates, only show non-Quiltt credit accounts
             credit_accounts.forEach(account => {
-                entryTypeDropdown.innerHTML += `<option value="ca_${account.id}">${account.name}</option>`;
+                const isQuilttLinked = quiltt_flags && 
+                                       quiltt_flags.quiltt_credit_ids && 
+                                       quiltt_flags.quiltt_credit_ids.includes(account.id);
+                
+                // Show if: future date, OR not a Quiltt-linked account
+                if (!isLockedDate || !isQuilttLinked) {
+                    entryTypeDropdown.innerHTML += `<option value="ca_${account.id}">${account.name}</option>`;
+                }
             });
         }
 

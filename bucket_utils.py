@@ -152,7 +152,9 @@ def find_next_bucket_for_category(table, category_id, user_id):
     Find the next bucket entry in a category from today's date.
     
     This is the NEW bucket selection logic that replaces cadence-based selection.
-    Simply finds the bucket entry (is_bucket=1) with the earliest date > today.
+    Simply finds the bucket entry (is_bucket=1) with the earliest date >= today.
+    
+    A bucket dated TODAY can be reduced by entries dated today.
     
     Args:
         table: 'income_entries', 'expense_entries', or 'c_expense_entries'
@@ -176,7 +178,7 @@ def find_next_bucket_for_category(table, category_id, user_id):
         current_app.logger.info(f"[FIND NEXT BUCKET] No entries in Redis for user {user_id}, table {table}")
         return None
     
-    # Filter to get only bucket entries for this category with amount > 0 and date > today
+    # Filter to get only bucket entries for this category with amount > 0 and date >= today
     future_buckets = []
     for entry in entries:
         if (entry.get('category_id') == int(category_id) and
@@ -187,12 +189,12 @@ def find_next_bucket_for_category(table, category_id, user_id):
             if isinstance(entry_date, str):
                 entry_date = date.fromisoformat(entry_date)
             
-            # Only include buckets with date > today
-            if entry_date > today:
+            # Include buckets with date >= today (same day bucket can be reduced)
+            if entry_date >= today:
                 future_buckets.append(entry)
     
     if not future_buckets:
-        current_app.logger.info(f"[FIND NEXT BUCKET] No future buckets found for category {category_id}")
+        current_app.logger.info(f"[FIND NEXT BUCKET] No current or future buckets found for category {category_id}")
         return None
     
     # Sort by date ascending and return the earliest one

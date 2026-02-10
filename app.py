@@ -7142,9 +7142,9 @@ def dashboard():
         if raw_income_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT id, category_id, date, amount, processed
-                FROM income_entries
-                WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
+                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id
+                FROM income_entries ie
+                WHERE ie.category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
             """, (current_user.id,))
             raw_income_entries = list(cursor.fetchall())
             raw_income_entries = _filter_pending_deletions('income_entries', current_user.id, raw_income_entries)
@@ -7209,9 +7209,9 @@ def dashboard():
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT id, category_id, date, amount, processed
-                FROM expense_entries
-                WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.recurring_id, ee.bud_item_id
+                FROM expense_entries ee
+                WHERE ee.category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
             """, (current_user.id,))
             raw_expense_entries = list(cursor.fetchall())
             raw_expense_entries = _filter_pending_deletions('expense_entries', current_user.id, raw_expense_entries)
@@ -9049,9 +9049,9 @@ def dashboard_3m():
         if raw_income_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT id, category_id, date, amount, processed
-                FROM income_entries
-                WHERE category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
+                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id
+                FROM income_entries ie
+                WHERE ie.category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
             """, (current_user.id,))
             raw_income_entries = list(cursor.fetchall())
             raw_income_entries = _filter_pending_deletions('income_entries', current_user.id, raw_income_entries)
@@ -9102,9 +9102,9 @@ def dashboard_3m():
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT id, category_id, date, amount, processed, is_bucket, original_amount
-                FROM expense_entries
-                WHERE category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.recurring_id, ee.bud_item_id
+                FROM expense_entries ee
+                WHERE ee.category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
             """, (current_user.id,))
             raw_expense_entries = list(cursor.fetchall())
             raw_expense_entries = _filter_pending_deletions('expense_entries', current_user.id, raw_expense_entries)

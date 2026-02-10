@@ -122,6 +122,9 @@ Reuse/extend existing `isBeforeMemberSince()` pattern:
 - [x] Modify income input creation - adds `readonly`, `quiltt-locked` class, hides move button
 - [x] Modify expense input creation - adds `readonly`, `quiltt-locked` class, hides move button
 - [x] Modify credit account input creation - adds `readonly`, `quiltt-locked` class, hides move button
+- [x] Add `shouldShowAddButton()` helper function - checks if add button should appear based on Quiltt flags
+- [x] Modify `populateEntryTypeDropdown(date)` - filters Income/Expense based on checking, filters credit accounts based on Quiltt linking
+- [x] Update add button creation - hides button if no valid entry types available for locked dates
 
 ### 3.4 Update dashboard_3m.html (Month View) ✅ DONE
 - [x] Add `quiltt_flags` JavaScript variable from template (Phase 2)

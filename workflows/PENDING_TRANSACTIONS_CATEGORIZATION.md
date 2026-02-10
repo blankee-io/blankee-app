@@ -3,7 +3,7 @@
 **Feature Overview**: Create a page to display imported bank transactions that need categorization. Users can assign categories to transactions, with Ntropy providing intelligent suggestions based on the user's existing categories.
 
 **Created**: January 7, 2026  
-**Status**: Phase 1 - Planning
+**Status**: Phases 1-8 Complete ✅
 
 ---
 
@@ -491,6 +491,25 @@ fetch('/quiltt/suggest-category', {
 - Final remainder: $2,076.83 ✅ (matches bank)
 - Idempotent: Re-running creates same single adjustment
 
+### 8.9 Recalculations Added (Feb 8, 2026) ✅ COMPLETE
+- [x] Moved recalculation logic from middleware to nightly_sync.py
+- [x] Recalculations now run regardless of user login
+- [x] Added functions:
+  - `recalculate_daily_totals()` - Updates totals_remainders_d
+  - `recalculate_weekly_totals()` - Updates totals_remainders
+  - `recalculate_monthly_totals()` - Updates totals_remainders_m
+  - `recalculate_savings()` - Updates savings_entries
+  - `recalculate_ca_daily_balances()` - Updates c_a_balances_d
+  - `recalculate_ca_weekly_balances()` - Updates c_a_balances
+  - `recalculate_ca_monthly_balances()` - Updates c_a_balances_m
+- [x] Helper functions added:
+  - `get_entries_from_redis_or_mysql()` - Data retrieval
+  - `update_totals_remainders_in_redis()` - Redis totals update
+  - `set_savings_entries_to_redis()` - Redis savings update
+  - `set_ca_balances_to_redis()` - Redis CA balances update
+- [x] Credit account balance now correctly shows $3,822.06 (was showing $11,466.18)
+- [x] Transaction sync boundary verified - only pulls from account connection date forward
+
 ---
 
 ## Phase 9: Polish & Testing
@@ -556,6 +575,9 @@ fetch('/quiltt/suggest-category', {
 - ✅ **Bucket undo/redo** - Category changes restore old bucket and reduce new bucket
 - ✅ **Nightly balance sync** - Bank balance fetched at 00:05, auto-adjustment created
 - ✅ **Balance reconciliation** - Remainder matches bank balance exactly after sync
+- ✅ **Nightly recalculations** - All totals (daily/weekly/monthly), savings, and CA balances recalculated
+- ✅ **Credit account balance fix** - Now shows correct $3,822.06 (was $11,466.18)
+- ✅ **Transaction boundary verified** - Only pulls transactions from account connection date forward
 
 ### Other Pending Items:
 - ✅ **Phase 7**: Auto-confirm unreviewed transactions at EOD - COMPLETE
@@ -610,27 +632,10 @@ fetch('/quiltt/suggest-category', {
 - **Files**: `quiltt_connection_checker.py` + `app.py` webhook handler
 - **Fixed**: ✅
 
-### Pending Verification (Feb 7, 6:00 AM):
-- ⏳ **Webhook persistence** - Check `quiltt_webhook_events` table for new entries after midnight cron
-- ⏳ **Single notification** - Should only have ONE reconnect notification (date updated, not new row)
-- ⏳ **Cron checker logs** - Check `/var/log/apache2/quiltt_checker.log` for "Updated existing notification"
-
-**Verification commands:**
-```bash
-# Check webhooks stored to MySQL
-ssh root@192.0.2.44 "mysql -u ms_admin -p'dune6MEANTIME.ching_reek' budget -e \"SELECT id, event_type, created_at FROM quiltt_webhook_events WHERE created_at >= '2026-02-06' ORDER BY created_at DESC LIMIT 10;\""
-
-# Check notification count (should be 1 per connection)
-ssh root@192.0.2.44 "mysql -u ms_admin -p'dune6MEANTIME.ching_reek' budget -e \"SELECT id, LEFT(message, 50), date FROM notifications WHERE user_id = 271 AND message LIKE '%reconnect%' ORDER BY date DESC;\""
-
-# Check cron logs
-ssh root@192.0.2.44 "tail -50 /var/log/apache2/quiltt_checker.log"
-```
-
-### Other Pending Items:
+### All Core Phases Complete ✅
 - ✅ **Phase 7**: Auto-confirm unreviewed transactions at EOD - COMPLETE
-- 🔜 **Phase 8**: Balance Reconciliation (brainstorm approach)
-- 🔜 **Phase 9**: Polish & Testing
+- ✅ **Phase 8**: Balance Reconciliation - COMPLETE (including recalculations)
+- 🔜 **Phase 9**: Polish & Testing (optional improvements)
 
 ---
 
