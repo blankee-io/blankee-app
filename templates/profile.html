@@ -171,17 +171,19 @@
                                     <div class="connection-header">
                                         <div class="connection-info">
                                             <h3>{{ connection.institution_name or 'Bank' }}</h3>
-                                            <span class="connection-status {% if connection.status == 'DISCONNECTED' %}disconnected{% elif connection.status in ['SYNCING', 'INITIALIZING', 'PENDING'] %}syncing{% else %}connected{% endif %}">
+                                            <span class="connection-status {% if connection.status in ['DISCONNECTED', 'ERROR_REPAIRABLE', 'ERROR_INSTITUTION', 'ERROR_PROVIDER', 'ERROR_SERVICE', 'ERROR'] %}disconnected{% elif connection.status in ['SYNCING', 'INITIALIZING', 'PENDING'] %}syncing{% else %}connected{% endif %}">
                                                 {% if connection.status in ['SYNCING', 'INITIALIZING', 'PENDING'] %}
                                                     <i class="fa-solid fa-arrows-rotate fa-spin"></i>
                                                 {% elif connection.status == 'SYNCED' %}
                                                     <i class="fa-solid fa-circle-check"></i>
+                                                {% elif connection.status in ['DISCONNECTED', 'ERROR_REPAIRABLE', 'ERROR_INSTITUTION', 'ERROR_PROVIDER', 'ERROR_SERVICE', 'ERROR'] %}
+                                                    <i class="fa-solid fa-circle-xmark"></i>
                                                 {% endif %}
-                                                {{ connection.status or 'active' }}
+                                                {% if connection.status in ['DISCONNECTED', 'ERROR_REPAIRABLE', 'ERROR_INSTITUTION', 'ERROR_PROVIDER', 'ERROR_SERVICE', 'ERROR'] %}Disconnected{% elif connection.status == 'SYNCED' %}Connected{% else %}{{ connection.status or 'Connected' }}{% endif %}
                                             </span>
                                         </div>
                                         <div class="connection-actions">
-                                            {% if connection.status == 'DISCONNECTED' %}
+                                            {% if connection.status in ['DISCONNECTED', 'ERROR_REPAIRABLE', 'ERROR_INSTITUTION', 'ERROR_PROVIDER', 'ERROR_SERVICE', 'ERROR'] %}
                                                 <button class="reconnect-btn" data-connection-id="{{ connection.connection_id }}" title="Reconnect">
                                                     <i class="fa-solid fa-rotate"></i>
                                                 </button>
@@ -1690,14 +1692,26 @@
                 }
                 
                 // Build connection card HTML
-                const statusClass = connection.status === 'DISCONNECTED' ? 'disconnected' : 
-                                  (['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 'syncing' : 'connected');
+                const isDisconnected = ['DISCONNECTED', 'ERROR_REPAIRABLE', 'ERROR_INSTITUTION', 'ERROR_PROVIDER', 'ERROR_SERVICE', 'ERROR'].includes(connection.status);
+                const isSyncing = ['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status);
                 
-                const statusIcon = ['SYNCING', 'INITIALIZING', 'PENDING'].includes(connection.status) ? 
-                                 '<i class="fa-solid fa-arrows-rotate fa-spin"></i>' :
-                                 (connection.status === 'SYNCED' ? '<i class="fa-solid fa-circle-check"></i>' : '');
+                const statusClass = isDisconnected ? 'disconnected' : 
+                                  (isSyncing ? 'syncing' : 'connected');
                 
-                const reconnectBtn = connection.status === 'DISCONNECTED' ? 
+                let statusIcon = '';
+                let statusText = 'Connected';
+                if (isSyncing) {
+                    statusIcon = '<i class="fa-solid fa-arrows-rotate fa-spin"></i>';
+                    statusText = 'Syncing';
+                } else if (connection.status === 'SYNCED') {
+                    statusIcon = '<i class="fa-solid fa-circle-check"></i>';
+                    statusText = 'Connected';
+                } else if (isDisconnected) {
+                    statusIcon = '<i class="fa-solid fa-circle-xmark"></i>';
+                    statusText = 'Disconnected';
+                }
+                
+                const reconnectBtn = isDisconnected ? 
                     `<button class="reconnect-btn" data-connection-id="${connection.connection_id}" title="Reconnect">
                         <i class="fa-solid fa-rotate"></i>
                     </button>` : '';
@@ -1709,7 +1723,7 @@
                                 <h3>${connection.institution_name || 'Bank'}</h3>
                                 <span class="connection-status ${statusClass}">
                                     ${statusIcon}
-                                    ${connection.status || 'active'}
+                                    ${statusText}
                                 </span>
                             </div>
                             <div class="connection-actions">
@@ -2222,6 +2236,33 @@
                 });
             }
 
+            // Check for auto-reconnect parameter in URL (from notification link)
+            function checkAutoReconnectParam() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const reconnectId = urlParams.get('reconnect');
+                
+                if (reconnectId) {
+                    // Clear the URL parameter without reloading
+                    const newUrl = window.location.pathname;
+                    window.history.replaceState({}, document.title, newUrl);
+                    
+                    // Find the reconnect button for this connection and click it
+                    const $reconnectBtn = $(`.reconnect-btn[data-connection-id="${reconnectId}"]`);
+                    if ($reconnectBtn.length > 0) {
+                        // Small delay to let the page fully render
+                        setTimeout(function() {
+                            $reconnectBtn.click();
+                        }, 500);
+                    } else {
+                        // Connection not found (maybe already fixed or deleted)
+                        console.log('[AUTO-RECONNECT] Connection not found:', reconnectId);
+                    }
+                }
+            }
+            
+            // Run auto-reconnect check on page load
+            checkAutoReconnectParam();
+
             // Connect bank account - Load Quiltt Connector
             connectBankBtn.on('click', function() {
                 const connectorId = '{{ connector_id if connector_id else "" }}';
@@ -2267,6 +2308,193 @@
                     document.head.appendChild(script);
                 } else {
                     openQuilttConnector(sessionToken, connectorId);
+                }
+            }
+
+            // Load SDK and use Quiltt.reconnect() for existing connections
+            function loadQuilttReconnector(sessionToken, connectorId, connectionId) {
+                if (typeof Quiltt === 'undefined') {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.quiltt.io/v1/connector.js';
+                    script.onload = function() {
+                        openQuilttReconnector(sessionToken, connectorId, connectionId);
+                    };
+                    script.onerror = function() {
+                        alert('Failed to load Quiltt Connector SDK. Please check your internet connection.');
+                    };
+                    document.head.appendChild(script);
+                } else {
+                    openQuilttReconnector(sessionToken, connectorId, connectionId);
+                }
+            }
+
+            // Open Quiltt Reconnect flow - goes directly to the specific bank
+            function openQuilttReconnector(sessionToken, connectorId, connectionId) {
+                try {
+                    // Authenticate with session token
+                    Quiltt.authenticate(sessionToken);
+                    
+                    // Use Quiltt.reconnect() which takes user directly to their bank
+                    const connector = Quiltt.reconnect(connectorId, {
+                        connectionId: connectionId,
+                        onLoad: function(metadata) {
+                            // Connector loaded
+                        },
+                        onExitSuccess: function(metadata) {
+                            // For ERROR_REPAIRABLE: Same connection is repaired (keeps same ID)
+                            // For DISCONNECTED: New connection created (new ID returned in metadata)
+                            const returnedConnectionId = metadata && metadata.connectionId ? metadata.connectionId : null;
+                            const oldConnectionId = window.reconnectingConnectionId;
+                            const oldStatus = window.reconnectingStatus;
+                            
+                            console.log('[RECONNECT] Success! Old:', oldConnectionId, 'Returned:', returnedConnectionId, 'OldStatus:', oldStatus);
+                            
+                            // Save the connection ID before clearing state (needed for notification deletion)
+                            const connectionIdToCleanup = oldConnectionId;
+                            
+                            // Clear reconnect state
+                            delete window.reconnectingConnectionId;
+                            delete window.reconnectingInstitution;
+                            delete window.reconnectingStatus;
+                            
+                            // Check if this was a DISCONNECTED connection (new connection created)
+                            // vs ERROR_REPAIRABLE (same connection repaired)
+                            const isNewConnection = oldStatus === 'DISCONNECTED' && returnedConnectionId && returnedConnectionId !== oldConnectionId;
+                            
+                            if (isNewConnection) {
+                                // DISCONNECTED flow: Delete old, sync new
+                                console.log('[RECONNECT] New connection created, deleting old one');
+                                $.ajax({
+                                    url: '/quiltt/delete',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({ connection_id: oldConnectionId }),
+                                    complete: function() {
+                                        // Sync new connection after brief delay
+                                        setTimeout(function() {
+                                            syncAndReload(connectionIdToCleanup);
+                                        }, 1500);
+                                    }
+                                });
+                            } else {
+                                // ERROR_REPAIRABLE flow: Same connection repaired, just sync to update status
+                                console.log('[RECONNECT] Existing connection repaired, syncing status');
+                                syncAndReload(connectionIdToCleanup);
+                            }
+                            
+                            function syncAndReload(connIdToCleanup) {
+                                
+                                // First sync the profile/connections (skip auto-adjust since we'll do it after transactions)
+                                $.ajax({
+                                    url: '/quiltt/sync-profile',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({ skip_auto_adjust: true }),
+                                    timeout: 30000,
+                                    success: function() {
+                                        // Now sync transactions from last synced date
+                                        const lastSynced = window.reconnectingLastSynced;
+                                        delete window.reconnectingLastSynced;
+                                        
+                                        if (lastSynced) {
+                                            const today = new Date().toISOString().split('T')[0];
+                                            console.log('[RECONNECT] Syncing transactions from', lastSynced, 'to', today);
+                                            
+                                            $.ajax({
+                                                url: '/quiltt/sync-transactions-range',
+                                                method: 'POST',
+                                                contentType: 'application/json',
+                                                data: JSON.stringify({
+                                                    start_date: lastSynced,
+                                                    end_date: today,
+                                                    auto_import: true  // Auto-import transactions as pending
+                                                }),
+                                                timeout: 60000,
+                                                success: function(txnResponse) {
+                                                    console.log('[RECONNECT] Transactions synced:', txnResponse);
+                                                    // Now do auto-adjustment
+                                                    doAutoAdjustAndReload(connIdToCleanup);
+                                                },
+                                                error: function(xhr, status, error) {
+                                                    console.warn('[RECONNECT] Transaction sync failed but continuing:', error);
+                                                    doAutoAdjustAndReload(connIdToCleanup);
+                                                }
+                                            });
+                                        } else {
+                                            // No last synced date, just do auto-adjust
+                                            doAutoAdjustAndReload(connIdToCleanup);
+                                        }
+                                    },
+                                    error: function(xhr) {
+                                        console.error('[RECONNECT] Sync failed:', xhr.responseText);
+                                        window.location.reload();
+                                    }
+                                });
+                                
+                                function doAutoAdjustAndReload(connectionIdToCleanup) {
+                                    $.ajax({
+                                        url: '/quiltt/auto-adjust-checking',
+                                        method: 'POST',
+                                        contentType: 'application/json',
+                                        success: function(autoAdjustResponse) {
+                                            // Delete reconnection notifications for this connection
+                                            deleteReconnectNotifications(connectionIdToCleanup);
+                                        },
+                                        error: function(xhr, status, error) {
+                                            console.warn('[AUTO-ADJUST] Failed on reconnect but continuing:', error);
+                                            // Still try to delete notifications
+                                            deleteReconnectNotifications(connectionIdToCleanup);
+                                        }
+                                    });
+                                }
+                                
+                                function deleteReconnectNotifications(connectionId) {
+                                    if (!connectionId) {
+                                        window.location.reload();
+                                        return;
+                                    }
+                                    
+                                    // Delete notifications that contain the reconnect link for this connection
+                                    $.ajax({
+                                        url: '/delete-reconnect-notifications',
+                                        method: 'POST',
+                                        contentType: 'application/json',
+                                        data: JSON.stringify({ connection_id: connectionId }),
+                                        success: function(response) {
+                                            console.log('[RECONNECT] Deleted notifications:', response);
+                                            window.location.reload();
+                                        },
+                                        error: function(xhr, status, error) {
+                                            console.warn('[RECONNECT] Failed to delete notifications:', error);
+                                            window.location.reload();
+                                        }
+                                    });
+                                }
+                            }
+                        },
+                        onExitAbort: function(metadata) {
+                            // User cancelled - restore original status
+                            const $card = $('.reconnect-btn[data-connection-id="' + window.reconnectingConnectionId + '"]').closest('.connection-card');
+                            $card.find('.connection-status').text('Disconnected').removeClass('connected').addClass('disconnected error');
+                            delete window.reconnectingConnectionId;
+                            delete window.reconnectingInstitution;
+                            delete window.reconnectingStatus;
+                            delete window.reconnectingLastSynced;
+                        },
+                        onExitError: function(metadata) {
+                            alert('Error reconnecting bank. Please try again.');
+                            const $card = $('.reconnect-btn[data-connection-id="' + window.reconnectingConnectionId + '"]').closest('.connection-card');
+                            $card.find('.connection-status').text('Disconnected').removeClass('connected').addClass('disconnected error');
+                            delete window.reconnectingConnectionId;
+                            delete window.reconnectingInstitution;
+                            delete window.reconnectingStatus;
+                            delete window.reconnectingLastSynced;
+                        }
+                    });
+                    
+                    connector.open();
+                } catch (error) {
+                    alert('Error opening bank reconnection: ' + error.message);
                 }
             }
 
@@ -2383,14 +2611,31 @@
                 const $card = $(this).closest('.connection-card');
                 const institutionName = $card.find('h3').first().text().trim();
                 
-                // Show loading state
+                // Get original status to determine reconnect behavior
                 const $status = $card.find('.connection-status');
-                const originalStatus = $status.text();
-                $status.text('RECONNECTING...').removeClass('disconnected').addClass('connected');
+                const originalStatusText = $status.text().trim().toUpperCase();
+                // Map display text to actual status
+                const originalStatus = originalStatusText === 'DISCONNECTED' ? 'DISCONNECTED' : 'ERROR_REPAIRABLE';
+                
+                // Get last synced date from the card (for transaction sync after reconnect)
+                const lastSyncedTimestamp = $card.find('.last-synced-time').data('timestamp');
+                let lastSyncedDate = null;
+                if (lastSyncedTimestamp) {
+                    // Parse the timestamp and get just the date part
+                    const d = new Date(lastSyncedTimestamp);
+                    if (!isNaN(d.getTime())) {
+                        lastSyncedDate = d.toISOString().split('T')[0]; // YYYY-MM-DD
+                    }
+                }
+                
+                // Show loading state
+                $status.text('RECONNECTING...').removeClass('disconnected error').addClass('connected');
                 
                 // Store connection info for after reconnection
                 window.reconnectingConnectionId = connectionId;
                 window.reconnectingInstitution = institutionName;
+                window.reconnectingStatus = originalStatus;
+                window.reconnectingLastSynced = lastSyncedDate;
                 
                 // Fetch fresh session token
                 $.ajax({
@@ -2398,17 +2643,20 @@
                     method: 'POST',
                     success: function(response) {
                         const freshToken = response.session_token;
+                        const connectorId = '{{ connector_id if connector_id else "" }}';
                         
-                        // Open Quiltt Connector for re-authentication
-                        openQuilttConnector(freshToken, 'quiltt-profile-connector');
+                        // Load SDK and open Quiltt Reconnect flow (goes directly to the bank)
+                        loadQuilttReconnector(freshToken, connectorId, connectionId);
                     },
                     error: function(xhr) {
                         alert('Failed to start reconnection. Please try again.');
-                        $status.text(originalStatus).removeClass('connected').addClass('disconnected');
+                        $status.text('Disconnected').removeClass('connected').addClass('disconnected error');
                         
                         // Clear reconnect state
                         delete window.reconnectingConnectionId;
                         delete window.reconnectingInstitution;
+                        delete window.reconnectingStatus;
+                        delete window.reconnectingLastSynced;
                     }
                 });
             });

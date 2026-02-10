@@ -1083,8 +1083,10 @@ body {
     font-size: 1.5rem;
 }
 
+#dashboard-d-entryType-input,
 #dashboard-d-category-input,
 #footer-category-input,
+#footer-ca-account-input,
 #footer-ca-category-input {
     width: 100%;
     height: 38px;
@@ -1093,6 +1095,17 @@ body {
     border-radius: 8px;
     box-sizing: border-box;
 }
+
+#dashboard-d-entryType-input:focus,
+#dashboard-d-category-input:focus,
+#footer-category-input:focus,
+#footer-ca-account-input:focus,
+#footer-ca-category-input:focus {
+    outline: none;
+    border-color: #2AAAA8;
+    box-shadow: 0 0 0 2px rgba(42, 170, 168, 0.25);
+}
+
 /* Form group */
 .footer-form-group {
     position: relative;
@@ -9950,7 +9963,7 @@ td.credit-account-action-cell button {
     position: absolute;
     z-index: 1000;
     width: calc(100% - 2px);
-    max-height: 200px;
+    max-height: 60vh; /* fallback, JS overrides dynamically */
     margin-top: 2px;
     overflow-y: auto;
     background-color: #fff;
@@ -10290,6 +10303,10 @@ html.modal-open {
     color: #dc3545;
 }
 
+.connection-status.error {
+    color: #dc3545;
+}
+
 .connection-status.syncing {
     color: #ffc107;
 }
@@ -10439,9 +10456,8 @@ html.modal-open {
     display: flex;
     align-items: center;
     gap: 12px;
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
-    max-width: calc(100% - 60px);
     margin-right: 10px;
     overflow: hidden;
 }
@@ -10460,15 +10476,15 @@ html.modal-open {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
-    max-width: 100%;
+    width: 0;
     text-align: left;
     display: block;
 }
 
 .account-info label strong {
-    display: block;
+    display: inline;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -10515,7 +10531,7 @@ html.modal-open {
     padding: 20px 0px;
     background: #f8f9fa;
     border-radius: 8px;
-    min-width: 345px;
+    min-width: 0;
 }
 
 .no-connections i {
@@ -11711,6 +11727,33 @@ html.modal-open {
     background-color: #f5f5f5;
 }
 
+/* Auto-confirmed transactions (categorized by overnight cron job) */
+.pending-transaction-item.auto-confirmed-item {
+    border-left: 4px solid #f5a623;
+    background-color: #fffef8;
+}
+
+.pending-transaction-item.auto-confirmed-item::before {
+    content: "Auto-Categorized";
+    color: #b07d00;
+}
+
+.auto-confirmed-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.75em;
+    color: #b07d00;
+    background-color: #fff3cd;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-top: 5px;
+}
+
+.auto-confirmed-badge i {
+    font-size: 0.9em;
+}
+
 .transaction-header {
     display: flex;
     justify-content: space-between;
@@ -11764,6 +11807,20 @@ html.modal-open {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ntropy-suggestion.has-suggestion {
+    background-color: #f0fdf4;
+    border-color: #bbf7d0;
+}
+
+.ntropy-suggestion.has-suggestion i {
+    color: #16a34a;
+}
+
+.ntropy-suggestion.has-suggestion .ntropy-label {
+    color: #166534;
 }
 
 .ntropy-suggestion i {
@@ -11774,6 +11831,29 @@ html.modal-open {
     font-size: 0.9em;
     color: #1e40af;
     font-weight: 500;
+}
+
+.confidence-badge {
+    font-size: 0.75em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.confidence-badge.confidence-high {
+    background-color: #dcfce7;
+    color: #166534;
+}
+
+.confidence-badge.confidence-medium {
+    background-color: #fef9c3;
+    color: #854d0e;
+}
+
+.confidence-badge.confidence-low {
+    background-color: #fee2e2;
+    color: #991b1b;
 }
 
 .category-select-row {
@@ -11811,6 +11891,12 @@ html.modal-open {
     box-sizing: border-box;
 }
 
+.category-input:focus {
+    outline: none;
+    border-color: #2AAAA8;
+    box-shadow: 0 0 0 2px rgba(42, 170, 168, 0.25);
+}
+
 .pending-transactions-category-dropdown {
     position: absolute;
     top: 100%;
@@ -11819,7 +11905,7 @@ html.modal-open {
     background-color: #fff;
     border: 1px solid #ccc;
     border-radius: 6px;
-    max-height: 50vh;
+    max-height: 60vh;
     overflow-y: auto;
     z-index: 9999;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
@@ -11864,6 +11950,78 @@ html.modal-open {
 
 .pending-transactions-category-dropdown-item.create-new-category i {
     margin-right: 6px;
+}
+
+.pending-transactions-category-dropdown-item.ai-suggestion {
+    background-color: #f0fdf4;
+    color: #166534;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pending-transactions-category-dropdown-item.ai-suggestion:hover {
+    background-color: #dcfce7;
+}
+
+.pending-transactions-category-dropdown-item.ai-suggestion i {
+    color: #16a34a;
+}
+
+.pending-transactions-category-dropdown-item.search-result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+}
+
+.pending-transactions-category-dropdown-item.search-result .search-icon {
+    color: #9ca3af;
+    font-size: 0.85em;
+}
+
+/* Footer category dropdown search results */
+.category-dropdown-item.search-result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+}
+
+.category-dropdown-item.search-result .search-icon {
+    color: #9ca3af;
+    font-size: 0.85em;
+}
+
+.dropdown-separator {
+    height: 1px;
+    background-color: #e5e7eb;
+    margin: 4px 0;
+}
+
+.ai-badge {
+    background-color: #16a34a;
+    color: white;
+    font-size: 0.7em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    margin-left: auto;
+}
+
+.ai-badge.confidence-high {
+    background-color: #16a34a; /* Green - high confidence */
+}
+
+.ai-badge.confidence-medium {
+    background-color: #f59e0b; /* Orange/amber - medium confidence */
+}
+
+.dropdown-separator {
+    height: 1px;
+    background-color: #e5e7eb;
+    margin: 4px 0;
 }
 
 .confirm-btn {
@@ -11944,4 +12102,109 @@ html.modal-open {
     border-radius: 10px;
     font-size: 0.85em;
     margin-left: 8px;
+}
+
+/* ===== Alert Modal Styles ===== */
+.alert-modal-content {
+    max-width: 420px;
+    text-align: center;
+    padding: 30px;
+}
+
+.alert-modal-icon {
+    font-size: 48px;
+    color: #E45F1C;
+    margin-bottom: 15px;
+}
+
+.alert-modal-content h2 {
+    margin: 0 0 10px 0;
+    font-size: 1.4em;
+    color: #E45F1C;
+}
+
+.alert-modal-content p {
+    margin: 0 0 20px 0;
+    color: #6b7280;
+    font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.alert-modal-details {
+    background: #E45F1C;
+    border-radius: 8px;
+    padding: 12px 15px;
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+.alert-modal-details .bank-name {
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.alert-modal-details .bank-status {
+    font-size: 0.85em;
+    color: #fde8e0;
+    margin-top: 4px;
+}
+
+.alert-modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.alert-modal-buttons .btn {
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.95em;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+}
+
+.alert-modal-buttons .btn-secondary {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.alert-modal-buttons .btn-secondary:hover {
+    background: #d1d5db;
+}
+
+.alert-modal-buttons .btn-primary {
+    background: #2AAAA8;
+    color: white;
+}
+
+.alert-modal-buttons .btn-primary:hover {
+    background: #239997;
+}
+
+.alert-modal-buttons .btn-primary i {
+    margin-right: 6px;
+}
+
+/* Dark mode support for alert modals */
+@media (prefers-color-scheme: dark) {
+    .alert-modal-content h2 {
+        color: #E45F1C;
+    }
+    
+    .alert-modal-content p {
+        color: #9ca3af;
+    }
+    
+    .alert-modal-details {
+        background: #E45F1C;
+    }
+    
+    .alert-modal-details .bank-name {
+        color: #ffffff;
+    }
+    
+    .alert-modal-details .bank-status {
+        color: #fde8e0;
+    }
 }

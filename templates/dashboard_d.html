@@ -26,6 +26,7 @@
 <body id="dashboard-d-body">
     <!-- Include the navigation bar -->
     {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
 
     <!-- Calendar navigation for moving between months -->
     <div class="calendarnav">
@@ -94,11 +95,9 @@
                 <!-- Select Income or Expense -->
                 <div class="dashboard-d-form-group">
                     <label for="dashboard-d-entryType">Entry Type:</label>
-                    <select id="dashboard-d-entryType" name="entryType" onchange="dashboardDUpdateCategoryOptions()">
-                        <option value="">Select Type</option>
-                        <option value="income">Income</option>
-                        <option value="expense">Expense</option>
-                    </select>
+                    <input type="text" id="dashboard-d-entryType-input" placeholder="Type to search..." autocomplete="off">
+                    <input type="hidden" id="dashboard-d-entryType" name="entryType">
+                    <div id="dashboard-d-entryType-dropdown" class="category-dropdown" style="display: none;"></div>
                 </div>
 
                 <!-- Select Category -->
@@ -212,6 +211,91 @@
         }
 
         const memberSince = {{ member_since | tojson }};
+
+        // Quiltt account flags for entry locking
+        let quiltt_flags = {{ quiltt_flags | tojson | safe }};
+
+        /**
+         * Check if an entry should be locked due to Quiltt bank account sync.
+         * Locked entries are from today or before, based on which accounts are linked.
+         * @param {string} entryDate - The date of the entry (YYYY-MM-DD format)
+         * @param {number|string} categoryId - The category ID of the entry
+         * @param {string} entryType - 'income', 'expense', or 'ca' (credit account)
+         * @param {number|string} [accountId] - For CA entries, the credit account ID
+         * @returns {boolean} - True if entry should be locked
+         */
+        function isEntryLockedByQuiltt(entryDate, categoryId, entryType, accountId = null) {
+            // If no quiltt flags, nothing is locked
+            if (!quiltt_flags) return false;
+            
+            // Get today's date at midnight for comparison
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            // Parse entry date
+            const entryDateObj = new Date(entryDate);
+            entryDateObj.setHours(0, 0, 0, 0);
+            
+            // Only lock entries from today or before
+            if (entryDateObj > today) return false;
+            
+            // Credit account entries - check if this specific account is Quiltt-linked
+            if (entryType === 'ca' && accountId !== null) {
+                const accountIdNum = parseInt(accountId, 10);
+                return quiltt_flags.quiltt_credit_ids && 
+                       quiltt_flags.quiltt_credit_ids.includes(accountIdNum);
+            }
+            
+            // If user has checking account linked, ALL income/expense entries are locked
+            if (quiltt_flags.has_checking && (entryType === 'income' || entryType === 'expense')) {
+                return true;
+            }
+            
+            // If user has savings account linked, only Savings category entries are locked
+            if (quiltt_flags.has_savings) {
+                const catIdNum = parseInt(categoryId, 10);
+                if (entryType === 'income' && catIdNum === quiltt_flags.savings_income_category_id) {
+                    return true;
+                }
+                if (entryType === 'expense' && catIdNum === quiltt_flags.savings_expense_category_id) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+
+        /**
+         * Check if we should show the add button for a given date.
+         * For dates today or before, only show if there are non-Quiltt entry options.
+         * @param {string} dateStr - The date string (YYYY-MM-DD format)
+         * @returns {boolean} - True if add button should be shown
+         */
+        function shouldShowAddButton(dateStr) {
+            // If no quiltt flags, always show
+            if (!quiltt_flags) return true;
+            
+            // Get today's date string in YYYY-MM-DD format for reliable comparison
+            const today = new Date();
+            const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD
+            
+            // Simple string comparison works because YYYY-MM-DD sorts correctly
+            // Future dates - always show add button
+            if (dateStr > todayStr) return true;
+            
+            // For today and past dates, check if there are any valid entry options
+            
+            // If no checking account linked, income/expense are available
+            if (!quiltt_flags.has_checking) return true;
+            
+            // Check if there are any non-Quiltt credit accounts
+            const hasNonQuilttCreditAccounts = credit_accounts.some(account => {
+                return !quiltt_flags.quiltt_credit_ids || 
+                       !quiltt_flags.quiltt_credit_ids.includes(account.id);
+            });
+            
+            return hasNonQuilttCreditAccounts;
+        }
 
         const savingsEntries = {{ savings_entries | tojson }};
 
@@ -327,7 +411,7 @@
 
         // Function to open the modal and set the date
         function addEntry(date) {
-            populateEntryTypeDropdown();
+            populateEntryTypeDropdown(date);
             document.getElementById('dashboard-d-entryDate').value = date;
             document.getElementById('dashboard-d-addEntryModal').style.display = 'flex';
             document.body.classList.add('modal-open');
@@ -396,20 +480,60 @@
         const dashboardDCategoryHidden = document.getElementById('dashboard-d-category');
         const dashboardDDropdown = document.getElementById('dashboard-d-category-dropdown');
 
+        function positionDashboardDDropdown() {
+            // Calculate available space below the input
+            const inputRect = dashboardDCategoryInput.getBoundingClientRect();
+            const availableBelow = window.innerHeight - inputRect.bottom - 20; // 20px padding from bottom
+            
+            // Set max-height to available space, minimum 150px
+            const maxHeight = Math.max(150, availableBelow);
+            dashboardDDropdown.style.maxHeight = maxHeight + 'px';
+        }
+
         function showDashboardDCategoryDropdown(searchText = '') {
             dashboardDDropdown.innerHTML = '';
-            const searchLower = searchText.toLowerCase();
-            const filtered = searchText.length === 0 
-                ? dashboardDCategories 
-                : dashboardDCategories.filter(cat => cat.name.toLowerCase().includes(searchLower));
+            const searchLower = searchText.toLowerCase().trim();
+            
+            // Separate matching and non-matching categories
+            const matchingCategories = searchLower.length > 0 
+                ? dashboardDCategories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+                : [];
+            const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+            const nonMatchingCategories = searchLower.length > 0
+                ? dashboardDCategories.filter(cat => !matchingIds.has(cat.id))
+                : dashboardDCategories;
 
             // Check if there's an exact match
-            const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
-            const hasMatches = filtered.length > 0;
+            const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
 
-            if (hasMatches) {
+            // Show search results with magnifying glass (if user is typing)
+            if (searchLower.length > 0 && matchingCategories.length > 0) {
                 dashboardDDropdown.style.display = 'block';
-                filtered.forEach(cat => {
+                matchingCategories.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                    div.className = 'category-dropdown-item search-result';
+                    div.addEventListener('click', function() {
+                        dashboardDCategoryInput.value = cat.name;
+                        dashboardDCategoryHidden.value = cat.id;
+                        dashboardDDropdown.style.display = 'none';
+                    });
+                    dashboardDDropdown.appendChild(div);
+                });
+                
+                // Add separator between search results and all categories
+                if (nonMatchingCategories.length > 0) {
+                    const separator = document.createElement('div');
+                    separator.className = 'dropdown-separator';
+                    dashboardDDropdown.appendChild(separator);
+                }
+            }
+
+            // Show all other categories (non-matching or all if no search)
+            if (nonMatchingCategories.length > 0 || (searchLower.length === 0 && dashboardDCategories.length > 0)) {
+                const catsToShow = searchLower.length > 0 ? nonMatchingCategories : dashboardDCategories;
+                dashboardDDropdown.style.display = 'block';
+                catsToShow.forEach(cat => {
                     const div = document.createElement('div');
                     div.textContent = cat.name;
                     div.className = 'category-dropdown-item';
@@ -434,8 +558,11 @@
                 dashboardDDropdown.appendChild(createDiv);
             }
 
-            if (!hasMatches && searchText.length === 0) {
+            if (dashboardDDropdown.children.length === 0) {
                 dashboardDDropdown.style.display = 'none';
+            } else {
+                // Position dropdown based on available screen space
+                positionDashboardDDropdown();
             }
         }
 
@@ -448,13 +575,20 @@
 
         dashboardDCategoryInput.addEventListener('focus', function() {
             if (dashboardDCategories.length > 0) {
-                showDashboardDCategoryDropdown(this.value);
+                // On focus, show all categories (don't treat pre-filled value as search)
+                showDashboardDCategoryDropdown('');
             }
         });
 
+        // Close all dropdowns when clicking outside
         document.addEventListener('click', function(e) {
+            // Close category dropdown if clicking outside
             if (!dashboardDCategoryInput.contains(e.target) && !dashboardDDropdown.contains(e.target)) {
                 dashboardDDropdown.style.display = 'none';
+            }
+            // Close entry type dropdown if clicking outside
+            if (!dashboardDEntryTypeInput.contains(e.target) && !dashboardDEntryTypeDropdown.contains(e.target)) {
+                dashboardDEntryTypeDropdown.style.display = 'none';
             }
         });
 
@@ -704,9 +838,10 @@
                     memberSinceIcon = '<div class="member-since-badge" title="Member Since"><i class="fa-solid fa-flag-checkered"></i></div>';
                 }
                 
-                // Hide add button if date is before member_since
+                // Hide add button if date is before member_since OR if no valid entry types available (Quiltt locking)
                 const isBeforeMemberSince = normalizedMemberSinceDate && date < normalizedMemberSinceDate;
-                const addButton = isBeforeMemberSince ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-solid fa-plus"></i><span class="nav-tooltip">Add New Entry</span></button>`;
+                const hasValidEntryTypes = shouldShowAddButton(date);
+                const addButton = (isBeforeMemberSince || !hasValidEntryTypes) ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-solid fa-plus"></i><span class="nav-tooltip">Add New Entry</span></button>`;
                 
                 dayHeader.innerHTML = `${formattedDate} ${addButton}${memberSinceIcon}`;
                 container.appendChild(dayHeader);
@@ -777,7 +912,8 @@
                     const catObj = incomeCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
                     const isStartingBalance = entry.category_name === 'Starting Balance' || (catObj && catObj.name === 'Starting Balance');
-                    const isReadonly = isBud || isStartingBalance;
+                    const isQuilttLocked = isEntryLockedByQuiltt(date, entry.category_id, 'income');
+                    const isReadonly = isBud || isStartingBalance || isQuilttLocked;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                     if (isStartingBalance) {
                         iconHtml = '<i class="fa-solid fa-flag-checkered category-icon"></i>';
@@ -798,7 +934,7 @@
                         </div>
                         <div class="dashboard-d-amount-cell ${paidClass}">
                             <input type="text"
-                                class="income-cell-input"
+                                class="income-cell-input${isReadonly ? ' auto-disable' : ''}"
                                 data-processed="${dataProcessed}"
                                 value="${formatCurrency(entry.amount)}"
                                 data-entry-id="${entry.id}"
@@ -852,6 +988,8 @@
                     
                     const catObj = expenseCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
+                    const isExpenseQuilttLocked = isEntryLockedByQuiltt(date, entry.category_id, 'expense');
+                    const isExpenseReadonly = isBud || isExpenseQuilttLocked;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                     if (catObj) {
                         if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
@@ -860,7 +998,7 @@
                         else if (catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
                     }
                     expenseRow.innerHTML = `
-                        ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
+                        ${!isExpenseReadonly ? `<span class="dashboard-d-move-btn" title="Move to date">
                             <span class="calendar-icon">
                             <i class="fa-solid fa-up-down-left-right"></i>
                             </span>
@@ -871,13 +1009,13 @@
                         </div>
                         <div class="dashboard-d-amount-cell ${paidClass}">
                             <input type="text"
-                                class="expense-cell-input"
+                                class="expense-cell-input${isExpenseReadonly ? ' auto-disable' : ''}"
                                 data-processed="${dataProcessed}"
                                 value="${formatCurrency(entry.amount)}"
                                 data-entry-id="${entry.id}"
                                 data-category-id="${entry.category_id}"
                                 data-date="${date}"
-                                ${isBud ? 'readonly tabindex="-1"' : ''}
+                                ${isExpenseReadonly ? 'readonly tabindex="-1"' : ''}
                             />
                         </div>
                     `;
@@ -969,6 +1107,8 @@
                         const catObj = c_expense_categories.find(cat => cat.id == entry.category_id);
                         if (catObj && catObj.name === "Starting Balance") return;
                         const isBud = catObj && catObj.is_bud;
+                        const isCaQuilttLocked = isEntryLockedByQuiltt(date, entry.category_id, 'ca', account.id);
+                        const isCaReadonly = isBud || isCaQuilttLocked;
                         let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                         if (catObj) {
                             if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
@@ -986,7 +1126,7 @@
                         const dataProcessed = entry.processed == 1 ? '1' : '0';
                         const paidClass = entry.processed == 1 ? 'paid' : '';
                         entryRow.innerHTML = `
-                            ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
+                            ${!isCaReadonly ? `<span class="dashboard-d-move-btn" title="Move to date">
                                 <span class="calendar-icon">
                                     <i class="fa-solid fa-up-down-left-right"></i>
                                 </span>
@@ -997,13 +1137,13 @@
                             </div>
                             <div class="dashboard-d-amount-cell ${paidClass}">
                                 <input type="text"
-                                    class="ca-cell-input"
+                                    class="ca-cell-input${isCaReadonly ? ' auto-disable' : ''}"
                                     data-processed="${dataProcessed}"
                                     value="${formatCurrency(entry.amount)}"
                                     data-entry-id="${entry.id}"
                                     data-category-id="${entry.category_id}"
                                     data-date="${date}"
-                                    ${isBud ? 'readonly tabindex="-1"' : ''}
+                                    ${isCaReadonly ? 'readonly tabindex="-1"' : ''}
                                 />
                             </div>
                         `;
@@ -2664,18 +2804,132 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             window.setupDashboardDInputFocus = setupDashboardDInputFocus;
         });
 
-        function populateEntryTypeDropdown() {
-            const entryTypeDropdown = document.getElementById('dashboard-d-entryType');
-            entryTypeDropdown.innerHTML = `
-                <option value="">Select Type</option>
-                <option value="income">Income</option>
-                <option value="expense">Expense</option>
-            `;
+        // Entry Type dropdown functionality
+        let dashboardDEntryTypes = [];
+        const dashboardDEntryTypeInput = document.getElementById('dashboard-d-entryType-input');
+        const dashboardDEntryTypeHidden = document.getElementById('dashboard-d-entryType');
+        const dashboardDEntryTypeDropdown = document.getElementById('dashboard-d-entryType-dropdown');
+
+        function positionEntryTypeDropdown() {
+            const inputRect = dashboardDEntryTypeInput.getBoundingClientRect();
+            const availableBelow = window.innerHeight - inputRect.bottom - 20;
+            const maxHeight = Math.max(150, availableBelow);
+            dashboardDEntryTypeDropdown.style.maxHeight = maxHeight + 'px';
+        }
+
+        function populateEntryTypeDropdown(dateStr) {
+            dashboardDEntryTypes = [];
+            dashboardDEntryTypeInput.value = '';
+            dashboardDEntryTypeHidden.value = '';
+            dashboardDEntryTypeDropdown.style.display = 'none';
+            
+            // Determine if this is a locked date (today or before)
+            let isLockedDate = false;
+            if (quiltt_flags && dateStr) {
+                const today = new Date();
+                const todayStr = today.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+                isLockedDate = dateStr <= todayStr;
+            }
+            
+            // For future dates or if no checking linked, show Income/Expense options
+            if (!isLockedDate || !quiltt_flags || !quiltt_flags.has_checking) {
+                dashboardDEntryTypes.push({ id: 'income', name: 'Income' });
+                dashboardDEntryTypes.push({ id: 'expense', name: 'Expense' });
+            }
+            
             // Add each credit account as an option
+            // For locked dates, only show non-Quiltt credit accounts
             credit_accounts.forEach(account => {
-                entryTypeDropdown.innerHTML += `<option value="ca_${account.id}">${account.name}</option>`;
+                const isQuilttLinked = quiltt_flags && 
+                                       quiltt_flags.quiltt_credit_ids && 
+                                       quiltt_flags.quiltt_credit_ids.includes(account.id);
+                
+                // Show if: future date, OR not a Quiltt-linked account
+                if (!isLockedDate || !isQuilttLinked) {
+                    dashboardDEntryTypes.push({ id: `ca_${account.id}`, name: account.name });
+                }
             });
         }
+
+        function showEntryTypeDropdown(searchText = '') {
+            dashboardDEntryTypeDropdown.innerHTML = '';
+            const searchLower = searchText.toLowerCase().trim();
+            
+            // Separate matching and non-matching entry types
+            const matchingTypes = searchLower.length > 0 
+                ? dashboardDEntryTypes.filter(type => type.name.toLowerCase().includes(searchLower))
+                : [];
+            const matchingIds = new Set(matchingTypes.map(type => type.id));
+            const nonMatchingTypes = searchLower.length > 0
+                ? dashboardDEntryTypes.filter(type => !matchingIds.has(type.id))
+                : dashboardDEntryTypes;
+
+            // Show search results with magnifying glass (if user is typing)
+            if (searchLower.length > 0 && matchingTypes.length > 0) {
+                dashboardDEntryTypeDropdown.style.display = 'block';
+                matchingTypes.forEach(type => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${type.name}`;
+                    div.className = 'category-dropdown-item search-result';
+                    div.addEventListener('click', function() {
+                        dashboardDEntryTypeInput.value = type.name;
+                        dashboardDEntryTypeHidden.value = type.id;
+                        dashboardDEntryTypeDropdown.style.display = 'none';
+                        dashboardDUpdateCategoryOptions();
+                    });
+                    dashboardDEntryTypeDropdown.appendChild(div);
+                });
+                
+                // Add separator between search results and all types
+                if (nonMatchingTypes.length > 0) {
+                    const separator = document.createElement('div');
+                    separator.className = 'dropdown-separator';
+                    dashboardDEntryTypeDropdown.appendChild(separator);
+                }
+            }
+
+            // Show all other entry types (non-matching or all if no search)
+            if (nonMatchingTypes.length > 0 || (searchLower.length === 0 && dashboardDEntryTypes.length > 0)) {
+                const typesToShow = searchLower.length > 0 ? nonMatchingTypes : dashboardDEntryTypes;
+                dashboardDEntryTypeDropdown.style.display = 'block';
+                typesToShow.forEach(type => {
+                    const div = document.createElement('div');
+                    div.textContent = type.name;
+                    div.className = 'category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        dashboardDEntryTypeInput.value = type.name;
+                        dashboardDEntryTypeHidden.value = type.id;
+                        dashboardDEntryTypeDropdown.style.display = 'none';
+                        dashboardDUpdateCategoryOptions();
+                    });
+                    dashboardDEntryTypeDropdown.appendChild(div);
+                });
+            }
+
+            if (dashboardDEntryTypeDropdown.children.length === 0) {
+                dashboardDEntryTypeDropdown.style.display = 'none';
+            } else {
+                positionEntryTypeDropdown();
+            }
+        }
+
+        dashboardDEntryTypeInput.addEventListener('input', function() {
+            if (this.value.length === 0) {
+                dashboardDEntryTypeHidden.value = '';
+                // Reset category dropdown when entry type is cleared
+                dashboardDCategories = [];
+                document.getElementById('dashboard-d-category-input').value = '';
+                document.getElementById('dashboard-d-category-input').disabled = true;
+                document.getElementById('dashboard-d-category').value = '';
+            }
+            showEntryTypeDropdown(this.value);
+        });
+
+        dashboardDEntryTypeInput.addEventListener('focus', function() {
+            if (dashboardDEntryTypes.length > 0) {
+                showEntryTypeDropdown('');
+            }
+        });
 
         function fetchDashboardDData(selectedDate, callback) {
             $.ajax({
@@ -2718,10 +2972,19 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
         }
 
         function resetDashboardDAddEntryForm() {
+            // Reset entry type dropdown
+            document.getElementById('dashboard-d-entryType-input').value = '';
             document.getElementById('dashboard-d-entryType').value = '';
-            const categoryDropdown = document.getElementById('dashboard-d-category');
-            categoryDropdown.innerHTML = '<option value="">Select Category</option>';
-            categoryDropdown.disabled = true;
+            document.getElementById('dashboard-d-entryType-dropdown').style.display = 'none';
+            dashboardDEntryTypes = [];
+            
+            // Reset category dropdown
+            document.getElementById('dashboard-d-category-input').value = '';
+            document.getElementById('dashboard-d-category-input').disabled = true;
+            document.getElementById('dashboard-d-category').value = '';
+            document.getElementById('dashboard-d-category-dropdown').style.display = 'none';
+            dashboardDCategories = [];
+            
             document.getElementById('dashboard-d-amount').value = '';
             // Optionally reset the date to today
             const today = new Date();

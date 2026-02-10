@@ -79,9 +79,9 @@
             <!-- Credit Account Dropdown -->
             <div class="footer-form-group">
                 <label for="footer-ca-account">Credit Account:</label>
-                <select id="footer-ca-account" name="account" required>
-                    <option value="">Select Account</option>
-                </select>
+                <input type="text" id="footer-ca-account-input" placeholder="Type to search..." autocomplete="off">
+                <input type="hidden" id="footer-ca-account" name="account" required>
+                <div id="footer-ca-account-dropdown" class="category-dropdown" style="display: none;"></div>
             </div>
             <!-- Category Dropdown -->
             <div class="footer-form-group">
@@ -568,8 +568,13 @@
     const caButton = document.getElementById('footer-ca-button');
     const caLabel = document.getElementById('footer-ca-label');
     const caModal = document.getElementById('footer-caEntryModal');
-    const caAccountDropdown = document.getElementById('footer-ca-account');
+    const caAccountHidden = document.getElementById('footer-ca-account');
     const caCategoryDropdown = document.getElementById('footer-ca-category');
+
+    // Credit account searchable dropdown elements
+    let footerCaAccounts = [];
+    const footerCaAccountInput = document.getElementById('footer-ca-account-input');
+    const footerCaAccountDropdown = document.getElementById('footer-ca-account-dropdown');
 
     // Show modal when button or label is clicked
     caButton.addEventListener('click', openCaEntryModal);
@@ -582,9 +587,19 @@
         populateCaAccountDropdown();
         document.getElementById('footer-ca-entryDate').value = getTodayDate();
         caModal.style.display = 'flex';
-        caCategoryDropdown.disabled = true;
-        caAccountDropdown.value = '';
-        caCategoryDropdown.innerHTML = '<option value="">Select Category</option>';
+        
+        // Reset account dropdown
+        footerCaAccountInput.value = '';
+        caAccountHidden.value = '';
+        footerCaAccountDropdown.style.display = 'none';
+        
+        // Reset category dropdown
+        document.getElementById('footer-ca-category-input').value = '';
+        document.getElementById('footer-ca-category-input').disabled = true;
+        document.getElementById('footer-ca-category').value = '';
+        document.getElementById('footer-ca-category-dropdown').style.display = 'none';
+        footerCaCategories = [];
+        
         document.getElementById('footer-bar').classList.remove('active');
         document.body.classList.add('modal-open');
         document.documentElement.classList.add('modal-open');
@@ -597,20 +612,116 @@
         document.documentElement.classList.remove('modal-open');
     }
 
-    // Populate credit account dropdown
+    // Populate credit account array (excludes Quiltt-linked accounts)
     function populateCaAccountDropdown() {
-        caAccountDropdown.innerHTML = '<option value="">Select Account</option>';
+        footerCaAccounts = [];
         credit_accounts.forEach(account => {
-            const option = document.createElement('option');
-            option.value = account.id;
-            option.textContent = account.name;
-            caAccountDropdown.appendChild(option);
+            // Skip Quiltt-linked accounts - entries are synced from bank
+            if (typeof quiltt_flags !== 'undefined' && 
+                quiltt_flags && 
+                quiltt_flags.quiltt_credit_ids && 
+                quiltt_flags.quiltt_credit_ids.includes(account.id)) {
+                return; // Skip this account
+            }
+            footerCaAccounts.push({ id: account.id, name: account.name });
         });
     }
 
-    // Update category dropdown for credit accounts (footer-ca-category)
-    caAccountDropdown.addEventListener('change', function() {
-        const accountId = caAccountDropdown.value;
+    function positionCaAccountDropdown() {
+        const inputRect = footerCaAccountInput.getBoundingClientRect();
+        const availableBelow = window.innerHeight - inputRect.bottom - 20;
+        const maxHeight = Math.max(150, availableBelow);
+        footerCaAccountDropdown.style.maxHeight = maxHeight + 'px';
+    }
+
+    function showCaAccountDropdown(searchText = '') {
+        footerCaAccountDropdown.innerHTML = '';
+        const searchLower = searchText.toLowerCase().trim();
+        
+        // Separate matching and non-matching accounts
+        const matchingAccounts = searchLower.length > 0 
+            ? footerCaAccounts.filter(acc => acc.name.toLowerCase().includes(searchLower))
+            : [];
+        const matchingIds = new Set(matchingAccounts.map(acc => acc.id));
+        const nonMatchingAccounts = searchLower.length > 0
+            ? footerCaAccounts.filter(acc => !matchingIds.has(acc.id))
+            : footerCaAccounts;
+
+        // Show search results with magnifying glass (if user is typing)
+        if (searchLower.length > 0 && matchingAccounts.length > 0) {
+            footerCaAccountDropdown.style.display = 'block';
+            matchingAccounts.forEach(acc => {
+                const div = document.createElement('div');
+                div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${acc.name}`;
+                div.className = 'category-dropdown-item search-result';
+                div.addEventListener('click', function() {
+                    footerCaAccountInput.value = acc.name;
+                    caAccountHidden.value = acc.id;
+                    footerCaAccountDropdown.style.display = 'none';
+                    onCaAccountSelected(acc.id);
+                });
+                footerCaAccountDropdown.appendChild(div);
+            });
+            
+            // Add separator between search results and all accounts
+            if (nonMatchingAccounts.length > 0) {
+                const separator = document.createElement('div');
+                separator.className = 'dropdown-separator';
+                footerCaAccountDropdown.appendChild(separator);
+            }
+        }
+
+        // Show all other accounts (non-matching or all if no search)
+        if (nonMatchingAccounts.length > 0 || (searchLower.length === 0 && footerCaAccounts.length > 0)) {
+            const accountsToShow = searchLower.length > 0 ? nonMatchingAccounts : footerCaAccounts;
+            footerCaAccountDropdown.style.display = 'block';
+            accountsToShow.forEach(acc => {
+                const div = document.createElement('div');
+                div.textContent = acc.name;
+                div.className = 'category-dropdown-item';
+                div.addEventListener('click', function() {
+                    footerCaAccountInput.value = acc.name;
+                    caAccountHidden.value = acc.id;
+                    footerCaAccountDropdown.style.display = 'none';
+                    onCaAccountSelected(acc.id);
+                });
+                footerCaAccountDropdown.appendChild(div);
+            });
+        }
+
+        if (footerCaAccountDropdown.children.length === 0) {
+            footerCaAccountDropdown.style.display = 'none';
+        } else {
+            positionCaAccountDropdown();
+        }
+    }
+
+    footerCaAccountInput.addEventListener('input', function() {
+        if (this.value.length === 0) {
+            caAccountHidden.value = '';
+            // Reset category dropdown when account is cleared
+            footerCaCategories = [];
+            document.getElementById('footer-ca-category-input').value = '';
+            document.getElementById('footer-ca-category-input').disabled = true;
+            document.getElementById('footer-ca-category').value = '';
+        }
+        showCaAccountDropdown(this.value);
+    });
+
+    footerCaAccountInput.addEventListener('focus', function() {
+        if (footerCaAccounts.length > 0) {
+            showCaAccountDropdown('');
+        }
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!footerCaAccountInput.contains(e.target) && !footerCaAccountDropdown.contains(e.target)) {
+            footerCaAccountDropdown.style.display = 'none';
+        }
+    });
+
+    // Called when a credit account is selected
+    function onCaAccountSelected(accountId) {
         const caCategoryInput = document.getElementById('footer-ca-category-input');
         const caCategoryHidden = document.getElementById('footer-ca-category');
         const caDropdown = document.getElementById('footer-ca-category-dropdown');
@@ -637,7 +748,7 @@
                 footerCaCategories.push({ id: category.id, name: category.name });
             }
         });
-    });
+    }
 
     // Submit credit entry
     $('#footer-caEntryForm').on('submit', function(e) {
@@ -745,11 +856,19 @@
     }
 
     function resetCaEntryForm() {
+        // Reset account dropdown
+        document.getElementById('footer-ca-account-input').value = '';
         document.getElementById('footer-ca-account').value = '';
+        document.getElementById('footer-ca-account-dropdown').style.display = 'none';
+        footerCaAccounts = [];
+        
+        // Reset category dropdown
         document.getElementById('footer-ca-category-input').value = '';
         document.getElementById('footer-ca-category').value = '';
         document.getElementById('footer-ca-category-input').disabled = true;
         document.getElementById('footer-ca-category-dropdown').style.display = 'none';
+        footerCaCategories = [];
+        
         document.getElementById('footer-ca-amount').value = '';
         // Reset date to today
         document.getElementById('footer-ca-entryDate').value = getTodayDate();
@@ -764,20 +883,60 @@
     const footerCategoryHidden = document.getElementById('footer-category');
     const footerDropdown = document.getElementById('footer-category-dropdown');
 
+    function positionDropdown(inputEl, dropdownEl) {
+        // Calculate available space below the input
+        const inputRect = inputEl.getBoundingClientRect();
+        const availableBelow = window.innerHeight - inputRect.bottom - 20; // 20px padding from bottom
+        
+        // Set max-height to available space, minimum 150px
+        const maxHeight = Math.max(150, availableBelow);
+        dropdownEl.style.maxHeight = maxHeight + 'px';
+    }
+
     function showFooterCategoryDropdown(searchText = '') {
         footerDropdown.innerHTML = '';
-        const searchLower = searchText.toLowerCase();
-        const filtered = searchText.length === 0 
-            ? footerCategories 
-            : footerCategories.filter(cat => cat.name.toLowerCase().includes(searchLower));
+        const searchLower = searchText.toLowerCase().trim();
+        
+        // Separate matching and non-matching categories
+        const matchingCategories = searchLower.length > 0 
+            ? footerCategories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+            : [];
+        const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+        const nonMatchingCategories = searchLower.length > 0
+            ? footerCategories.filter(cat => !matchingIds.has(cat.id))
+            : footerCategories;
 
         // Check if there's an exact match
-        const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
-        const hasMatches = filtered.length > 0;
+        const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
 
-        if (hasMatches) {
+        // Show search results with magnifying glass (if user is typing)
+        if (searchLower.length > 0 && matchingCategories.length > 0) {
             footerDropdown.style.display = 'block';
-            filtered.forEach(cat => {
+            matchingCategories.forEach(cat => {
+                const div = document.createElement('div');
+                div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                div.className = 'category-dropdown-item search-result';
+                div.addEventListener('click', function() {
+                    footerCategoryInput.value = cat.name;
+                    footerCategoryHidden.value = cat.id;
+                    footerDropdown.style.display = 'none';
+                });
+                footerDropdown.appendChild(div);
+            });
+            
+            // Add separator between search results and all categories
+            if (nonMatchingCategories.length > 0) {
+                const separator = document.createElement('div');
+                separator.className = 'dropdown-separator';
+                footerDropdown.appendChild(separator);
+            }
+        }
+
+        // Show all other categories (non-matching or all if no search)
+        if (nonMatchingCategories.length > 0 || (searchLower.length === 0 && footerCategories.length > 0)) {
+            const catsToShow = searchLower.length > 0 ? nonMatchingCategories : footerCategories;
+            footerDropdown.style.display = 'block';
+            catsToShow.forEach(cat => {
                 const div = document.createElement('div');
                 div.textContent = cat.name;
                 div.className = 'category-dropdown-item';
@@ -802,8 +961,11 @@
             footerDropdown.appendChild(createDiv);
         }
 
-        if (!hasMatches && searchText.length === 0) {
+        if (footerDropdown.children.length === 0) {
             footerDropdown.style.display = 'none';
+        } else {
+            // Position dropdown based on available screen space
+            positionDropdown(footerCategoryInput, footerDropdown);
         }
     }
 
@@ -816,7 +978,8 @@
 
     footerCategoryInput.addEventListener('focus', function() {
         if (footerCategories.length > 0) {
-            showFooterCategoryDropdown(this.value);
+            // On focus, show all categories (don't treat pre-filled value as search)
+            showFooterCategoryDropdown('');
         }
     });
 
@@ -885,18 +1048,48 @@
 
     function showFooterCaCategoryDropdown(searchText = '') {
         footerCaDropdown.innerHTML = '';
-        const searchLower = searchText.toLowerCase();
-        const filtered = searchText.length === 0 
-            ? footerCaCategories 
-            : footerCaCategories.filter(cat => cat.name.toLowerCase().includes(searchLower));
+        const searchLower = searchText.toLowerCase().trim();
+        
+        // Separate matching and non-matching categories
+        const matchingCategories = searchLower.length > 0 
+            ? footerCaCategories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+            : [];
+        const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+        const nonMatchingCategories = searchLower.length > 0
+            ? footerCaCategories.filter(cat => !matchingIds.has(cat.id))
+            : footerCaCategories;
 
         // Check if there's an exact match
-        const exactMatch = filtered.find(cat => cat.name.toLowerCase() === searchLower);
-        const hasMatches = filtered.length > 0;
+        const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
 
-        if (hasMatches) {
+        // Show search results with magnifying glass (if user is typing)
+        if (searchLower.length > 0 && matchingCategories.length > 0) {
             footerCaDropdown.style.display = 'block';
-            filtered.forEach(cat => {
+            matchingCategories.forEach(cat => {
+                const div = document.createElement('div');
+                div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                div.className = 'category-dropdown-item search-result';
+                div.addEventListener('click', function() {
+                    footerCaCategoryInput.value = cat.name;
+                    footerCaCategoryHidden.value = cat.id;
+                    footerCaDropdown.style.display = 'none';
+                });
+                footerCaDropdown.appendChild(div);
+            });
+            
+            // Add separator between search results and all categories
+            if (nonMatchingCategories.length > 0) {
+                const separator = document.createElement('div');
+                separator.className = 'dropdown-separator';
+                footerCaDropdown.appendChild(separator);
+            }
+        }
+
+        // Show all other categories (non-matching or all if no search)
+        if (nonMatchingCategories.length > 0 || (searchLower.length === 0 && footerCaCategories.length > 0)) {
+            const catsToShow = searchLower.length > 0 ? nonMatchingCategories : footerCaCategories;
+            footerCaDropdown.style.display = 'block';
+            catsToShow.forEach(cat => {
                 const div = document.createElement('div');
                 div.textContent = cat.name;
                 div.className = 'category-dropdown-item';
@@ -921,8 +1114,11 @@
             footerCaDropdown.appendChild(createDiv);
         }
 
-        if (!hasMatches && searchText.length === 0) {
+        if (footerCaDropdown.children.length === 0) {
             footerCaDropdown.style.display = 'none';
+        } else {
+            // Position dropdown based on available screen space
+            positionDropdown(footerCaCategoryInput, footerCaDropdown);
         }
     }
 
@@ -935,7 +1131,8 @@
 
     footerCaCategoryInput.addEventListener('focus', function() {
         if (footerCaCategories.length > 0) {
-            showFooterCaCategoryDropdown(this.value);
+            // On focus, show all categories (don't treat pre-filled value as search)
+            showFooterCaCategoryDropdown('');
         }
     });
 
@@ -989,5 +1186,61 @@
             }
         });
     }
+
+    /**
+     * Apply Quiltt-based footer restrictions.
+     * Called after page load when quiltt_flags is available.
+     * - Hides Income/Expense/AutoBalance buttons if user has checking account linked
+     * - Hides Credit Entry button if all credit accounts are Quiltt-linked
+     */
+    function applyQuilttFooterRestrictions() {
+        // Check if quiltt_flags is defined (set by dashboard templates)
+        if (typeof quiltt_flags === 'undefined' || !quiltt_flags) {
+            return;
+        }
+
+        // If user has checking account linked, hide Income/Expense/AutoBalance buttons
+        // (All income/expense entries sync with bank - manual entry would desync)
+        if (quiltt_flags.has_checking) {
+            const incomeBtn = document.getElementById('footer-income-button');
+            const incomeLbl = document.getElementById('footer-income-label');
+            const expenseBtn = document.getElementById('footer-expense-button');
+            const expenseLbl = document.getElementById('footer-expense-label');
+            const autobalBtn = document.getElementById('footer-autobalance-button');
+            const autobalLbl = document.getElementById('footer-autobalance-label');
+
+            if (incomeBtn) incomeBtn.style.display = 'none';
+            if (incomeLbl) incomeLbl.style.display = 'none';
+            if (expenseBtn) expenseBtn.style.display = 'none';
+            if (expenseLbl) expenseLbl.style.display = 'none';
+            if (autobalBtn) autobalBtn.style.display = 'none';
+            if (autobalLbl) autobalLbl.style.display = 'none';
+        }
+
+        // Check if all credit accounts are Quiltt-linked
+        // If so, hide the Credit Entry button entirely
+        if (typeof credit_accounts !== 'undefined' && 
+            credit_accounts && 
+            credit_accounts.length > 0 && 
+            quiltt_flags.quiltt_credit_ids && 
+            quiltt_flags.quiltt_credit_ids.length > 0) {
+            
+            // Check if any non-Quiltt credit account exists
+            const hasNonQuilttAccount = credit_accounts.some(account => 
+                !quiltt_flags.quiltt_credit_ids.includes(account.id)
+            );
+
+            if (!hasNonQuilttAccount) {
+                // All credit accounts are Quiltt-linked, hide credit entry button
+                const caBtn = document.getElementById('footer-ca-button');
+                const caLbl = document.getElementById('footer-ca-label');
+                if (caBtn) caBtn.style.display = 'none';
+                if (caLbl) caLbl.style.display = 'none';
+            }
+        }
+    }
+
+    // Apply restrictions after page is fully loaded (quiltt_flags defined by then)
+    window.addEventListener('load', applyQuilttFooterRestrictions);
 
 </script>
