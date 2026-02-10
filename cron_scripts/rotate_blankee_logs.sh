@@ -1,6 +1,6 @@
 #!/bin/bash
 # Rotate Blankee app logs daily at 23:59 UTC
-# Creates dated log files: blankee_app_yyyymmdd.log, quiltt_checker_yyyymmdd.log
+# Creates dated log files for app logs and cron job logs
 # Works on both dev (budget_error.log) and prod (blankee_error.log)
 
 LOG_DIR="/var/log/apache2"
@@ -23,7 +23,7 @@ rotate_log() {
     fi
 }
 
-# Rotate main app log (check for both dev and prod names)
+# Rotate main app error log (check for both dev and prod names)
 if [ -f "/var/log/apache2/blankee_error.log" ]; then
     rotate_log "/var/log/apache2/blankee_error.log" "blankee_app"
 elif [ -f "/var/log/apache2/budget_error.log" ]; then
@@ -32,9 +32,13 @@ else
     echo "$(date -u): No main error log found (checked blankee_error.log and budget_error.log)"
 fi
 
-# Rotate quiltt checker log
+# Rotate cron job logs
 rotate_log "/var/log/apache2/quiltt_checker.log" "quiltt_checker"
+rotate_log "/var/log/apache2/auto_confirm.log" "auto_confirm"
+rotate_log "/var/log/apache2/nightly_sync.log" "nightly_sync"
 
 # Clean up logs older than 180 days (6 months)
 find "$LOG_DIR" -name "blankee_app_*.log" -type f -mtime +180 -delete
 find "$LOG_DIR" -name "quiltt_checker_*.log" -type f -mtime +180 -delete
+find "$LOG_DIR" -name "auto_confirm_*.log" -type f -mtime +180 -delete
+find "$LOG_DIR" -name "nightly_sync_*.log" -type f -mtime +180 -delete
