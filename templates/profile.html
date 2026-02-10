@@ -349,10 +349,18 @@
                 </div>
             </div>
             <form id="mfa-verify-form" class="mfa-verify-form">
-                <input type="text" id="mfa-code" maxlength="6" placeholder="Enter 6-digit code" required>
+                <div class="mfa-code-inputs">
+                    <div id="mfa-verify-message" class="mfa-speech-bubble" style="display: none;"></div>
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                </div>
+                <input type="hidden" id="mfa-code" name="mfa-code">
                 <button type="submit" class="submit-button">Verify</button>
             </form>
-            <div id="mfa-verify-message"></div>
         </div>
     </div>
 
@@ -535,6 +543,8 @@
                             $('#mfa-secret-key').text(data.secret);
                             $('#mfa-verify-message').text('');
                             $('#mfa-code').val('');
+                            // Clear all digit inputs
+                            $('.mfa-digit').each(function() { $(this).val(''); });
                             $('#mfa-qr-modal').css('display', 'flex');
                         } else {
                             // Error - revert toggle
@@ -654,20 +664,120 @@
                 }
             });
 
+            // MFA 6-digit input handling
+            const mfaDigits = document.querySelectorAll('.mfa-digit');
+            const mfaCodeHidden = document.getElementById('mfa-code');
+
+            function updateMfaCode() {
+                let code = '';
+                mfaDigits.forEach(input => {
+                    code += input.value;
+                });
+                mfaCodeHidden.value = code;
+            }
+
+            mfaDigits.forEach((input, index) => {
+                // Only allow digits 0-9
+                input.addEventListener('input', function(e) {
+                    // Remove any non-digit characters
+                    this.value = this.value.replace(/[^0-9]/g, '');
+                    
+                    if (this.value.length === 1) {
+                        // Auto-advance to next input
+                        if (index < mfaDigits.length - 1) {
+                            mfaDigits[index + 1].focus();
+                        }
+                    }
+                    updateMfaCode();
+                });
+
+                // Handle backspace to go to previous input
+                input.addEventListener('keydown', function(e) {
+                    if (e.key === 'Backspace' && this.value === '' && index > 0) {
+                        mfaDigits[index - 1].focus();
+                    }
+                    // Handle arrow keys
+                    if (e.key === 'ArrowLeft' && index > 0) {
+                        mfaDigits[index - 1].focus();
+                    }
+                    if (e.key === 'ArrowRight' && index < mfaDigits.length - 1) {
+                        mfaDigits[index + 1].focus();
+                    }
+                    // Submit on Enter if all 6 digits are filled
+                    if (e.key === 'Enter') {
+                        updateMfaCode();
+                        if (mfaCodeHidden.value.length === 6) {
+                            e.preventDefault();
+                            document.getElementById('mfa-verify-form').dispatchEvent(new Event('submit'));
+                        }
+                    }
+                });
+
+                // Handle paste - distribute across all inputs
+                input.addEventListener('paste', function(e) {
+                    e.preventDefault();
+                    const pastedData = (e.clipboardData || window.clipboardData).getData('text');
+                    const digits = pastedData.replace(/[^0-9]/g, '').slice(0, 6);
+                    
+                    digits.split('').forEach((digit, i) => {
+                        if (mfaDigits[i]) {
+                            mfaDigits[i].value = digit;
+                        }
+                    });
+                    
+                    // Focus the next empty input or the last one
+                    const nextEmptyIndex = Math.min(digits.length, mfaDigits.length - 1);
+                    mfaDigits[nextEmptyIndex].focus();
+                    updateMfaCode();
+                });
+
+                // Select all text on focus for easy replacement
+                input.addEventListener('focus', function() {
+                    this.select();
+                });
+            });
+
             // Verify MFA code
             $('#mfa-verify-form').on('submit', function(e) {
                 e.preventDefault();
                 const code = $('#mfa-code').val();
+                if (code.length !== 6) {
+                    showMfaMessage('Please enter all 6 digits', 'error');
+                    return;
+                }
                 $.post('/verify_mfa', {code: code}, function(data) {
                     if (data.status === 'success') {
                         mfaVerified = true; // Mark as verified
-                        $('#mfa-verify-message').css('color', 'green').text('MFA enabled successfully!');
+                        showMfaMessage('MFA enabled successfully!', 'success');
                         setTimeout(function() { $('#mfa-qr-modal').hide(); }, 1500);
                     } else {
-                        $('#mfa-verify-message').css('color', 'red').text('Invalid code. Please try again.');
+                        showMfaMessage('Incorrect code', 'error');
+                        // Clear inputs on error
+                        mfaDigits.forEach(input => input.value = '');
+                        mfaDigits[0].focus();
+                        mfaCodeHidden.value = '';
                     }
+                }).fail(function() {
+                    showMfaMessage('Error verifying code', 'error');
                 });
             });
+
+            function showMfaMessage(message, type) {
+                const msgEl = $('#mfa-verify-message');
+                msgEl.stop(true, true)
+                    .removeClass('error success')
+                    .addClass(type)
+                    .text(message)
+                    .css({display: 'block', opacity: 1});
+                
+                if (type === 'error') {
+                    setTimeout(function() {
+                        msgEl.fadeOut(300, function() {
+                            $(this).text('').css('display', 'none');
+                        });
+                    }, 2000);
+                }
+            }
         });
 
         $(document).ready(function() {

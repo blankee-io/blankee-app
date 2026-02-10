@@ -43,13 +43,38 @@
         </div>
 
         {% if mfa_step %}
-            <form method="POST" action="{{ url_for('login_mfa') }}">
+            <form method="POST" action="{{ url_for('login_mfa') }}" id="login-mfa-form">
                 <div class="mfa-row">
                     <label for="mfa_code">Enter 6-digit code from your authenticator app:</label>
-                    <input type="text" name="mfa_code" id="mfa_code" class="mfa-input" maxlength="6" required autofocus>
+                    <div class="mfa-code-inputs">
+                        <div id="login-mfa-error" class="login-mfa-error" style="display: none;"></div>
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    </div>
+                    <input type="hidden" name="mfa_code" id="mfa_code">
                 </div>
                 <button type="submit" class="login-button">Verify</button>
             </form>
+            {% if mfa_error %}
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    var errorDiv = document.getElementById('login-mfa-error');
+                    errorDiv.textContent = '{{ mfa_error }}';
+                    errorDiv.style.display = 'block';
+                    setTimeout(function() {
+                        errorDiv.style.opacity = '0';
+                        setTimeout(function() {
+                            errorDiv.style.display = 'none';
+                            errorDiv.style.opacity = '1';
+                        }, 300);
+                    }, 2000);
+                });
+            </script>
+            {% endif %}
             <p><a href="{{ url_for('login') }}">Back to Login</a></p>
         {% else %}
             <form method="POST" action="{{ url_for('login') }}">
@@ -88,6 +113,80 @@
             var modal = document.getElementById('loginModal');
             var message = document.getElementById('loginMessage');
             
+            // MFA 6-digit input handling
+            const mfaDigits = document.querySelectorAll('.mfa-digit');
+            const mfaCodeHidden = document.getElementById('mfa_code');
+            
+            if (mfaDigits.length > 0 && mfaCodeHidden) {
+                function updateMfaCode() {
+                    let code = '';
+                    mfaDigits.forEach(input => {
+                        code += input.value;
+                    });
+                    mfaCodeHidden.value = code;
+                }
+
+                mfaDigits.forEach((input, index) => {
+                    // Only allow digits 0-9
+                    input.addEventListener('input', function(e) {
+                        this.value = this.value.replace(/[^0-9]/g, '');
+                        
+                        if (this.value.length === 1) {
+                            if (index < mfaDigits.length - 1) {
+                                mfaDigits[index + 1].focus();
+                            }
+                        }
+                        updateMfaCode();
+                    });
+
+                    // Handle backspace and arrow keys
+                    input.addEventListener('keydown', function(e) {
+                        if (e.key === 'Backspace' && this.value === '' && index > 0) {
+                            mfaDigits[index - 1].focus();
+                        }
+                        if (e.key === 'ArrowLeft' && index > 0) {
+                            mfaDigits[index - 1].focus();
+                        }
+                        if (e.key === 'ArrowRight' && index < mfaDigits.length - 1) {
+                            mfaDigits[index + 1].focus();
+                        }
+                        // Submit on Enter if all 6 digits are filled
+                        if (e.key === 'Enter') {
+                            updateMfaCode();
+                            if (mfaCodeHidden.value.length === 6) {
+                                e.preventDefault();
+                                document.getElementById('login-mfa-form').submit();
+                            }
+                        }
+                    });
+
+                    // Handle paste
+                    input.addEventListener('paste', function(e) {
+                        e.preventDefault();
+                        const pastedData = (e.clipboardData || window.clipboardData).getData('text');
+                        const digits = pastedData.replace(/[^0-9]/g, '').slice(0, 6);
+                        
+                        digits.split('').forEach((digit, i) => {
+                            if (mfaDigits[i]) {
+                                mfaDigits[i].value = digit;
+                            }
+                        });
+                        
+                        const nextEmptyIndex = Math.min(digits.length, mfaDigits.length - 1);
+                        mfaDigits[nextEmptyIndex].focus();
+                        updateMfaCode();
+                    });
+
+                    // Select all text on focus
+                    input.addEventListener('focus', function() {
+                        this.select();
+                    });
+                });
+                
+                // Autofocus first digit
+                mfaDigits[0].focus();
+            }
+
             {% if verification_modal %}
             // Email verification required modal
             var resendUrl = "{{ url_for('resend_verification') }}";
