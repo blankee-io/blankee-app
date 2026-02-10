@@ -729,12 +729,15 @@ def update_savings_balance(cursor, conn, user_id, bank_balance, account_id=None)
 
 def cleanup_expired_bucket_entries(cursor, conn, user_id):
     """
-    Remove bucket entries (is_bucket=1) from yesterday.
+    Handle bucket entries (is_bucket=1) from yesterday.
     
     Bucket entries are placeholders for expected recurring income/expenses.
-    Once the day passes, these should be removed so they don't affect calculations.
+    Once the day passes, these need to be handled:
     
-    The nightly sync runs at 00:05, so we delete entries for yesterday.
+    - For Quiltt-linked accounts: DELETE the bucket entry (real transaction comes from bank sync)
+    - For non-Quiltt accounts: CONVERT to regular entry (set is_bucket=0)
+    
+    The nightly sync runs at 00:05, so we process entries for yesterday.
     
     This directly updates MySQL, and also updates Redis if user is hydrated.
     
@@ -744,80 +747,204 @@ def cleanup_expired_bucket_entries(cursor, conn, user_id):
         user_id: User ID
         
     Returns:
-        dict with counts of deleted entries per table
+        dict with counts of processed entries per table
     """
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     
-    tables = [
-        ('income_entries', 'income_categories'),
-        ('expense_entries', 'expense_categories'),
-        ('c_expense_entries', 'c_expense_categories')
-    ]
-    
     results = {}
     
-    for entry_table, cat_table in tables:
-        try:
-            # First, get IDs of bucket entries to delete (for Redis cleanup)
-            if entry_table == 'c_expense_entries':
-                # Credit account categories link via account_id
-                cursor.execute(f"""
-                    SELECT e.id FROM {entry_table} e
-                    JOIN {cat_table} c ON e.category_id = c.id
-                    JOIN credit_accounts ca ON c.account_id = ca.id
-                    WHERE ca.user_id = %s AND e.date = %s AND e.is_bucket = 1
-                """, (user_id, yesterday))
-            else:
-                cursor.execute(f"""
-                    SELECT e.id FROM {entry_table} e
-                    JOIN {cat_table} c ON e.category_id = c.id
-                    WHERE c.user_id = %s AND e.date = %s AND e.is_bucket = 1
-                """, (user_id, yesterday))
-            
-            entry_ids = [row[0] for row in cursor.fetchall()]
-            
-            if not entry_ids:
-                results[entry_table] = 0
-                continue
-            
-            # Delete from MySQL
+    # -------------------------------------------------------------------------
+    # Check if user has any Quiltt-linked depository accounts (for income/expense)
+    # -------------------------------------------------------------------------
+    cursor.execute("""
+        SELECT COUNT(*) FROM quiltt_accounts qa
+        JOIN quiltt_connections qc ON qa.connection_id = qc.id
+        WHERE qa.user_id = %s AND qa.is_active = 1 AND qa.account_type = 'DEPOSITORY'
+    """, (user_id,))
+    has_quiltt_depository = cursor.fetchone()[0] > 0
+    
+    # -------------------------------------------------------------------------
+    # Process income_entries
+    # -------------------------------------------------------------------------
+    try:
+        cursor.execute("""
+            SELECT e.id FROM income_entries e
+            JOIN income_categories c ON e.category_id = c.id
+            WHERE c.user_id = %s AND e.date = %s AND e.is_bucket = 1
+        """, (user_id, yesterday))
+        entry_ids = [row[0] for row in cursor.fetchall()]
+        
+        if entry_ids:
             placeholders = ','.join(['%s'] * len(entry_ids))
-            cursor.execute(f"""
-                DELETE FROM {entry_table} WHERE id IN ({placeholders})
-            """, entry_ids)
-            conn.commit()
             
-            deleted_count = cursor.rowcount
-            results[entry_table] = deleted_count
+            if has_quiltt_depository:
+                # Quiltt-linked: DELETE bucket entries
+                cursor.execute(f"""
+                    DELETE FROM income_entries WHERE id IN ({placeholders})
+                """, entry_ids)
+                action = 'deleted'
+            else:
+                # Non-Quiltt: CONVERT to regular entries
+                cursor.execute(f"""
+                    UPDATE income_entries SET is_bucket = 0 WHERE id IN ({placeholders})
+                """, entry_ids)
+                action = 'converted'
+            
+            conn.commit()
+            results['income_entries'] = cursor.rowcount
             
             # Update Redis if user is hydrated
             if is_user_hydrated(user_id):
-                try:
-                    redis_key = get_redis_key(entry_table, user_id)
-                    redis_data = redis_client.get(redis_key)
-                    
-                    if redis_data:
-                        entries_list = json.loads(redis_data)
-                        entry_ids_set = set(entry_ids)
-                        
-                        # Filter out deleted entries
-                        entries_list = [e for e in entries_list if e.get('id') not in entry_ids_set]
-                        
-                        # Save back to Redis
-                        redis_client.setex(redis_key, REDIS_TTL, json.dumps(entries_list, cls=DecimalEncoder))
-                        mark_dirty(user_id, entry_table)
-                        
-                except Exception as redis_err:
-                    logger.warning(f"User {user_id}: Redis cleanup error for {entry_table}: {redis_err}")
+                _update_redis_after_bucket_cleanup(user_id, 'income_entries', entry_ids, has_quiltt_depository)
             
-            if deleted_count > 0:
-                logger.info(f"User {user_id}: Deleted {deleted_count} expired bucket entries from {entry_table} for {yesterday}")
-                
-        except Exception as e:
-            logger.error(f"User {user_id}: Error cleaning bucket entries from {entry_table}: {e}")
-            results[entry_table] = 0
+            if results['income_entries'] > 0:
+                logger.info(f"User {user_id}: {action.capitalize()} {results['income_entries']} bucket entries from income_entries for {yesterday}")
+        else:
+            results['income_entries'] = 0
+            
+    except Exception as e:
+        logger.error(f"User {user_id}: Error processing bucket entries from income_entries: {e}")
+        results['income_entries'] = 0
+    
+    # -------------------------------------------------------------------------
+    # Process expense_entries
+    # -------------------------------------------------------------------------
+    try:
+        cursor.execute("""
+            SELECT e.id FROM expense_entries e
+            JOIN expense_categories c ON e.category_id = c.id
+            WHERE c.user_id = %s AND e.date = %s AND e.is_bucket = 1
+        """, (user_id, yesterday))
+        entry_ids = [row[0] for row in cursor.fetchall()]
+        
+        if entry_ids:
+            placeholders = ','.join(['%s'] * len(entry_ids))
+            
+            if has_quiltt_depository:
+                # Quiltt-linked: DELETE bucket entries
+                cursor.execute(f"""
+                    DELETE FROM expense_entries WHERE id IN ({placeholders})
+                """, entry_ids)
+                action = 'deleted'
+            else:
+                # Non-Quiltt: CONVERT to regular entries
+                cursor.execute(f"""
+                    UPDATE expense_entries SET is_bucket = 0 WHERE id IN ({placeholders})
+                """, entry_ids)
+                action = 'converted'
+            
+            conn.commit()
+            results['expense_entries'] = cursor.rowcount
+            
+            # Update Redis if user is hydrated
+            if is_user_hydrated(user_id):
+                _update_redis_after_bucket_cleanup(user_id, 'expense_entries', entry_ids, has_quiltt_depository)
+            
+            if results['expense_entries'] > 0:
+                logger.info(f"User {user_id}: {action.capitalize()} {results['expense_entries']} bucket entries from expense_entries for {yesterday}")
+        else:
+            results['expense_entries'] = 0
+            
+    except Exception as e:
+        logger.error(f"User {user_id}: Error processing bucket entries from expense_entries: {e}")
+        results['expense_entries'] = 0
+    
+    # -------------------------------------------------------------------------
+    # Process c_expense_entries (credit accounts)
+    # Need to check per-account if it's Quiltt-linked
+    # -------------------------------------------------------------------------
+    try:
+        # Get bucket entries grouped by whether the credit account is Quiltt-linked
+        cursor.execute("""
+            SELECT e.id, COALESCE(ca.is_quiltt, 0) as is_quiltt
+            FROM c_expense_entries e
+            JOIN c_expense_categories c ON e.category_id = c.id
+            JOIN credit_accounts ca ON c.account_id = ca.id
+            WHERE ca.user_id = %s AND e.date = %s AND e.is_bucket = 1
+        """, (user_id, yesterday))
+        
+        quiltt_entry_ids = []
+        non_quiltt_entry_ids = []
+        
+        for row in cursor.fetchall():
+            entry_id, is_quiltt = row
+            if is_quiltt:
+                quiltt_entry_ids.append(entry_id)
+            else:
+                non_quiltt_entry_ids.append(entry_id)
+        
+        total_processed = 0
+        
+        # DELETE Quiltt-linked bucket entries
+        if quiltt_entry_ids:
+            placeholders = ','.join(['%s'] * len(quiltt_entry_ids))
+            cursor.execute(f"""
+                DELETE FROM c_expense_entries WHERE id IN ({placeholders})
+            """, quiltt_entry_ids)
+            conn.commit()
+            total_processed += cursor.rowcount
+            
+            if is_user_hydrated(user_id):
+                _update_redis_after_bucket_cleanup(user_id, 'c_expense_entries', quiltt_entry_ids, True)
+            
+            logger.info(f"User {user_id}: Deleted {cursor.rowcount} bucket entries from c_expense_entries (Quiltt-linked) for {yesterday}")
+        
+        # CONVERT non-Quiltt bucket entries
+        if non_quiltt_entry_ids:
+            placeholders = ','.join(['%s'] * len(non_quiltt_entry_ids))
+            cursor.execute(f"""
+                UPDATE c_expense_entries SET is_bucket = 0 WHERE id IN ({placeholders})
+            """, non_quiltt_entry_ids)
+            conn.commit()
+            total_processed += cursor.rowcount
+            
+            if is_user_hydrated(user_id):
+                _update_redis_after_bucket_cleanup(user_id, 'c_expense_entries', non_quiltt_entry_ids, False)
+            
+            logger.info(f"User {user_id}: Converted {cursor.rowcount} bucket entries from c_expense_entries (non-Quiltt) for {yesterday}")
+        
+        results['c_expense_entries'] = total_processed
+            
+    except Exception as e:
+        logger.error(f"User {user_id}: Error processing bucket entries from c_expense_entries: {e}")
+        results['c_expense_entries'] = 0
     
     return results
+
+
+def _update_redis_after_bucket_cleanup(user_id, entry_table, entry_ids, delete_entries):
+    """
+    Update Redis after bucket entry cleanup.
+    
+    Args:
+        user_id: User ID
+        entry_table: Table name (income_entries, expense_entries, c_expense_entries)
+        entry_ids: List of entry IDs that were processed
+        delete_entries: True to remove entries, False to set is_bucket=0
+    """
+    try:
+        redis_key = get_redis_key(entry_table, user_id)
+        redis_data = redis_client.get(redis_key)
+        
+        if redis_data:
+            entries_list = json.loads(redis_data)
+            entry_ids_set = set(entry_ids)
+            
+            if delete_entries:
+                # Remove entries from list
+                entries_list = [e for e in entries_list if e.get('id') not in entry_ids_set]
+            else:
+                # Set is_bucket=0 for these entries
+                for entry in entries_list:
+                    if entry.get('id') in entry_ids_set:
+                        entry['is_bucket'] = 0
+            
+            # Save back to Redis
+            redis_client.setex(redis_key, REDIS_TTL, json.dumps(entries_list, cls=DecimalEncoder))
+            mark_dirty(user_id, entry_table)
+            
+    except Exception as redis_err:
+        logger.warning(f"User {user_id}: Redis cleanup error for {entry_table}: {redis_err}")
 
 
 # ============================================================================
