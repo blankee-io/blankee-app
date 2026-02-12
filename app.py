@@ -183,31 +183,64 @@ def inject_unread_notifications():
     
     if current_user.is_authenticated:
         try:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Get unread notification count
-                cursor.execute("""
-                    SELECT COUNT(*) FROM notifications
-                    WHERE user_id = %s AND is_read = 0
-                """, (current_user.id,))
-                result = cursor.fetchone()
-                if result:
-                    unread_count = result[0]
-                
-                # Get user's first and last name (try Redis first)
-                user_data = None
-                redis_key = f"users:v1:{current_user.id}"
-                if app.config.get('REDIS_OK'):
-                    try:
-                        cached = _redis_client.get(redis_key)
-                        if cached:
-                            user_data = json.loads(cached)
-                    except Exception:
-                        pass
-                
-                # Fallback to MySQL if not in Redis
-                if not user_data:
+            # Get unread notification count (Redis-first)
+            notifications_key = f"notifications:v1:{current_user.id}"
+            if app.config.get('REDIS_OK'):
+                try:
+                    cached = _redis_client.get(notifications_key)
+                    if cached:
+                        notifications = json.loads(cached)
+                        unread_count = sum(1 for n in notifications if not n.get('is_read'))
+                except Exception:
+                    pass
+            
+            # Fallback to MySQL if Redis didn't have data
+            if unread_count == 0 and app.config.get('REDIS_OK'):
+                # Check if we got 0 from Redis or just didn't find data
+                try:
+                    cached = _redis_client.get(notifications_key)
+                    if not cached or cached == b'[]':
+                        # No Redis data, fall back to MySQL
+                        with get_db_pool().get_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("""
+                                SELECT COUNT(*) FROM notifications
+                                WHERE user_id = %s AND is_read = 0
+                            """, (current_user.id,))
+                            result = cursor.fetchone()
+                            if result:
+                                unread_count = result[0]
+                            cursor.close()
+                except Exception:
+                    pass
+            elif not app.config.get('REDIS_OK'):
+                # Redis not available, use MySQL
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM notifications
+                        WHERE user_id = %s AND is_read = 0
+                    """, (current_user.id,))
+                    result = cursor.fetchone()
+                    if result:
+                        unread_count = result[0]
+                    cursor.close()
+            
+            # Get user's first and last name (try Redis first)
+            user_data = None
+            redis_key = f"users:v1:{current_user.id}"
+            if app.config.get('REDIS_OK'):
+                try:
+                    cached = _redis_client.get(redis_key)
+                    if cached:
+                        user_data = json.loads(cached)
+                except Exception:
+                    pass
+            
+            # Fallback to MySQL if not in Redis
+            if not user_data:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor()
                     cursor.execute("""
                         SELECT first_name, last_name
                         FROM users
@@ -217,11 +250,10 @@ def inject_unread_notifications():
                     if user_result:
                         first_name = user_result[0] or ''
                         last_name = user_result[1] or ''
-                else:
-                    first_name = user_data.get('first_name', '') or ''
-                    last_name = user_data.get('last_name', '') or ''
-                
-                cursor.close()
+                    cursor.close()
+            else:
+                first_name = user_data.get('first_name', '') or ''
+                last_name = user_data.get('last_name', '') or ''
                 
         except Exception as e:
             app.logger.error(f"Error in context processor: {e}")
@@ -1992,6 +2024,40 @@ def dashboard_d():
             recurring_expense = list(cursor.fetchall())
             cursor.close()
 
+    # Fetch bucket records for progress bar display
+    recurring_income_buckets = _get_entries_from_redis('recurring_income_buckets', current_user.id)
+    if recurring_income_buckets is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM recurring_income_buckets
+                WHERE user_id = %s
+            """, (current_user.id,))
+            recurring_income_buckets = list(cursor.fetchall())
+            cursor.close()
+    
+    recurring_expense_buckets = _get_entries_from_redis('recurring_expense_buckets', current_user.id)
+    if recurring_expense_buckets is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM recurring_expense_buckets
+                WHERE user_id = %s
+            """, (current_user.id,))
+            recurring_expense_buckets = list(cursor.fetchall())
+            cursor.close()
+    
+    recurring_c_expense_buckets = _get_entries_from_redis('recurring_c_expense_buckets', current_user.id)
+    if recurring_c_expense_buckets is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT * FROM recurring_c_expense_buckets
+                WHERE user_id = %s
+            """, (current_user.id,))
+            recurring_c_expense_buckets = list(cursor.fetchall())
+            cursor.close()
+
     # Get Quiltt account flags for entry locking
     quiltt_flags = get_user_quiltt_account_flags(current_user.id)
 
@@ -2018,6 +2084,9 @@ def dashboard_d():
         c_a_balances_d=c_a_balances_d,
         recurring_income=recurring_income,
         recurring_expense=recurring_expense,
+        recurring_income_buckets=recurring_income_buckets,
+        recurring_expense_buckets=recurring_expense_buckets,
+        recurring_c_expense_buckets=recurring_c_expense_buckets,
         quiltt_flags=quiltt_flags
     )
 
@@ -10913,19 +10982,40 @@ def notifications():
     profile_picture = user_data['profile_picture'] if user_data else None
     landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
 
-    # Fetch notifications for this user
+    # Fetch notifications for this user (Redis-first)
     notifications = []
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-        cursor.execute("""
-            SELECT id, date, message, is_read
-            FROM notifications
-            WHERE user_id = %s
-            ORDER BY date DESC
-            LIMIT 100
-        """, (current_user.id,))
-        notifications = cursor.fetchall()
-        cursor.close()
+    notifications_key = f"notifications:v1:{current_user.id}"
+    
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(notifications_key)
+            if cached:
+                notifications = json.loads(cached)
+                # Convert date strings to datetime objects for template compatibility
+                for n in notifications:
+                    if isinstance(n.get('date'), str):
+                        try:
+                            n['date'] = datetime.fromisoformat(n['date'].replace('Z', '+00:00'))
+                        except (ValueError, TypeError):
+                            n['date'] = datetime.now()
+                # Sort by date descending
+                notifications = sorted(notifications, key=lambda x: x.get('date', datetime.min), reverse=True)[:100]
+        except Exception as e:
+            pass
+    
+    # Fallback to MySQL if not in Redis
+    if not notifications:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, date, message, is_read
+                FROM notifications
+                WHERE user_id = %s
+                ORDER BY date DESC
+                LIMIT 100
+            """, (current_user.id,))
+            notifications = cursor.fetchall()
+            cursor.close()
 
     return render_template(
         'notifications.html',
@@ -11270,6 +11360,9 @@ def confirm_transaction():
             app.logger.error(f"[CONFIRM TXN] Error processing bucket reduction: {e}")
             # Continue even if bucket processing fails
         
+        # Check if all pending transactions are now confirmed and clear notification
+        _clear_pending_transactions_notification_if_none(current_user.id)
+        
         return jsonify({'status': 'success'})
         
     except Exception as e:
@@ -11368,6 +11461,9 @@ def confirm_all_transactions():
                 except Exception as e:
                     app.logger.error(f"[CONFIRM ALL] Error processing bucket reduction: {e}")
                     # Continue even if bucket processing fails
+        
+        # Check if all pending transactions are now confirmed and clear notification
+        _clear_pending_transactions_notification_if_none(current_user.id)
         
         return jsonify({'status': 'success'})
         
@@ -14972,11 +15068,74 @@ def _create_pending_transactions_notification(user_id, new_count):
     # Build message with link to pending transactions page
     txn_word = "transaction" if total_pending == 1 else "transactions"
     need_word = "needs" if total_pending == 1 else "need"
-    message = f'You have {total_pending} pending {txn_word} synced from your bank accounts that {need_word} to be categorized. <a href="/pending-transactions">Click here to categorize</a>.'
+    message = f'You have {total_pending} pending {txn_word} synced from your bank accounts that {need_word} to be categorized. <a href="/pending-transactions">Click here to review</a>.'
     
     # Create new notification
     add_notification(user_id, message)
     app.logger.info(f"Created pending transactions notification for user {user_id}: {total_pending} pending")
+
+
+def _clear_pending_transactions_notification_if_none(user_id):
+    """
+    Check if there are any remaining pending transactions.
+    If none, delete the pending transactions notification.
+    
+    Args:
+        user_id: The user ID to check
+        
+    Returns:
+        True if notification was deleted, False otherwise
+    """
+    total_pending = 0
+    
+    try:
+        if app.config.get('REDIS_OK'):
+            # Count pending income entries
+            income_key = f"income_entries:v1:{user_id}"
+            cached = _redis_client.get(income_key)
+            if cached:
+                entries = json.loads(cached)
+                total_pending += sum(1 for e in entries if e.get('pending') == 1)
+            
+            # Count pending expense entries
+            expense_key = f"expense_entries:v1:{user_id}"
+            cached = _redis_client.get(expense_key)
+            if cached:
+                entries = json.loads(cached)
+                total_pending += sum(1 for e in entries if e.get('pending') == 1)
+            
+            # Count pending c_expense entries
+            c_expense_key = f"c_expense_entries:v1:{user_id}"
+            cached = _redis_client.get(c_expense_key)
+            if cached:
+                entries = json.loads(cached)
+                total_pending += sum(1 for e in entries if e.get('pending') == 1)
+    except Exception as e:
+        app.logger.error(f"Error counting pending transactions for cleanup: {e}")
+        return False
+    
+    if total_pending > 0:
+        return False
+    
+    # No pending transactions left - delete the notification
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM notifications
+                WHERE user_id = %s
+                AND message LIKE %s
+            """, (user_id, '%pending transaction%synced from your bank%'))
+            deleted_count = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            if deleted_count > 0:
+                app.logger.info(f"Cleared pending transaction notification for user {user_id} (no pending left)")
+                return True
+    except Exception as e:
+        app.logger.error(f"Error deleting pending transaction notification: {e}")
+    
+    return False
 
 
 def check_negative_remainders(user_id):

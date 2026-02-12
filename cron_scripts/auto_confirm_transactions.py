@@ -24,6 +24,9 @@ import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+# Add parent directory to path so we can import app modules
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Load environment variables from .env file (check multiple locations)
 from dotenv import load_dotenv
 
