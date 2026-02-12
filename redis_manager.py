@@ -519,6 +519,7 @@ def _dehydrate_user_data(user_id: int):
                 'buds',  # Must flush before bud_items to resolve temp IDs
                 'bud_items',
                 'users',  # User settings (goofy_week_mode, landing_page, etc.)
+                'notifications',  # User notifications
             ]
             
             flushed_count = 0
@@ -654,6 +655,7 @@ def _flush_redis_to_mysql():
             'buds',  # Must flush before bud_items to resolve temp IDs
             'bud_items',
             'users',  # User settings (balance_threshold, starting_savings)
+            'notifications',  # User notifications
             'quiltt_profiles',  # Quiltt session tokens and profile info
             'quiltt_connections',  # Quiltt bank connections
             'quiltt_accounts',  # Quiltt bank accounts
@@ -4045,6 +4047,95 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 cursor.close()
                 logger.debug(f"[FLUSH] → starting_balance: 1 row")
                 return 1
+            
+            elif table == 'notifications':
+                # Notifications table
+                # First, handle pending deletes
+                pending_key = f"pending_deletes:notifications:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    delete_ids = [int(id_str) for id_str in pending_deletes]
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    cursor.execute(f"""
+                        DELETE FROM notifications WHERE id IN ({placeholders}) AND user_id = %s
+                    """, delete_ids + [user_id])
+                    deleted_count = cursor.rowcount
+                    logger.info(f"[FLUSH] Deleted {deleted_count} notifications from MySQL (removed from Redis)")
+                    _redis_client.delete(pending_key)
+                
+                if not rows:
+                    conn.commit()
+                    cursor.close()
+                    return 0
+                
+                # Track temp ID to real ID mappings
+                temp_id_mappings = {}
+                
+                # Process notifications one at a time to handle temp IDs
+                for row in rows:
+                    old_id = row.get('id')
+                    is_temp = old_id and int(old_id) < 0
+                    
+                    # Convert date string to proper format if needed
+                    date_val = row.get('date')
+                    if isinstance(date_val, str):
+                        # Remove timezone info if present, MySQL will store as local
+                        if 'T' in date_val:
+                            date_val = date_val.replace('T', ' ').split('.')[0]
+                    
+                    if is_temp:
+                        # INSERT with NULL id to get auto-generated ID
+                        cursor.execute("""
+                            INSERT INTO notifications (id, user_id, date, message, is_read)
+                            VALUES (NULL, %s, %s, %s, %s)
+                        """, (
+                            user_id,
+                            date_val,
+                            row.get('message'),
+                            int(row.get('is_read', 0))
+                        ))
+                        new_id = cursor.lastrowid
+                        temp_id_mappings[int(old_id)] = new_id
+                        logger.info(f"[FLUSH] Notification temp ID {old_id} → real ID {new_id}")
+                    else:
+                        # Regular UPSERT for existing IDs
+                        cursor.execute("""
+                            INSERT INTO notifications (id, user_id, date, message, is_read)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                date = VALUES(date),
+                                message = VALUES(message),
+                                is_read = VALUES(is_read)
+                        """, (
+                            old_id,
+                            user_id,
+                            date_val,
+                            row.get('message'),
+                            int(row.get('is_read', 0))
+                        ))
+                
+                conn.commit()
+                
+                # Update Redis with new IDs if any temp IDs were replaced
+                if temp_id_mappings:
+                    for i, row in enumerate(rows):
+                        old_id = row.get('id')
+                        if old_id and int(old_id) in temp_id_mappings:
+                            rows[i]['id'] = temp_id_mappings[int(old_id)]
+                    
+                    # Save updated notifications back to Redis
+                    redis_key = _get_redis_key('notifications', user_id)
+                    _redis_client.setex(
+                        redis_key,
+                        INACTIVITY_TIMEOUT + 60,
+                        json.dumps(rows, cls=DecimalEncoder)
+                    )
+                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} notification temp IDs in Redis")
+                
+                cursor.close()
+                logger.debug(f"[FLUSH] → notifications: {len(rows)} rows")
+                return len(rows)
                 
             else:
                 # Table not configured for flushing
@@ -4363,6 +4454,7 @@ def flush_dirty_tables_for_user(user_id: int):
             'buds',  # Must flush before bud_items to resolve temp IDs
             'bud_items',
             'users',  # User settings (balance_threshold, starting_savings)
+            'notifications',  # User notifications
         ]
         
         # Get dirty tables for this user
