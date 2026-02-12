@@ -228,16 +228,13 @@
             // If no quiltt flags, nothing is locked
             if (!quiltt_flags) return false;
             
-            // Get today's date at midnight for comparison
+            // Get today's date string for reliable comparison (avoids UTC vs local timezone bugs)
             const today = new Date();
-            today.setHours(0, 0, 0, 0);
+            const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD in local time
             
-            // Parse entry date
-            const entryDateObj = new Date(entryDate);
-            entryDateObj.setHours(0, 0, 0, 0);
-            
+            // Simple string comparison works because YYYY-MM-DD sorts correctly
             // Only lock entries from today or before
-            if (entryDateObj > today) return false;
+            if (entryDate > todayStr) return false;
             
             // Credit account entries - check if this specific account is Quiltt-linked
             if (entryType === 'ca' && accountId !== null) {
@@ -305,6 +302,11 @@
         const c_expense_categories = {{ c_expense_categories|tojson }};
         const c_expense_entries = {{ c_expense_entries|tojson }};
         const c_a_balances_d = {{ c_a_balances_d|tojson }};
+
+        // Bucket records for progress bar original_amount lookup
+        const recurring_income_buckets = {{ recurring_income_buckets|tojson }};
+        const recurring_expense_buckets = {{ recurring_expense_buckets|tojson }};
+        const recurring_c_expense_buckets = {{ recurring_c_expense_buckets|tojson }};
 
         let totalsRemaindersData  = baseTotalsRemainders.map(item => [
             item.id,
@@ -947,10 +949,10 @@
                     incomeEntriesDiv.appendChild(incomeRow);
                     
                     // Add progress bar for bucket entries
-                    if (entry.is_bucket === 1 && entry.original_amount) {
+                    if (entry.is_bucket == 1) {
                         const amountCell = incomeRow.querySelector('.dashboard-d-amount-cell');
                         if (amountCell) {
-                            updateBucketProgressBar(amountCell, entry);
+                            updateBucketProgressBar(amountCell, entry, 'income');
                         }
                     }
                 });
@@ -1022,10 +1024,10 @@
                     expenseEntriesDiv.appendChild(expenseRow);
                     
                     // Add progress bar for bucket entries
-                    if (entry.is_bucket === 1 && entry.original_amount) {
+                    if (entry.is_bucket == 1) {
                         const amountCell = expenseRow.querySelector('.dashboard-d-amount-cell');
                         if (amountCell) {
-                            updateBucketProgressBar(amountCell, entry);
+                            updateBucketProgressBar(amountCell, entry, 'expense');
                         }
                     }
                 });
@@ -1150,10 +1152,10 @@
                         caDiv.appendChild(entryRow);
                         
                         // Add progress bar for bucket entries
-                        if (entry.is_bucket === 1 && entry.original_amount) {
+                        if (entry.is_bucket == 1) {
                             const amountCell = entryRow.querySelector('.dashboard-d-amount-cell');
                             if (amountCell) {
-                                updateBucketProgressBar(amountCell, entry);
+                                updateBucketProgressBar(amountCell, entry, 'c_expense');
                             }
                         }
                     });
@@ -1355,7 +1357,7 @@
                                     const bucketEntry = entriesArray.find(e => 
                                         String(e.category_id) === String(categoryId) && 
                                         e.date === bucket.date && 
-                                        e.is_bucket === 1
+                                        e.is_bucket == 1
                                     );
                                     if (bucketEntry) {
                                         if (bucket.amount > 0) {
@@ -1458,7 +1460,7 @@
                                     const bucketEntry = entriesArray.find(e => 
                                         String(e.category_id) === String(categoryId) && 
                                         e.date === bucket.date && 
-                                        e.is_bucket === 1
+                                        e.is_bucket == 1
                                     );
                                     if (bucketEntry) {
                                         bucketEntry.amount = bucket.amount;
@@ -1775,7 +1777,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
     // Update bucket entries if provided
     if (updatedBuckets && updatedBuckets.length > 0) {
         updatedBuckets.forEach(bucket => {
-            const bucketEntry = entriesArray.find(e => e.id === bucket.id && e.is_bucket === 1);
+            const bucketEntry = entriesArray.find(e => e.id === bucket.id && e.is_bucket == 1);
             if (bucketEntry) {
                 bucketEntry.amount = bucket.amount;
             }
@@ -1869,18 +1871,51 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
         }
         
         // Helper function to create/update bucket progress bar
-        function updateBucketProgressBar(cell, entry) {
+        function updateBucketProgressBar(cell, entry, entryType = null) {
             // Remove any existing progress bar
             const existingBar = cell.querySelector('.bucket-progress-container');
             if (existingBar) {
                 existingBar.remove();
             }
             
-            // Only add progress bar if entry is a bucket with original amount
-            if (!entry || entry.is_bucket !== 1) return;
+            // Only add progress bar if entry is a bucket
+            if (!entry || entry.is_bucket != 1) return;
             
             const remainingAmount = parseFloat(entry.amount || 0);
-            const originalAmount = parseFloat(entry.original_amount || 0);
+            let originalAmount = parseFloat(entry.original_amount || 0);
+            
+            // If original_amount is not on the entry, look it up from bucket records
+            if (originalAmount <= 0 && entry.category_id && entry.date) {
+                const entryDate = typeof entry.date === 'string' ? entry.date : new Date(entry.date).toISOString().split('T')[0];
+                const categoryId = String(entry.category_id);
+                
+                // Determine which bucket records to search based on entry type
+                let bucketRecords = [];
+                if (entryType === 'income') {
+                    bucketRecords = recurring_income_buckets || [];
+                } else if (entryType === 'expense') {
+                    bucketRecords = recurring_expense_buckets || [];
+                } else if (entryType === 'c_expense') {
+                    bucketRecords = recurring_c_expense_buckets || [];
+                } else {
+                    // Try all bucket records if type not specified
+                    bucketRecords = [
+                        ...(recurring_income_buckets || []),
+                        ...(recurring_expense_buckets || []),
+                        ...(recurring_c_expense_buckets || [])
+                    ];
+                }
+                
+                // Find matching bucket record by category_id and date
+                const matchingBucket = bucketRecords.find(b => {
+                    const bucketDate = typeof b.bucket_date === 'string' ? b.bucket_date : new Date(b.bucket_date).toISOString().split('T')[0];
+                    return String(b.category_id) === categoryId && bucketDate === entryDate;
+                });
+                
+                if (matchingBucket && matchingBucket.original_amount) {
+                    originalAmount = parseFloat(matchingBucket.original_amount);
+                }
+            }
             
             // Don't show if no original amount (avoid division by zero)
             if (originalAmount <= 0) return;

@@ -21,9 +21,18 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-# Load environment variables from .env file
+# Add parent directory to path so we can import app modules
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Load environment variables from .env file (check multiple locations)
 from dotenv import load_dotenv
-load_dotenv('/var/www/budget_env/.env')
+
+# Try dev server path first, then prod path
+env_paths = ['/var/www/budget_env/.env', '/var/www/blankee/.env']
+for env_path in env_paths:
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+        break
 
 import mysql.connector
 from mysql.connector import pooling
