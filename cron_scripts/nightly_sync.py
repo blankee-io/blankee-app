@@ -465,7 +465,7 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
         # Skip if start date is after end date (nothing to sync)
         if start_date > end_date:
             logger.info(f"User {user_id}: Skipping account {account_id} - already synced past {end_date}")
-            return 0, 0, None
+            return 0, 0, None, set()
         
         # Format dates
         start_str = start_date.strftime('%Y-%m-%d')
@@ -483,7 +483,7 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
         )
         
         if not transactions:
-            return 0, 0, None
+            return 0, 0, None, set()
         
         # Get existing transaction IDs to avoid duplicates (check both MySQL and Redis)
         existing_txn_ids = set()
@@ -511,6 +511,7 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
         new_count = 0
         imported_count = 0
         earliest_date = None  # Track earliest imported transaction date
+        imported_dates = set()  # Track ALL dates with newly imported transactions
         
         for txn in transactions:
             txn_id = txn.get('id')
@@ -523,10 +524,11 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
             amount = abs(raw_amount)
             txn_date = txn.get('date')
             
-            # Track earliest date for recalculation
+            # Track earliest date and all imported dates for recalculation
             if txn_date:
                 try:
                     txn_date_obj = datetime.strptime(txn_date, '%Y-%m-%d').date() if isinstance(txn_date, str) else txn_date
+                    imported_dates.add(txn_date_obj)
                     if earliest_date is None or txn_date_obj < earliest_date:
                         earliest_date = txn_date_obj
                 except (ValueError, TypeError):
@@ -700,11 +702,11 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
             """, (user_id, account_id))
             conn.commit()
         
-        return new_count, imported_count, earliest_date
+        return new_count, imported_count, earliest_date, imported_dates
         
     except Exception as e:
         logger.error(f"User {user_id}: Error syncing transactions for {account_id}: {e}")
-        return 0, 0, None
+        return 0, 0, None, set()
 
 
 def auto_import_transaction(cursor, conn, user_id, account_id, txn, txn_type):
@@ -968,6 +970,185 @@ def auto_import_transaction(cursor, conn, user_id, account_id, txn, txn_type):
         return False
 
 
+def cleanup_stale_checking_adjustments(cursor, conn, user_id, affected_dates):
+    """
+    Remove auto-adjustment entries (income/expense) on dates where late bank
+    transactions were imported.  Removing them before the first recalculation
+    lets the remainder chain rebuild cleanly so that yesterday's single new
+    adjustment absorbs the full cumulative delta vs the bank.
+
+    Args:
+        cursor: DB cursor
+        conn: DB connection
+        user_id: User ID
+        affected_dates: set of date objects that received new transactions
+    """
+    if not affected_dates:
+        return
+    
+    yesterday = date.today() - timedelta(days=1)
+    # Only clean up dates BEFORE yesterday — yesterday gets a fresh adjustment
+    dates_to_clean = [d for d in affected_dates if d < yesterday]
+    if not dates_to_clean:
+        return
+    
+    date_strings = [d.strftime('%Y-%m-%d') for d in dates_to_clean]
+    
+    # Find auto-adjustment category IDs
+    income_cat_id = None
+    expense_cat_id = None
+    
+    user_hydrated = is_user_hydrated(user_id)
+    
+    if user_hydrated:
+        inc_cats = get_entries_from_redis_or_mysql(cursor, 'income_categories', user_id)
+        exp_cats = get_entries_from_redis_or_mysql(cursor, 'expense_categories', user_id)
+        for c in (inc_cats or []):
+            if c.get('is_auto_adjustment'):
+                income_cat_id = int(c['id'])
+                break
+        for c in (exp_cats or []):
+            if c.get('is_auto_adjustment'):
+                expense_cat_id = int(c['id'])
+                break
+    else:
+        cursor.execute("SELECT id FROM income_categories WHERE user_id = %s AND is_auto_adjustment = 1 LIMIT 1", (user_id,))
+        row = cursor.fetchone()
+        income_cat_id = row[0] if row else None
+        cursor.execute("SELECT id FROM expense_categories WHERE user_id = %s AND is_auto_adjustment = 1 LIMIT 1", (user_id,))
+        row = cursor.fetchone()
+        expense_cat_id = row[0] if row else None
+    
+    if not income_cat_id and not expense_cat_id:
+        return
+    
+    removed_count = 0
+    
+    if user_hydrated:
+        # REDIS-FIRST: filter out auto-adjustment entries on affected dates
+        # IMPORTANT: Only remove entries tagged with is_auto_adjustment=1
+        # to avoid deleting imported pending transactions on the same category+date
+        for table, cat_id in [('income_entries', income_cat_id), ('expense_entries', expense_cat_id)]:
+            if not cat_id:
+                continue
+            redis_key = get_redis_key(table, user_id)
+            cached = redis_client.get(redis_key)
+            if not cached:
+                continue
+            entries = json.loads(cached)
+            original_len = len(entries)
+            entries = [
+                e for e in entries
+                if not (
+                    int(e.get('category_id', 0)) == cat_id and
+                    str(e.get('date', ''))[:10] in date_strings and
+                    e.get('is_auto_adjustment')
+                )
+            ]
+            removed = original_len - len(entries)
+            if removed > 0:
+                redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(entries, cls=DecimalEncoder))
+                mark_dirty(user_id, table)
+                removed_count += removed
+    else:
+        # MYSQL-ONLY: delete directly (only auto-adjustment entries)
+        for table, cat_id in [('income_entries', income_cat_id), ('expense_entries', expense_cat_id)]:
+            if not cat_id:
+                continue
+            placeholders = ','.join(['%s'] * len(date_strings))
+            cursor.execute(f"""
+                DELETE FROM {table}
+                WHERE category_id = %s AND date IN ({placeholders}) AND is_auto_adjustment = 1
+            """, [cat_id] + date_strings)
+            removed_count += cursor.rowcount
+        conn.commit()
+    
+    if removed_count > 0:
+        logger.info(f"User {user_id}: Removed {removed_count} stale checking auto-adjustment(s) on dates: {', '.join(date_strings)}")
+
+
+def cleanup_stale_ca_adjustments(cursor, conn, user_id, quiltt_account_id, affected_dates, account_name):
+    """
+    Remove auto-adjustment entries for a credit account on dates where late
+    bank transactions were imported.  Same logic as checking cleanup but
+    targets c_expense_entries with is_auto_adjustment categories.
+
+    Args:
+        cursor: DB cursor
+        conn: DB connection
+        user_id: User ID
+        quiltt_account_id: Quiltt account ID string
+        affected_dates: set of date objects that received new transactions
+        account_name: Account name for logging
+    """
+    if not affected_dates:
+        return
+    
+    yesterday = date.today() - timedelta(days=1)
+    dates_to_clean = [d for d in affected_dates if d < yesterday]
+    if not dates_to_clean:
+        return
+    
+    date_strings = [d.strftime('%Y-%m-%d') for d in dates_to_clean]
+    
+    # Find the credit account and its auto-adjustment category
+    all_credit_accounts = get_entries_from_redis_or_mysql(cursor, 'credit_accounts', user_id)
+    ca_match = None
+    for ca in (all_credit_accounts or []):
+        if ca.get('quiltt_account_id') == quiltt_account_id:
+            ca_match = ca
+            break
+    
+    if not ca_match:
+        return
+    
+    account_id = int(ca_match['id'])
+    
+    c_expense_cats = get_entries_from_redis_or_mysql(cursor, 'c_expense_categories', user_id)
+    auto_adj_cat_id = None
+    for c in (c_expense_cats or []):
+        if int(c.get('account_id', 0)) == account_id and c.get('is_auto_adjustment'):
+            auto_adj_cat_id = int(c['id'])
+            break
+    
+    if not auto_adj_cat_id:
+        return
+    
+    removed_count = 0
+    user_hydrated = is_user_hydrated(user_id)
+    
+    if user_hydrated:
+        redis_key = get_redis_key('c_expense_entries', user_id)
+        cached = redis_client.get(redis_key)
+        if cached:
+            entries = json.loads(cached)
+            original_len = len(entries)
+            entries = [
+                e for e in entries
+                if not (
+                    int(e.get('category_id', 0)) == auto_adj_cat_id and
+                    str(e.get('date', ''))[:10] in date_strings and
+                    e.get('is_auto_adjustment')
+                )
+            ]
+            removed = original_len - len(entries)
+            if removed > 0:
+                redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(entries, cls=DecimalEncoder))
+                mark_dirty(user_id, 'c_expense_entries')
+                removed_count = removed
+    else:
+        placeholders = ','.join(['%s'] * len(date_strings))
+        cursor.execute(f"""
+            DELETE FROM c_expense_entries
+            WHERE category_id = %s AND date IN ({placeholders}) AND is_auto_adjustment = 1
+        """, [auto_adj_cat_id] + date_strings)
+        removed_count = cursor.rowcount
+        conn.commit()
+    
+    if removed_count > 0:
+        logger.info(f"User {user_id}: Removed {removed_count} stale {account_name} auto-adjustment(s) on dates: {', '.join(date_strings)}")
+
+
 def create_auto_adjustment(cursor, conn, user_id, bank_balance, account_name):
     """
     Create auto-adjustment entry to match bank balance.
@@ -1070,7 +1251,8 @@ def create_auto_adjustment(cursor, conn, user_id, bank_balance, account_name):
                 'is_bucket': 0,
                 'original_amount': None,
                 'pending': 0,
-                'auto_confirmed': 0
+                'auto_confirmed': 0,
+                'is_auto_adjustment': 1
             }
             
             if diff > 0:
@@ -1097,13 +1279,13 @@ def create_auto_adjustment(cursor, conn, user_id, bank_balance, account_name):
             # ====== MYSQL-ONLY PATH ======
             if diff > 0:
                 cursor.execute("""
-                    INSERT INTO income_entries (category_id, date, amount, processed)
-                    VALUES (%s, %s, %s, 1)
+                    INSERT INTO income_entries (category_id, date, amount, processed, is_auto_adjustment)
+                    VALUES (%s, %s, %s, 1, 1)
                 """, (income_cat_id, target_date_str, adj_amount))
             else:
                 cursor.execute("""
-                    INSERT INTO expense_entries (category_id, date, amount, processed)
-                    VALUES (%s, %s, %s, 1)
+                    INSERT INTO expense_entries (category_id, date, amount, processed, is_auto_adjustment)
+                    VALUES (%s, %s, %s, 1, 1)
                 """, (expense_cat_id, target_date_str, adj_amount))
             
             conn.commit()
@@ -2709,11 +2891,13 @@ def create_credit_account_auto_adjustment(cursor, conn, user_id, quiltt_account_
                     deleted_expense_ids = [e.get('id') for e in entries if (
                         int(e.get('category_id', 0)) == auto_adj_category_id and 
                         str(e.get('date', ''))[:10] == target_date_str and
+                        e.get('is_auto_adjustment') and
                         e.get('id') is not None and int(e.get('id', 0)) > 0  # Only real IDs
                     )]
                     entries = [e for e in entries if not (
                         int(e.get('category_id', 0)) == auto_adj_category_id and 
-                        str(e.get('date', ''))[:10] == target_date_str
+                        str(e.get('date', ''))[:10] == target_date_str and
+                        e.get('is_auto_adjustment')
                     )]
                     redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(entries, cls=DecimalEncoder))
                     
@@ -2756,7 +2940,7 @@ def create_credit_account_auto_adjustment(cursor, conn, user_id, quiltt_account_
                 logger.warning(f"User {user_id}: Redis delete error, falling back to MySQL: {e}")
                 cursor.execute("""
                     DELETE FROM c_expense_entries 
-                    WHERE category_id = %s AND date = %s
+                    WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1
                 """, (auto_adj_category_id, target_date_str))
                 cursor.execute("""
                     DELETE FROM c_payment_entries 
@@ -2767,7 +2951,7 @@ def create_credit_account_auto_adjustment(cursor, conn, user_id, quiltt_account_
             # MYSQL-ONLY: User not hydrated
             cursor.execute("""
                 DELETE FROM c_expense_entries 
-                WHERE category_id = %s AND date = %s
+                WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1
             """, (auto_adj_category_id, target_date_str))
             cursor.execute("""
                 DELETE FROM c_payment_entries 
@@ -2861,7 +3045,8 @@ def create_credit_account_auto_adjustment(cursor, conn, user_id, quiltt_account_
                         'is_bucket': 0,
                         'original_amount': None,
                         'processed': 1,
-                        'bud_item_id': None
+                        'bud_item_id': None,
+                        'is_auto_adjustment': 1
                     })
                     
                     redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(entries, cls=DecimalEncoder))
@@ -2869,14 +3054,14 @@ def create_credit_account_auto_adjustment(cursor, conn, user_id, quiltt_account_
                 except Exception as e:
                     logger.warning(f"User {user_id}: Redis error, falling back to MySQL: {e}")
                     cursor.execute("""
-                        INSERT INTO c_expense_entries (category_id, date, amount, processed)
-                        VALUES (%s, %s, %s, 1)
+                        INSERT INTO c_expense_entries (category_id, date, amount, processed, is_auto_adjustment)
+                        VALUES (%s, %s, %s, 1, 1)
                     """, (auto_adj_category_id, target_date_str, adjustment_amount))
                     conn.commit()
             else:
                 cursor.execute("""
-                    INSERT INTO c_expense_entries (category_id, date, amount, processed)
-                    VALUES (%s, %s, %s, 1)
+                    INSERT INTO c_expense_entries (category_id, date, amount, processed, is_auto_adjustment)
+                    VALUES (%s, %s, %s, 1, 1)
                 """, (auto_adj_category_id, target_date_str, adjustment_amount))
                 conn.commit()
             
@@ -2994,16 +3179,18 @@ def process_user(cursor, conn, user_row):
             'type': account_type,
             'subtype': account_subtype,
             'balance': current_balance,
-            'mask': mask
+            'mask': mask,
+            'imported_dates': set()  # Will be populated by sync
         }
         
         # Sync transactions for this account
         # Pass both last_synced_at and account_created_at
-        new_txns, imported_txns, earliest_txn_date = sync_transactions_for_account(
+        new_txns, imported_txns, earliest_txn_date, txn_dates = sync_transactions_for_account(
             cursor, conn, user_id, account_id, session_token, last_synced_at, account_created_at
         )
         result['transactions_synced'] += new_txns
         result['transactions_imported'] += imported_txns
+        accounts_info[account_id]['imported_dates'] = txn_dates
         
         # Track the earliest transaction date across all accounts
         if earliest_txn_date:
@@ -3023,6 +3210,31 @@ def process_user(cursor, conn, user_row):
     # =========================================================================
     if result['transactions_imported'] > 0:
         create_pending_transactions_notification(cursor, conn, user_id, result['transactions_imported'])
+    
+    # =========================================================================
+    # STEP 4.75: Clean up stale auto-adjustments on dates with new transactions
+    # If a late bank transaction lands on a date that already had an auto-
+    # adjustment, the old adjustment is now wrong.  Remove it so the first
+    # recalculation rebuilds clean remainders, and yesterday's fresh
+    # adjustment absorbs the full cumulative delta vs the bank.
+    # =========================================================================
+    # Collect all imported dates for checking/depository accounts
+    checking_imported_dates = set()
+    for acc_id, info in accounts_info.items():
+        if info['type'] == 'depository':
+            acc_name_lower = info['name'].lower()
+            if 'checking' in acc_name_lower or info['subtype'] == 'checking':
+                checking_imported_dates |= info.get('imported_dates', set())
+    
+    if checking_imported_dates:
+        cleanup_stale_checking_adjustments(cursor, conn, user_id, checking_imported_dates)
+    
+    # Clean up stale credit account adjustments per account
+    for acc_id, info in accounts_info.items():
+        if info['type'] == 'credit' and info.get('imported_dates'):
+            cleanup_stale_ca_adjustments(
+                cursor, conn, user_id, acc_id, info['imported_dates'], info['name']
+            )
     
     # =========================================================================
     # STEP 5: FIRST recalculation - get accurate totals including new transactions

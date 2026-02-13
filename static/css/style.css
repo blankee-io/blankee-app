@@ -2806,30 +2806,65 @@ tr[data-category-id] td.before-member-since {
     position: absolute;
     top: -6px;
     right: -8px;
-    padding: 2px;
-    font-size: 12px;
+    width: 11px;
+    height: 11px;
+    font-size: 8.5px;
     font-weight: 900;
     pointer-events: none;
     font-family: "Font Awesome 7 Pro";
-    content: '\f058';
-    color: #28a745;
-    background-color: #575757;
+    content: '\f00c';
+    color: #575757;
+    background-color: #28a745;
+    border: 1.5px solid #575757;
     border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pending-entry {
+    font-weight: bold;
+    position: relative;
+}
+
+.pending-entry::after {
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    width: 11px;
+    height: 11px;
+    font-size: 8.5px;
+    font-weight: 900;
+    pointer-events: none;
+    font-family: "Font Awesome 7 Pro";
+    content: '\f128';
+    color: #575757;
+    background-color: #A9A9A9;
+    border: 1.5px solid #575757;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .overdue-bill::after {
     position: absolute;
     top: -6px;
     right: -8px;
-    padding: 2px;
-    font-size: 12px;
+    width: 11px;
+    height: 11px;
+    font-size: 8.5px;
     font-weight: 900;
     pointer-events: none;
     font-family: "Font Awesome 7 Pro";
-    content: '\f059';
-    color: #A9A9A9;
-    background-color: #575757;
+    content: '\f128';
+    color: #575757;
+    background-color: #A9A9A9;
+    border: 1.5px solid #575757;
     border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* Alternating background colors for income entries */

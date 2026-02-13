@@ -206,8 +206,13 @@
                 {% endfor %}
             </select>
 
-            <label for="ca-category-name">New Category Name</label>
-            <input type="text" id="ca-category-name" name="category_name" placeholder="Category" required>
+            <label for="ca-category-select">Category</label>
+            <select id="ca-category-select" name="category_id" required>
+                <option value="">-- Select a category --</option>
+                {% for cat in c_expense_categories if not cat.hidden and not cat.is_recurring and not cat.is_interest and not cat.is_auto_adjustment %}
+                    <option value="{{ cat.id }}" data-account-id="{{ cat.account_id }}">{{ cat.name }}</option>
+                {% endfor %}
+            </select>
 
             <label for="ca-amount">Recurring Amount</label>
             <div class="currency-input-container">
@@ -979,6 +984,43 @@
 
     ////////////////////////////////////////////////////// Credit Accounts ////////////////////////////////////////////////
 
+    // Filter category dropdown to only show categories for the selected account
+    function filterCaCategoryDropdown() {
+        const accountId = $('#ca-account-id').val();
+        $('#ca-category-select option').each(function() {
+            const optAccountId = $(this).data('account-id');
+            if (optAccountId === undefined || String(optAccountId) === String(accountId)) {
+                $(this).show();
+            } else {
+                $(this).hide();
+            }
+        });
+        // Reset selection if current selection doesn't match account
+        const selectedOpt = $('#ca-category-select option:selected');
+        if (selectedOpt.data('account-id') !== undefined && String(selectedOpt.data('account-id')) !== String(accountId)) {
+            $('#ca-category-select').val('');
+        }
+    }
+
+    // When account changes, re-filter
+    $('#ca-account-id').on('change', filterCaCategoryDropdown);
+
+    // Also filter when the modal becomes visible (account is set before showing)
+    const caCatObserver = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.attributeName === 'style') {
+                const modal = document.getElementById('add-ca-modal');
+                if (modal && modal.style.display === 'flex') {
+                    filterCaCategoryDropdown();
+                }
+            }
+        });
+    });
+    const caModal = document.getElementById('add-ca-modal');
+    if (caModal) {
+        caCatObserver.observe(caModal, { attributes: true, attributeFilter: ['style'] });
+    }
+
     // Show/hide cadence options for CA modal
     $('#ca-cadence-unit').on('change', function() {
         $('#ca-weekly-options, #ca-monthly-options, #ca-yearly-options').hide();
@@ -1037,7 +1079,7 @@
         });
         const formData = {
             account_id: $form.find('#ca-account-id').val(),
-            category_name: $form.find('#ca-category-name').val(),
+            category_id: $form.find('#ca-category-select').val(),
             amount: $form.find('#ca-amount').val(),
             cadence_interval: $form.find('#ca-cadence-interval').val(),
             cadence_unit: $form.find('#ca-cadence-unit').val(),

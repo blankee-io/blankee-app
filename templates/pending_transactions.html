@@ -81,7 +81,7 @@
                                                data-suggested-confidence="{{ txn.custom_category_confidence or '' }}"
                                                placeholder="Type to search..."
                                                autocomplete="off"
-                                               value="{{ txn.custom_category_suggestion if (txn.custom_category_suggestion and (not txn.current_category_name or txn.current_category_name == 'Uncategorized')) else (txn.current_category_name or '') }}">
+                                               value="{{ txn.custom_category_suggestion if (txn.custom_category_suggestion and txn.custom_category_id and (not txn.current_category_name or txn.current_category_name == 'Uncategorized')) else (txn.current_category_name or '') }}">
                                         <input type="hidden" class="category-hidden" 
                                                data-transaction-id="{{ txn.transaction_id }}"
                                                value="{{ txn.custom_category_id if (txn.custom_category_id and (not txn.current_category_id or txn.current_category_name == 'Uncategorized')) else (txn.current_category_id or '') }}">
@@ -275,8 +275,8 @@
             let url, categoriesArray;
             
             if (entryType === 'c_expense') {
-                // For credit account expenses, use add_ca_category endpoint
-                url = "{{ url_for('add_ca_category') }}";
+                // For credit account expenses, create expense_category which auto-syncs to all credit accounts
+                url = "{{ url_for('add_expense_category') }}";
                 categoriesArray = cExpenseCategories;
             } else if (entryType === 'expense') {
                 url = "{{ url_for('add_expense_category') }}";
@@ -286,29 +286,39 @@
                 categoriesArray = incomeCategories;
             }
             
-            // Build data object
+            // Build data object (no account_id needed - expense categories sync to all credit accounts)
             const postData = { name: categoryName.trim() };
-            if (entryType === 'c_expense' && creditAccountId) {
-                postData.account_id = creditAccountId;
-            }
             
             $.ajax({
                 url: url,
                 method: "POST",
                 data: postData,
                 success: function(response) {
-                    if (response.id) {
+                    if (response.id || response.new_category_id) {
+                        let categoryIdToUse = response.id || response.new_category_id;
+                        
+                        // For c_expense, use the c_expense_category_id from the mapping
+                        if (entryType === 'c_expense' && creditAccountId && response.c_expense_categories) {
+                            const cExpenseId = response.c_expense_categories[creditAccountId];
+                            if (cExpenseId) {
+                                categoryIdToUse = cExpenseId;
+                            }
+                        }
+                        
                         // Add to categories array (with account_id for c_expense)
-                        const newCat = { id: response.id, name: categoryName.trim() };
+                        const newCat = { id: categoryIdToUse, name: categoryName.trim() };
                         if (entryType === 'c_expense' && creditAccountId) {
                             newCat.account_id = parseInt(creditAccountId);
+                            // Also add to expenseCategories since they're synced
+                            expenseCategories.push({ id: response.id || response.new_category_id, name: categoryName.trim() });
+                            expenseCategories.sort((a, b) => a.name.localeCompare(b.name));
                         }
                         categoriesArray.push(newCat);
                         // Sort alphabetically
                         categoriesArray.sort((a, b) => a.name.localeCompare(b.name));
                         // Set the input values
                         input.value = categoryName.trim();
-                        hiddenInput.value = response.id;
+                        hiddenInput.value = categoryIdToUse;
                         dropdown.style.display = 'none';
                     } else {
                         alert('Failed to create category');

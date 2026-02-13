@@ -2467,12 +2467,17 @@
                             const weekKey = `${startOfWeek.toISOString()}_${entry.category_id}`; // Unique key for each week-category pair
 
                             if (!weekEntriesMap[weekKey]) {
-                                weekEntriesMap[weekKey] = { processed: true, cells: [] };
+                                weekEntriesMap[weekKey] = { processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [] };
                             }
 
                             // Convert processed to boolean and check if all entries are processed
                             const isEntryProcessed = Number(entry.processed) === 1;
                             weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && isEntryProcessed;
+                            weekEntriesMap[weekKey].totalCount += (entry.total_count || 1);
+                            if (Number(entry.pending) === 1) {
+                                weekEntriesMap[weekKey].hasPending = true;
+                                weekEntriesMap[weekKey].pendingCount += (entry.pending_count || 1);
+                            }
                             weekEntriesMap[weekKey].cells.push(matchedCell);
                         }
                     });
@@ -2491,7 +2496,7 @@
             });
 
             // After processing all entries, update the `data-processed` attribute for each week's cells
-            Object.values(weekEntriesMap).forEach(({ processed, cells }) => {
+            Object.values(weekEntriesMap).forEach(({ processed, hasPending, pendingCount, totalCount, cells }) => {
 
                 // Convert to a numeric boolean for consistent logic
                 const isProcessed = Number(processed) === 1;
@@ -2502,11 +2507,16 @@
                     cell.removeAttribute('data-processed');
                     cell.setAttribute('data-processed', isProcessed ? '1' : '0');
 
-                    // Toggle 'paid' class based on processed state
-                    if (isProcessed) {
+                    // Toggle paid/pending-entry class based on state
+                    cell.classList.remove('paid', 'pending-entry');
+                    cell.removeAttribute('title');
+                    if (hasPending) {
+                        cell.classList.add('pending-entry');
+                        const qualifier = pendingCount >= totalCount ? 'All' : 'Some';
+                        cell.title = `${qualifier} entries for this week are pending categorization — go to Pending Transactions to confirm`;
+                    } else if (isProcessed) {
                         cell.classList.add('paid');
-                    } else {
-                        cell.classList.remove('paid');
+                        cell.title = 'All entries for this week are marked as paid';
                     }
                 });
             });
@@ -2559,12 +2569,17 @@
                             const weekKey = `${startOfWeek.toISOString()}_${entry.category_id}`; // Unique key for each week-category pair
 
                             if (!weekEntriesMap[weekKey]) {
-                                weekEntriesMap[weekKey] = { processed: true, cells: [] };
+                                weekEntriesMap[weekKey] = { processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [] };
                             }
 
                             // Convert processed to boolean and check if all entries are processed
                             const isEntryProcessed = Number(entry.processed) === 1;
                             weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && isEntryProcessed;
+                            weekEntriesMap[weekKey].totalCount += (entry.total_count || 1);
+                            if (Number(entry.pending) === 1) {
+                                weekEntriesMap[weekKey].hasPending = true;
+                                weekEntriesMap[weekKey].pendingCount += (entry.pending_count || 1);
+                            }
                             weekEntriesMap[weekKey].cells.push(matchedCell);
                         }
                     });
@@ -2583,7 +2598,7 @@
             });
 
             // After processing all entries, update the `data-processed` attribute for each week's cells
-            Object.values(weekEntriesMap).forEach(({ processed, cells }) => {
+            Object.values(weekEntriesMap).forEach(({ processed, hasPending, pendingCount, totalCount, cells }) => {
 
                 // Convert to a numeric boolean for consistent logic
                 const isProcessed = Number(processed) === 1;
@@ -2594,11 +2609,16 @@
                     cell.removeAttribute('data-processed');
                     cell.setAttribute('data-processed', isProcessed ? '1' : '0');
 
-                    // Toggle 'paid' class based on processed state
-                    if (isProcessed) {
+                    // Toggle paid/pending-entry class based on state
+                    cell.classList.remove('paid', 'pending-entry');
+                    cell.removeAttribute('title');
+                    if (hasPending) {
+                        cell.classList.add('pending-entry');
+                        const qualifier = pendingCount >= totalCount ? 'All' : 'Some';
+                        cell.title = `${qualifier} entries for this week are pending categorization — go to Pending Transactions to confirm`;
+                    } else if (isProcessed) {
                         cell.classList.add('paid');
-                    } else {
-                        cell.classList.remove('paid');
+                        cell.title = 'All entries for this week are marked as paid';
                     }
                 });
             });
@@ -2669,12 +2689,17 @@
                         // Track processed status for week/category
                         const weekKey = `${startOfWeek.toISOString()}_${categoryId}`;
                         if (!weekEntriesMap[weekKey]) {
-                            weekEntriesMap[weekKey] = { processed: true, cells: [], hasEntry: false };
+                            weekEntriesMap[weekKey] = { processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], hasEntry: false };
                         }
                         if (entry && entry.processed !== undefined) {
                             // Convert processed to boolean and check if all entries are processed
                             const isEntryProcessed = Number(entry.processed) === 1;
                             weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && isEntryProcessed;
+                            weekEntriesMap[weekKey].totalCount += (entry.total_count || 1);
+                            if (Number(entry.pending) === 1) {
+                                weekEntriesMap[weekKey].hasPending = true;
+                                weekEntriesMap[weekKey].pendingCount += (entry.pending_count || 1);
+                            }
                             weekEntriesMap[weekKey].hasEntry = true;
                         }
                         weekEntriesMap[weekKey].cells.push(td);
@@ -2682,16 +2707,21 @@
                 });
 
                 // After processing all entries, update the `data-processed` attribute for each week's cells
-                Object.values(weekEntriesMap).forEach(({ processed, cells, hasEntry }) => {
+                Object.values(weekEntriesMap).forEach(({ processed, hasPending, pendingCount, totalCount, cells, hasEntry }) => {
                     // Only mark as processed if there is at least one entry for the week/category
                     const isProcessed = Number(processed) === 1 && hasEntry;
                     cells.forEach(cell => {
                         cell.removeAttribute('data-processed');
                         cell.setAttribute('data-processed', isProcessed ? '1' : '0');
-                        if (isProcessed) {
+                        cell.classList.remove('paid', 'pending-entry');
+                        cell.removeAttribute('title');
+                        if (hasPending) {
+                            cell.classList.add('pending-entry');
+                            const qualifier = pendingCount >= totalCount ? 'All' : 'Some';
+                            cell.title = `${qualifier} entries for this week are pending categorization — go to Pending Transactions to confirm`;
+                        } else if (isProcessed) {
                             cell.classList.add('paid');
-                        } else {
-                            cell.classList.remove('paid');
+                            cell.title = 'All entries for this week are marked as paid';
                         }
                     });
                 });
@@ -3513,6 +3543,7 @@
             }
         }
 
+        // NOTE: Creates an expense_category which auto-syncs to all credit accounts
         function addCaCategory() {
             const inputContainer = document.getElementById('ca-category-input-container');
             const input = document.getElementById('new-ca-category');
@@ -3526,17 +3557,27 @@
             $("#ca-categories-table-" + accountId + " tbody").sortable("disable");
 
             $.ajax({
-                url: "/add_ca_category",
+                url: "/add_expense_category",
                 method: "POST",
-                data: { name: categoryName, account_id: accountId },
+                data: { name: categoryName },
                 success: function(response) {
                     if (response.status === 'success') {
                         input.value = '';
-                        c_expense_categories.push({ id: response.new_category_id, account_id: parseInt(accountId), name: categoryName });
+                        
+                        // Get the c_expense_category_id for this specific account
+                        let cExpenseCategoryId = response.new_category_id;
+                        if (response.c_expense_categories && response.c_expense_categories[accountId]) {
+                            cExpenseCategoryId = response.c_expense_categories[accountId];
+                        }
+                        
+                        c_expense_categories.push({ id: cExpenseCategoryId, account_id: parseInt(accountId), name: categoryName });
+                        
+                        // Also add to expense_categories since they're synced
+                        expense_categories.push({ id: response.new_category_id, name: categoryName });
 
                         // Create new row for the sidebar table
                         const newRow = document.createElement('tr');
-                        newRow.setAttribute('data-category-id', response.new_category_id);
+                        newRow.setAttribute('data-category-id', cExpenseCategoryId);
 
                         const cell = document.createElement('td');
                         cell.classList.add('category-cell');

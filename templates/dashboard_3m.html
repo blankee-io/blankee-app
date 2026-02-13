@@ -2484,12 +2484,17 @@
                 const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                 if (!monthEntriesMap[monthKey]) {
-                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
+                    monthEntriesMap[monthKey] = { total: 0, processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                 // Convert processed to boolean and check if all entries are processed
                 const isEntryProcessed = Number(entry.processed) === 1;
                 monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
+                monthEntriesMap[monthKey].totalCount += (entry.total_count || 1);
+                if (Number(entry.pending) === 1) {
+                    monthEntriesMap[monthKey].hasPending = true;
+                    monthEntriesMap[monthKey].pendingCount += (entry.pending_count || 1);
+                }
                 // Track bucket info
                 if (entry.has_bucket) {
                     monthEntriesMap[monthKey].has_bucket = true;
@@ -2516,17 +2521,23 @@
                         }
                         // Set processed status
                         td.setAttribute('data-processed', monthEntriesMap[monthKey].processed ? '1' : '0');
-                        if (monthEntriesMap[monthKey].processed) {
+                        td.classList.remove('paid', 'pending-entry');
+                        td.removeAttribute('title');
+                        if (monthEntriesMap[monthKey].hasPending) {
+                            td.classList.add('pending-entry');
+                            const qualifier = monthEntriesMap[monthKey].pendingCount >= monthEntriesMap[monthKey].totalCount ? 'All' : 'Some';
+                            td.title = `${qualifier} entries for this month are pending categorization \u2014 go to Pending Transactions to confirm`;
+                        } else if (monthEntriesMap[monthKey].processed) {
                             td.classList.add('paid');
-                        } else {
-                            td.classList.remove('paid');
+                            td.title = 'All entries for this month are marked as paid';
                         }
                         // Update bucket progress bar
                         updateBucketProgressBar(td, monthEntriesMap[monthKey]);
                     } else {
                         if (input) input.value = '';
                         td.removeAttribute('data-processed');
-                        td.classList.remove('paid');
+                        td.classList.remove('paid', 'pending-entry');
+                        td.removeAttribute('title');
                         // Remove any existing progress bar
                         const existingBar = td.querySelector('.bucket-progress-container');
                         if (existingBar) existingBar.remove();
@@ -2547,12 +2558,17 @@
                 const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                 if (!monthEntriesMap[monthKey]) {
-                    monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
+                    monthEntriesMap[monthKey] = { total: 0, processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                 // Convert processed to boolean and check if all entries are processed
                 const isEntryProcessed = Number(entry.processed) === 1;
                 monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
+                monthEntriesMap[monthKey].totalCount += (entry.total_count || 1);
+                if (Number(entry.pending) === 1) {
+                    monthEntriesMap[monthKey].hasPending = true;
+                    monthEntriesMap[monthKey].pendingCount += (entry.pending_count || 1);
+                }
                 // Track bucket info
                 if (entry.has_bucket) {
                     monthEntriesMap[monthKey].has_bucket = true;
@@ -2579,17 +2595,23 @@
                         }
                         // Set processed status
                         td.setAttribute('data-processed', monthEntriesMap[monthKey].processed ? '1' : '0');
-                        if (monthEntriesMap[monthKey].processed) {
+                        td.classList.remove('paid', 'pending-entry');
+                        td.removeAttribute('title');
+                        if (monthEntriesMap[monthKey].hasPending) {
+                            td.classList.add('pending-entry');
+                            const qualifier = monthEntriesMap[monthKey].pendingCount >= monthEntriesMap[monthKey].totalCount ? 'All' : 'Some';
+                            td.title = `${qualifier} entries for this month are pending categorization \u2014 go to Pending Transactions to confirm`;
+                        } else if (monthEntriesMap[monthKey].processed) {
                             td.classList.add('paid');
-                        } else {
-                            td.classList.remove('paid');
+                            td.title = 'All entries for this month are marked as paid';
                         }
                         // Update bucket progress bar
                         updateBucketProgressBar(td, monthEntriesMap[monthKey]);
                     } else {
                         if (input) input.value = '';
                         td.removeAttribute('data-processed');
-                        td.classList.remove('paid');
+                        td.classList.remove('paid', 'pending-entry');
+                        td.removeAttribute('title');
                         // Remove any existing progress bar
                         const existingBar = td.querySelector('.bucket-progress-container');
                         if (existingBar) existingBar.remove();
@@ -2614,12 +2636,17 @@
                     const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                     if (!monthEntriesMap[monthKey]) {
-                        monthEntriesMap[monthKey] = { total: 0, processed: true, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
+                        monthEntriesMap[monthKey] = { total: 0, processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
                     }
                     monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                     // Convert processed to boolean and check if all entries are processed
                     const isEntryProcessed = Number(entry.processed) === 1;
                     monthEntriesMap[monthKey].processed = monthEntriesMap[monthKey].processed && isEntryProcessed;
+                    monthEntriesMap[monthKey].totalCount += (entry.total_count || 1);
+                    if (Number(entry.pending) === 1) {
+                        monthEntriesMap[monthKey].hasPending = true;
+                        monthEntriesMap[monthKey].pendingCount += (entry.pending_count || 1);
+                    }
                     // Track bucket info
                     if (entry.has_bucket) {
                         monthEntriesMap[monthKey].has_bucket = true;
@@ -2646,17 +2673,23 @@
                             }
                             // Set processed status
                             td.setAttribute('data-processed', monthEntriesMap[monthKey].processed ? '1' : '0');
-                            if (monthEntriesMap[monthKey].processed) {
+                            td.classList.remove('paid', 'pending-entry');
+                            td.removeAttribute('title');
+                            if (monthEntriesMap[monthKey].hasPending) {
+                                td.classList.add('pending-entry');
+                                const qualifier = monthEntriesMap[monthKey].pendingCount >= monthEntriesMap[monthKey].totalCount ? 'All' : 'Some';
+                                td.title = `${qualifier} entries for this month are pending categorization \u2014 go to Pending Transactions to confirm`;
+                            } else if (monthEntriesMap[monthKey].processed) {
                                 td.classList.add('paid');
-                            } else {
-                                td.classList.remove('paid');
+                                td.title = 'All entries for this month are marked as paid';
                             }
                             // Update bucket progress bar
                             updateBucketProgressBar(td, monthEntriesMap[monthKey]);
                         } else {
                             if (input) input.value = '';
                             td.removeAttribute('data-processed');
-                            td.classList.remove('paid');
+                            td.classList.remove('paid', 'pending-entry');
+                            td.removeAttribute('title');
                             // Remove any existing progress bar
                             const existingBar = td.querySelector('.bucket-progress-container');
                             if (existingBar) existingBar.remove();
@@ -3467,6 +3500,7 @@
             }
         }
 
+        // NOTE: Creates an expense_category which auto-syncs to all credit accounts
         function addCaCategory() {
             const inputContainer = document.getElementById('ca-category-input-container');
             const input = document.getElementById('new-ca-category');
@@ -3480,17 +3514,27 @@
             $("#ca-categories-table-" + accountId + " tbody").sortable("disable");
 
             $.ajax({
-                url: "/add_ca_category",
+                url: "/add_expense_category",
                 method: "POST",
-                data: { name: categoryName, account_id: accountId },
+                data: { name: categoryName },
                 success: function(response) {
                     if (response.status === 'success') {
                         input.value = '';
-                        c_expense_categories.push({ id: response.new_category_id, account_id: parseInt(accountId), name: categoryName });
+                        
+                        // Get the c_expense_category_id for this specific account
+                        let cExpenseCategoryId = response.new_category_id;
+                        if (response.c_expense_categories && response.c_expense_categories[accountId]) {
+                            cExpenseCategoryId = response.c_expense_categories[accountId];
+                        }
+                        
+                        c_expense_categories.push({ id: cExpenseCategoryId, account_id: parseInt(accountId), name: categoryName });
+                        
+                        // Also add to expense_categories since they're synced
+                        expense_categories.push({ id: response.new_category_id, name: categoryName });
 
                         // Create new row for the sidebar table
                         const newRow = document.createElement('tr');
-                        newRow.setAttribute('data-category-id', response.new_category_id);
+                        newRow.setAttribute('data-category-id', cExpenseCategoryId);
 
                         const cell = document.createElement('td');
                         cell.classList.add('category-cell');

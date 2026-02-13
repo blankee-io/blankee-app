@@ -2603,6 +2603,7 @@ def get_dashboard_d_data():
                     'date': entry.get('date'),
                     'amount': entry.get('amount'),
                     'processed': entry.get('processed'),
+                    'pending': entry.get('pending', 0),
                     'category_id': entry.get('category_id'),
                     'category_name': cat.get('name', ''),
                     'display_order': cat.get('display_order', 0),
@@ -2618,6 +2619,7 @@ def get_dashboard_d_data():
                     'date': entry.get('date'),
                     'amount': entry.get('amount'),
                     'processed': entry.get('processed'),
+                    'pending': entry.get('pending', 0),
                     'category_id': entry.get('category_id'),
                     'category_name': cat.get('name', ''),
                     'display_order': cat.get('display_order', 0),
@@ -3426,7 +3428,7 @@ def _set_entries_to_redis(table_name, user_id, data):
     except Exception as e:
         pass
 
-def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount, processed=0, entry_id=None, bud_item_id=None, is_bucket=False, original_amount=None, recurring_id=None):
+def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount, processed=0, entry_id=None, bud_item_id=None, is_bucket=False, original_amount=None, recurring_id=None, is_auto_adjustment=False):
     """
     Update or insert a single entry in Redis cache.
     
@@ -3442,6 +3444,7 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
         is_bucket: Whether this is a bucket entry from recurring
         original_amount: Original amount for bucket tracking
         recurring_id: Optional recurring entry ID
+        is_auto_adjustment: Whether this is a nightly auto-adjustment entry
     """
     if not app.config.get('REDIS_OK'):
         return
@@ -3514,7 +3517,8 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
                 'amount': float(amount),
                 'recurring_id': int(recurring_id) if recurring_id is not None else None,
                 'processed': int(processed),
-                'is_bucket': 1 if is_bucket else 0
+                'is_bucket': 1 if is_bucket else 0,
+                'is_auto_adjustment': 1 if is_auto_adjustment else 0
             }
             if original_amount is not None:
                 new_entry['original_amount'] = float(original_amount)
@@ -4365,6 +4369,96 @@ def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=
         
     except Exception as e:
         app.logger.error(f"Error deleting future buckets from {table_name} in Redis: {e}")
+
+
+def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None):
+    """
+    Sync an expense category to all credit accounts for a user.
+    Creates a non-recurring c_expense_category for each credit account.
+    
+    This ensures expense categories are available across all credit accounts
+    for unified category management.
+    
+    Args:
+        user_id: User ID
+        category_name: Name of the category
+        display_order: Display order from the expense_category
+        group_id: Optional group ID (currently not used for c_expense)
+    
+    Returns:
+        Dictionary mapping account_id -> c_expense_category_id
+    """
+    created_map = {}  # account_id -> category_id
+    
+    # Get all credit accounts for this user
+    accounts = _get_credit_accounts_from_redis(user_id)
+    if accounts is None:
+        # Fallback to MySQL
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
+            accounts = cursor.fetchall()
+            cursor.close()
+    
+    if not accounts:
+        return created_map  # No credit accounts, nothing to sync
+    
+    for account in accounts:
+        account_id = account.get('id')
+        
+        # Check if category already exists for this account (avoid duplicates)
+        existing_categories = _get_categories_from_redis('c_expense_categories', user_id)
+        if existing_categories:
+            existing_cat = next(
+                (cat for cat in existing_categories 
+                 if cat.get('account_id') == account_id and cat.get('name') == category_name),
+                None
+            )
+            if existing_cat:
+                # Already exists, return the existing ID
+                created_map[account_id] = existing_cat.get('id')
+                continue
+        
+        # Get max display_order for this account's categories
+        if existing_categories:
+            account_cats = [cat for cat in existing_categories if cat.get('account_id') == account_id]
+            max_order = max([cat.get('display_order', 0) for cat in account_cats], default=0)
+        else:
+            max_order = display_order  # Use the expense_category's display_order as fallback
+        
+        # Create c_expense category data (always non-recurring)
+        c_expense_category = {
+            'account_id': account_id,
+            'name': category_name,
+            'display_order': max_order + 1,
+            'group_id': None,  # group_id not synced for now
+            'is_recurring': 0,  # Always non-recurring when synced
+            'no_end_date': 0,
+            'hidden': 0,
+            'is_bud': 0,
+            'is_interest': 0,
+            'is_auto_adjustment': 0
+        }
+        
+        # Add to Redis
+        new_id = _add_category_to_redis('c_expense_categories', user_id, c_expense_category)
+        if new_id is not None:
+            created_map[account_id] = new_id
+        else:
+            # Redis failed, try MySQL directly
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO c_expense_categories 
+                    (account_id, name, display_order, is_recurring, hidden, is_bud, is_interest, is_auto_adjustment)
+                    VALUES (%s, %s, %s, 0, 0, 0, 0, 0)
+                """, (account_id, category_name, max_order + 1))
+                new_id = cursor.lastrowid
+                conn.commit()
+                cursor.close()
+                created_map[account_id] = new_id
+    
+    return created_map
 
 
 def _add_category_to_redis(table_name, user_id, category_data):
@@ -6909,73 +7003,29 @@ def add_expense_category():
             conn.commit()
             cursor.close()
     
+    # Sync to all credit accounts (creates non-recurring c_expense categories)
+    # Returns mapping of account_id -> c_expense_category_id
+    c_expense_map = _sync_expense_category_to_credit_accounts(current_user.id, category_name, max_order + 1)
+    
     # Sync updated categories to Ntropy (non-blocking)
     _trigger_ntropy_sync(current_user.id)
     
-    return jsonify({'status': 'success', 'new_category_id': new_category_id, 'category_name': category_name})
+    # Return both expense_category_id and c_expense mapping for credit account use
+    return jsonify({
+        'status': 'success', 
+        'new_category_id': new_category_id, 
+        'id': new_category_id,  # For compatibility with existing code
+        'category_name': category_name,
+        'c_expense_categories': c_expense_map  # account_id -> c_expense_category_id
+    })
 
 @app.route('/add_ca_category', methods=['POST'])
 @login_required
 def add_ca_category():
-    name = request.form.get('name')
-    account_id = request.form.get('account_id')
-    if not name or not account_id:
-        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
-
-    # Verify ownership
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_id FROM credit_accounts WHERE id = %s", (account_id,))
-        row = cursor.fetchone()
-        if not row or row[0] != current_user.id:
-            cursor.close()
-            return jsonify({'status': 'error', 'message': 'Invalid account'}), 403
-        cursor.close()
-    
-    # Get max display_order - try Redis first (categories stored by user_id), fallback to MySQL
-    categories = _get_categories_from_redis('c_expense_categories', current_user.id)
-    if categories is not None:
-        # Filter by account_id
-        account_categories = [cat for cat in categories if cat.get('account_id') == int(account_id)]
-        max_order = max([cat.get('display_order', 0) for cat in account_categories], default=0)
-    else:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COALESCE(MAX(display_order), 0) FROM c_expense_categories WHERE account_id = %s", (account_id,))
-            max_order = cursor.fetchone()[0]
-            cursor.close()
-    
-    # Create category data
-    new_category = {
-        'account_id': int(account_id),
-        'name': name,
-        'display_order': max_order + 1,
-        'group_id': None,
-        'is_recurring': 0,
-        'no_end_date': 0,
-        'hidden': 0,
-        'is_bud': 0,
-        'is_interest': 0,
-        'is_auto_adjustment': 0
-    }
-    
-    # Add to Redis first - use user_id as the key (flush worker will sync to MySQL)
-    new_category_id = _add_category_to_redis('c_expense_categories', current_user.id, new_category)
-    
-    if new_category_id is None:
-        # Redis failed, fallback to MySQL directly
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO c_expense_categories (account_id, name, display_order) VALUES (%s, %s, %s)", 
-                          (account_id, name, max_order + 1))
-            new_category_id = cursor.lastrowid
-            conn.commit()
-            cursor.close()
-    
-    # Sync updated categories to Ntropy (non-blocking)
-    _trigger_ntropy_sync(current_user.id)
-    
-    return jsonify({'status': 'success', 'new_category_id': new_category_id, 'category_name': name})
+    # DISABLED: Credit account categories are now created through expense_categories
+    # and automatically synced to all credit accounts via _sync_expense_category_to_credit_accounts().
+    # See: /add_expense_category, /add-recurring-expense
+    return jsonify({'status': 'error', 'message': 'Credit account categories must be created through Expenses. They will automatically sync to all credit accounts.'}), 400
 
 
 @app.route('/update_income_category', methods=['POST'])
@@ -7235,6 +7285,8 @@ def dashboard():
 
         income_map = {}
         processed_map = {}
+        pending_count_map = {}
+        total_count_map = {}
         bucket_info_map = {}  # Track bucket info per cell
         for entry in raw_income_entries:
             week_key = get_week_key(entry['date'], goofy_week_mode)
@@ -7243,6 +7295,9 @@ def dashboard():
             if key not in processed_map:
                 processed_map[key] = []
             processed_map[key].append(entry['processed'])
+            total_count_map[key] = total_count_map.get(key, 0) + 1
+            if entry.get('pending') == 1:
+                pending_count_map[key] = pending_count_map.get(key, 0) + 1
             
             # Track bucket info
             if key not in bucket_info_map:
@@ -7263,7 +7318,10 @@ def dashboard():
                 'category_id': category_id,
                 'date': week_key,
                 'total_amount': total_amount,
-                'processed': processed
+                'processed': processed,
+                'pending': 1 if pending_count_map.get(key) else 0,
+                'pending_count': pending_count_map.get(key, 0),
+                'total_count': total_count_map.get(key, 0)
             }
             if bucket_info['has_bucket']:
                 entry_data['has_bucket'] = True
@@ -7290,6 +7348,8 @@ def dashboard():
 
         expense_map = {}
         expense_processed_map = {}
+        expense_pending_count_map = {}
+        expense_total_count_map = {}
         expense_bucket_info_map = {}  # Track bucket info per cell
         for entry in raw_expense_entries:
             week_key = get_week_key(entry['date'], goofy_week_mode)
@@ -7298,6 +7358,9 @@ def dashboard():
             if key not in expense_processed_map:
                 expense_processed_map[key] = []
             expense_processed_map[key].append(entry['processed'])
+            expense_total_count_map[key] = expense_total_count_map.get(key, 0) + 1
+            if entry.get('pending') == 1:
+                expense_pending_count_map[key] = expense_pending_count_map.get(key, 0) + 1
             
             # Track bucket info
             if key not in expense_bucket_info_map:
@@ -7318,7 +7381,10 @@ def dashboard():
                 'category_id': category_id,
                 'date': week_key,
                 'total_amount': total_amount,
-                'processed': processed
+                'processed': processed,
+                'pending': 1 if expense_pending_count_map.get(key) else 0,
+                'pending_count': expense_pending_count_map.get(key, 0),
+                'total_count': expense_total_count_map.get(key, 0)
             }
             if bucket_info['has_bucket']:
                 entry_data['has_bucket'] = True
@@ -7347,6 +7413,8 @@ def dashboard():
 
         c_expense_map = {}
         c_expense_processed_map = {}
+        c_expense_pending_count_map = {}
+        c_expense_total_count_map = {}
         c_expense_bucket_info_map = {}  # Track bucket info per cell
         for entry in raw_c_expense_entries:
             week_key = get_week_key(entry['date'], goofy_week_mode)
@@ -7355,6 +7423,9 @@ def dashboard():
             if key not in c_expense_processed_map:
                 c_expense_processed_map[key] = []
             c_expense_processed_map[key].append(entry['processed'])
+            c_expense_total_count_map[key] = c_expense_total_count_map.get(key, 0) + 1
+            if entry.get('pending') == 1:
+                c_expense_pending_count_map[key] = c_expense_pending_count_map.get(key, 0) + 1
             
             # Track bucket info
             if key not in c_expense_bucket_info_map:
@@ -7375,7 +7446,10 @@ def dashboard():
                 'category_id': category_id,
                 'date': week_key,
                 'total_amount': total_amount,
-                'processed': processed
+                'processed': processed,
+                'pending': 1 if c_expense_pending_count_map.get(key) else 0,
+                'pending_count': c_expense_pending_count_map.get(key, 0),
+                'total_count': c_expense_total_count_map.get(key, 0)
             }
             if bucket_info['has_bucket']:
                 entry_data['has_bucket'] = True
@@ -9129,6 +9203,8 @@ def dashboard_3m():
             pass
         income_map = {}
         processed_map = {}
+        pending_count_map = {}
+        total_count_map = {}
         bucket_info_map = {}  # Track bucket info per cell
         for entry in raw_income_entries:
             month_end = get_month_end_str(entry['date'])
@@ -9137,6 +9213,9 @@ def dashboard_3m():
             if key not in processed_map:
                 processed_map[key] = []
             processed_map[key].append(entry['processed'])
+            total_count_map[key] = total_count_map.get(key, 0) + 1
+            if entry.get('pending') == 1:
+                pending_count_map[key] = pending_count_map.get(key, 0) + 1
             
             # Track bucket info
             if key not in bucket_info_map:
@@ -9156,7 +9235,10 @@ def dashboard_3m():
                 'category_id': category_id,
                 'date': month_end,
                 'total_amount': total_amount,
-                'processed': processed
+                'processed': processed,
+                'pending': 1 if pending_count_map.get(key) else 0,
+                'pending_count': pending_count_map.get(key, 0),
+                'total_count': total_count_map.get(key, 0)
             }
             if bucket_info['has_bucket']:
                 entry_data['has_bucket'] = True
@@ -9182,6 +9264,8 @@ def dashboard_3m():
             pass
         expense_map = {}
         expense_processed_map = {}
+        expense_pending_count_map = {}
+        expense_total_count_map = {}
         expense_bucket_info_map = {}
         for entry in raw_expense_entries:
             month_end = get_month_end_str(entry['date'])
@@ -9190,6 +9274,9 @@ def dashboard_3m():
             if key not in expense_processed_map:
                 expense_processed_map[key] = []
             expense_processed_map[key].append(entry['processed'])
+            expense_total_count_map[key] = expense_total_count_map.get(key, 0) + 1
+            if entry.get('pending') == 1:
+                expense_pending_count_map[key] = expense_pending_count_map.get(key, 0) + 1
             # Track bucket info
             if key not in expense_bucket_info_map:
                 expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
@@ -9208,7 +9295,10 @@ def dashboard_3m():
                 'category_id': category_id,
                 'date': month_end,
                 'total_amount': total_amount,
-                'processed': processed
+                'processed': processed,
+                'pending': 1 if expense_pending_count_map.get(key) else 0,
+                'pending_count': expense_pending_count_map.get(key, 0),
+                'total_count': expense_total_count_map.get(key, 0)
             }
             if expense_bucket_info['has_bucket']:
                 entry_data['has_bucket'] = True
@@ -9236,6 +9326,8 @@ def dashboard_3m():
             pass
         c_expense_map = {}
         c_expense_processed_map = {}
+        c_expense_pending_count_map = {}
+        c_expense_total_count_map = {}
         c_expense_bucket_info_map = {}
         for entry in raw_c_expense_entries:
             month_end = get_month_end_str(entry['date'])
@@ -9244,6 +9336,9 @@ def dashboard_3m():
             if key not in c_expense_processed_map:
                 c_expense_processed_map[key] = []
             c_expense_processed_map[key].append(entry['processed'])
+            c_expense_total_count_map[key] = c_expense_total_count_map.get(key, 0) + 1
+            if entry.get('pending') == 1:
+                c_expense_pending_count_map[key] = c_expense_pending_count_map.get(key, 0) + 1
             # Track bucket info
             if key not in c_expense_bucket_info_map:
                 c_expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
@@ -9262,7 +9357,10 @@ def dashboard_3m():
                 'category_id': category_id,
                 'date': month_end,
                 'total_amount': total_amount,
-                'processed': processed
+                'processed': processed,
+                'pending': 1 if c_expense_pending_count_map.get(key) else 0,
+                'pending_count': c_expense_pending_count_map.get(key, 0),
+                'total_count': c_expense_total_count_map.get(key, 0)
             }
             if c_expense_bucket_info['has_bucket']:
                 entry_data['has_bucket'] = True
@@ -13256,6 +13354,9 @@ def add_recurring_expense():
         if category_id is None:
             return jsonify({'status': 'error', 'message': 'Failed to create category'}), 500
 
+        # Sync to all credit accounts (creates NON-RECURRING c_expense categories)
+        _sync_expense_category_to_credit_accounts(current_user.id, category_name, max_display_order + 1)
+
         # Step 3: Create recurring expense record in Redis
         recurring_data = {
             'id': None,  # Will be generated by Redis helper
@@ -13749,6 +13850,20 @@ def recurring_ca_expense():
         """, (current_user.id,))
         credit_accounts = cursor.fetchall()
 
+        # Fetch c_expense_categories for the category dropdown (non-recurring, non-hidden, non-system)
+        cursor.execute("""
+            SELECT cec.id, cec.account_id, cec.name, cec.is_recurring, cec.hidden,
+                   cec.is_interest, cec.is_auto_adjustment
+            FROM c_expense_categories cec
+            WHERE cec.account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+              AND cec.hidden = 0
+              AND cec.is_recurring = 0
+              AND cec.is_interest = 0
+              AND cec.is_auto_adjustment = 0
+            ORDER BY cec.account_id, cec.display_order
+        """, (current_user.id,))
+        ca_categories_for_dropdown = cursor.fetchall()
+
         # Fetch user profile data
         cursor.execute("SELECT profile_picture, first_name, last_name, landing_page, currency_type FROM users WHERE id = %s", (current_user.id,))
         user_data = cursor.fetchone()
@@ -13812,6 +13927,7 @@ def recurring_ca_expense():
         'recurring_ca_e.html',
         recurring_ca_expense_records=recurring_ca_expense_records,
         credit_accounts=credit_accounts,  # <-- Pass this to the template
+        ca_categories_for_dropdown=ca_categories_for_dropdown,  # <-- Available categories for new recurring
         profile_picture=profile_picture,
         first_name=first_name,
         last_name=last_name,
@@ -13828,7 +13944,7 @@ def add_recurring_ca_expense():
         return jsonify({'status': 'error', 'message': 'No data received'}), 400
 
     account_id = data.get('account_id')
-    category_name = data.get('category_name')
+    category_id = data.get('category_id')
     amount = data.get('amount')
     cadence_interval = data.get('cadence_interval')
     cadence_unit = data.get('cadence_unit')
@@ -13841,55 +13957,63 @@ def add_recurring_ca_expense():
     no_end_date = data.get('no_end_date', 0)
     wage_bill = data.get('wage_bill', 0)
 
-    # Validate the data
-    if not all([account_id, category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
+    # Validate the data - now requires category_id instead of category_name
+    if not all([account_id, category_id, amount, cadence_interval, cadence_unit, start_date, end_date]):
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
     try:
-        # Step 1: Get max display_order - try Redis first (keyed by user_id), fallback to MySQL
+        # Verify the category exists and belongs to this account/user
         categories = _get_categories_from_redis('c_expense_categories', current_user.id)
+        category_name = None
         if categories is not None:
-            # Filter by account_id
-            account_categories = [cat for cat in categories if cat.get('account_id') == int(account_id)]
-            max_display_order = max([cat.get('display_order', 0) for cat in account_categories], default=0)
+            for cat in categories:
+                if int(cat.get('id')) == int(category_id) and int(cat.get('account_id')) == int(account_id):
+                    category_name = cat.get('name')
+                    break
+        
+        if category_name is None:
+            # Fallback to MySQL
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT cec.name FROM c_expense_categories cec
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE cec.id = %s AND cec.account_id = %s AND ca.user_id = %s
+                """, (category_id, account_id, current_user.id))
+                row = cursor.fetchone()
+                cursor.close()
+                if row:
+                    category_name = row[0]
+                else:
+                    return jsonify({'status': 'error', 'message': 'Invalid category for this account'}), 400
+
+        # Mark the category as recurring in Redis
+        if categories is not None:
+            for cat in categories:
+                if int(cat.get('id')) == int(category_id):
+                    cat['is_recurring'] = 1
+                    cat['no_end_date'] = no_end_date
+                    break
+            redis_key = f"c_expense_categories:v1:{current_user.id}"
+            _redis_client.setex(redis_key, 604800, json.dumps(categories, cls=DecimalEncoder))
+            _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_categories')
         else:
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT COALESCE(MAX(display_order), 0) FROM c_expense_categories WHERE account_id = %s
-                """, (account_id,))
-                max_display_order = cursor.fetchone()[0]
+                    UPDATE c_expense_categories SET is_recurring = 1, no_end_date = %s
+                    WHERE id = %s AND account_id = %s
+                """, (no_end_date, category_id, account_id))
+                conn.commit()
                 cursor.close()
 
-        # Step 2: Create category in Redis first (keyed by user_id, flush worker will sync to MySQL)
-        new_category = {
-            'account_id': int(account_id),
-            'name': category_name,
-            'display_order': max_display_order + 1,
-            'group_id': None,
-            'is_recurring': 1,
-            'no_end_date': no_end_date,
-            'hidden': 0,
-            'is_bud': 0,
-            'is_interest': 0,
-            'is_auto_adjustment': 0
-        }
-        
-        category_id = _add_category_to_redis('c_expense_categories', current_user.id, new_category)
-        
-        if category_id is None:
-            return jsonify({'status': 'error', 'message': 'Failed to create category'}), 500
-        
-        # account_id_value is already known (it's the account_id parameter)
-        account_id_value = account_id
-
-        # Step 3: Create recurring CA expense record in Redis
+        # Create recurring CA expense record in Redis
         recurring_data = {
             'id': None,  # Will be generated by Redis helper
             'user_id': current_user.id,
-            'category_id': category_id,
-            'account_id': account_id_value,  # Include the account_id
-            'category_name': category_name,  # Include the category name
+            'category_id': int(category_id),
+            'account_id': int(account_id),
+            'category_name': category_name,
             'amount': float(amount),
             'cadence_interval': cadence_interval,
             'cadence_unit': cadence_unit,
@@ -13909,10 +14033,9 @@ def add_recurring_ca_expense():
         recurring_id = recurring_data['id']
 
         # Generate CA expense entries based on the cadence
-        # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
         if recurring_id:
             generate_ca_expense_entries(
-                recurring_id, category_id, amount, cadence_interval, cadence_unit,
+                recurring_id, int(category_id), amount, cadence_interval, cadence_unit,
                 start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month, current_user.id, account_id
             )
 
@@ -17690,7 +17813,11 @@ def quiltt_settings():
                         VALUES (%s, %s, %s, %s)
                     """, (current_user.id, result['profileId'], result['token'], result['expiresAt']))
                 
-                # Enable quiltt for this user
+                # Enable quiltt for this user (Redis-first)
+                try:
+                    _update_user_setting_in_redis(current_user.id, 'quiltt_enabled', 1)
+                except Exception:
+                    pass
                 cursor.execute("""
                     UPDATE users SET quiltt_enabled = 1 WHERE id = %s
                 """, (current_user.id,))
@@ -18711,6 +18838,13 @@ def quiltt_sync_profile():
         
         # Note: Transactions will not be synced automatically during initial setup
         # User must select accounts first, then transactions will be synced for selected accounts
+        
+        # Enable quiltt for this user (Redis-first, then mark dirty for MySQL flush)
+        try:
+            _update_user_setting_in_redis(current_user.id, 'quiltt_enabled', 1)
+            app.logger.info(f"Set quiltt_enabled=1 for user {current_user.id} via sync-profile")
+        except Exception as qe:
+            app.logger.error(f"Error setting quiltt_enabled for user {current_user.id}: {qe}")
         
         return jsonify({'status': 'success'})
             
@@ -20793,10 +20927,10 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
         if existing_entry:
             # Update existing entry
             new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(adjustment_amount)
-            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(new_amount), processed=1)
+            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(new_amount), processed=1, is_auto_adjustment=True)
         else:
             # Create new entry
-            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(adjustment_amount), processed=1)
+            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(adjustment_amount), processed=1, is_auto_adjustment=True)
         
         return True, f"Auto-adjustment created: {entry_type} of ${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
         
@@ -21080,7 +21214,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
             category_id = auto_cat.get('id')
             
             # Create expense entry to increase balance
-            _update_entry_in_redis('c_expense_entries', user_id, category_id, today_str, float(adjustment_amount), processed=1)
+            _update_entry_in_redis('c_expense_entries', user_id, category_id, today_str, float(adjustment_amount), processed=1, is_auto_adjustment=True)
             app.logger.info(f"[CA-AUTO-ADJUST] Created expense entry for ${adjustment_amount} to increase balance")
             
             return True, f"Credit account expense adjustment: +${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"

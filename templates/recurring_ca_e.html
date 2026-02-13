@@ -152,8 +152,13 @@
             <form id="add-recurring-ca-form">
                 <input type="hidden" id="ca-account-id" name="account_id">
 
-                <label for="category_name">New Category Name</label>
-                <input type="text" id="category_name" name="category_name" placeholder="Category" required>
+                <label for="ca-category-select">Category</label>
+                <select id="ca-category-select" name="category_id" required>
+                    <option value="">-- Select a category --</option>
+                    {% for cat in ca_categories_for_dropdown %}
+                        <option value="{{ cat.id }}" data-account-id="{{ cat.account_id }}">{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
 
                 <div class="form-row">
                     <label for="wage-bill-select">Type:</label>
@@ -453,7 +458,19 @@
             document.getElementById('no-end-date-checkbox').checked = false;
             document.getElementById('end_date').value = '';
             // Set the hidden input for account_id
-            $('#ca-account-id').val($(this).data('account-id'));
+            const accountId = $(this).data('account-id');
+            $('#ca-account-id').val(accountId);
+            // Filter category dropdown to only show categories for this account
+            $('#ca-category-select option').each(function() {
+                const optAccountId = $(this).data('account-id');
+                if (optAccountId === undefined || String(optAccountId) === String(accountId)) {
+                    $(this).show();
+                } else {
+                    $(this).hide();
+                }
+            });
+            // Reset dropdown selection
+            $('#ca-category-select').val('');
         });
 
         // Close modals when clicking outside (desktop and mobile)
@@ -916,7 +933,7 @@
 
             // Initialize the formData object
             const formData = {
-                category_name: $('#category_name').val(),
+                category_id: $('#ca-category-select').val(),
                 amount: $('#amount').val(),
                 cadence_interval: $('#cadence-interval').val(),
                 cadence_unit: $('#cadence-unit').val(),
