@@ -287,11 +287,14 @@
             let order = [];
             const tableId = type === 'income' ? 'income-manage-table' : 'expense-manage-table';
             const rows = $(`#${tableId} tbody tr`).get().reverse();
+            let orderNum = 1;
             rows.forEach(function(element, index) {
+                // Skip credit account payment categories and auto-adjustment categories — they have fixed positions
+                if ($(element).attr('data-is-credit-account') === '1' || $(element).attr('data-is-auto-adjustment') === '1') return;
                 order.push({
                     id: $(element).attr('data-category-id'),
                     name: $(element).find('.category-name').text().trim(),
-                    order: index + 1
+                    order: orderNum++
                 });
             });
             const url = type === 'income' ? "{{ url_for('update_income_order') }}" : "{{ url_for('update_expense_order') }}";

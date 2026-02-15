@@ -5208,6 +5208,10 @@ td:has(.bucket-progress-container) {
     display: table-row !important;
 }
 
+.ca-categories-table.ca-collapsed {
+    margin-top: 5px !important;
+}
+
 .cas-table.ca-collapsed {
     margin-top: 10px !important;
 }

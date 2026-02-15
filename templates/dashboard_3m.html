@@ -2036,26 +2036,26 @@
             // Enable sorting for expense categories
             $("#expense-categories-table tbody").sortable("enable");
 
-            // Show delete buttons for non-auto-adjustment expense categories
+            // Show delete buttons for non-auto-adjustment, non-credit-account expense categories
             document.querySelectorAll('.delete-category-btn.expense').forEach(btn => {
                 const row = btn.closest('tr');
-                if (row && row.getAttribute('data-is-auto-adjustment') !== '1') {
+                if (row && row.getAttribute('data-is-auto-adjustment') !== '1' && row.getAttribute('data-is-credit-account') !== '1') {
                     btn.style.display = 'inline-block';
                 }
             });
 
-            // Show rename buttons for non-auto-adjustment expense categories
+            // Show rename buttons for non-auto-adjustment, non-credit-account expense categories
             document.querySelectorAll('.rename-category-btn.expense').forEach(btn => {
                 const row = btn.closest('tr');
-                if (row && row.getAttribute('data-is-auto-adjustment') !== '1') {
+                if (row && row.getAttribute('data-is-auto-adjustment') !== '1' && row.getAttribute('data-is-credit-account') !== '1') {
                     btn.style.display = 'inline-block';
                 }
             });
 
-            // Add sort icon only for non-auto-adjustment rows
+            // Add sort icon only for non-auto-adjustment, non-credit-account rows
             document.querySelectorAll('#expense-categories-table .category-cell').forEach(td => {
                 const row = td.closest('tr');
-                if (row && row.getAttribute('data-is-auto-adjustment') !== '1') {
+                if (row && row.getAttribute('data-is-auto-adjustment') !== '1' && row.getAttribute('data-is-credit-account') !== '1') {
                     if (!td.querySelector('.sort-handle')) {
                         const sortIcon = document.createElement('span');
                         sortIcon.classList.add('sort-handle');
@@ -3840,11 +3840,14 @@
             } else {
                 return;
             }
+            let orderNum = 1;
             rows.forEach(function(element, index) {
+                // Skip credit account payment categories and auto-adjustment categories — they have fixed positions
+                if ($(element).attr('data-is-credit-account') === '1' || $(element).attr('data-is-auto-adjustment') === '1') return;
                 order.push({
                     id: $(element).attr('data-category-id'),
                     name: $(element).find('.category-name').text().trim(),
-                    order: index + 1
+                    order: orderNum++
                 });
             });
             // Send the new order to the server
@@ -4603,7 +4606,7 @@
                 scroll: true,              // Enable auto-scroll
                 scrollSensitivity: 30,     // Distance from edge to start scrolling
                 scrollSpeed: 5,
-                items: "> tr:not(#expense-total-row):not([data-is-auto-adjustment='1'])", // Exclude total row and auto adjustment
+                items: "> tr:not(#expense-total-row):not([data-is-auto-adjustment='1']):not([data-is-credit-account='1'])", // Exclude total row, auto adjustment, and credit account payment categories
                 handle: ".sort-handle", // Only allow sorting via the sort icon
                 helper: function(e, tr) {
                     var $originals = tr.children();

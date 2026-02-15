@@ -8291,10 +8291,11 @@ def update_expense_order():
         for item in order_data:
             category_name = item['name']
             display_order = item['order']
+            # Skip credit account payment categories — they have fixed display_order
             cursor.execute("""
                 UPDATE expense_categories 
                 SET display_order = %s 
-                WHERE user_id = %s AND name = %s
+                WHERE user_id = %s AND name = %s AND is_credit_account = 0
             """, (display_order, user_id, category_name))
 
         # Sync display_order to c_expense_categories across all credit accounts
@@ -17406,13 +17407,62 @@ def add_credit_account():
     # Create matching expense_categories record for payment
     payment_category_name = f"{name} payment"
     
-    # Get max display_order for expense_categories
+    # Payment categories sit just above system categories (Savings/Uncategorized)
+    # Find the lowest display_order among existing payment categories, or the lowest
+    # non-system category if no payment categories exist yet
     expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+    existing_payment_orders = []
+    non_system_orders = []
     if expense_categories:
-        max_display_order = max([cat.get('display_order', 0) for cat in expense_categories])
+        for cat in expense_categories:
+            do = cat.get('display_order', 0)
+            if cat.get('is_credit_account') == 1:
+                existing_payment_orders.append(do)
+            elif cat.get('is_auto_adjustment') != 1:
+                non_system_orders.append(do)
+    
+    if existing_payment_orders:
+        # Place at same level as lowest payment category (they cluster together)
+        new_display_order = min(existing_payment_orders)
+    elif non_system_orders:
+        # First payment category — place at the lowest non-system position
+        new_display_order = min(non_system_orders)
     else:
-        max_display_order = 0
-    new_display_order = max_display_order + 1
+        new_display_order = 1
+    
+    # Shift all non-system, non-payment categories at or above this position up by 1
+    if expense_categories:
+        shifted = False
+        for cat in expense_categories:
+            if cat.get('is_auto_adjustment') == 1 or cat.get('is_credit_account') == 1:
+                continue
+            if cat.get('display_order', 0) >= new_display_order:
+                cat['display_order'] = cat.get('display_order', 0) + 1
+                shifted = True
+        if shifted:
+            _redis_client.set(
+                f"expense_categories:v1:{current_user.id}",
+                json.dumps(expense_categories, cls=DecimalEncoder)
+            )
+            _redis_client.expire(f"expense_categories:v1:{current_user.id}", 604800)
+            _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+    # Also shift c_expense_categories display_order to stay in sync
+    c_expense_cats = _get_categories_from_redis('c_expense_categories', current_user.id)
+    if c_expense_cats:
+        shifted = False
+        for cat in c_expense_cats:
+            if cat.get('is_auto_adjustment') == 1 or cat.get('is_interest') == 1:
+                continue
+            if cat.get('display_order', 0) >= new_display_order:
+                cat['display_order'] = cat.get('display_order', 0) + 1
+                shifted = True
+        if shifted:
+            _redis_client.set(
+                f"c_expense_categories:v1:{current_user.id}",
+                json.dumps(c_expense_cats, cls=DecimalEncoder)
+            )
+            _redis_client.expire(f"c_expense_categories:v1:{current_user.id}", 604800)
+            _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_categories')
     
     # Set is_recurring and no_end_date if recurring payment is enabled
     is_recurring = 1 if recurring_payment else 0
