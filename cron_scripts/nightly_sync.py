@@ -520,9 +520,11 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
             
             # Store transaction
             raw_amount = float(txn.get('amount', 0))
-            is_expense = raw_amount < 0
             amount = abs(raw_amount)
             txn_date = txn.get('date')
+            # Use Quiltt's entryType field: CREDIT = inflow (income), DEBIT = outflow (expense)
+            entry_type_raw = txn.get('entryType', '').upper()
+            is_expense = (entry_type_raw != 'CREDIT')  # DEBIT or empty = expense
             
             # Track earliest date and all imported dates for recalculation
             if txn_date:
@@ -536,7 +538,8 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
             description = txn.get('description', '')
             merchant_name = txn.get('merchantName')
             category = txn.get('category')
-            txn_type = txn.get('transactionType', txn.get('type', '')).lower()
+            # Derive txn_type from entryType for auto-import routing
+            txn_type = 'income' if entry_type_raw == 'CREDIT' else 'expense'
             pending = 1 if txn.get('pending') else 0
             
             # Extract Ntropy data if present
@@ -731,15 +734,18 @@ def auto_import_transaction(cursor, conn, user_id, account_id, txn, txn_type):
         acc_row = cursor.fetchone()
         account_type = acc_row[0].lower() if acc_row else 'depository'
         
+        # Use txn_type derived from Quiltt's entryType (CREDIT=income, DEBIT=expense)
+        is_income = (txn_type == 'income')
+        
         # Determine which table to insert into
         blankee_account_id = None
         if account_type == 'credit':
-            if txn_type == 'income' or 'payment' in (txn.get('description') or '').lower():
+            if is_income:
                 entry_type = 'c_payment'
             else:
                 entry_type = 'c_expense'
         else:
-            if txn_type == 'income':
+            if is_income:
                 entry_type = 'income'
             else:
                 entry_type = 'expense'

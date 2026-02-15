@@ -3681,7 +3681,8 @@ tr[data-category-id] td.before-member-since {
 }
 
 .category-search-field {
-    width: 190px; 
+    width: 85%;
+    max-width: 300px; 
     padding: 10px 12px;
     background-color: #f9f9f9;
     border: 1px solid #d1d1d6;
@@ -3692,6 +3693,7 @@ tr[data-category-id] td.before-member-since {
     box-sizing: border-box;
     outline: none;
     color: #575757;
+
 }
 
 .category-search-field:focus {
@@ -3734,6 +3736,10 @@ tr[data-category-id] td.before-member-since {
     align-items: center;
     height: 38px;
     gap: 5px;
+}
+
+.category-btn-container.unified {
+    justify-content: flex-start;
 }
 
 /* Unified button colors */

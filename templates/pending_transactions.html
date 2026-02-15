@@ -132,7 +132,7 @@
                 }
                 return cExpenseCategories;
             } else if (entryType === 'expense') {
-                return expenseCategories;
+                return expenseCategories.filter(cat => cat.name !== 'Interest Charge');
             } else {
                 return incomeCategories;
             }

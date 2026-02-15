@@ -923,7 +923,7 @@
                     
                     // Check if this is an overdue unpaid bill
                     const isOverdue = isOverdueBill(entry, date, recurringIncomeMap);
-                    const isPending = Number(entry.pending) === 1;
+                    const isPending = Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1;
                     const paidClass = isPending ? 'pending-entry' : (entry.processed == 1 ? 'paid' : (isOverdue ? 'overdue-bill' : ''));
                     const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
                     
@@ -1002,7 +1002,7 @@
                     
                     // Check if this is an overdue unpaid bill
                     const isOverdue = isOverdueBill(entry, date, recurringExpenseMap);
-                    const isPending = Number(entry.pending) === 1;
+                    const isPending = Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1;
                     const paidClass = isPending ? 'pending-entry' : (entry.processed == 1 ? 'paid' : (isOverdue ? 'overdue-bill' : ''));
                     const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
                     
@@ -1144,7 +1144,7 @@
                         entryRow.setAttribute('data-date', date);
                         entryRow.setAttribute('data-account-id', catObj ? catObj.account_id : '');
                         const dataProcessed = entry.processed == 1 ? '1' : '0';
-                        const isPending = Number(entry.pending) === 1;
+                        const isPending = Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1;
                         const paidClass = isPending ? 'pending-entry' : (entry.processed == 1 ? 'paid' : '');
                         const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
                         entryRow.innerHTML = `

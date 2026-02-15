@@ -443,6 +443,11 @@ def register():
                 INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
                 VALUES (%s, %s, %s, %s, %s)
             """, (new_user_id, 'Savings', -1, 0, 1))
+            # --- Add Interest Charge category (system, hidden from dropdowns) ---
+            cursor.execute("""
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (new_user_id, 'Interest Charge', 0, 0, 1))
             cursor.close()
             conn.commit()
 
@@ -2607,6 +2612,7 @@ def get_dashboard_d_data():
                     'amount': entry.get('amount'),
                     'processed': entry.get('processed'),
                     'pending': entry.get('pending', 0),
+                    'auto_confirmed': entry.get('auto_confirmed', 0),
                     'category_id': entry.get('category_id'),
                     'category_name': cat.get('name', ''),
                     'display_order': cat.get('display_order', 0),
@@ -2623,6 +2629,7 @@ def get_dashboard_d_data():
                     'amount': entry.get('amount'),
                     'processed': entry.get('processed'),
                     'pending': entry.get('pending', 0),
+                    'auto_confirmed': entry.get('auto_confirmed', 0),
                     'category_id': entry.get('category_id'),
                     'category_name': cat.get('name', ''),
                     'display_order': cat.get('display_order', 0),
@@ -7605,7 +7612,7 @@ def dashboard():
                 expense_processed_map[key] = []
             expense_processed_map[key].append(entry['processed'])
             expense_total_count_map[key] = expense_total_count_map.get(key, 0) + 1
-            if entry.get('pending') == 1:
+            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
                 expense_pending_count_map[key] = expense_pending_count_map.get(key, 0) + 1
             
             # Track bucket info
@@ -7670,7 +7677,7 @@ def dashboard():
                 c_expense_processed_map[key] = []
             c_expense_processed_map[key].append(entry['processed'])
             c_expense_total_count_map[key] = c_expense_total_count_map.get(key, 0) + 1
-            if entry.get('pending') == 1:
+            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
                 c_expense_pending_count_map[key] = c_expense_pending_count_map.get(key, 0) + 1
             
             # Track bucket info
@@ -9600,7 +9607,7 @@ def dashboard_3m():
                 expense_processed_map[key] = []
             expense_processed_map[key].append(entry['processed'])
             expense_total_count_map[key] = expense_total_count_map.get(key, 0) + 1
-            if entry.get('pending') == 1:
+            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
                 expense_pending_count_map[key] = expense_pending_count_map.get(key, 0) + 1
             # Track bucket info
             if key not in expense_bucket_info_map:
@@ -9662,7 +9669,7 @@ def dashboard_3m():
                 c_expense_processed_map[key] = []
             c_expense_processed_map[key].append(entry['processed'])
             c_expense_total_count_map[key] = c_expense_total_count_map.get(key, 0) + 1
-            if entry.get('pending') == 1:
+            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
                 c_expense_pending_count_map[key] = c_expense_pending_count_map.get(key, 0) + 1
             # Track bucket info
             if key not in c_expense_bucket_info_map:
@@ -17353,7 +17360,7 @@ def add_credit_account():
     _add_category_to_redis('c_expense_categories', current_user.id, {
         'account_id': temp_account_id,
         'name': 'Interest Charge',
-        'display_order': -1,
+        'display_order': 2,
         'group_id': None,
         'is_recurring': 0,
         'no_end_date': 0,
@@ -19483,7 +19490,7 @@ def quiltt_sync_profile():
                             _add_category_to_redis('c_expense_categories', current_user.id, {
                                 'account_id': temp_account_id,
                                 'name': 'Interest Charge',
-                                'display_order': -1,
+                                'display_order': 2,
                                 'group_id': None,
                                 'is_recurring': 0,
                                 'no_end_date': 0,
@@ -20228,9 +20235,11 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             account_id = account_obj.get('id')  # Quiltt account_id string
             amount = abs(float(txn.get('amount', 0)))
             date = txn.get('date')
-            is_expense = float(txn.get('amount', 0)) < 0
+            # Use Quiltt's entryType field: CREDIT = inflow (income), DEBIT = outflow (expense)
+            entry_type_raw = txn.get('entryType', '').upper()
+            is_expense = (entry_type_raw != 'CREDIT')  # DEBIT or empty = expense
             
-            app.logger.info(f"Processing txn {txn_id}: amount={txn.get('amount')}, is_expense={is_expense}")
+            app.logger.info(f"Processing txn {txn_id}: amount={txn.get('amount')}, entryType={entry_type_raw}, is_expense={is_expense}")
             
             # Check if transaction already exists in Redis
             existing_txn = None
@@ -20481,9 +20490,8 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
 @login_required
 def quiltt_sync_transactions():
     """Manually sync transactions from Quiltt for accounts with sync enabled"""
-    # skip_auto_import=True - transactions are stored but don't auto-create budget entries
-    # Users can manually import transactions via the Transactions page
-    success, count, message = _sync_quiltt_transactions_for_user(current_user.id, skip_auto_import=True)
+    # Auto-import transactions so they appear in pending transactions for categorization
+    success, count, message = _sync_quiltt_transactions_for_user(current_user.id, skip_auto_import=False)
     
     if success:
         return jsonify({
@@ -22208,7 +22216,7 @@ def quiltt_toggle_sync():
                                 _add_category_to_redis('c_expense_categories', current_user.id, {
                                     'account_id': temp_account_id,
                                     'name': 'Interest Charge',
-                                    'display_order': -1,
+                                    'display_order': 2,
                                     'group_id': None,
                                     'is_recurring': 0,
                                     'no_end_date': 0,
