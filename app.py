@@ -23434,6 +23434,201 @@ def quiltt_webhook():
         # Return 204 even on error to prevent retries for malformed data
         return '', 204
 
+############################################################################################
+############################### FEEDBACK (FIDER) ###########################################
+############################################################################################
+
+from feedback_client import get_fider_client
+
+def _get_user_profile_meta(user_id: int):
+    """Fetch user display data from Redis (preferred) or MySQL."""
+    user_data = None
+    redis_key = f"users:v1:{user_id}"
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+        except Exception:
+            pass
+
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT profile_picture, first_name, last_name, landing_page, email, username
+                FROM users
+                WHERE id = %s
+            """, (user_id,))
+            user_data = cursor.fetchone() or {}
+            cursor.close()
+
+    profile_picture = user_data.get('profile_picture') if user_data else None
+    first_name = user_data.get('first_name', '') if user_data else ''
+    last_name = user_data.get('last_name', '') if user_data else ''
+    landing_page = user_data.get('landing_page', 'dashboard_3m') if user_data else 'dashboard_3m'
+    email = user_data.get('email') or user_data.get('username') or ''
+    username = user_data.get('username') or email
+
+    return {
+        'profile_picture': profile_picture,
+        'first_name': first_name,
+        'last_name': last_name,
+        'landing_page': landing_page,
+        'email': email,
+        'username': username,
+    }
+
+def _page_context_tag(path: str) -> str:
+    cleaned = path.lstrip('/') or 'home'
+    cleaned = cleaned.replace('/', '_')
+    return f"page:{cleaned}"
+
+
+def _get_fider_client_and_user():
+    client = get_fider_client()
+    meta = _get_user_profile_meta(current_user.id)
+    display_name = f"{meta.get('first_name', '').strip()} {meta.get('last_name', '').strip()}".strip() or meta.get('username') or meta.get('email')
+    email = meta.get('email') or meta.get('username')
+    redis_client = _redis_client if app.config.get('REDIS_OK') else None
+    fider_user_id = client.ensure_user(display_name, email, str(current_user.id), redis_client)
+    return client, fider_user_id, meta
+
+
+@app.route('/feedback')
+@login_required
+def feedback_page():
+    meta = _get_user_profile_meta(current_user.id)
+    return render_template(
+        'feedback.html',
+        profile_picture=meta.get('profile_picture'),
+        first_name=meta.get('first_name'),
+        last_name=meta.get('last_name'),
+        landing_page=meta.get('landing_page', 'dashboard_3m'),
+    )
+
+
+@app.route('/api/feedback/posts', methods=['GET'])
+@login_required
+def feedback_list_posts():
+    try:
+        client, fider_user_id, _ = _get_fider_client_and_user()
+        view = request.args.get('view', 'trending')
+        query = request.args.get('query', '')
+        tags = request.args.get('tags', '')
+        page_context = request.args.get('page_context')
+        limit = request.args.get('limit')
+
+        if page_context:
+            tags = f"{tags},{page_context}" if tags else page_context
+
+        params = {"view": view}
+        if query:
+            params["query"] = query
+        if tags:
+            params["tags"] = tags
+        if limit:
+            params["limit"] = limit
+
+        data = client.list_posts(params, fider_user_id)
+        return jsonify(data)
+    except Exception as e:
+        app.logger.error(f"[FIDER] list posts error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/feedback/posts', methods=['POST'])
+@login_required
+def feedback_create_post():
+    payload = request.get_json() or {}
+    title = (payload.get('title') or '').strip()
+    description = payload.get('description') or ''
+    context_tag = (payload.get('context_tag') or '').strip()
+    if not title:
+        return jsonify({'status': 'error', 'message': 'Title is required'}), 400
+
+    try:
+        client, fider_user_id, _ = _get_fider_client_and_user()
+        post = client.create_post(fider_user_id, title, description)
+        if context_tag:
+            slug = client.create_tag(context_tag) or context_tag
+            if slug:
+                try:
+                    client.tag_post(post.get('number'), slug)
+                except Exception as tag_err:
+                    app.logger.warning(f"[FIDER] tag post failed: {tag_err}")
+        return jsonify({'status': 'success', 'post': post})
+    except Exception as e:
+        app.logger.error(f"[FIDER] create post error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/feedback/posts/<int:number>', methods=['GET'])
+@login_required
+def feedback_get_post(number):
+    try:
+        client, fider_user_id, _ = _get_fider_client_and_user()
+        post = client.get_post(number, fider_user_id)
+        return jsonify(post)
+    except Exception as e:
+        app.logger.error(f"[FIDER] get post error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/feedback/posts/<int:number>/comments', methods=['GET'])
+@login_required
+def feedback_list_comments(number):
+    try:
+        client, _, _ = _get_fider_client_and_user()
+        comments = client.list_comments(number)
+        return jsonify(comments)
+    except Exception as e:
+        app.logger.error(f"[FIDER] list comments error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/feedback/posts/<int:number>/comments', methods=['POST'])
+@login_required
+def feedback_add_comment(number):
+    payload = request.get_json() or {}
+    content = (payload.get('content') or '').strip()
+    if not content:
+        return jsonify({'status': 'error', 'message': 'Content is required'}), 400
+    try:
+        client, fider_user_id, _ = _get_fider_client_and_user()
+        comment = client.add_comment(fider_user_id, number, content)
+        return jsonify({'status': 'success', 'comment': comment})
+    except Exception as e:
+        app.logger.error(f"[FIDER] add comment error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/feedback/posts/<int:number>/votes', methods=['POST', 'DELETE'])
+@login_required
+def feedback_vote(number):
+    try:
+        client, fider_user_id, _ = _get_fider_client_and_user()
+        if request.method == 'POST':
+            client.vote(fider_user_id, number)
+        else:
+            client.unvote(fider_user_id, number)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        app.logger.error(f"[FIDER] vote error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/feedback/tags', methods=['GET'])
+@login_required
+def feedback_tags():
+    try:
+        client, _, _ = _get_fider_client_and_user()
+        tags = client.list_tags()
+        return jsonify(tags)
+    except Exception as e:
+        app.logger.error(f"[FIDER] tags error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 ##############################################################################
 
