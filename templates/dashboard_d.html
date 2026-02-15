@@ -609,25 +609,39 @@
                 categoriesArray = expenseCategories;
             } else if (entryType.startsWith('ca_')) {
                 const accountId = parseInt(entryType.split('_')[1]);
-                url = "{{ url_for('add_ca_category') }}";
+                // NOTE: Creates an expense_category which auto-syncs to all credit accounts
+                url = "{{ url_for('add_expense_category') }}";
                 // For credit accounts, we'll handle differently
                 $.ajax({
                     url: url,
                     method: "POST",
                     data: { 
-                        name: categoryName.trim(),
-                        account_id: accountId
+                        name: categoryName.trim()
                     },
                     success: function(response) {
                         if (response.status === 'success') {
                             // Set flag that new category was created
                             newCategoryCreated = true;
                             
-                            // Add to c_expense_categories array
+                            // Get the c_expense_category_id for this specific account
+                            let cExpenseCategoryId = response.new_category_id;
+                            if (response.c_expense_categories && response.c_expense_categories[accountId]) {
+                                cExpenseCategoryId = response.c_expense_categories[accountId];
+                            }
+                            
+                            // Add to c_expense_categories array with correct ID
                             c_expense_categories.push({ 
-                                id: response.new_category_id, 
+                                id: cExpenseCategoryId, 
                                 name: categoryName.trim(),
                                 account_id: accountId,
+                                hidden: false,
+                                is_bud: false
+                            });
+                            
+                            // Also add to expense_categories since they're synced
+                            expense_categories.push({
+                                id: response.new_category_id,
+                                name: categoryName.trim(),
                                 hidden: false,
                                 is_bud: false
                             });
@@ -637,7 +651,7 @@
                             
                             // Then update the input and hidden field with the new category
                             dashboardDCategoryInput.value = categoryName.trim();
-                            dashboardDCategoryHidden.value = response.new_category_id;
+                            dashboardDCategoryHidden.value = cExpenseCategoryId;
                             dashboardDDropdown.style.display = 'none';
                         } else {
                             alert('Failed to create category');
@@ -909,7 +923,9 @@
                     
                     // Check if this is an overdue unpaid bill
                     const isOverdue = isOverdueBill(entry, date, recurringIncomeMap);
-                    const paidClass = entry.processed == 1 ? 'paid' : (isOverdue ? 'overdue-bill' : '');
+                    const isPending = Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1;
+                    const paidClass = isPending ? 'pending-entry' : (entry.processed == 1 ? 'paid' : (isOverdue ? 'overdue-bill' : ''));
+                    const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
                     
                     const catObj = incomeCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
@@ -934,7 +950,7 @@
                             ${iconHtml}
                             ${entry.category_name}
                         </div>
-                        <div class="dashboard-d-amount-cell ${paidClass}">
+                        <div class="dashboard-d-amount-cell ${paidClass}" ${paidTitle ? `title="${paidTitle}"` : ''}>
                             <input type="text"
                                 class="income-cell-input${isReadonly ? ' auto-disable' : ''}"
                                 data-processed="${dataProcessed}"
@@ -986,7 +1002,9 @@
                     
                     // Check if this is an overdue unpaid bill
                     const isOverdue = isOverdueBill(entry, date, recurringExpenseMap);
-                    const paidClass = entry.processed == 1 ? 'paid' : (isOverdue ? 'overdue-bill' : '');
+                    const isPending = Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1;
+                    const paidClass = isPending ? 'pending-entry' : (entry.processed == 1 ? 'paid' : (isOverdue ? 'overdue-bill' : ''));
+                    const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
                     
                     const catObj = expenseCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
@@ -1009,7 +1027,7 @@
                             ${iconHtml}
                             ${entry.category_name}
                         </div>
-                        <div class="dashboard-d-amount-cell ${paidClass}">
+                        <div class="dashboard-d-amount-cell ${paidClass}" ${paidTitle ? `title="${paidTitle}"` : ''}>
                             <input type="text"
                                 class="expense-cell-input${isExpenseReadonly ? ' auto-disable' : ''}"
                                 data-processed="${dataProcessed}"
@@ -1126,7 +1144,9 @@
                         entryRow.setAttribute('data-date', date);
                         entryRow.setAttribute('data-account-id', catObj ? catObj.account_id : '');
                         const dataProcessed = entry.processed == 1 ? '1' : '0';
-                        const paidClass = entry.processed == 1 ? 'paid' : '';
+                        const isPending = Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1;
+                        const paidClass = isPending ? 'pending-entry' : (entry.processed == 1 ? 'paid' : '');
+                        const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
                         entryRow.innerHTML = `
                             ${!isCaReadonly ? `<span class="dashboard-d-move-btn" title="Move to date">
                                 <span class="calendar-icon">
@@ -1137,7 +1157,7 @@
                                 ${iconHtml}
                                 ${catObj ? catObj.name : 'Category'}
                             </div>
-                            <div class="dashboard-d-amount-cell ${paidClass}">
+                            <div class="dashboard-d-amount-cell ${paidClass}" ${paidTitle ? `title="${paidTitle}"` : ''}>
                                 <input type="text"
                                     class="ca-cell-input${isCaReadonly ? ' auto-disable' : ''}"
                                     data-processed="${dataProcessed}"

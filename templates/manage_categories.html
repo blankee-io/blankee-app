@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Manage Categories</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/jquery-ui.css') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="manage-categories-body">
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <!-- Calendar navigation (back button) -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+
+        <!-- ======================== INCOME SECTION ======================== -->
+        <div class="manage-categories-container">
+            <div class="recurring-header income">
+                <span><i class="fa-solid fa-plus-large" style="font-size:14px; margin-right:6px;"></i>Income</span>
+                <div class="manage-cat-btn-group">
+                    <button class="manage-cat-btn add-cat-btn" id="add-income-btn" title="Add Category">
+                        <i class="fa-solid fa-folder-plus"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Add category input (hidden by default) -->
+            <div id="income-add-input-container" class="manage-cat-input-container" style="display:none;">
+                <input type="text" id="new-income-category-input" placeholder="New Income Category Name" maxlength="20">
+                <button id="submit-income-category-btn"><i class="fa-solid fa-plus"></i></button>
+                <button id="cancel-income-category-btn"><i class="fa-solid fa-times"></i></button>
+            </div>
+
+            <table class="manage-cat-table income-manage-table" id="income-manage-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th class="manage-cat-type-col">Type</th>
+                        <th class="manage-cat-status-col"><i class="fa-solid fa-eye"></i></th>
+                        <th class="manage-cat-actions-col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for category in income_categories %}
+                        {% if category.name != "Starting Balance" %}
+                        <tr data-category-id="{{ category.id }}" 
+                            data-is-auto-adjustment="{{ category.is_auto_adjustment }}"
+                            data-is-recurring="{{ category.is_recurring }}"
+                            data-hidden="{{ category.hidden }}">
+                            <td class="category-cell">
+                                {% if category.is_auto_adjustment != 1 %}
+                                <span class="sort-handle"><i class="fa fa-bars"></i></span>
+                                {% endif %}
+                                <span class="category-name">{{ category.name }}</span>
+                            </td>
+                            <td class="manage-cat-type-col">
+                                {% if category.is_recurring %}
+                                    <i class="fa-regular fa-arrows-repeat category-icon"></i> Recurring
+                                {% elif category.is_auto_adjustment %}
+                                    <i class="fa-regular fa-lock category-icon"></i> Default
+                                {% else %}
+                                    <i class="fa-regular fa-folder category-icon"></i> Standard
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-status-col">
+                                {% if category.hidden == 1 %}
+                                    <i class="fa-solid fa-eye-slash manage-cat-eye-icon hidden-icon"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-eye manage-cat-eye-icon visible-icon"></i>
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-actions-col">
+                                {% if category.is_auto_adjustment != 1 %}
+                                <button class="rename-category-btn income" title="Edit Category"
+                                    data-category-id="{{ category.id }}"
+                                    data-category-type="income"
+                                    data-category-name="{{ category.name }}">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="4" class="recurring-footer"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <!-- ======================== EXPENSE SECTION ======================== -->
+        <div class="manage-categories-container">
+            <div class="recurring-header expenses">
+                <span><i class="fa-solid fa-minus" style="font-size:14px; margin-right:6px;"></i>Expenses</span>
+                <div class="manage-cat-btn-group">
+                    <button class="manage-cat-btn add-cat-btn" id="add-expense-btn" title="Add Category">
+                        <i class="fa-solid fa-folder-plus"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Add category input (hidden by default) -->
+            <div id="expense-add-input-container" class="manage-cat-input-container" style="display:none;">
+                <input type="text" id="new-expense-category-input" placeholder="New Expense Category Name" maxlength="20">
+                <button id="submit-expense-category-btn"><i class="fa-solid fa-plus"></i></button>
+                <button id="cancel-expense-category-btn"><i class="fa-solid fa-times"></i></button>
+            </div>
+
+            <table class="manage-cat-table expense-manage-table" id="expense-manage-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th class="manage-cat-type-col">Type</th>
+                        <th class="manage-cat-status-col"><i class="fa-solid fa-eye"></i></th>
+                        <th class="manage-cat-actions-col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for category in expense_categories %}
+                        <tr data-category-id="{{ category.id }}" 
+                            data-is-auto-adjustment="{{ category.is_auto_adjustment }}"
+                            data-is-credit-account="{{ category.is_credit_account }}"
+                            data-is-recurring="{{ category.is_recurring }}"
+                            data-hidden="{{ category.hidden }}">
+                            <td class="category-cell">
+                                {% if category.is_auto_adjustment != 1 and category.is_credit_account != 1 %}
+                                <span class="sort-handle"><i class="fa fa-bars"></i></span>
+                                {% endif %}
+                                <span class="category-name">{{ category.name }}</span>
+                            </td>
+                            <td class="manage-cat-type-col">
+                                {% if category.is_recurring %}
+                                    <i class="fa-regular fa-arrows-repeat category-icon"></i> Recurring
+                                {% elif category.is_credit_account == 1 %}
+                                    <i class="fa-regular fa-credit-card category-icon"></i> Credit Payment
+                                {% elif category.is_auto_adjustment %}
+                                    <i class="fa-regular fa-lock category-icon"></i> Default
+                                {% elif category.is_bud %}
+                                    <i class="fa-regular fa-seedling category-icon"></i> Bud
+                                {% else %}
+                                    <i class="fa-regular fa-folder category-icon"></i> Standard
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-status-col">
+                                {% if category.hidden == 1 %}
+                                    <i class="fa-solid fa-eye-slash manage-cat-eye-icon hidden-icon"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-eye manage-cat-eye-icon visible-icon"></i>
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-actions-col">
+                                {% if category.is_auto_adjustment != 1 and category.is_credit_account != 1 %}
+                                <button class="rename-category-btn expense" title="Edit Category"
+                                    data-category-id="{{ category.id }}"
+                                    data-category-type="expense"
+                                    data-category-name="{{ category.name }}">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="4" class="recurring-footer"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal for delete confirmation -->
+    <div id="deleteCategoryModal" class="category-delete-modal">
+        <div class="category-delete-modal-content">
+            <h3>Are you sure you want to delete this category? Past entries for this category will be added to Uncategorized and future entries will be deleted.</h3>
+            <button id="confirmDeleteCategory" class="confirm-delete-category-btn">Delete</button>
+            <button id="cancelDeleteCategory" class="cancel-delete-category-btn">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Modal for editing category name -->
+    <div id="editCategoryModal" class="category-edit-modal">
+        <div class="category-edit-modal-content">
+            <input id="editCategoryInput" type="text" maxlength="20" />
+            <button id="confirmEditCategoryBtn" class="confirm-edit-category-btn">Rename</button>
+            <button id="hideCategoryBtn" class="hide-category-btn" title="Hide Category"><i class="fa-solid fa-eye-slash"></i></button>
+            <button id="deleteFromEditCategoryBtn" class="delete-from-edit-category-btn"><i class="fa-solid fa-trash"></i></button>
+        </div>
+    </div>
+
+    <script>
+        // Pass categories to JS
+        let incomeCategories = {{ income_categories | tojson | safe }};
+        let expenseCategories = {{ expense_categories | tojson | safe }};
+
+        let isModalOpen = false;
+
+        // ===================== ADD CATEGORY =====================
+        document.getElementById('add-income-btn').addEventListener('click', function() {
+            const container = document.getElementById('income-add-input-container');
+            container.style.display = container.style.display === 'none' ? 'flex' : 'none';
+            if (container.style.display === 'flex') {
+                document.getElementById('new-income-category-input').focus();
+            }
+        });
+        document.getElementById('add-expense-btn').addEventListener('click', function() {
+            const container = document.getElementById('expense-add-input-container');
+            container.style.display = container.style.display === 'none' ? 'flex' : 'none';
+            if (container.style.display === 'flex') {
+                document.getElementById('new-expense-category-input').focus();
+            }
+        });
+        document.getElementById('cancel-income-category-btn').addEventListener('click', function() {
+            document.getElementById('income-add-input-container').style.display = 'none';
+            document.getElementById('new-income-category-input').value = '';
+        });
+        document.getElementById('cancel-expense-category-btn').addEventListener('click', function() {
+            document.getElementById('expense-add-input-container').style.display = 'none';
+            document.getElementById('new-expense-category-input').value = '';
+        });
+
+        function addCategory(type) {
+            const inputId = type === 'income' ? 'new-income-category-input' : 'new-expense-category-input';
+            const input = document.getElementById(inputId);
+            const categoryName = input.value.trim();
+            if (!categoryName) return;
+
+            const url = type === 'income' ? "{{ url_for('add_income_category') }}" : "{{ url_for('add_expense_category') }}";
+
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: { name: categoryName },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        location.reload();
+                    }
+                },
+                error: function() {
+                    alert('Failed to add category.');
+                }
+            });
+        }
+
+        document.getElementById('submit-income-category-btn').addEventListener('click', function() {
+            addCategory('income');
+        });
+        document.getElementById('submit-expense-category-btn').addEventListener('click', function() {
+            addCategory('expense');
+        });
+        // Enter key support
+        document.getElementById('new-income-category-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') addCategory('income');
+        });
+        document.getElementById('new-expense-category-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') addCategory('expense');
+        });
+
+        // ===================== SAVE NEW ORDER =====================
+        function saveNewOrder(type) {
+            let order = [];
+            const tableId = type === 'income' ? 'income-manage-table' : 'expense-manage-table';
+            const rows = $(`#${tableId} tbody tr`).get().reverse();
+            let orderNum = 1;
+            rows.forEach(function(element, index) {
+                // Skip credit account payment categories and auto-adjustment categories — they have fixed positions
+                if ($(element).attr('data-is-credit-account') === '1' || $(element).attr('data-is-auto-adjustment') === '1') return;
+                order.push({
+                    id: $(element).attr('data-category-id'),
+                    name: $(element).find('.category-name').text().trim(),
+                    order: orderNum++
+                });
+            });
+            const url = type === 'income' ? "{{ url_for('update_income_order') }}" : "{{ url_for('update_expense_order') }}";
+            $.ajax({
+                url: url,
+                method: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ order: order }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Update local arrays
+                        order.forEach(item => {
+                            const catArr = type === 'income' ? incomeCategories : expenseCategories;
+                            const catObj = catArr.find(c => String(c.id) === String(item.id));
+                            if (catObj) catObj.display_order = item.order;
+                        });
+                    }
+                },
+                error: function() {
+                    alert('Failed to save order.');
+                }
+            });
+        }
+
+        // ===================== RENAME CATEGORY (Edit Modal) =====================
+        (function() {
+            const editCategoryModal = document.getElementById('editCategoryModal');
+            const editCategoryInput = document.getElementById('editCategoryInput');
+            const confirmEditCategoryBtn = document.getElementById('confirmEditCategoryBtn');
+            const deleteFromEditCategoryBtn = document.getElementById('deleteFromEditCategoryBtn');
+            const hideCategoryBtn = document.getElementById('hideCategoryBtn');
+            let editingCategoryId = null;
+            let editingCategoryType = null;
+
+            // Open modal when rename button is clicked
+            document.addEventListener('click', function(e) {
+                const btn = e.target.closest('.rename-category-btn');
+                if (!btn) return;
+
+                editingCategoryId = btn.getAttribute('data-category-id');
+                editingCategoryType = btn.getAttribute('data-category-type');
+                const currentName = btn.getAttribute('data-category-name');
+
+                // For expense bud/credit_account, redirect
+                if (editingCategoryType === 'expense') {
+                    const catObj = expenseCategories.find(cat => String(cat.id) === String(editingCategoryId));
+                    if (catObj) {
+                        if (catObj.is_credit_account == 1) {
+                            window.location.href = '/credit_accounts';
+                            return;
+                        }
+                    }
+                }
+
+                editCategoryInput.value = currentName;
+                editCategoryModal.style.display = 'flex';
+                editCategoryInput.focus();
+                editCategoryInput.select();
+                isModalOpen = true;
+
+                // Set hide button icon
+                let catArr = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
+                let catObj = catArr.find(cat => String(cat.id) === String(editingCategoryId));
+                if (catObj && catObj.hidden == 1) {
+                    hideCategoryBtn.title = "Unhide Category";
+                    hideCategoryBtn.querySelector('i').classList.remove('fa-eye-slash');
+                    hideCategoryBtn.querySelector('i').classList.add('fa-eye');
+                } else {
+                    hideCategoryBtn.title = "Hide Category";
+                    hideCategoryBtn.querySelector('i').classList.remove('fa-eye');
+                    hideCategoryBtn.querySelector('i').classList.add('fa-eye-slash');
+                }
+
+
+            });
+
+            // Close modal
+            editCategoryModal.addEventListener('mousedown', function(e) {
+                if (e.target === editCategoryModal) {
+                    editCategoryModal.style.display = 'none';
+                    isModalOpen = false;
+                }
+            });
+            document.addEventListener('keydown', function(e) {
+                if (isModalOpen && e.key === 'Escape') {
+                    editCategoryModal.style.display = 'none';
+                    isModalOpen = false;
+                }
+            });
+
+            // Rename
+            confirmEditCategoryBtn.onclick = function() {
+                if (editingCategoryId && editCategoryInput.value.trim()) {
+                    const tableId = editingCategoryType === 'income' ? 'income-manage-table' : 'expense-manage-table';
+                    const row = document.querySelector(`#${tableId} tr[data-category-id='${editingCategoryId}']`);
+                    const categorySpan = row ? row.querySelector('.category-name') : null;
+                    if (categorySpan) categorySpan.textContent = editCategoryInput.value.trim();
+                    saveCategoryName(categorySpan, editingCategoryId, editingCategoryType);
+                    editCategoryModal.style.display = 'none';
+                    isModalOpen = false;
+                }
+            };
+            editCategoryInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') confirmEditCategoryBtn.click();
+            });
+
+            // Delete button
+            deleteFromEditCategoryBtn.onclick = function() {
+                if (editingCategoryId && editingCategoryType) {
+                    editCategoryModal.style.display = 'none';
+                    isModalOpen = false;
+                    openCategoryDeleteModal(editingCategoryId, editingCategoryType);
+                }
+            };
+
+            // Hide/unhide
+            hideCategoryBtn.onclick = function() {
+                if (!editingCategoryId || !editingCategoryType) return;
+                let catArr = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
+                const catObj = catArr.find(cat => String(cat.id) === String(editingCategoryId));
+                if (!catObj) return;
+
+                const newHidden = catObj.hidden == 1 ? 0 : 1;
+                const url = editingCategoryType === 'income' ? "/hide_income_category" : "/hide_expense_category";
+
+                $.ajax({
+                    url: url,
+                    method: "POST",
+                    data: { category_id: editingCategoryId, hidden: newHidden },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            catObj.hidden = newHidden;
+                            // Update button icon
+                            if (newHidden == 1) {
+                                hideCategoryBtn.title = "Unhide Category";
+                                hideCategoryBtn.querySelector('i').classList.remove('fa-eye-slash');
+                                hideCategoryBtn.querySelector('i').classList.add('fa-eye');
+                            } else {
+                                hideCategoryBtn.title = "Hide Category";
+                                hideCategoryBtn.querySelector('i').classList.remove('fa-eye');
+                                hideCategoryBtn.querySelector('i').classList.add('fa-eye-slash');
+                            }
+                            // Update row eye icon
+                            const tableId = editingCategoryType === 'income' ? 'income-manage-table' : 'expense-manage-table';
+                            const row = document.querySelector(`#${tableId} tr[data-category-id='${editingCategoryId}']`);
+                            if (row) {
+                                row.setAttribute('data-hidden', newHidden);
+                                const eyeIcon = row.querySelector('.manage-cat-eye-icon');
+                                if (eyeIcon) {
+                                    if (newHidden == 1) {
+                                        eyeIcon.classList.remove('fa-eye', 'visible-icon');
+                                        eyeIcon.classList.add('fa-eye-slash', 'hidden-icon');
+                                    } else {
+                                        eyeIcon.classList.remove('fa-eye-slash', 'hidden-icon');
+                                        eyeIcon.classList.add('fa-eye', 'visible-icon');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            };
+        })();
+
+        // ===================== SAVE CATEGORY NAME =====================
+        function saveCategoryName(categorySpan, categoryId, type) {
+            const newCategoryName = categorySpan ? categorySpan.textContent.trim() : '';
+            if (!newCategoryName || !categoryId) return;
+
+            const url = type === 'income' ? "/update_income_category" : "/update_expense_category";
+
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: { category_id: categoryId, new_name: newCategoryName },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        let catArr = type === 'income' ? incomeCategories : expenseCategories;
+                        const catObj = catArr.find(cat => String(cat.id) === String(categoryId));
+                        if (catObj) catObj.name = newCategoryName;
+
+                        // Rebuild the span with icon
+                        if (categorySpan) {
+                            const icon = categorySpan.querySelector('.category-icon');
+                            if (icon) icon.remove();
+                            let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
+                            if (catObj) {
+                                if (catObj.is_recurring == 1) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
+                                else if (type === 'expense' && catObj.is_credit_account == 1) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
+                                else if (catObj.is_auto_adjustment == 1) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
+                                else if (catObj.is_bud == 1) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                            }
+                            categorySpan.innerHTML = iconHtml + ' ' + newCategoryName;
+                        }
+
+                        // Update rename button data
+                        const tableId = type === 'income' ? 'income-manage-table' : 'expense-manage-table';
+                        const row = document.querySelector(`#${tableId} tr[data-category-id='${categoryId}']`);
+                        if (row) {
+                            const renameBtn = row.querySelector('.rename-category-btn');
+                            if (renameBtn) renameBtn.setAttribute('data-category-name', newCategoryName);
+                        }
+                    }
+                }
+            });
+        }
+
+        // ===================== DELETE CATEGORY =====================
+        let deleteCategoryId = null;
+        let deleteCategoryType = null;
+
+        function openCategoryDeleteModal(categoryId, categoryType) {
+            deleteCategoryId = categoryId;
+            deleteCategoryType = categoryType;
+            document.getElementById('deleteCategoryModal').style.display = 'flex';
+        }
+
+        document.getElementById('confirmDeleteCategory').addEventListener('click', function() {
+            if (!deleteCategoryId || !deleteCategoryType) return;
+            const url = deleteCategoryType === 'income' ? "{{ url_for('delete_income_category') }}" : "{{ url_for('delete_expense_category') }}";
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: { category_id: deleteCategoryId },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        location.reload();
+                    } else {
+                        alert('Failed to delete category.');
+                    }
+                },
+                error: function() {
+                    alert('An error occurred while deleting the category.');
+                }
+            });
+            document.getElementById('deleteCategoryModal').style.display = 'none';
+        });
+
+        document.getElementById('cancelDeleteCategory').addEventListener('click', function() {
+            document.getElementById('deleteCategoryModal').style.display = 'none';
+        });
+
+        // ===================== SORTABLE TABLES (Drag and Drop) =====================
+        $(function() {
+            // Income sortable
+            $("#income-manage-table tbody").sortable({
+                containment: "parent",
+                axis: "y",
+                scroll: true,
+                scrollSensitivity: 30,
+                scrollSpeed: 5,
+                items: "> tr:not([data-is-auto-adjustment='1'])",
+                handle: ".sort-handle",
+                helper: function(e, tr) {
+                    var $originals = tr.children();
+                    var $helper = tr.clone();
+                    $helper.children().each(function(index) {
+                        $(this).width($originals.eq(index).width());
+                    });
+                    $helper.css({ display: 'table', background: '#fff', 'z-index': 1000, margin: 0 });
+                    return $helper;
+                },
+                cursor: "move",
+                appendTo: document.body,
+                start: function(event, ui) {
+                    var mouseY = event.pageY;
+                    var offsetY = ui.helper.height() / 2;
+                    ui.helper.css({ position: 'absolute', top: mouseY - offsetY, left: event.pageX });
+                },
+                sort: function(event, ui) {
+                    var mouseY = event.pageY;
+                    var offsetY = ui.helper.height() / 2;
+                    ui.helper.css({ top: mouseY - offsetY, left: event.pageX });
+                },
+                stop: function() {
+                    saveNewOrder('income');
+                }
+            }).disableSelection();
+
+            // Expense sortable
+            $("#expense-manage-table tbody").sortable({
+                containment: "parent",
+                axis: "y",
+                scroll: true,
+                scrollSensitivity: 30,
+                scrollSpeed: 5,
+                items: "> tr:not([data-is-auto-adjustment='1']):not([data-is-credit-account='1'])",
+                handle: ".sort-handle",
+                helper: function(e, tr) {
+                    var $originals = tr.children();
+                    var $helper = tr.clone();
+                    $helper.children().each(function(index) {
+                        $(this).width($originals.eq(index).width());
+                    });
+                    $helper.css({ display: 'table', background: '#fff', 'z-index': 1000, margin: 0 });
+                    return $helper;
+                },
+                cursor: "move",
+                appendTo: document.body,
+                start: function(event, ui) {
+                    var mouseY = event.pageY;
+                    var offsetY = ui.helper.height() / 2;
+                    ui.helper.css({ position: 'absolute', top: mouseY - offsetY, left: event.pageX });
+                },
+                sort: function(event, ui) {
+                    var mouseY = event.pageY;
+                    var offsetY = ui.helper.height() / 2;
+                    ui.helper.css({ top: mouseY - offsetY, left: event.pageX });
+                },
+                stop: function() {
+                    saveNewOrder('expense');
+                }
+            }).disableSelection();
+        });
+
+
+    </script>
+</body>
+</html>
