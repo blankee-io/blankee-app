@@ -108,7 +108,7 @@
                                 <button class="edit-recurring-btn" onclick="openEditModal('{{ record.id }}')">
                                     <i class="fas fa-pencil-alt"></i>
                                 </button>
-                                <button class="delete-recurring-btn" onclick="openRecurringDeleteModal('{{ record.id }}', event)"><i class="fa-solid fa-xmark"></i></button>
+                                <button class="delete-recurring-btn" onclick="openRecurringDeleteModal('{{ record.id }}', event)"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>
                             </td>
                         </tr>
                         {% endfor %}
@@ -152,8 +152,12 @@
             <form id="add-recurring-ca-form">
                 <input type="hidden" id="ca-account-id" name="account_id">
 
-                <label for="category_name">New Category Name</label>
-                <input type="text" id="category_name" name="category_name" placeholder="Category" required>
+                <label for="ca-category-input">Category</label>
+                <div class="category-input-wrapper">
+                    <input type="text" class="category-input" id="ca-category-input" name="ca_category_name" placeholder="Search categories..." autocomplete="off" required>
+                    <input type="hidden" class="category-hidden" id="ca-category-id-hidden" name="category_id" value="">
+                    <div class="pending-transactions-category-dropdown"></div>
+                </div>
 
                 <div class="form-row">
                     <label for="wage-bill-select">Type:</label>
@@ -263,9 +267,11 @@
             <form id="edit-recurring-ca-form">
                 <input type="hidden" id="edit-recurring-id" name="recurring_id">  <!-- Hidden input for recurring ID -->
             
-                <!-- Update Category Name directly -->
+                <!-- Category Name (read-only, managed via expense categories) -->
                 <label for="edit-category-name">Category Name</label>
-                <input type="text" id="edit-category-name" name="category_name" required>
+                <input type="text" id="edit-category-name" name="category_name" readonly
+                    style="background-color: var(--input-disabled-bg, #f0f0f0); cursor: not-allowed; opacity: 0.7;"
+                    title="Category names are managed in Expenses. Rename there to update everywhere.">
 
                 <div class="form-row">
                     <label for="edit-wage-bill-select">Type:</label>
@@ -377,8 +383,8 @@
     <!-- Modal for delete confirmation -->
     <div id="deleteRecurringModal" class="category-delete-modal">
         <div class="category-delete-modal-content">
-            <h3>Are you sure you want to delete this recurring ca? Past entries for this category will be added to Uncategorized and future entries will be deleted.</h3>
-            <button id="confirmDeleteRecurring" class="confirm-delete-category-btn">Delete</button>
+            <h3>Stop this recurring expense? Future entries will be removed, but past entries will be kept. The category will remain as a regular (non-recurring) category.</h3>
+            <button id="confirmDeleteRecurring" class="confirm-delete-category-btn">Stop Recurring</button>
             <button id="cancelDeleteRecurring" class="cancel-delete-category-btn">Cancel</button>
         </div>
     </div>
@@ -391,6 +397,98 @@
 
     <script>
         document.getElementById('loading-screen').style.display = 'none';
+
+        // All CA expense categories for searchable dropdown
+        const allCACategories = {{ ca_categories_for_dropdown | tojson | safe }};
+
+        function showCACategoryDropdown(input, searchText, accountId) {
+            const wrapper = input.closest('.category-input-wrapper');
+            const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
+            const hiddenInput = wrapper.querySelector('.category-hidden');
+            // Filter: match account, exclude already-recurring, interest, bud
+            const categories = allCACategories.filter(cat =>
+                String(cat.account_id) === String(accountId) &&
+                cat.is_recurring != 1 &&
+                cat.is_interest != 1 &&
+                cat.is_bud != 1 &&
+                cat.name !== 'Uncategorized'
+            ).sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
+
+            dropdown.innerHTML = '';
+            const searchLower = searchText.toLowerCase().trim();
+
+            const matchingCategories = searchLower.length > 0
+                ? categories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+                : [];
+            const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+            const nonMatchingCategories = searchLower.length > 0
+                ? categories.filter(cat => !matchingIds.has(cat.id))
+                : categories;
+
+            // Search results
+            if (searchLower.length > 0 && matchingCategories.length > 0) {
+                dropdown.style.display = 'block';
+                matchingCategories.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                    div.className = 'pending-transactions-category-dropdown-item search-result';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+                if (nonMatchingCategories.length > 0) {
+                    const sep = document.createElement('div');
+                    sep.className = 'dropdown-separator';
+                    dropdown.appendChild(sep);
+                }
+            }
+
+            // All other categories
+            const catsToShow = searchLower.length > 0 ? nonMatchingCategories : categories;
+            if (catsToShow.length > 0) {
+                dropdown.style.display = 'block';
+                catsToShow.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.textContent = cat.name;
+                    div.className = 'pending-transactions-category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+            }
+
+            if (dropdown.children.length === 0) {
+                dropdown.style.display = 'none';
+            }
+        }
+
+        // Attach event listeners for CA category input
+        (function() {
+            const catInput = document.getElementById('ca-category-input');
+            if (catInput) {
+                catInput.addEventListener('input', function() {
+                    document.getElementById('ca-category-id-hidden').value = '';
+                    const accountId = document.getElementById('ca-account-id').value;
+                    showCACategoryDropdown(this, this.value, accountId);
+                });
+                catInput.addEventListener('focus', function() {
+                    const accountId = document.getElementById('ca-account-id').value;
+                    showCACategoryDropdown(this, '', accountId);
+                });
+                document.addEventListener('click', function(e) {
+                    if (!e.target.closest('.category-input-wrapper')) {
+                        document.querySelectorAll('.pending-transactions-category-dropdown').forEach(d => d.style.display = 'none');
+                    }
+                });
+            }
+        })();
+
         const currencyType = "{{ currency_type }}";
         const currencySymbols = { USD: "$", EUR: "€" };
         const currencySymbol = currencySymbols[currencyType] || currencyType;
@@ -453,7 +551,11 @@
             document.getElementById('no-end-date-checkbox').checked = false;
             document.getElementById('end_date').value = '';
             // Set the hidden input for account_id
-            $('#ca-account-id').val($(this).data('account-id'));
+            const accountId = $(this).data('account-id');
+            $('#ca-account-id').val(accountId);
+            // Clear category selection
+            document.getElementById('ca-category-input').value = '';
+            document.getElementById('ca-category-id-hidden').value = '';
         });
 
         // Close modals when clicking outside (desktop and mobile)
@@ -915,8 +1017,13 @@
 
 
             // Initialize the formData object
+            const selectedCategoryId = $('#ca-category-id-hidden').val();
+            if (!selectedCategoryId) {
+                alert('Please select a category from the dropdown.');
+                return false;
+            }
             const formData = {
-                category_name: $('#category_name').val(),
+                category_id: selectedCategoryId,
                 amount: $('#amount').val(),
                 cadence_interval: $('#cadence-interval').val(),
                 cadence_unit: $('#cadence-unit').val(),

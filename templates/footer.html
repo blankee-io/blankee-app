@@ -1143,28 +1143,42 @@
     });
 
     // Function to create a new credit account category from footer modal
+    // NOTE: Creates an expense_category which auto-syncs to all credit accounts
     function createFooterCaCategory(categoryName) {
         const accountId = document.getElementById('footer-ca-account').value;
         
         if (!categoryName || categoryName.trim().length === 0 || !accountId) return;
         
         $.ajax({
-            url: "{{ url_for('add_ca_category') }}",
+            url: "{{ url_for('add_expense_category') }}",
             method: "POST",
             data: { 
-                name: categoryName.trim(),
-                account_id: accountId
+                name: categoryName.trim()
             },
             success: function(response) {
                 if (response.status === 'success') {
                     // Set flag that new category was created
                     newCategoryCreated = true;
                     
-                    // Add to c_expense_categories array
+                    // Get the c_expense_category_id for this specific account
+                    let cExpenseCategoryId = response.new_category_id;
+                    if (response.c_expense_categories && response.c_expense_categories[accountId]) {
+                        cExpenseCategoryId = response.c_expense_categories[accountId];
+                    }
+                    
+                    // Add to c_expense_categories array with the correct c_expense_category ID
                     c_expense_categories.push({ 
-                        id: response.new_category_id, 
+                        id: cExpenseCategoryId, 
                         name: categoryName.trim(),
                         account_id: parseInt(accountId),
+                        hidden: false,
+                        is_bud: false
+                    });
+                    
+                    // Also add to expense_categories since they're synced
+                    expense_categories.push({
+                        id: response.new_category_id,
+                        name: categoryName.trim(),
                         hidden: false,
                         is_bud: false
                     });
@@ -1175,7 +1189,7 @@
                     
                     // Then update the input and hidden field with the new category
                     footerCaCategoryInput.value = categoryName.trim();
-                    footerCaCategoryHidden.value = response.new_category_id;
+                    footerCaCategoryHidden.value = cExpenseCategoryId;
                     footerCaDropdown.style.display = 'none';
                 } else {
                     alert('Failed to create category');
