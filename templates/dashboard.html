@@ -97,19 +97,32 @@
                     <!-- JavaScript will populate the year options dynamically -->
                 </select>
             </div>
-                <div class="category-btn-container income" id="income-category-btn-container">
-                    <button class="toggle-hidden-btn income" id="toggle-income-hidden-btn">
+                <div class="category-btn-container unified" id="unified-category-btn-container">
+                    <button class="toggle-hidden-btn unified" id="toggle-all-hidden-btn">
                         <i class="fa-solid fa-eye-slash"></i>
-                        <span id="income-hidden-count" class="hidden-count-bubble"></span>
-                        <span class="nav-tooltip">Toggle Hidden Income Categories</span>
+                        <span id="all-hidden-count" class="hidden-count-bubble"></span>
+                        <span class="nav-tooltip">Toggle Hidden Categories</span>
                     </button>
-                    <button class="add-recurring-btn income" id="recurring-income-btn"><i class="fa-solid fa-arrows-repeat"></i><span class="nav-tooltip">Add Recurring Income Category</span></button>
-                    <!-- Button to add a new income category -->
-                    <button class="add-category-btn income" id="add-income-btn" onclick="toggleCategoryInput('income')"><i class="fa-solid fa-folder-plus"></i><span class="nav-tooltip">Add Income Category</span></button>
-                    <!-- Edit button for income categories -->
-                    <button class="edit-category-btn income" id="edit-income-btn" onclick="toggleEditMode('income')">
+                    <div class="type-selector-wrapper">
+                        <button class="add-recurring-btn unified" id="unified-recurring-btn"><i class="fa-solid fa-arrows-repeat"></i><span class="nav-tooltip">Add Recurring</span></button>
+                        <div class="type-selector-popover" id="recurring-type-selector" style="display:none;">
+                            <div class="type-selector-option" data-type="income"><i class="fa-solid fa-plus" style="color:#2AAAA8;"></i> Income</div>
+                            <div class="type-selector-option" data-type="expense"><i class="fa-solid fa-minus" style="color:#E45F1C;"></i> Expense</div>
+                            {% for account in credit_accounts %}
+                            <div class="type-selector-option" data-type="ca" data-account-id="{{ account.id }}" data-account-name="{{ account.name }}"><i class="fa-solid fa-credit-card" style="color:#575757;"></i> {{ account.name }}</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="type-selector-wrapper">
+                        <button class="add-category-btn unified" id="unified-add-btn"><i class="fa-solid fa-folder-plus"></i><span class="nav-tooltip">Add Category</span></button>
+                        <div class="type-selector-popover" id="add-type-selector" style="display:none;">
+                            <div class="type-selector-option" data-type="income"><i class="fa-solid fa-plus" style="color:#2AAAA8;"></i> Income</div>
+                            <div class="type-selector-option" data-type="expense"><i class="fa-solid fa-minus" style="color:#E45F1C;"></i> Expense</div>
+                        </div>
+                    </div>
+                    <button class="edit-category-btn unified" id="unified-edit-btn">
                         <i class="fa-solid fa-gear"></i>
-                        <span class="nav-tooltip">Edit Income Categories</span>
+                        <span class="nav-tooltip">Toggle Category Editing</span>
                     </button>
                 </div>
                 <!-- Table for displaying income categories -->
@@ -161,21 +174,6 @@
                     </tbody>
                 </table>
 
-                <div class="category-btn-container expense" id="expense-category-btn-container">
-                    <button class="toggle-hidden-btn expense" id="toggle-expense-hidden-btn">
-                        <i class="fa-solid fa-eye-slash"></i>
-                        <span id="expense-hidden-count" class="hidden-count-bubble"></span>
-                        <span class="nav-tooltip">Toggle Hidden Expense Categories</span>
-                    </button>
-                    <button class="add-recurring-btn expense" id="recurring-expense-btn"><i class="fa-solid fa-arrows-repeat"></i><span class="nav-tooltip">Add Recurring Expense Category</span></button>
-                    <!-- Button to add a new expense category -->
-                    <button class="add-category-btn expense" id="add-expense-btn" onclick="toggleCategoryInput('expense')"><i class="fa-solid fa-folder-plus"></i><span class="nav-tooltip">Add Expense Category</span></button>
-                    <!-- Edit button for expense categories -->
-                    <button class="edit-category-btn expense" id="edit-expense-btn" onclick="toggleEditMode('expense')">
-                        <i class="fa-solid fa-gear"></i>
-                        <span class="nav-tooltip">Edit Expense Categories</span>
-                    </button>
-                </div>
 
                 <!-- Table for displaying expense categories -->
                 <table id="expense-categories-table">
@@ -232,32 +230,6 @@
 
                 <!-- Table for displaying Credit Accounts categories -->
                 {% for account in credit_accounts %}
-                    <div class="category-btn-container ca" id="ca-category-btn-container" data-account-id="{{ account.id }}">
-                        <button class="toggle-hidden-btn ca" id="toggle-ca-hidden-btn-{{ account.id }}">
-                            <i class="fa-solid fa-eye-slash"></i>
-                            <span id="ca-hidden-count-{{ account.id }}" class="hidden-count-bubble"></span>
-                            <span class="nav-tooltip">Toggle Hidden {{ account.name }} Categories</span>
-                        </button>
-                        <button
-                            class="add-recurring-btn ca"
-                            data-account-id="{{ account.id }}"
-                            data-account-name="{{ account.name }}"
-                            type="button"
-                        >
-                            <i class="fa-solid fa-arrows-repeat"></i>
-                            <span class="nav-tooltip">Add Recurring Credit Account Category</span>
-                        </button>
-                        <!-- Button to add a new ca category -->
-                        <button class="add-category-btn ca" id="add-ca-btn-{{ account.id }}" onclick="toggleCategoryInput('ca', {{ account.id }})">
-                            <i class="fa-solid fa-folder-plus"></i>
-                            <span class="nav-tooltip">Add Credit Account Category</span>
-                        </button>
-                        <!-- Edit button for ca categories -->
-                        <button class="edit-category-btn ca" id="edit-ca-btn-{{ account.id }}" onclick="toggleEditMode('ca', {{ account.id }})">
-                            <i class="fa-solid fa-gear"></i>
-                            <span class="nav-tooltip">Edit Credit Account Categories</span>
-                        </button>
-                    </div>
 
                     <table class="ca-categories-table" id="ca-categories-table-{{ account.id }}">
                         <thead>
@@ -475,6 +447,113 @@
             <button id="confirmEditCategoryBtn" class="confirm-edit-category-btn">Rename</button>
             <button id="hideCategoryBtn" class="hide-category-btn" title="Hide Category"><i class="fa-solid fa-eye-slash"></i></button>
             <button id="deleteFromEditCategoryBtn" class="delete-from-edit-category-btn"><i class="fa-solid fa-trash"></i></button>
+        </div>
+    </div>
+
+    <!-- Modal for converting a category to recurring -->
+    <div id="convertToRecurringModal" class="modal">
+        <div class="convert-recurring-form-container">
+            <h2>Convert to Recurring</h2>
+            <form id="convert-to-recurring-form">
+                <label>Category</label>
+                <input type="text" id="convert-category-name" readonly class="convert-category-name-input" />
+
+                <div class="form-row">
+                    <label for="convert-wage-bill-select">Type:</label>
+                    <select id="convert-wage-bill-select" name="wage_bill">
+                        <option value="1" id="convert-wage-bill-option-1">Bill (fixed expense)</option>
+                        <option value="0" id="convert-wage-bill-option-0">Allowance (flexible spending)</option>
+                    </select>
+                </div>
+
+                <label for="convert-amount">Recurring Amount</label>
+                <div class="currency-input-container">
+                    <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                    <input type="number" class="recurring-amount" id="convert-amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
+                </div>
+
+                <label for="convert-cadence-interval">Repeat Every</label>
+                <div class="cadence-row">
+                    <input type="number" id="convert-cadence-interval" name="cadence_interval" placeholder="1" step="1" min="1" required>
+                    <select id="convert-cadence-unit" name="cadence_unit" required>
+                        <option value="days">Day(s)</option>
+                        <option value="weeks">Week(s)</option>
+                        <option value="months">Month(s)</option>
+                        <option value="years">Year(s)</option>
+                    </select>
+                </div>
+
+                <div id="convert-weekly-options" style="display:none;">
+                    <label>Repeat on:</label>
+                    <div class="weekday"><input type="checkbox" name="convert_weekdays" value="monday"> Mo</div>
+                    <div class="weekday"><input type="checkbox" name="convert_weekdays" value="tuesday"> Tu</div>
+                    <div class="weekday"><input type="checkbox" name="convert_weekdays" value="wednesday"> We</div>
+                    <div class="weekday"><input type="checkbox" name="convert_weekdays" value="thursday"> Th</div>
+                    <div class="weekday"><input type="checkbox" name="convert_weekdays" value="friday"> Fr</div>
+                    <div class="weekday"><input type="checkbox" name="convert_weekdays" value="saturday"> Sa</div>
+                    <div class="weekday"><input type="checkbox" name="convert_weekdays" value="sunday"> Su</div>
+                </div>
+
+                <div id="convert-monthly-options" style="display:none;">
+                    <label>Days of the month:</label>
+                    <div id="convert-monthly-day-container"></div>
+                    <button type="button" id="convert-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
+                </div>
+
+                <div id="convert-yearly-options" style="display:none;">
+                    <label for="convert-yearly-day">Day of the year:</label>
+                    <input type="number" id="convert-yearly-day" name="yearly_day" min="1" max="31">
+                    <label for="convert-yearly-month">Month of the year:</label>
+                    <select id="convert-yearly-month" name="yearly_month">
+                        <option value="1">January</option>
+                        <option value="2">February</option>
+                        <option value="3">March</option>
+                        <option value="4">April</option>
+                        <option value="5">May</option>
+                        <option value="6">June</option>
+                        <option value="7">July</option>
+                        <option value="8">August</option>
+                        <option value="9">September</option>
+                        <option value="10">October</option>
+                        <option value="11">November</option>
+                        <option value="12">December</option>
+                    </select>
+                </div>
+
+                <div class="date-row">
+                    <div class="date-label-row">
+                        <label for="convert-start-date">Start Date</label>
+                        <label for="convert-end-date">End Date</label>
+                    </div>
+                    <div class="date-input-row">
+                        <input type="date" id="convert-start-date" name="start_date" required>
+                        <input type="date" id="convert-end-date" name="end_date" required>
+                    </div>
+                    <div class="date-checkbox-row">
+                        <span class="date-checkbox-label">Or</span>
+                        <input type="checkbox" id="convert-no-end-date-checkbox">
+                        <label for="convert-no-end-date-checkbox">No End Date</label>
+                    </div>
+                    <div class="date-checkbox-row">
+                        <span class="date-checkbox-label">Or</span>
+                        <input type="checkbox" id="convert-use-occurrences-checkbox">
+                        <label for="convert-use-occurrences-checkbox">Repeat this many times:</label>
+                        <input type="number" id="convert-occurrences-count" name="occurrences_count" min="1" style="width:60px;" disabled>
+                    </div>
+                </div>
+
+                <br>
+                <button type="submit">Submit</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for stopping recurring (confirm) -->
+    <div id="stopRecurringModal" class="category-delete-modal">
+        <div class="category-delete-modal-content">
+            <h3>Stop recurring? Future entries will be removed, but past entries will be kept.</h3>
+            <button id="confirmStopRecurring" class="confirm-delete-category-btn">Stop Recurring</button>
+            <button id="cancelStopRecurring" class="cancel-delete-category-btn">Cancel</button>
         </div>
     </div>
 
@@ -1644,8 +1723,9 @@
 
                 caTableBody.innerHTML = ''; // Clear previous rows
 
-                // Get all categories for this account
+                // Get all categories for this account, sorted by display_order
                 const caCategories = c_expense_categories.filter(cat => String(cat.account_id) === String(accountId));
+                caCategories.sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
                 caCategories.forEach(category => {
                     // --- Skip "Starting Balance" category ---
                     if (category.name === "Starting Balance") return;
@@ -1824,18 +1904,15 @@
         }
 
         function toggleEditButtonIcon(type, isEditMode, accountId = null) {
-            let button, icon;
-            if (type === 'income') {
-                button = document.getElementById('edit-income-btn');
-            } else if (type === 'expense') {
-                button = document.getElementById('edit-expense-btn');
-            } else if (type === 'ca' && accountId) {
-                button = document.getElementById(`edit-ca-btn-${accountId}`);
-            }
+            // With unified button, update the single edit button icon
+            // Show X if ANY type is in edit mode, gear if none are
+            const anyEditMode = isIncomeEditMode || isExpenseEditMode || 
+                (window.isCaEditMode && Object.values(window.isCaEditMode).some(v => v));
+            const button = document.getElementById('unified-edit-btn');
             if (!button) return;
-            icon = button.querySelector('i');
+            const icon = button.querySelector('i');
             if (!icon) return;
-            if (isEditMode) {
+            if (anyEditMode) {
                 icon.classList.remove('fa-gear');
                 icon.classList.add('fa-times');
             } else {
@@ -1877,8 +1954,7 @@
                 }
             });
 
-            // Change edit button style
-            document.getElementById('edit-income-btn').classList.add('active');
+            // Change edit button style (unified button handles icon via toggleEditButtonIcon)
         }
 
 
@@ -1907,8 +1983,7 @@
                 handle.remove(); // Remove the sort icon
             });
 
-            // Revert edit button style
-            document.getElementById('edit-income-btn').classList.remove('active');
+            // Revert edit button style (unified button handles icon via toggleEditButtonIcon)
         }
 
         function enableExpenseEditMode() {
@@ -1944,8 +2019,7 @@
                 }
             });
 
-            // Change edit button style
-            document.getElementById('edit-expense-btn').classList.add('active');
+            // Change edit button style (unified)
         }
 
         function disableExpenseEditMode() {
@@ -1972,40 +2046,27 @@
                 handle.remove(); // Remove the sort icon
             });
 
-            // Revert edit button style
-            document.getElementById('edit-expense-btn').classList.remove('active');
+            // Revert edit button style (unified)
         }
 
         function enableCaEditMode(accountId) {
-            $(`#ca-categories-table-${accountId} tbody`).sortable("enable");
+            // CA categories are NOT drag-and-drop reorderable (order syncs from expense categories)
             document.querySelectorAll(`#ca-categories-table-${accountId} tr[data-category-id]`).forEach(row => {
-                // Only show buttons and sort handle if not interest and not auto adjustment
+                // Only show rename button if not interest and not auto adjustment
                 if (row.getAttribute('data-is-interest') === '0' && row.getAttribute('data-is-auto-adjustment') !== '1') {
                     const renameBtn = row.querySelector('.rename-category-btn.ca');
                     if (renameBtn) renameBtn.style.display = 'inline-block';
-                    const cell = row.querySelector('.category-cell');
-                    if (cell && !cell.querySelector('.sort-handle')) {
-                        const sortIcon = document.createElement('span');
-                        sortIcon.classList.add('sort-handle');
-                        sortIcon.innerHTML = '<i class="fa fa-bars"></i>';
-                        cell.prepend(sortIcon);
-                    }
                 }
             });
-            const editBtn = document.getElementById(`edit-ca-btn-${accountId}`);
-            if (editBtn) editBtn.classList.add('active');
+            // Edit button style handled by unified toggleEditButtonIcon
         }
 
         function disableCaEditMode(accountId) {
-            $(`#ca-categories-table-${accountId} tbody`).sortable("disable");
+            // CA categories are NOT drag-and-drop reorderable (order syncs from expense categories)
             document.querySelectorAll(`#ca-categories-table-${accountId} .rename-category-btn.ca`).forEach(btn => {
                 btn.style.display = 'none';
             });
-            document.querySelectorAll(`#ca-categories-table-${accountId} .sort-handle`).forEach(handle => {
-                handle.remove();
-            });
-            const editBtn = document.querySelector(`#edit-ca-btn`);
-            if (editBtn) editBtn.classList.remove('active');
+            // Edit button style handled by unified toggleEditButtonIcon
         }
 
         function showDeleteButtons(type, accountId = null) {
@@ -2797,13 +2858,7 @@
                 data: { id: categoryId },
                 success: function(response) {
                     if (response.status === 'success') {
-                        const row = document.querySelector(`#income-categories-table tbody tr[data-category-id="${categoryId}"]`);
-                        if (row) row.remove();
-                        const monthRow = document.querySelector(`#income-table tr[data-category-id="${categoryId}"]`);
-                        if (monthRow) monthRow.remove();
-                        // Remove from local data array
-                        incomeCategories = incomeCategories.filter(cat => String(cat.id) !== String(categoryId));
-                        saveDailyTotalsAndRemainders();
+                        // Always reload — handles both delete and convert-to-nonrecurring
                         location.reload();
                     } else {
                     }
@@ -2822,13 +2877,7 @@
                 data: { id: categoryId },
                 success: function(response) {
                     if (response.status === 'success') {
-                        const row = document.querySelector(`#expense-categories-table tbody tr[data-category-id="${categoryId}"]`);
-                        if (row) row.remove();
-                        const monthRow = document.querySelector(`#expenses-table tr[data-category-id="${categoryId}"]`);
-                        if (monthRow) monthRow.remove();
-                        // Remove from local data array
-                        expenseCategories = expenseCategories.filter(cat => String(cat.id) !== String(categoryId));
-                        saveDailyTotalsAndRemainders();
+                        // Always reload — handles both delete and convert-to-nonrecurring
                         location.reload();
                     } else {
                     }
@@ -2846,12 +2895,7 @@
                 data: { id: categoryId },
                 success: function(response) {
                     if (response.status === 'success') {
-                        // Remove from sidebar and month view
-                        document.querySelectorAll(`.ca-categories-table tr[data-category-id="${categoryId}"]`).forEach(row => row.remove());
-                        document.querySelectorAll(`tr[data-category-id="${categoryId}"]`).forEach(row => row.remove());
-                        // Remove from local data array
-                        c_expense_categories = c_expense_categories.filter(cat => String(cat.id) !== String(categoryId));
-                        saveCaDailyBalance();
+                        // Always reload — handles convert-to-nonrecurring
                         location.reload();
                     } else {
                     }
@@ -2862,7 +2906,6 @@
         }
 
         function openCategoryDeleteModal(categoryId, categoryType, event) {
-
 
             // Stop the event propagation to prevent it from affecting other click handlers
             if (event) {
@@ -3318,27 +3361,21 @@
 
         // Function to toggle the visibility of the new category modal
         function toggleCategoryInput(type, accountId = null) {
-            let inputContainer, otherContainer, inputButton, otherButton, inputField, overlay;
+            let inputContainer, otherContainer, inputField, overlay;
 
+            const unifiedAddBtn = document.getElementById('unified-add-btn');
             if (type === 'income') {
                 inputContainer = document.getElementById('income-category-input-container');
                 otherContainer = document.getElementById('expense-category-input-container');
-                inputButton = document.querySelector('.add-category-btn.income');
-                otherButton = document.querySelector('.add-category-btn.expense');
                 inputField = document.getElementById('new-income-category');
             } else if (type === 'expense') {
                 inputContainer = document.getElementById('expense-category-input-container');
                 otherContainer = document.getElementById('income-category-input-container');
-                inputButton = document.querySelector('.add-category-btn.expense');
-                otherButton = document.querySelector('.add-category-btn.income');
                 inputField = document.getElementById('new-expense-category');
             } else if (type === 'ca') {
                 inputContainer = document.getElementById('ca-category-input-container');
-                otherContainer = null; // CA does not hide income/expense popups
-                inputButton = accountId ? document.getElementById(`add-ca-btn-${accountId}`) : document.querySelector('.add-category-btn.ca');
-                otherButton = null;
+                otherContainer = null;
                 inputField = document.getElementById('new-ca-category');
-                // Store the accountId for later use in addCaCategory
                 if (inputContainer && accountId) {
                     inputContainer.dataset.accountId = accountId;
                 }
@@ -3348,18 +3385,17 @@
             // Hide the other popup if open (only for income/expense)
             if (otherContainer && otherContainer.style.display === 'flex') {
                 otherContainer.style.display = 'none';
-                if (otherButton) otherButton.disabled = false;
             }
 
             // Toggle visibility of the popup and overlay
             if (inputContainer && inputContainer.style.display === 'flex') {
                 inputContainer.style.display = 'none';
-                if (inputButton) inputButton.disabled = false;
+                if (unifiedAddBtn) unifiedAddBtn.disabled = false;
                 if (overlay) overlay.style.display = 'none';
                 document.removeEventListener('mousedown', closeInputOnClickOutside);
             } else if (inputContainer) {
                 inputContainer.style.display = 'flex';
-                if (inputButton) inputButton.disabled = true;
+                if (unifiedAddBtn) unifiedAddBtn.disabled = true;
                 if (overlay) overlay.style.display = 'block';
                 if (inputField) inputField.focus();
                 document.addEventListener('mousedown', closeInputOnClickOutside);
@@ -3371,31 +3407,22 @@
             const incomeContainer = document.getElementById('income-category-input-container');
             const expenseContainer = document.getElementById('expense-category-input-container');
             const caContainer = document.getElementById('ca-category-input-container');
-            const incomeButton = document.querySelector('.add-category-btn.income');
-            const expenseButton = document.querySelector('.add-category-btn.expense');
+            const unifiedAddBtn = document.getElementById('unified-add-btn');
             const overlay = document.getElementById('category-input-overlay');
 
-            // CA: Find the correct button for the open modal
-            let caButton = null;
-            if (caContainer && caContainer.dataset.accountId) {
-                caButton = document.getElementById(`add-ca-btn-${caContainer.dataset.accountId}`);
-            } else {
-                caButton = document.querySelector('.add-category-btn.ca');
-            }
-
-            if (incomeContainer && incomeContainer.style.display === 'flex' && !incomeContainer.contains(event.target) && !incomeButton.contains(event.target)) {
+            if (incomeContainer && incomeContainer.style.display === 'flex' && !incomeContainer.contains(event.target) && (!unifiedAddBtn || !unifiedAddBtn.contains(event.target))) {
                 incomeContainer.style.display = 'none';
-                incomeButton.disabled = false;
+                if (unifiedAddBtn) unifiedAddBtn.disabled = false;
                 if (overlay) overlay.style.display = 'none';
             }
-            if (expenseContainer && expenseContainer.style.display === 'flex' && !expenseContainer.contains(event.target) && !expenseButton.contains(event.target)) {
+            if (expenseContainer && expenseContainer.style.display === 'flex' && !expenseContainer.contains(event.target) && (!unifiedAddBtn || !unifiedAddBtn.contains(event.target))) {
                 expenseContainer.style.display = 'none';
-                expenseButton.disabled = false;
+                if (unifiedAddBtn) unifiedAddBtn.disabled = false;
                 if (overlay) overlay.style.display = 'none';
             }
-            if (caContainer && caContainer.style.display === 'flex' && !caContainer.contains(event.target) && !caButton.contains(event.target)) {
+            if (caContainer && caContainer.style.display === 'flex' && !caContainer.contains(event.target) && (!unifiedAddBtn || !unifiedAddBtn.contains(event.target))) {
                 caContainer.style.display = 'none';
-                caButton.disabled = false;
+                if (unifiedAddBtn) unifiedAddBtn.disabled = false;
                 if (overlay) overlay.style.display = 'none';
             }
             if (
@@ -3554,8 +3581,6 @@
                 return;
             }
 
-            $("#ca-categories-table-" + accountId + " tbody").sortable("disable");
-
             $.ajax({
                 url: "/add_expense_category",
                 method: "POST",
@@ -3612,7 +3637,6 @@
                     }
                 },
                 error: function() {
-                    $("#ca-categories-table-" + accountId + " tbody").sortable("enable");
                 }
             });
         }
@@ -3622,11 +3646,7 @@
             // Refresh income and expense tables
             $("#income-categories-table tbody").sortable("refresh");
             $("#expense-categories-table tbody").sortable("refresh");
-
-            // Refresh all CA categories tables
-            document.querySelectorAll('table[id^="ca-categories-table-"] tbody').forEach(tbody => {
-                $(`#${tbody.parentElement.id} tbody`).sortable("refresh");
-            });
+            // CA categories are NOT sortable (order syncs from expense categories)
         }
 
         // Function to attach editing and sorting listeners to a new row
@@ -3731,6 +3751,12 @@
 
         function saveCategoryName(categorySpan, categoryId, type) {
             const newCategoryName = categorySpan ? categorySpan.textContent.trim() : editCategoryInput.value.trim();
+            // Capture old name before rename for syncing to CA categories
+            let oldCategoryName = null;
+            if (type === 'expense') {
+                const expCat = expenseCategories.find(cat => String(cat.id) === String(categoryId));
+                if (expCat) oldCategoryName = expCat.name;
+            }
             if (newCategoryName && categoryId) {
                 let url;
                 if (type === 'income') {
@@ -3792,6 +3818,31 @@
                                 // Insert icon and a space after it before the name
                                 categorySpan.innerHTML = iconHtml + ' ' + newCategoryName;
                             }
+
+                            // Sync rename to CA categories in the UI (expense → c_expense)
+                            if (type === 'expense' && oldCategoryName && oldCategoryName !== newCategoryName) {
+                                c_expense_categories.forEach(caCat => {
+                                    if (caCat.name === oldCategoryName && !caCat.is_interest && !caCat.is_auto_adjustment) {
+                                        caCat.name = newCategoryName;
+                                        // Update sidebar span
+                                        const caTable = document.getElementById(`ca-categories-table-${caCat.account_id}`);
+                                        if (caTable) {
+                                            const row = caTable.querySelector(`tr[data-category-id="${caCat.id}"]`);
+                                            if (row) {
+                                                const nameSpan = row.querySelector('.category-name');
+                                                if (nameSpan) {
+                                                    const existingIcon = nameSpan.querySelector('.category-icon');
+                                                    const iconHtml = existingIcon ? existingIcon.outerHTML : '<i class="fa-regular fa-folder category-icon"></i>';
+                                                    nameSpan.innerHTML = iconHtml + ' ' + newCategoryName;
+                                                }
+                                                // Update rename button data attribute
+                                                const renameBtn = row.querySelector('.rename-category-btn.ca');
+                                                if (renameBtn) renameBtn.setAttribute('data-category-name', newCategoryName);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
                         } else {
                         }
                     },
@@ -3842,6 +3893,28 @@
                 data: JSON.stringify({ order: order, account_id: accountId }),
                 success: function(response) {
                     if (response.status === 'success') {
+                        // If expense order changed, sync display_order to c_expense_categories and re-sort CA sidebar
+                        if (type === 'expense') {
+                            order.forEach(item => {
+                                c_expense_categories.forEach(cCat => {
+                                    if (cCat.name === item.name && !cCat.is_interest && !cCat.is_auto_adjustment) {
+                                        cCat.display_order = item.order;
+                                    }
+                                });
+                            });
+                            // Re-sort sidebar CA rows by display_order
+                            document.querySelectorAll('table[id^="ca-categories-table-"] tbody').forEach(tbody => {
+                                const rows = Array.from(tbody.querySelectorAll('tr[data-category-id]'));
+                                const totalRow = tbody.querySelector('.ca-total-row');
+                                rows.sort((a, b) => {
+                                    const catA = c_expense_categories.find(c => String(c.id) === a.getAttribute('data-category-id'));
+                                    const catB = c_expense_categories.find(c => String(c.id) === b.getAttribute('data-category-id'));
+                                    return ((catB ? catB.display_order : 0) || 0) - ((catA ? catA.display_order : 0) || 0);
+                                });
+                                rows.forEach(row => tbody.appendChild(row));
+                                if (totalRow) tbody.appendChild(totalRow);
+                            });
+                        }
                         updateView();
                     } else {
                     }
@@ -4559,108 +4632,45 @@
                 }
             }).disableSelection();
 
-            document.querySelectorAll('table[id^="ca-categories-table-"] tbody').forEach(tbody => {
-                $(`#${tbody.parentElement.id} tbody`).sortable({
-                    containment: "parent",
-                    axis: "y",
-                    scroll: true,
-                    scrollSensitivity: 30,
-                    scrollSpeed: 5,
-                    items: "> tr:not(.ca-total-row):not([data-is-interest='1']):not([data-is-auto-adjustment='1'])",
-                    handle: ".sort-handle",
-                    helper: function(e, tr) {
-                        var $originals = tr.children();
-                        var $helper = tr.clone();
-                        $helper.children().each(function(index) {
-                            $(this).width($originals.eq(index).width());
-                        });
-                        $helper.css({
-                            display: 'table',
-                            'background': '#fff',
-                            'z-index': 1000,
-                            'margin': 0,
-                            'top': 0,
-                            'transform': 'translateY(0)'
-                        });
-                        return $helper;
-                    },
-                    cursor: "move",
-                    appendTo: document.body,
-                    start: function(event, ui) {
-                        disableCategoryEditing();
-                        isCategorySortActive = true;
-                        var mouseY = event.pageY;
-                        var offsetY = ui.helper.height() / 2;
-                        ui.helper.css({
-                            position: 'absolute',
-                            top: mouseY - offsetY,
-                            left: event.pageX
-                        });
-                    },
-                    sort: function(event, ui) {
-                        var mouseY = event.pageY;
-                        var offsetY = ui.helper.height() / 2;
-                        ui.helper.css({
-                            top: mouseY - offsetY,
-                            left: event.pageX
-                        });
-                    },
-                    stop: function(event, ui) {
-                        const accountId = $(this).closest('table').attr('id').replace('ca-categories-table-', '');
-                        saveNewOrder('ca', accountId);
-                        isCategorySortActive = false;
-                        if (window.isCaEditMode && window.isCaEditMode[accountId]) {
-                            showDeleteButtons('ca', accountId);
-                            enableCategoryEditing('ca', accountId);
-                        }
-                    }
-                }).disableSelection();
-            });
+            // CA categories are NOT drag-and-drop reorderable (order syncs from expense categories)
 
             $(document).on('click', function(event) {
-                const isIncomeTableClicked =
+                const isAnyCategoryTableClicked =
                     $(event.target).closest('#income-categories-table').length > 0 ||
-                    $(event.target).closest('#income-category-btn-container').length > 0;
-                const isExpenseTableClicked =
                     $(event.target).closest('#expense-categories-table').length > 0 ||
-                    $(event.target).closest('#expense-category-btn-container').length > 0;
+                    $(event.target).closest('#unified-category-btn-container').length > 0;
                 const isDeleteModalClicked = $(event.target).closest('#deleteCategoryModal').length > 0;
 
-                // CA: Check if click is inside any CA table or its button container
+                // CA: Check if click is inside any CA table
                 let isCaTableClicked = false;
                 document.querySelectorAll('.ca-categories-table').forEach(table => {
                     if ($(event.target).closest(`#${table.id}`).length > 0) {
                         isCaTableClicked = true;
                     }
                 });
-                document.querySelectorAll('.category-btn-container.ca').forEach(container => {
-                    if ($(event.target).closest(container).length > 0) {
-                        isCaTableClicked = true;
-                    }
-                });
+
+                const isAnyTableClicked = isAnyCategoryTableClicked || isCaTableClicked;
 
                 // If the modal is open, and the click is inside the modal, ignore this click
                 if (isModalOpen && isDeleteModalClicked) {
                     return;
                 }
 
-                // Income
-                if (!isIncomeTableClicked && isIncomeEditMode && !isModalOpen) {
-                    toggleEditMode('income');
-                }
-
-                // Expense
-                if (!isExpenseTableClicked && isExpenseEditMode && !isModalOpen) {
-                    toggleEditMode('expense');
-                }
-
-                // CA: Close edit mode for all active CA accounts
-                if (!isCaTableClicked && window.isCaEditMode && !isModalOpen) {
-                    Object.keys(window.isCaEditMode).forEach(accountId => {
-                        if (window.isCaEditMode[accountId]) {
-                            toggleEditMode('ca', accountId);
-                        }
-                    });
+                // Close ALL edit modes if click is outside any category table
+                if (!isAnyTableClicked && !isModalOpen) {
+                    if (isIncomeEditMode) {
+                        toggleEditMode('income');
+                    }
+                    if (isExpenseEditMode) {
+                        toggleEditMode('expense');
+                    }
+                    if (window.isCaEditMode) {
+                        Object.keys(window.isCaEditMode).forEach(accountId => {
+                            if (window.isCaEditMode[accountId]) {
+                                toggleEditMode('ca', accountId);
+                            }
+                        });
+                    }
                 }
             });
 
@@ -5354,7 +5364,7 @@
                     editingCategoryType = btn.getAttribute('data-category-type');
                     const currentName = btn.getAttribute('data-category-name');
 
-                    // Expense: Go to Buds if is_bud=1, Recurring Expense if is_recurring=1, Credit Accounts if is_credit_account=1
+                    // Expense: Go to Buds if is_bud=1, Credit Accounts if is_credit_account=1
                     if (editingCategoryType === 'expense') {
                         const catObj = expenseCategories.find(cat => String(cat.id) === String(editingCategoryId));
                         if (catObj) {
@@ -5365,40 +5375,16 @@
                                     return;
                                 }
                             }
-                            if (catObj.is_recurring == 1) {
-                                window.location.href = `/recurring-expense`;
-                                return;
-                            }
                             if (catObj.is_credit_account == 1) {
                                 window.location.href = `/credit_accounts`;
                                 return;
                             }
                         }
-                        // Open modal for normal expense category
-                        editCategoryInput.value = currentName;
-                        editCategoryModal.style.display = 'flex';
-                        editCategoryInput.focus();
-                        editCategoryInput.select();
-                        isModalOpen = true;
-                        return;
                     }
 
-                    // Income: Go to Recurring Income if is_recurring=1
-                    if (editingCategoryType === 'income') {
-                        const catObj = incomeCategories.find(cat => String(cat.id) === String(editingCategoryId));
-                        if (catObj && catObj.is_recurring == 1) {
-                            window.location.href = `/recurring-income`;
-                            return;
-                        }
-                        // Open modal for normal income category
-                        editCategoryInput.value = currentName;
-                        editCategoryModal.style.display = 'flex';
-                        editCategoryInput.focus();
-                        editCategoryInput.select();
-                        isModalOpen = true;
-                        return;
-                    }
+                    // Income: no special redirects needed
 
+                    // CA: Go to Buds if is_bud=1
                     if (editingCategoryType === 'ca') {
                         const catObj = c_expense_categories.find(cat => String(cat.id) === String(editingCategoryId));
                         if (catObj) {
@@ -5409,18 +5395,15 @@
                                     return;
                                 }
                             }
-                            if (catObj.is_recurring == 1) {
-                                window.location.href = `/recurring-ca-expense`;
-                                return;
-                            }
                         }
-                        // Otherwise, just open the modal
-                        editCategoryInput.value = currentName;
-                        editCategoryModal.style.display = 'flex';
-                        editCategoryInput.focus();
-                        editCategoryInput.select();
-                        isModalOpen = true;
                     }
+
+                    // Open the edit modal for all category types (including recurring)
+                    editCategoryInput.value = currentName;
+                    editCategoryModal.style.display = 'flex';
+                    editCategoryInput.focus();
+                    editCategoryInput.select();
+                    isModalOpen = true;
 
                     // Set hide button icon and title
                     let catArr, catObj;
@@ -5441,6 +5424,8 @@
                         hideCategoryBtn.querySelector('i').classList.remove('fa-eye');
                         hideCategoryBtn.querySelector('i').classList.add('fa-eye-slash');
                     }
+
+
                 }
             });
 
@@ -5483,6 +5468,8 @@
                     confirmEditCategoryBtn.click();
                 }
             });
+
+
 
             // Delete button opens delete modal
             deleteFromEditCategoryBtn.onclick = function() {
@@ -5605,6 +5592,355 @@
             };
         })();
 
+        // ==================== Convert to Recurring / Stop Recurring ====================
+
+        let convertCategoryId = null;
+        let convertCategoryType = null;
+
+        function openConvertToRecurringModal(categoryId, categoryType, catObj) {
+            convertCategoryId = categoryId;
+            convertCategoryType = categoryType;
+
+            // Set category name (read-only)
+            document.getElementById('convert-category-name').value = catObj.name;
+
+            // Set wage/bill label based on type
+            const wageBillSelect = document.getElementById('convert-wage-bill-select');
+            const opt1 = document.getElementById('convert-wage-bill-option-1');
+            const opt0 = document.getElementById('convert-wage-bill-option-0');
+            if (categoryType === 'income') {
+                opt1.textContent = 'Wages (fixed income)';
+                opt0.textContent = 'Variable (flexible income)';
+            } else {
+                opt1.textContent = 'Bill (fixed expense)';
+                opt0.textContent = 'Allowance (flexible spending)';
+            }
+
+            // Reset form
+            document.getElementById('convert-to-recurring-form').reset();
+            document.getElementById('convert-category-name').value = catObj.name;
+            document.getElementById('convert-amount').value = '';
+            document.getElementById('convert-cadence-interval').value = '';
+            document.getElementById('convert-start-date').value = getTodayDateString();
+            document.getElementById('convert-end-date').value = '';
+            document.getElementById('convert-no-end-date-checkbox').checked = false;
+            document.getElementById('convert-use-occurrences-checkbox').checked = false;
+            document.getElementById('convert-occurrences-count').disabled = true;
+            document.getElementById('convert-occurrences-count').value = '';
+            document.getElementById('convert-end-date').disabled = false;
+            document.getElementById('convert-end-date').style.opacity = '1';
+            document.getElementById('convert-weekly-options').style.display = 'none';
+            document.getElementById('convert-monthly-options').style.display = 'none';
+            document.getElementById('convert-yearly-options').style.display = 'none';
+            document.getElementById('convert-monthly-day-container').innerHTML = '';
+
+            // Uncheck all weekday checkboxes
+            document.querySelectorAll('input[name="convert_weekdays"]').forEach(cb => cb.checked = false);
+
+            document.getElementById('convertToRecurringModal').style.display = 'flex';
+        }
+
+        // Close convert modal on outside click
+        (function() {
+            const convertModal = document.getElementById('convertToRecurringModal');
+            if (convertModal) {
+                ['mousedown', 'touchstart'].forEach(function(evtType) {
+                    convertModal.addEventListener(evtType, function(e) {
+                        if (e.target === convertModal) {
+                            convertModal.style.display = 'none';
+                        }
+                    });
+                });
+            }
+        })();
+
+        // Cadence unit change handler for convert modal
+        document.getElementById('convert-cadence-unit').addEventListener('change', function() {
+            const unit = this.value;
+            document.getElementById('convert-weekly-options').style.display = 'none';
+            document.getElementById('convert-monthly-options').style.display = 'none';
+            document.getElementById('convert-yearly-options').style.display = 'none';
+
+            if (unit === 'weeks') {
+                document.getElementById('convert-weekly-options').style.display = 'flex';
+            } else if (unit === 'months') {
+                document.getElementById('convert-monthly-options').style.display = 'block';
+                const container = document.getElementById('convert-monthly-day-container');
+                container.innerHTML = '';
+                container.appendChild(createMonthlyDaySelect('convert_monthly_days[]'));
+            } else if (unit === 'years') {
+                document.getElementById('convert-yearly-options').style.display = 'block';
+            }
+        });
+
+        // Add monthly day button for convert modal
+        document.getElementById('convert-add-monthly-day-btn').addEventListener('click', function() {
+            document.getElementById('convert-monthly-day-container').appendChild(
+                createMonthlyDaySelect('convert_monthly_days[]')
+            );
+        });
+
+        // Mutually exclusive date options for convert modal
+        $('#convert-no-end-date-checkbox').on('change', function() {
+            if (this.checked) {
+                $('#convert-use-occurrences-checkbox').prop('checked', false).trigger('change');
+                $('#convert-end-date').css('opacity', 0.5).prop('disabled', true);
+            } else {
+                $('#convert-end-date').css('opacity', 1).prop('disabled', false);
+            }
+        });
+        $('#convert-use-occurrences-checkbox').on('change', function() {
+            if (this.checked) {
+                $('#convert-no-end-date-checkbox').prop('checked', false).trigger('change');
+                $('#convert-occurrences-count').prop('disabled', false);
+                $('#convert-end-date').css('opacity', 0.5).prop('disabled', true);
+            } else {
+                $('#convert-occurrences-count').prop('disabled', true).val('');
+                $('#convert-end-date').css('opacity', 1).prop('disabled', false);
+            }
+        });
+
+        // Auto-calculate end date from occurrences for convert modal
+        $('#convert-occurrences-count, #convert-start-date, #convert-cadence-interval, #convert-cadence-unit, input[name="convert_weekdays"], #convert-yearly-day, #convert-yearly-month').on('input change', function() {
+            if ($('#convert-use-occurrences-checkbox').is(':checked')) {
+                const start = $('#convert-start-date').val();
+                const interval = $('#convert-cadence-interval').val();
+                const unit = $('#convert-cadence-unit').val();
+                const occ = $('#convert-occurrences-count').val();
+                let selectedWeekdays = [];
+                $('input[name="convert_weekdays"]:checked').each(function() {
+                    selectedWeekdays.push($(this).val());
+                });
+                let selectedMonthlyDays = [];
+                $('div#convert-monthly-day-container .monthly-day-select').each(function() {
+                    if ($(this).val()) selectedMonthlyDays.push($(this).val());
+                });
+                const yearlyDay = $('#convert-yearly-day').val();
+                const yearlyMonth = $('#convert-yearly-month').val();
+                $('#convert-end-date').val(
+                    calculateEndDateFromOccurrences(start, interval, unit, occ, selectedWeekdays, selectedMonthlyDays, yearlyDay, yearlyMonth)
+                );
+            }
+        });
+
+        // Limit decimal places for convert amount
+        (function() {
+            const convertAmountInput = document.getElementById('convert-amount');
+            if (convertAmountInput) {
+                convertAmountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+        })();
+
+        // Form submission for Convert to Recurring
+        $('#convert-to-recurring-form').on('submit', function(event) {
+            event.preventDefault();
+            const $form = $(this);
+            const startDate = $form.find('#convert-start-date').val();
+            const endDate = $form.find('#convert-end-date').val();
+            const noEndDateChecked = $form.find('#convert-no-end-date-checkbox').is(':checked');
+
+            if (!noEndDateChecked && new Date(endDate) < new Date(startDate)) {
+                alert("End date cannot be earlier than the start date.");
+                return false;
+            }
+            if (!validateDateRange(startDate, endDate, noEndDateChecked)) {
+                return;
+            }
+
+            let selectedWeekdays = [];
+            $form.find('input[name="convert_weekdays"]:checked').each(function() {
+                selectedWeekdays.push($(this).val());
+            });
+            let selectedMonthlyDays = [];
+            $form.find('div#convert-monthly-day-container .monthly-day-select').each(function() {
+                if ($(this).val()) selectedMonthlyDays.push($(this).val());
+            });
+
+            const formData = {
+                category_id: convertCategoryId,
+                amount: $form.find('#convert-amount').val(),
+                cadence_interval: $form.find('#convert-cadence-interval').val(),
+                cadence_unit: $form.find('#convert-cadence-unit').val(),
+                start_date: startDate,
+                end_date: endDate,
+                weekdays: selectedWeekdays,
+                monthly_days: selectedMonthlyDays,
+                wage_bill: parseInt($form.find('#convert-wage-bill-select').val()),
+                no_end_date: noEndDateChecked ? 1 : 0
+            };
+
+            if ($form.find('#convert-cadence-unit').val() === 'years') {
+                const yearlyDay = $form.find('#convert-yearly-day').val();
+                const yearlyMonth = $form.find('#convert-yearly-month').val();
+                if (!yearlyDay || !yearlyMonth) {
+                    alert("Please select both a day and a month for yearly recurrence.");
+                    return false;
+                }
+                formData.yearly_day = yearlyDay;
+                formData.yearly_month = yearlyMonth;
+            }
+
+            if ($form.find('#convert-use-occurrences-checkbox').is(':checked')) {
+                const occ = $form.find('#convert-occurrences-count').val();
+                formData.end_date = calculateEndDateFromOccurrences(
+                    startDate, formData.cadence_interval, formData.cadence_unit, occ,
+                    selectedWeekdays, selectedMonthlyDays,
+                    formData.yearly_day || null, formData.yearly_month || null
+                );
+                formData.occurrences_count = occ;
+            }
+
+            if (noEndDateChecked) {
+                formData.end_date = getFiveYearsFromNowEndDateString();
+            }
+
+            // Determine the correct endpoint
+            let url;
+            if (convertCategoryType === 'income') {
+                url = '/convert-to-recurring-income';
+            } else if (convertCategoryType === 'expense') {
+                url = '/convert-to-recurring-expense';
+            } else if (convertCategoryType === 'ca') {
+                // CA endpoint uses the existing /add-recurring-ca-expense with category_id
+                url = '/add-recurring-ca-expense';
+                // CA needs account_id
+                const catObj = c_expense_categories.find(cat => String(cat.id) === String(convertCategoryId));
+                if (catObj) {
+                    formData.account_id = catObj.account_id;
+                }
+            }
+
+            document.getElementById('convertToRecurringModal').style.display = 'none';
+            document.getElementById('loading-screen').style.display = 'flex';
+
+            $.ajax({
+                url: url,
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(formData),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        if (convertCategoryType === 'ca') {
+                            saveCaDailyBalance();
+                        } else {
+                            saveDailyTotalsAndRemainders();
+                        }
+                        location.reload();
+                    } else {
+                        document.getElementById('loading-screen').style.display = 'none';
+                        alert('Failed to convert: ' + response.message);
+                    }
+                },
+                error: function(xhr) {
+                    document.getElementById('loading-screen').style.display = 'none';
+                    alert('An error occurred: ' + xhr.responseText);
+                }
+            });
+        });
+
+        // ==================== Stop Recurring Modal ====================
+
+        let stopRecurringCategoryId = null;
+        let stopRecurringCategoryType = null;
+
+        function openStopRecurringModal(categoryId, categoryType) {
+            stopRecurringCategoryId = categoryId;
+            stopRecurringCategoryType = categoryType;
+            document.getElementById('stopRecurringModal').style.display = 'flex';
+        }
+
+        (function() {
+            const stopModal = document.getElementById('stopRecurringModal');
+            const confirmBtn = document.getElementById('confirmStopRecurring');
+            const cancelBtn = document.getElementById('cancelStopRecurring');
+
+            if (cancelBtn) {
+                cancelBtn.onclick = function() {
+                    stopModal.style.display = 'none';
+                };
+            }
+
+            if (stopModal) {
+                stopModal.addEventListener('mousedown', function(e) {
+                    if (e.target === stopModal) {
+                        stopModal.style.display = 'none';
+                    }
+                });
+            }
+
+            if (confirmBtn) {
+                confirmBtn.onclick = function() {
+                    stopModal.style.display = 'none';
+                    document.getElementById('loading-screen').style.display = 'flex';
+
+                    // Look up the recurring_id via AJAX, then call delete-recurring
+                    let deleteUrl;
+                    if (stopRecurringCategoryType === 'income') deleteUrl = '/delete-recurring-income';
+                    else if (stopRecurringCategoryType === 'expense') deleteUrl = '/delete-recurring-expense';
+                    else if (stopRecurringCategoryType === 'ca') deleteUrl = '/delete-recurring-ca-expense';
+
+                    $.ajax({
+                        url: '/get-recurring-id-for-category',
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({
+                            category_id: stopRecurringCategoryId,
+                            category_type: stopRecurringCategoryType
+                        }),
+                        success: function(lookupResponse) {
+                            if (lookupResponse.status !== 'success' || !lookupResponse.recurring_id) {
+                                document.getElementById('loading-screen').style.display = 'none';
+                                alert('Could not find recurring record. Please use the recurring page.');
+                                return;
+                            }
+                            $.ajax({
+                                url: deleteUrl,
+                                method: 'POST',
+                                contentType: 'application/json',
+                                data: JSON.stringify({ recurring_id: lookupResponse.recurring_id }),
+                                success: function(response) {
+                                    if (response.status === 'success') {
+                                        if (stopRecurringCategoryType === 'ca') {
+                                            saveCaDailyBalance();
+                                        } else {
+                                            saveDailyTotalsAndRemainders();
+                                        }
+                                        location.reload();
+                                    } else {
+                                        document.getElementById('loading-screen').style.display = 'none';
+                                        alert('Failed to stop recurring: ' + response.message);
+                                    }
+                                },
+                                error: function(xhr) {
+                                    document.getElementById('loading-screen').style.display = 'none';
+                                    alert('An error occurred: ' + xhr.responseText);
+                                }
+                            });
+                        },
+                        error: function(xhr) {
+                            document.getElementById('loading-screen').style.display = 'none';
+                            alert('Could not look up recurring record: ' + xhr.responseText);
+                        }
+                    });
+                };
+            }
+        })();
+
+        // ==================== End Convert/Stop Recurring ====================
+
         // Guided Tour Overlay
         function startGuidedTourOverlay() {
             var incomeRows = document.querySelectorAll('#income-categories-table tbody tr[data-category-id]');
@@ -5642,25 +5978,25 @@
                 },
                 {
                     targets: [
-                        document.getElementById('recurring-income-btn')
+                        document.getElementById('unified-recurring-btn')
                     ],
-                    modalText: 'Start by creating recurring categories. These are categories for either income or expenses that happen on a consistent basis.'
+                    modalText: 'Start by creating recurring income or expenses. These are entries that happen on a consistent basis.'
                 },
                 {
                     targets: [
-                        document.getElementById('add-income-btn')
+                        document.getElementById('unified-add-btn')
                     ],
                     modalText: 'You can also create manual categories that can be used to enter either income or expenses that are random.'
                 },
                 {
                     targets: [
-                        document.getElementById('edit-income-btn')
+                        document.getElementById('unified-edit-btn')
                     ],
                     modalText: 'Once you create categories, you can sort them, rename, hide them, or delete them with this button.'
                 },
                 {
                     targets: [
-                        document.getElementById('toggle-income-hidden-btn')
+                        document.getElementById('toggle-all-hidden-btn')
                     ],
                     modalText: 'This is the toggle hidden category visibility button. The number is how many hidden categories you have.'
                 },
@@ -5809,39 +6145,25 @@
             let incomeHiddenActive = localStorage.getItem('incomeHiddenActive') === 'true';
             let expenseHiddenActive = localStorage.getItem('expenseHiddenActive') === 'true';
 
-            // Set initial icon state for income
-            const toggleIncomeBtn = document.getElementById('toggle-income-hidden-btn');
-            if (incomeHiddenActive) {
-                toggleIncomeBtn.querySelector('i').classList.remove('fa-eye');
-                toggleIncomeBtn.querySelector('i').classList.add('fa-eye-slash');
-            } else {
-                toggleIncomeBtn.querySelector('i').classList.remove('fa-eye-slash');
-                toggleIncomeBtn.querySelector('i').classList.add('fa-eye');
-            }
+            // Unified hidden state — all types toggle together
+            let allHiddenActive = localStorage.getItem('allHiddenActive') === 'true';
 
-            // Set initial icon state for expense
-            const toggleExpenseBtn = document.getElementById('toggle-expense-hidden-btn');
-            if (expenseHiddenActive) {
-                toggleExpenseBtn.querySelector('i').classList.remove('fa-eye');
-                toggleExpenseBtn.querySelector('i').classList.add('fa-eye-slash');
-            } else {
-                toggleExpenseBtn.querySelector('i').classList.remove('fa-eye-slash');
-                toggleExpenseBtn.querySelector('i').classList.add('fa-eye');
-            }
-
-            // Set initial icon state for each CA account
-            document.querySelectorAll('button[id^="toggle-ca-hidden-btn-"]').forEach(toggleBtn => {
-                const accountId = toggleBtn.id.replace('toggle-ca-hidden-btn-', '');
-                let caHiddenActive = localStorage.getItem(`caHiddenActive_${accountId}`) === 'true';
-                const icon = toggleBtn.querySelector('i');
-                if (caHiddenActive) {
+            // Set initial icon state for unified hide button
+            const toggleAllBtn = document.getElementById('toggle-all-hidden-btn');
+            if (toggleAllBtn) {
+                const icon = toggleAllBtn.querySelector('i');
+                if (allHiddenActive) {
                     icon.classList.remove('fa-eye');
                     icon.classList.add('fa-eye-slash');
                 } else {
                     icon.classList.remove('fa-eye-slash');
                     icon.classList.add('fa-eye');
                 }
-            });
+            }
+
+            // Sync legacy per-type states to unified state
+            incomeHiddenActive = allHiddenActive;
+            expenseHiddenActive = allHiddenActive;
 
             // Apply initial hidden classes based on saved state
             function applyHiddenClasses() {
@@ -5908,7 +6230,7 @@
                 // CA sidebar and month view for each account
                 document.querySelectorAll('table[id^="ca-categories-table-"]').forEach(caTable => {
                     const accountId = caTable.id.replace('ca-categories-table-', '');
-                    let caHiddenActive = localStorage.getItem(`caHiddenActive_${accountId}`) === 'true';
+                    let caHiddenActive = allHiddenActive;
                     // Sidebar
                     caTable.querySelectorAll('tr[data-category-id]').forEach(row => {
                         const catId = row.getAttribute('data-category-id');
@@ -5946,77 +6268,36 @@
             applyHiddenClasses();
             updateHiddenCountBubbles();
 
-            // Income toggle
-            toggleIncomeBtn.addEventListener('click', function() {
-                incomeHiddenActive = !incomeHiddenActive;
-                localStorage.setItem('incomeHiddenActive', incomeHiddenActive);
-                applyHiddenClasses();
-                // Change icon
-                const icon = toggleIncomeBtn.querySelector('i');
-                if (incomeHiddenActive) {
-                    icon.classList.remove('fa-eye');
-                    icon.classList.add('fa-eye-slash');
-                } else {
-                    icon.classList.remove('fa-eye-slash');
-                    icon.classList.add('fa-eye');
-                }
-                zebraStripeVisibleRows('#income-categories-body', 'zebra-odd-income', 'zebra-even-income');
-                zebraStripeVisibleRows('#income-categories-table tbody', 'zebra-odd-income', 'zebra-even-income');
-                setTimeout(() => {
-                    if (typeof updateView === 'function') {
-                        updateView(["highlightCurrentWeek", "addCurrentWeekDiv"]);
-                    }
-                    setTimeout(() => {
-                        if (typeof updateCurrentWeekOutline === 'function') updateCurrentWeekOutline();
-                    }, 0);
-                }, 0);
-            });
-
-            // Expense toggle
-            toggleExpenseBtn.addEventListener('click', function() {
-                expenseHiddenActive = !expenseHiddenActive;
-                localStorage.setItem('expenseHiddenActive', expenseHiddenActive);
-                applyHiddenClasses();
-                // Change icon
-                const icon = toggleExpenseBtn.querySelector('i');
-                if (expenseHiddenActive) {
-                    icon.classList.remove('fa-eye');
-                    icon.classList.add('fa-eye-slash');
-                } else {
-                    icon.classList.remove('fa-eye-slash');
-                    icon.classList.add('fa-eye');
-                }
-                zebraStripeVisibleRows('#expense-categories-body', 'zebra-odd-expense', 'zebra-even-expense');
-                zebraStripeVisibleRows('#expense-categories-table tbody', 'zebra-odd-expense', 'zebra-even-expense');
-                setTimeout(() => {
-                    if (typeof updateView === 'function') {
-                        updateView(["highlightCurrentWeek", "addCurrentWeekDiv"]);
-                    }
-                    setTimeout(() => {
-                        if (typeof updateCurrentWeekOutline === 'function') updateCurrentWeekOutline();
-                    }, 0);
-                }, 0);
-            });
-
-            // CA toggle for each account
-            document.querySelectorAll('button[id^="toggle-ca-hidden-btn-"]').forEach(toggleBtn => {
-                const accountId = toggleBtn.id.replace('toggle-ca-hidden-btn-', '');
-                let caHiddenActive = localStorage.getItem(`caHiddenActive_${accountId}`) === 'true';
-                toggleBtn.addEventListener('click', function() {
-                    caHiddenActive = !caHiddenActive;
-                    localStorage.setItem(`caHiddenActive_${accountId}`, caHiddenActive);
+            // Unified hide toggle — toggles ALL types at once
+            if (toggleAllBtn) {
+                toggleAllBtn.addEventListener('click', function() {
+                    allHiddenActive = !allHiddenActive;
+                    localStorage.setItem('allHiddenActive', allHiddenActive);
+                    // Sync per-type states
+                    incomeHiddenActive = allHiddenActive;
+                    expenseHiddenActive = allHiddenActive;
+                    localStorage.setItem('incomeHiddenActive', allHiddenActive);
+                    localStorage.setItem('expenseHiddenActive', allHiddenActive);
                     applyHiddenClasses();
                     // Change icon
-                    const icon = toggleBtn.querySelector('i');
-                    if (caHiddenActive) {
+                    const icon = toggleAllBtn.querySelector('i');
+                    if (allHiddenActive) {
                         icon.classList.remove('fa-eye');
                         icon.classList.add('fa-eye-slash');
                     } else {
                         icon.classList.remove('fa-eye-slash');
                         icon.classList.add('fa-eye');
                     }
-                    zebraStripeVisibleRows(`#ca-categories-table-${accountId} tbody`, 'zebra-odd-ca', 'zebra-even-ca');
-                    zebraStripeVisibleRows(`#ca-categories-body-${accountId}`, 'zebra-odd-ca', 'zebra-even-ca');
+                    // Re-stripe all tables
+                    zebraStripeVisibleRows('#income-categories-body', 'zebra-odd-income', 'zebra-even-income');
+                    zebraStripeVisibleRows('#income-categories-table tbody', 'zebra-odd-income', 'zebra-even-income');
+                    zebraStripeVisibleRows('#expense-categories-body', 'zebra-odd-expense', 'zebra-even-expense');
+                    zebraStripeVisibleRows('#expense-categories-table tbody', 'zebra-odd-expense', 'zebra-even-expense');
+                    document.querySelectorAll('table[id^="ca-categories-table-"]').forEach(caTable => {
+                        const accId = caTable.id.replace('ca-categories-table-', '');
+                        zebraStripeVisibleRows(`#ca-categories-table-${accId} tbody`, 'zebra-odd-ca', 'zebra-even-ca');
+                        zebraStripeVisibleRows(`#ca-categories-body-${accId}`, 'zebra-odd-ca', 'zebra-even-ca');
+                    });
                     setTimeout(() => {
                         if (typeof updateView === 'function') {
                             updateView(["highlightCurrentWeek", "addCurrentWeekDiv"]);
@@ -6026,7 +6307,7 @@
                         }, 0);
                     }, 0);
                 });
-            });
+            }
         });
 
         function zebraStripeVisibleRows(tableBodySelector, oddClass, evenClass) {
@@ -6043,27 +6324,18 @@
         }
         
         function updateHiddenCountBubbles() {
-            // Income
+            // Unified: sum hidden counts across all types
             const incomeHiddenCount = incomeCategories.filter(cat => cat.hidden == 1).length;
-            const incomeBubble = document.getElementById('income-hidden-count');
-            if (incomeBubble) {
-                incomeBubble.textContent = incomeHiddenCount; // Always show the number, even if 0
-            }
-            // Expense
             const expenseHiddenCount = expenseCategories.filter(cat => cat.hidden == 1).length;
-            const expenseBubble = document.getElementById('expense-hidden-count');
-            if (expenseBubble) {
-                expenseBubble.textContent = expenseHiddenCount; // Always show the number, even if 0
+            let caHiddenCount = 0;
+            if (typeof c_expense_categories !== 'undefined') {
+                caHiddenCount = c_expense_categories.filter(cat => cat.hidden == 1).length;
             }
-            // CA: For each credit account, update its hidden count bubble
-            document.querySelectorAll('button[id^="toggle-ca-hidden-btn-"]').forEach(toggleBtn => {
-                const accountId = toggleBtn.id.replace('toggle-ca-hidden-btn-', '');
-                const caHiddenCount = c_expense_categories.filter(cat => cat.account_id == accountId && cat.hidden == 1).length;
-                const caBubble = document.getElementById(`ca-hidden-count-${accountId}`);
-                if (caBubble) {
-                    caBubble.textContent = caHiddenCount; // Always show the number, even if 0
-                }
-            });
+            const totalHidden = incomeHiddenCount + expenseHiddenCount + caHiddenCount;
+            const allBubble = document.getElementById('all-hidden-count');
+            if (allBubble) {
+                allBubble.textContent = totalHidden;
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function () {
@@ -6297,68 +6569,144 @@
         });
 
         document.addEventListener('DOMContentLoaded', function () {
-            // Only for recurring buttons
-            const recurringIncomeBtn = document.getElementById('recurring-income-btn');
-            if (recurringIncomeBtn) {
-                recurringIncomeBtn.onclick = function (e) {
-                    e.preventDefault();
-                    const addIncomeModal = document.getElementById('add-income-modal');
-                    if (addIncomeModal) {
-                        addIncomeModal.style.display = 'flex';
-                        document.getElementById('add-recurring-income-form').reset();
-                        document.getElementById('start_date').value = getTodayDateString();
-                        document.getElementById('no-end-date-checkbox').checked = false;
-                        document.getElementById('end_date').value = '';
-                    }
-                };
+            // === Unified Button Handlers ===
+
+            // --- Type Selector Popover Logic ---
+            function closeAllPopovers() {
+                document.querySelectorAll('.type-selector-popover').forEach(p => p.style.display = 'none');
             }
 
-            const recurringExpenseBtn = document.getElementById('recurring-expense-btn');
-            if (recurringExpenseBtn) {
-                recurringExpenseBtn.onclick = function (e) {
-                    e.preventDefault();
-                    const addExpenseModal = document.getElementById('add-expense-modal');
-                    if (addExpenseModal) {
-                        addExpenseModal.style.display = 'flex';
-                        document.getElementById('add-recurring-expense-form').reset();
-                        document.getElementById('expense-start_date').value = getTodayDateString();
-                        document.getElementById('expense-no-end-date-checkbox').checked = false;
-                        document.getElementById('expense-end_date').value = '';
-                    }
-                };
-            }
+            // Close popovers on outside click
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.type-selector-wrapper')) {
+                    closeAllPopovers();
+                }
+            });
 
-            // Listen for clicks on all recurring CA buttons (one per account)
-            document.querySelectorAll('.add-recurring-btn.ca').forEach(function(btn) {
-                btn.addEventListener('click', function(e) {
+            // --- Unified Recurring Button ---
+            const unifiedRecurringBtn = document.getElementById('unified-recurring-btn');
+            const recurringTypeSelector = document.getElementById('recurring-type-selector');
+            if (unifiedRecurringBtn && recurringTypeSelector) {
+                unifiedRecurringBtn.addEventListener('click', function(e) {
                     e.preventDefault();
-                    const addCaModal = document.getElementById('add-ca-modal');
-                    if (addCaModal) {
-                        addCaModal.style.display = 'flex';
-                        // Reset the form
-                        const form = document.getElementById('add-recurring-ca-form');
-                        if (form) {
-                            form.reset();
-                            const today = new Date().toISOString().split('T')[0];
-                            form.querySelector('#ca-start-date').value = today;
-                            form.querySelector('#ca-no-end-date-checkbox').checked = false;
-                            form.querySelector('#ca-end-date').value = '';
-                        }
-                        // Set the account_id in the select (if present)
-                        const accountId = btn.getAttribute('data-account-id');
-                        const accountName = btn.getAttribute('data-account-name');
-                        const accountSelect = document.getElementById('ca-account-id');
-                        if (accountSelect && accountId) {
-                            accountSelect.value = accountId;
-                        }
-                        // Set the account name in the modal header
-                        const accountNameSpan = document.getElementById('ca-modal-account-name');
-                        if (accountNameSpan) {
-                            accountNameSpan.textContent = accountName ? `${accountName}` : '';
-                        }
+                    e.stopPropagation();
+                    const isVisible = recurringTypeSelector.style.display === 'block';
+                    closeAllPopovers();
+                    if (!isVisible) {
+                        recurringTypeSelector.style.display = 'block';
                     }
                 });
-            });
+
+                recurringTypeSelector.querySelectorAll('.type-selector-option').forEach(option => {
+                    option.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        closeAllPopovers();
+                        const type = this.getAttribute('data-type');
+                        if (type === 'income') {
+                            const addIncomeModal = document.getElementById('add-income-modal');
+                            if (addIncomeModal) {
+                                addIncomeModal.style.display = 'flex';
+                                document.getElementById('add-recurring-income-form').reset();
+                                document.getElementById('start_date').value = getTodayDateString();
+                                document.getElementById('no-end-date-checkbox').checked = false;
+                                document.getElementById('end_date').value = '';
+                                document.getElementById('income-category-id-hidden').value = '';
+                            }
+                        } else if (type === 'expense') {
+                            const addExpenseModal = document.getElementById('add-expense-modal');
+                            if (addExpenseModal) {
+                                addExpenseModal.style.display = 'flex';
+                                document.getElementById('add-recurring-expense-form').reset();
+                                document.getElementById('expense-start_date').value = getTodayDateString();
+                                document.getElementById('expense-no-end-date-checkbox').checked = false;
+                                document.getElementById('expense-end_date').value = '';
+                                document.getElementById('expense-category-id-hidden').value = '';
+                            }
+                        } else if (type === 'ca') {
+                            const accountId = this.getAttribute('data-account-id');
+                            const accountName = this.getAttribute('data-account-name');
+                            const addCaModal = document.getElementById('add-ca-modal');
+                            if (addCaModal) {
+                                addCaModal.style.display = 'flex';
+                                const form = document.getElementById('add-recurring-ca-form');
+                                if (form) {
+                                    form.reset();
+                                    const today = new Date().toISOString().split('T')[0];
+                                    form.querySelector('#ca-start-date').value = today;
+                                    form.querySelector('#ca-no-end-date-checkbox').checked = false;
+                                    form.querySelector('#ca-end-date').value = '';
+                                }
+                                document.getElementById('ca-category-id-hidden').value = '';
+                                document.getElementById('ca-category-input').value = '';
+                                const accountSelect = document.getElementById('ca-account-id');
+                                if (accountSelect && accountId) {
+                                    accountSelect.value = accountId;
+                                }
+                                const accountNameSpan = document.getElementById('ca-modal-account-name');
+                                if (accountNameSpan) {
+                                    accountNameSpan.textContent = accountName ? `${accountName}` : '';
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+
+            // --- Unified Add Button ---
+            const unifiedAddBtn = document.getElementById('unified-add-btn');
+            const addTypeSelector = document.getElementById('add-type-selector');
+            if (unifiedAddBtn && addTypeSelector) {
+                unifiedAddBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const isVisible = addTypeSelector.style.display === 'block';
+                    closeAllPopovers();
+                    if (!isVisible) {
+                        addTypeSelector.style.display = 'block';
+                    }
+                });
+
+                addTypeSelector.querySelectorAll('.type-selector-option').forEach(option => {
+                    option.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        closeAllPopovers();
+                        const type = this.getAttribute('data-type');
+                        toggleCategoryInput(type);
+                    });
+                });
+            }
+
+            // --- Unified Edit Button ---
+            const unifiedEditBtn = document.getElementById('unified-edit-btn');
+            if (unifiedEditBtn) {
+                unifiedEditBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    // Toggle ALL edit modes together
+                    const anyActive = isIncomeEditMode || isExpenseEditMode || 
+                        (window.isCaEditMode && Object.values(window.isCaEditMode).some(v => v));
+                    
+                    if (anyActive) {
+                        // Turn all off
+                        if (isIncomeEditMode) toggleEditMode('income');
+                        if (isExpenseEditMode) toggleEditMode('expense');
+                        if (window.isCaEditMode) {
+                            Object.keys(window.isCaEditMode).forEach(accountId => {
+                                if (window.isCaEditMode[accountId]) toggleEditMode('ca', accountId);
+                            });
+                        }
+                    } else {
+                        // Turn all on
+                        toggleEditMode('income');
+                        toggleEditMode('expense');
+                        document.querySelectorAll('table[id^="ca-categories-table-"]').forEach(caTable => {
+                            const accountId = caTable.id.replace('ca-categories-table-', '');
+                            if (!window.isCaEditMode || !window.isCaEditMode[accountId]) {
+                                toggleEditMode('ca', accountId);
+                            }
+                        });
+                    }
+                });
+            }
 
             const addCaModal = document.getElementById('add-ca-modal');
             if (addCaModal) {
@@ -6388,8 +6736,8 @@
                 casTable.classList.remove('ca-expanded');
             });
 
-            // Hide all CA search and button containers by default
-            document.querySelectorAll('.category-btn-container.ca, .search-btn-container.ca').forEach(el => {
+            // Hide all CA search containers by default
+            document.querySelectorAll('.search-btn-container.ca').forEach(el => {
                 el.style.display = 'none';
             });
 
@@ -6397,7 +6745,6 @@
                 const accountId = caTable.id.replace('ca-categories-table-', '');
                 const isCollapsed = localStorage.getItem(`caCollapsed_${accountId}`) !== 'false'; // default to collapsed
                 const casTable = document.getElementById(`cas-table-${accountId}`);
-                const btnContainer = document.querySelector(`.category-btn-container.ca[data-account-id="${accountId}"]`);
                 const searchContainer = document.getElementById(`ca-search-btn-container-${accountId}`);
 
                 if (isCollapsed) {
@@ -6407,7 +6754,6 @@
                         casTable.classList.add('ca-collapsed');
                         casTable.classList.remove('ca-expanded');
                     }
-                    if (btnContainer) btnContainer.style.display = 'none';
                     if (searchContainer) searchContainer.style.display = 'none';
                 } else {
                     caTable.classList.remove('ca-collapsed');
@@ -6416,7 +6762,6 @@
                         casTable.classList.remove('ca-collapsed');
                         casTable.classList.add('ca-expanded');
                     }
-                    if (btnContainer) btnContainer.style.display = '';
                     if (searchContainer) searchContainer.style.display = '';
                 }
             });
@@ -6427,7 +6772,6 @@
                     const accountId = this.getAttribute('data-account-id');
                     const caTable = document.getElementById(`ca-categories-table-${accountId}`);
                     const casTable = document.getElementById(`cas-table-${accountId}`);
-                    const btnContainer = document.querySelector(`.category-btn-container.ca[data-account-id="${accountId}"]`);
                     const searchContainer = document.getElementById(`ca-search-btn-container-${accountId}`);
 
                     const isCollapsed = caTable.classList.contains('ca-collapsed');
@@ -6438,7 +6782,6 @@
                             casTable.classList.remove('ca-collapsed');
                             casTable.classList.add('ca-expanded');
                         }
-                        if (btnContainer) btnContainer.style.display = '';
                         if (searchContainer) searchContainer.style.display = '';
                         localStorage.setItem(`caCollapsed_${accountId}`, 'false');
                     } else {
@@ -6448,7 +6791,6 @@
                             casTable.classList.add('ca-collapsed');
                             casTable.classList.remove('ca-expanded');
                         }
-                        if (btnContainer) btnContainer.style.display = 'none';
                         if (searchContainer) searchContainer.style.display = 'none';
                         localStorage.setItem(`caCollapsed_${accountId}`, 'true');
                     }

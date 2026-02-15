@@ -2111,7 +2111,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('yearly_day'),
                             row.get('yearly_month'),
                             row.get('start_date'),
-                            row.get('end_date')
+                            row.get('end_date'),
+                            int(row.get('wage_bill', 0))
                         ))
                     else:
                         batch_data.append((

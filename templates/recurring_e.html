@@ -104,7 +104,7 @@
                                 <button class="edit-recurring-btn" onclick="openEditModal('{{ record.id }}')">
                                     <i class="fas fa-pencil-alt"></i>
                                 </button>
-                                <button class="delete-recurring-btn" onclick="openRecurringDeleteModal('{{ record.id }}', event)"><i class="fa-solid fa-xmark"></i></button>
+                                <button class="delete-recurring-btn" onclick="openRecurringDeleteModal('{{ record.id }}', event)"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>
                             </td>
                         </tr>
                         {% endfor %}
@@ -137,8 +137,12 @@
             <!-- No need for action or method attributes since we will use AJAX -->
             <form id="add-recurring-expense-form">
             
-                <label for="category_name">New Category Name</label>
-                <input type="text" id="category_name" name="category_name" placeholder="Category" required>
+                <label for="category_name">Category</label>
+                <div class="category-input-wrapper">
+                    <input type="text" class="category-input" id="category_name" name="category_name" placeholder="Search or create category..." autocomplete="off" required>
+                    <input type="hidden" class="category-hidden" id="category_id_hidden" name="category_id" value="">
+                    <div class="pending-transactions-category-dropdown" style="display: none;"></div>
+                </div>
 
                 <div class="form-row">
                     <label for="wage-bill-select">Type:</label>
@@ -362,8 +366,8 @@
     <!-- Modal for delete confirmation -->
     <div id="deleteRecurringModal" class="category-delete-modal">
         <div class="category-delete-modal-content">
-            <h3>Are you sure you want to delete this recurring expense? Past entries for this category will be added to Uncategorized and future entries will be deleted.</h3>
-            <button id="confirmDeleteRecurring" class="confirm-delete-category-btn">Delete</button>
+            <h3>Stop this recurring expense? Future entries will be removed, but past entries will be kept. The category will remain as a regular (non-recurring) category.</h3>
+            <button id="confirmDeleteRecurring" class="confirm-delete-category-btn">Stop Recurring</button>
             <button id="cancelDeleteRecurring" class="cancel-delete-category-btn">Cancel</button>
         </div>
     </div>
@@ -379,6 +383,114 @@
         const currencyType = "{{ currency_type }}";
         const currencySymbols = { USD: "$", EUR: "€" };
         const currencySymbol = currencySymbols[currencyType] || currencyType;
+
+        // Categories for searchable dropdown
+        const allExpenseCategories = {{ expense_categories | tojson | safe }};
+
+        // Searchable category dropdown
+        function showRecurringCategoryDropdown(input, searchText) {
+            const wrapper = input.closest('.category-input-wrapper');
+            const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
+            const hiddenInput = wrapper.querySelector('.category-hidden');
+            // Filter out already-recurring, bud, Starting Balance, and Uncategorized
+            const categories = allExpenseCategories.filter(cat => 
+                cat.is_recurring != 1 && cat.is_bud != 1 &&
+                cat.name !== 'Starting Balance' && cat.name !== 'Uncategorized'
+            ).sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
+
+            dropdown.innerHTML = '';
+            const searchLower = searchText.toLowerCase().trim();
+
+            const matchingCategories = searchLower.length > 0
+                ? categories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+                : [];
+            const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+            const nonMatchingCategories = searchLower.length > 0
+                ? categories.filter(cat => !matchingIds.has(cat.id))
+                : categories;
+            const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
+
+            // Search results
+            if (searchLower.length > 0 && matchingCategories.length > 0) {
+                dropdown.style.display = 'block';
+                matchingCategories.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                    div.className = 'pending-transactions-category-dropdown-item search-result';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+                if (nonMatchingCategories.length > 0) {
+                    const sep = document.createElement('div');
+                    sep.className = 'dropdown-separator';
+                    dropdown.appendChild(sep);
+                }
+            }
+
+            // All other categories
+            const catsToShow = searchLower.length > 0 ? nonMatchingCategories : categories;
+            if (catsToShow.length > 0) {
+                dropdown.style.display = 'block';
+                catsToShow.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.textContent = cat.name;
+                    div.className = 'pending-transactions-category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+            }
+
+            // Create new option
+            if (searchLower.length > 0 && !exactMatch) {
+                dropdown.style.display = 'block';
+                const sep = document.createElement('div');
+                sep.className = 'dropdown-separator';
+                dropdown.appendChild(sep);
+                const createDiv = document.createElement('div');
+                createDiv.className = 'pending-transactions-category-dropdown-item create-new-category';
+                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+                createDiv.addEventListener('click', function() {
+                    input.value = searchText;
+                    hiddenInput.value = '';  // Empty = create new
+                    dropdown.style.display = 'none';
+                });
+                dropdown.appendChild(createDiv);
+            }
+
+            if (dropdown.children.length === 0) {
+                dropdown.style.display = 'none';
+            }
+        }
+
+        // Attach event listeners for category input
+        (function() {
+            const catInput = document.getElementById('category_name');
+            if (!catInput) return;
+
+            catInput.addEventListener('input', function() {
+                const hiddenInput = this.closest('.category-input-wrapper').querySelector('.category-hidden');
+                if (!this.value) hiddenInput.value = '';
+                showRecurringCategoryDropdown(this, this.value);
+            });
+
+            catInput.addEventListener('focus', function() {
+                showRecurringCategoryDropdown(this, '');
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.category-input-wrapper')) {
+                    document.querySelectorAll('.pending-transactions-category-dropdown').forEach(d => d.style.display = 'none');
+                }
+            });
+        })();
         document.addEventListener("DOMContentLoaded", function() {
             document.querySelectorAll('.r-currency-symbol').forEach(function(span) {
                 span.textContent = currencySymbol;
@@ -436,6 +548,8 @@
             addExpenseModal.style.display = "flex";
             // Reset form fields
             document.getElementById('add-recurring-expense-form').reset();
+            // Clear the hidden category ID
+            document.getElementById('category_id_hidden').value = '';
             // Set the start_date input value to today's date
             document.getElementById('start_date').value = getTodayDateString();
             // Reset the 'no-end-date-checkbox' and show 'end_date' containers
@@ -903,8 +1017,8 @@
 
 
             // Initialize the formData object
+            const selectedCategoryId = $('#category_id_hidden').val();
             const formData = {
-                category_name: $('#category_name').val(),
                 amount: $('#amount').val(),
                 cadence_interval: $('#cadence-interval').val(),
                 cadence_unit: $('#cadence-unit').val(),
@@ -914,6 +1028,13 @@
                 monthly_days: selectedMonthlyDays,  // Include all the selected monthly days
                 wage_bill: parseInt($('#wage-bill-select').val())
             };
+
+            // Send category_id for existing categories, category_name for new ones
+            if (selectedCategoryId) {
+                formData.category_id = selectedCategoryId;
+            } else {
+                formData.category_name = $('#category_name').val();
+            }
 
             formData.no_end_date = $('#no-end-date-checkbox').is(':checked') ? 1 : 0;
 

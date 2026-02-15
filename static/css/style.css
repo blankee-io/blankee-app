@@ -3398,10 +3398,13 @@ tr[data-category-id] td.before-member-since {
     font-size: clamp(13px, calc(1.13vw + 4.65px), 14px);
 }
 
-#income-categories-table,
+#income-categories-table{
+    margin-top: 5px;
+}
+
 #expense-categories-table,
 .ca-categories-table {
-    margin-top: 5px;
+    margin-top: 53px;
 }
 
 #expenses-table {
@@ -3731,6 +3734,67 @@ tr[data-category-id] td.before-member-since {
     align-items: center;
     height: 38px;
     gap: 5px;
+}
+
+/* Unified button colors */
+.toggle-hidden-btn.unified,
+.add-recurring-btn.unified,
+.add-category-btn.unified,
+.edit-category-btn.unified {
+    color: #575757;
+}
+
+/* Type selector wrapper for popover positioning */
+.type-selector-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+/* Type selector popover */
+.type-selector-popover {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 300;
+    min-width: 160px;
+    margin-top: 4px;
+    padding: 4px 0;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.type-selector-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: #333;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    white-space: nowrap;
+}
+
+.type-selector-option:hover {
+    background-color: #f0f0f0;
+}
+
+.type-selector-option:first-child {
+    border-radius: 6px 6px 0 0;
+}
+
+.type-selector-option:last-child {
+    border-radius: 0 0 6px 6px;
+}
+
+.type-selector-option i {
+    width: 16px;
+    text-align: center;
+    font-size: 13px;
+    color: #666;
 }
 
 .add-category-btn {
@@ -4175,6 +4239,33 @@ td:has(.bucket-progress-container) {
     cursor: pointer;
 }
 
+.convert-recurring-btn {
+    width: 35px;
+    height: 35px;
+    margin-left: 8px;
+    padding: 8px;
+    background: #5B7FFF;
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.convert-category-name-input {
+    width: 100%;
+    padding: 10px 12px;
+    background: #f9f9f9;
+    border: 1px solid #d1d1d6;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #666;
+    cursor: default;
+    box-sizing: border-box;
+    margin-top: 5px;
+    margin-bottom: 10px;
+}
+
 
 /* The Modal (background) */
 .category-delete-modal {
@@ -4324,10 +4415,12 @@ td:has(.bucket-progress-container) {
         margin-top: 5px !important;
     }
 
-    #income-categories-table,
+    #income-categories-table {
+        margin-top: 5px !important;
+    }
     #expense-categories-table,
     .ca-categories-table {
-        margin-top: 5px !important;
+        margin-top: 53px !important;
     }
 
     .income-table-3m {
@@ -7717,7 +7810,8 @@ td:has(.bucket-progress-container) {
 /* Form Container Styling */
 .expense-form-container,
 .income-form-container,
-.ca-form-container {
+.ca-form-container,
+.convert-recurring-form-container {
     width: 350px;
     margin: 15% auto;
     padding: 20px;
@@ -7729,7 +7823,8 @@ td:has(.bucket-progress-container) {
 
 .expense-form-container h2,
 .income-form-container h2,
-.ca-form-container h2 {
+.ca-form-container h2,
+.convert-recurring-form-container h2 {
     margin-top: 0;
     color: #575757;
     font-size: 1.5rem;
@@ -7738,7 +7833,8 @@ td:has(.bucket-progress-container) {
 /* General Label & Input Layout for recurring forms */
 .income-form-container label,
 .ca-form-container label,
-.expense-form-container label {
+.expense-form-container label,
+.convert-recurring-form-container label {
     display: block;
     margin-bottom: 8px;
     color: #555;
@@ -7757,7 +7853,11 @@ td:has(.bucket-progress-container) {
 .expense-form-container input[type="number"],
 .expense-form-container input[type="text"],
 .expense-form-container input[type="date"],
-.expense-form-container select {
+.expense-form-container select,
+.convert-recurring-form-container input[type="number"],
+.convert-recurring-form-container input[type="text"],
+.convert-recurring-form-container input[type="date"],
+.convert-recurring-form-container select {
     width: 100%;
     margin-top: 5px;
     margin-bottom: 10px;
@@ -7776,7 +7876,9 @@ td:has(.bucket-progress-container) {
 .ca-form-container input:focus,
 .ca-form-container select:focus,
 .expense-form-container input:focus,
-.expense-form-container select:focus {
+.expense-form-container select:focus,
+.convert-recurring-form-container input:focus,
+.convert-recurring-form-container select:focus {
     background-color: #fff;
     border-color: #2aaaa8;
     box-shadow: 0 0 0 3px rgb(42 170 168 / 10%);
@@ -7786,7 +7888,8 @@ td:has(.bucket-progress-container) {
 /* Submit buttons for recurring forms */
 .income-form-container button[type="submit"],
 .ca-form-container button[type="submit"],
-.expense-form-container button[type="submit"] {
+.expense-form-container button[type="submit"],
+.convert-recurring-form-container button[type="submit"] {
     padding: 12px 24px;
     border: none;
     border-radius: 10px;
@@ -7802,7 +7905,8 @@ td:has(.bucket-progress-container) {
 
 .income-form-container button[type="submit"]:hover,
 .ca-form-container button[type="submit"]:hover,
-.expense-form-container button[type="submit"]:hover {
+.expense-form-container button[type="submit"]:hover,
+.convert-recurring-form-container button[type="submit"]:hover {
     box-shadow: 0 4px 12px rgb(228 95 28 / 40%);
     transform: translateY(-1px);
     background-color: #EF9F77;
@@ -7810,7 +7914,8 @@ td:has(.bucket-progress-container) {
 
 .income-form-container button[type="submit"]:active,
 .ca-form-container button[type="submit"]:active,
-.expense-form-container button[type="submit"]:active {
+.expense-form-container button[type="submit"]:active,
+.convert-recurring-form-container button[type="submit"]:active {
     box-shadow: 0 1px 4px rgb(228 95 28 / 30%);
     transform: translateY(0);
 }
@@ -8054,7 +8159,8 @@ td:has(.bucket-progress-container) {
 #edit-weekly-options .weekday,
 #expense-weekly-options .weekday,
 #ca-weekly-options .weekday,
-#edit-category-weekly-options .weekday {
+#edit-category-weekly-options .weekday,
+#convert-weekly-options .weekday {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -8073,7 +8179,8 @@ td:has(.bucket-progress-container) {
 #edit-monthly-options label,
 #expense-monthly-options label,
 #ca-monthly-options label,
-#edit-category-monthly-options label {
+#edit-category-monthly-options label,
+#convert-monthly-options label {
     font-size: 14px;
     margin: 0 0 8px 0;
     white-space: nowrap;
@@ -8083,7 +8190,8 @@ td:has(.bucket-progress-container) {
 /* Monthly Option Row */
 #monthly-day-container div,
 #edit-monthly-day-container div,
-#edit-category-monthly-day-container div {
+#edit-category-monthly-day-container div,
+#convert-monthly-day-container div {
     display: flex;
     align-items: center;
     margin-top: 6px;
@@ -8091,7 +8199,8 @@ td:has(.bucket-progress-container) {
 
 #monthly-day-container select,
 #edit-monthly-day-container select,
-#edit-category-monthly-day-container select {
+#edit-category-monthly-day-container select,
+#convert-monthly-day-container select {
     flex: 1;
     width: 100%;
     appearance: none;
@@ -8164,7 +8273,10 @@ td:has(.bucket-progress-container) {
 #ca-monthly-options,
 #edit-category-yearly-options,
 #edit-category-weekly-options,
-#edit-category-monthly-options {
+#edit-category-monthly-options,
+#convert-yearly-options,
+#convert-weekly-options,
+#convert-monthly-options {
     margin-bottom: 20px;
     display: flex;
     flex-wrap: wrap;
@@ -8179,7 +8291,8 @@ td:has(.bucket-progress-container) {
 #edit-weekly-options,
 #expense-weekly-options,
 #ca-weekly-options,
-#edit-category-weekly-options {
+#edit-category-weekly-options,
+#convert-weekly-options {
     justify-content: space-between;
 }
 
@@ -8188,13 +8301,15 @@ td:has(.bucket-progress-container) {
 #edit-monthly-options,
 #expense-monthly-options,
 #ca-monthly-options,
-#edit-category-monthly-options {
+#edit-category-monthly-options,
+#convert-monthly-options {
     display: block;
 }
 
 #yearly-options,
 #edit-yearly-options,
-#edit-category-yearly-options {
+#edit-category-yearly-options,
+#convert-yearly-options {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -8203,9 +8318,11 @@ td:has(.bucket-progress-container) {
 #yearly-options input,
 #edit-yearly-options input,
 #edit-category-yearly-options input,
+#convert-yearly-options input,
 #yearly-options select,
 #edit-yearly-options select,
-#edit-category-yearly-options select {
+#edit-category-yearly-options select,
+#convert-yearly-options select {
     width: 100%;
     appearance: none;
     appearance: none;
@@ -12376,4 +12493,317 @@ html.modal-open {
     .alert-modal-details .bank-status {
         color: #fde8e0;
     }
+}
+
+/* ============================================================================
+   MANAGE CATEGORIES PAGE
+   ============================================================================ */
+
+.manage-categories-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-width: 350px;
+    max-width: 875px;
+    margin: 0 auto 30px auto;
+    background-color: transparent;
+    border-radius: 10px;
+    transition: transform 0.3s ease-in-out;
+    text-overflow: ellipsis;
+    will-change: transform;
+}
+
+.manage-cat-btn-group {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.manage-cat-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: white;
+    background-color: #575757;
+    transition: background-color 0.2s ease, transform 0.15s ease;
+    position: relative;
+}
+
+.manage-cat-btn:hover {
+    background-color: #777;
+}
+
+/* Add category buttons: circles matching section color */
+.manage-cat-btn.add-cat-btn {
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
+}
+
+.income .manage-cat-btn.add-cat-btn {
+    background-color: #2aaaa8;
+}
+
+.income .manage-cat-btn.add-cat-btn:hover {
+    background-color: #238d8b;
+}
+
+.expenses .manage-cat-btn.add-cat-btn {
+    background-color: #E45F1C;
+}
+
+.expenses .manage-cat-btn.add-cat-btn:hover {
+    background-color: #c5501a;
+}
+
+.manage-cat-btn .hidden-count-bubble {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background-color: #f94449;
+    color: white;
+    font-size: 10px;
+    font-weight: bold;
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.manage-cat-input-container {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    margin-bottom: 10px;
+    padding: 0 5px;
+}
+
+.manage-cat-input-container input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    background-color: #fff;
+    color: #333;
+}
+
+.manage-cat-input-container input:focus {
+    border-color: #2AAAA8;
+}
+
+.manage-cat-input-container button {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: white;
+}
+
+.manage-cat-input-container button:first-of-type {
+    background-color: #2AAAA8;
+}
+
+.manage-cat-input-container button:last-of-type {
+    background-color: #f94449;
+}
+
+/* Manage categories table */
+.manage-cat-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: clamp(12px, calc(1.13vw + 4.65px), 14px);
+    text-align: left;
+    table-layout: fixed;
+}
+
+.manage-cat-table th,
+.manage-cat-table td {
+    height: 36px;
+    padding: 4px 12px;
+    box-sizing: border-box;
+}
+
+.manage-cat-table th {
+    color: white;
+    font-weight: 600;
+}
+
+.manage-cat-table th:first-child {
+    border-top-left-radius: 10px;
+}
+
+.manage-cat-table th:last-child {
+    border-top-right-radius: 10px;
+}
+
+.manage-cat-table tfoot tr:last-child td:first-child {
+    border-bottom-left-radius: 10px;
+}
+
+.manage-cat-table tfoot tr:last-child td:last-child {
+    border-bottom-right-radius: 10px;
+}
+
+/* Income table colors */
+.income-manage-table thead {
+    background-color: #2aaaa8;
+}
+
+.income-manage-table tbody tr:nth-child(odd) {
+    background-color: #d3eeed;
+}
+
+.income-manage-table tbody tr:nth-child(even) {
+    background-color: #59D6D4;
+}
+
+/* Expense table colors */
+.expense-manage-table thead {
+    background-color: #E45F1C;
+}
+
+.expense-manage-table tbody tr:nth-child(even) {
+    background-color: #FDEEEE;
+}
+
+.expense-manage-table tbody tr:nth-child(odd) {
+    background-color: #EF9F77;
+}
+
+.manage-cat-table tfoot tr {
+    background-color: #A9A9A9;
+}
+
+.manage-cat-type-col {
+    width: 120px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.manage-cat-status-col {
+    width: 50px;
+    text-align: center;
+}
+
+/* Actions column */
+.manage-cat-actions-col {
+    width: 45px;
+    text-align: center;
+}
+
+/* Eye icon styling - inherits row text color */
+.manage-cat-eye-icon {
+    font-size: 14px;
+    color: inherit;
+}
+
+/* Sort handle styling for manage page */
+.manage-cat-table .sort-handle {
+    cursor: move;
+    margin-right: 8px;
+    color: inherit;
+    display: inline-block;
+}
+
+.manage-cat-table .sort-handle:hover {
+    color: inherit;
+}
+
+/* Rename button (always visible in manage page) - must override global .rename-category-btn */
+.manage-cat-table .rename-category-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    font-size: 14px;
+    padding: 4px 6px;
+    display: inline-flex !important;
+    position: static !important;
+    transform: none !important;
+}
+
+.manage-cat-table .rename-category-btn:hover {
+    color: inherit;
+}
+
+/* Category cell flex layout */
+.manage-cat-table .category-cell {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: none;
+    overflow: hidden;
+    padding-right: 4px;
+    height: auto;
+}
+
+.manage-cat-table .category-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Hidden categories styling */
+.manage-cat-table .hidden_style {
+    opacity: 0.5;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .manage-cat-input-container input {
+        background-color: #fff;
+        border-color: #ddd;
+        color: #333;
+    }
+
+    .manage-cat-table .sort-handle {
+        color: #888;
+    }
+
+    .manage-cat-table .sort-handle:hover {
+        color: #ccc;
+    }
+
+}
+
+/* Ensure dropdown works inside recurring add modals */
+.income-form-container,
+.expense-form-container,
+.ca-form-container {
+    overflow: visible;
+}
+
+.income-form-container .category-input-wrapper,
+.expense-form-container .category-input-wrapper,
+.ca-form-container .category-input-wrapper {
+    display: block;
+    margin-bottom: 12px;
+}
+
+.income-form-container .category-input,
+.expense-form-container .category-input,
+.ca-form-container .category-input {
+    width: 100%;
+    box-sizing: border-box;
 }

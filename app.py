@@ -1959,6 +1959,9 @@ def dashboard_d():
                 cat['account_name'] = account_names.get(cat.get('account_id'), '')
             c_expense_categories = all_ca_categories
 
+        # Sort c_expense_categories by display_order DESC to match expense categories convention
+        c_expense_categories.sort(key=lambda x: (-(x.get('display_order') or 0), -(x.get('id') or 0)))
+
         # Try Redis first for c_expense_entries
         c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
         if c_expense_entries is None:
@@ -4461,6 +4464,246 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
     return created_map
 
 
+def _copy_expense_categories_to_new_credit_account(user_id, account_id):
+    """
+    Copy all existing expense categories to a newly created credit account.
+    Skips system categories (is_credit_account=1, is_auto_adjustment=1) and
+    categories that already exist for this account.
+    
+    Called when a new credit account is created (manual or Quiltt).
+    
+    Args:
+        user_id: User ID
+        account_id: The new credit account's ID (can be temp negative ID)
+    
+    Returns:
+        Number of categories copied
+    """
+    # Get all expense categories for this user
+    expense_categories = _get_categories_from_redis('expense_categories', user_id)
+    if expense_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM expense_categories WHERE user_id = %s", (user_id,))
+            expense_categories = cursor.fetchall()
+            cursor.close()
+    
+    if not expense_categories:
+        return 0
+    
+    # Get existing c_expense categories to check for duplicates
+    existing_c_cats = _get_categories_from_redis('c_expense_categories', user_id) or []
+    existing_names_for_account = set(
+        cat.get('name') for cat in existing_c_cats 
+        if cat.get('account_id') == account_id
+    )
+    
+    # Find max display_order for this account's categories
+    account_cats = [cat for cat in existing_c_cats if cat.get('account_id') == account_id]
+    max_order = max([cat.get('display_order', 0) for cat in account_cats], default=1)
+    
+    copied = 0
+    for exp_cat in expense_categories:
+        name = exp_cat.get('name')
+        
+        # Skip system categories
+        if exp_cat.get('is_credit_account') == 1:
+            continue
+        if exp_cat.get('is_auto_adjustment') == 1:
+            continue
+        
+        # Skip if already exists for this account
+        if name in existing_names_for_account:
+            continue
+        
+        max_order += 1
+        _add_category_to_redis('c_expense_categories', user_id, {
+            'account_id': account_id,
+            'name': name,
+            'display_order': max_order,
+            'group_id': None,
+            'is_recurring': 0,
+            'no_end_date': 0,
+            'hidden': 0,
+            'is_bud': 0,
+            'is_interest': 0,
+            'is_auto_adjustment': 0
+        })
+        copied += 1
+    
+    if copied > 0:
+        app.logger.info(f"[CATEGORY SYNC] Copied {copied} expense categories to credit account {account_id} for user {user_id}")
+    
+    return copied
+
+
+def _sync_rename_to_credit_accounts(user_id, old_name, new_name):
+    """
+    Rename all c_expense_categories matching old_name to new_name across all credit accounts.
+    Called when an expense_category is renamed.
+    
+    Args:
+        user_id: User ID
+        old_name: The original category name
+        new_name: The new category name
+    """
+    renamed_count = 0
+    
+    # Update in Redis
+    if app.config.get('REDIS_OK'):
+        try:
+            redis_key = f"c_expense_categories:v1:{user_id}"
+            cached = _redis_client.get(redis_key)
+            if cached:
+                categories = json.loads(cached)
+                for cat in categories:
+                    if cat.get('name') == old_name and not cat.get('is_interest') and not cat.get('is_auto_adjustment'):
+                        cat['name'] = new_name
+                        renamed_count += 1
+                if renamed_count > 0:
+                    _redis_client.setex(redis_key, 604800, json.dumps(categories, cls=DecimalEncoder))
+                    _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+        except Exception as e:
+            app.logger.error(f"Error syncing category rename to c_expense_categories in Redis: {e}")
+    
+    # Also update MySQL directly for consistency
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE c_expense_categories SET name = %s
+            WHERE name = %s AND is_interest = 0 AND is_auto_adjustment = 0
+              AND account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+        """, (new_name, old_name, user_id))
+        conn.commit()
+        cursor.close()
+    
+    if renamed_count > 0:
+        app.logger.info(f"[CATEGORY SYNC] Renamed '{old_name}' -> '{new_name}' in {renamed_count} c_expense categories for user {user_id}")
+
+
+def _sync_delete_to_credit_accounts(user_id, category_name):
+    """
+    Delete all c_expense_categories matching category_name across all credit accounts.
+    Called when an expense_category is deleted.
+    Moves past entries to Uncategorized, deletes future entries, recurring, and buckets.
+    
+    Args:
+        user_id: User ID
+        category_name: The name of the category being deleted
+    """
+    if not category_name:
+        return
+    
+    deleted_count = 0
+    yesterday = date.today() - timedelta(days=1)
+    
+    # Get all c_expense_categories from Redis
+    c_categories = _get_categories_from_redis('c_expense_categories', user_id)
+    if not c_categories:
+        return
+    
+    # Find matching categories (skip system categories)
+    matching_cats = [cat for cat in c_categories 
+                     if cat.get('name') == category_name 
+                     and not cat.get('is_interest') 
+                     and not cat.get('is_auto_adjustment')]
+    
+    if not matching_cats:
+        return
+    
+    # Get all c_expense_entries from Redis
+    entries = _get_entries_from_redis('c_expense_entries', user_id)
+    
+    # Group matching categories by account_id to find each account's Uncategorized
+    account_ids = set(cat.get('account_id') for cat in matching_cats)
+    
+    # Build map of account_id -> Uncategorized category_id
+    uncat_map = {}
+    for cat in c_categories:
+        if cat.get('name') == 'Uncategorized' and cat.get('account_id') in account_ids:
+            uncat_map[cat.get('account_id')] = cat.get('id')
+    
+    # Move past entries to Uncategorized for each matching category
+    if entries:
+        entries_modified = False
+        for match_cat in matching_cats:
+            cat_id = int(match_cat.get('id'))
+            acct_id = match_cat.get('account_id')
+            uncat_id = uncat_map.get(acct_id)
+            
+            if not uncat_id:
+                continue
+            
+            # Find past entries for this category
+            past_entries = [e for e in entries 
+                          if int(e.get('category_id', 0)) == cat_id 
+                          and datetime.strptime(e.get('date'), '%Y-%m-%d').date() <= yesterday]
+            
+            for old_entry in past_entries:
+                entry_date = old_entry.get('date')
+                amount = float(old_entry.get('amount', 0))
+                
+                # Find existing Uncategorized entry for this date
+                auto_entry = next((e for e in entries 
+                                  if int(e.get('category_id', 0)) == int(uncat_id) 
+                                  and e.get('date') == entry_date), None)
+                
+                if auto_entry:
+                    new_amount = float(auto_entry.get('amount', 0)) + amount
+                    for i, e in enumerate(entries):
+                        if e.get('id') == auto_entry.get('id'):
+                            entries[i]['amount'] = new_amount
+                            entries[i]['processed'] = 1
+                            break
+                else:
+                    temp_id = -int(time.time() * 1000000) - cat_id
+                    new_entry = {
+                        'id': temp_id,
+                        'category_id': uncat_id,
+                        'date': entry_date,
+                        'amount': amount,
+                        'recurring_id': None,
+                        'is_bucket': 0,
+                        'original_amount': None,
+                        'processed': 1,
+                        'bud_item_id': None
+                    }
+                    entries.append(new_entry)
+                
+                entries = [e for e in entries if e.get('id') != old_entry.get('id')]
+                entries_modified = True
+        
+        if entries_modified:
+            _set_entries_to_redis('c_expense_entries', user_id, entries)
+    
+    # Delete each matching category (handles entries, recurring, buckets, pending deletes)
+    for match_cat in matching_cats:
+        cat_id = match_cat.get('id')
+        _delete_category_in_redis('c_expense_categories', user_id, cat_id)
+        deleted_count += 1
+    
+    # Also remove recurring_c_expense records for deleted categories
+    if app.config.get('REDIS_OK'):
+        try:
+            recurring_redis_key = f"recurring_c_expense:v1:{user_id}"
+            recurring_data = _redis_client.get(recurring_redis_key)
+            if recurring_data:
+                recurring_list = json.loads(recurring_data)
+                cat_ids = set(int(cat.get('id')) for cat in matching_cats)
+                filtered = [r for r in recurring_list if int(r.get('category_id', 0)) not in cat_ids]
+                if len(filtered) < len(recurring_list):
+                    if len(filtered) == 0:
+                        _redis_client.delete(recurring_redis_key)
+                    else:
+                        _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered, cls=DecimalEncoder))
+                    _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense')
+        except Exception as e:
+            app.logger.error(f"[CATEGORY SYNC] Error removing recurring_c_expense for deleted categories: {e}")
+    
+    if deleted_count > 0:
+        app.logger.info(f"[CATEGORY SYNC] Deleted '{category_name}' from {deleted_count} c_expense categories for user {user_id}")
+
+
 def _add_category_to_redis(table_name, user_id, category_data):
     """
     Add a new category to Redis cache.
@@ -6664,8 +6907,21 @@ def delete_expense_category():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
 
-            # 1. Find the Uncategorized expense category for this user (Redis-first)
+            # 0. Capture category name BEFORE deletion (for CA sync)
+            deleted_category_name = None
             categories = _get_categories_from_redis('expense_categories', current_user.id)
+            if categories:
+                for cat in categories:
+                    if int(cat.get('id')) == int(category_id):
+                        deleted_category_name = cat.get('name')
+                        break
+            if not deleted_category_name:
+                cursor.execute("SELECT name FROM expense_categories WHERE id = %s AND user_id = %s", (category_id, current_user.id))
+                row = cursor.fetchone()
+                if row:
+                    deleted_category_name = row[0]
+
+            # 1. Find the Uncategorized expense category for this user (Redis-first)
             auto_adj_id = None
             if categories:
                 for cat in categories:
@@ -6775,6 +7031,10 @@ def delete_expense_category():
             if app.config.get('REDIS_OK'):
                 _delete_category_in_redis('expense_categories', current_user.id, category_id)
             
+            # Sync delete to credit account categories
+            if deleted_category_name:
+                _sync_delete_to_credit_accounts(current_user.id, deleted_category_name)
+            
             # Sync updated categories to Ntropy (non-blocking)
             _trigger_ntropy_sync(current_user.id)
             
@@ -6789,127 +7049,117 @@ def delete_ca_category():
     category_id = request.form['id']
 
     try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-
-            # 1. Find the account_id for this CA category
-            cursor.execute("""
-                SELECT account_id FROM c_expense_categories
-                WHERE id = %s
-            """, (category_id,))
-            row = cursor.fetchone()
-            if not row:
+        # Check if this category is recurring (Redis-first)
+        c_categories = _get_categories_from_redis('c_expense_categories', current_user.id)
+        target_cat = None
+        if c_categories:
+            for cat in c_categories:
+                if int(cat.get('id')) == int(category_id):
+                    target_cat = cat
+                    break
+        
+        if not target_cat:
+            # Fallback to MySQL
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute("SELECT * FROM c_expense_categories WHERE id = %s", (category_id,))
+                target_cat = cursor.fetchone()
                 cursor.close()
-                return jsonify({'status': 'error', 'message': 'CA category not found'}), 400
-            account_id = row[0]
-
-            # 2. Find the Uncategorized CA category for this account
-            cursor.execute("""
-                SELECT id FROM c_expense_categories
-                WHERE account_id = %s AND name = 'Uncategorized'
-                LIMIT 1
-            """, (account_id,))
-            auto_adj_row = cursor.fetchone()
-            if not auto_adj_row:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Uncategorized CA category not found'}), 400
-            auto_adj_id = auto_adj_row[0]
-
-            # 3. For all entries for this category with date <= yesterday, move to Uncategorized (Redis-first)
-            yesterday = date.today() - timedelta(days=1)
-            entries = _get_entries_from_redis('c_expense_entries', current_user.id)
-            if entries:
-                old_entries = [e for e in entries if int(e.get('category_id', 0)) == int(category_id) and 
-                             datetime.strptime(e.get('date'), '%Y-%m-%d').date() <= yesterday]
-
-                for old_entry in old_entries:
-                    entry_date = old_entry.get('date')
-                    amount = float(old_entry.get('amount', 0))
-                    
-                    # Find existing Uncategorized entry for this date
-                    auto_entry = next((e for e in entries if int(e.get('category_id', 0)) == int(auto_adj_id) and 
-                                      e.get('date') == entry_date), None)
-                    
-                    if auto_entry:
-                        # Update the existing auto adjustment entry
-                        new_amount = float(auto_entry.get('amount', 0)) + amount
-                        for i, e in enumerate(entries):
-                            if e.get('id') == auto_entry.get('id'):
-                                entries[i]['amount'] = new_amount
-                                entries[i]['processed'] = 1
-                                break
-                    else:
-                        # Create a new auto adjustment entry
-                        temp_id = -int(time.time() * 1000000)
-                        new_entry = {
-                            'id': temp_id,
-                            'category_id': auto_adj_id,
-                            'date': entry_date,
-                            'amount': amount,
-                            'recurring_id': None,
-                            'is_bucket': 0,
-                            'original_amount': None,
-                            'processed': 1,
-                            'bud_item_id': None
-                        }
-                        entries.append(new_entry)
-                    
-                    # Remove the original entry
-                    entries = [e for e in entries if e.get('id') != old_entry.get('id')]
+        
+        if not target_cat:
+            return jsonify({'status': 'error', 'message': 'CA category not found'}), 400
+        
+        is_recurring = int(target_cat.get('is_recurring', 0))
+        
+        # Non-recurring categories cannot be deleted directly
+        if not is_recurring:
+            return jsonify({'status': 'error', 'message': 'Credit account categories cannot be deleted directly. Delete the expense category instead.'}), 400
+        
+        # Recurring category: Convert to non-recurring
+        # 1. Remove future entries (today and onward) from Redis
+        today = date.today()
+        category_id_int = int(category_id)
+        
+        entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+        if entries:
+            # Remove future entries for this category, keep past entries
+            filtered_entries = []
+            deleted_entry_ids = []
+            for e in entries:
+                if int(e.get('category_id', 0)) == category_id_int and datetime.strptime(e.get('date'), '%Y-%m-%d').date() >= today:
+                    # Future entry - mark for deletion
+                    entry_id = e.get('id')
+                    if entry_id and int(entry_id) > 0:
+                        deleted_entry_ids.append(str(entry_id))
+                else:
+                    filtered_entries.append(e)
+            
+            if len(filtered_entries) < len(entries):
+                _set_entries_to_redis('c_expense_entries', current_user.id, filtered_entries)
                 
-                # Save updated entries back to Redis
-                _set_entries_to_redis('c_expense_entries', current_user.id, entries)
-
-            cursor.close()
-            
-            # Delete the CA category from Redis (not MySQL) to prevent cascade deletion of buckets
-            # The flush worker will handle MySQL deletion
-            if app.config.get('REDIS_OK'):
-                _delete_category_in_redis('c_expense_categories', current_user.id, category_id)
-            
-            # Remove recurring c_expense and bucket records from Redis for this category
-            if app.config.get('REDIS_OK'):
-                try:
-                    # Invalidate c_expense entries cache
-                    redis_key = f"c_expense_entries:v1:{current_user.id}"
-                    _redis_client.delete(redis_key)
-                    
-                    # Remove recurring c_expense records for this category from Redis (keyed by user_id)
-                    recurring_redis_key = f"recurring_c_expense:v1:{current_user.id}"
-                    recurring_data = _redis_client.get(recurring_redis_key)
-                    if recurring_data:
-                        recurring_list = json.loads(recurring_data)
-                        category_id_int = int(category_id)
-                        filtered_recurring = [r for r in recurring_list if r.get('category_id') != category_id_int]
-                        if len(filtered_recurring) < len(recurring_list):
-                            if len(filtered_recurring) == 0:
-                                _redis_client.delete(recurring_redis_key)
-                            else:
-                                _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring))
-                            _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_c_expense')
-                    
-                    # Remove bucket records for this category from Redis (keyed by user_id)
-                    bucket_redis_key = f"recurring_c_expense_buckets:v1:{current_user.id}"
-                    bucket_data = _redis_client.get(bucket_redis_key)
-                    if bucket_data:
-                        buckets = json.loads(bucket_data)
-                        # Remove buckets for this category (including negative IDs)
-                        category_id_int = int(category_id)
-                        filtered_buckets = [b for b in buckets if b.get('category_id') != category_id_int]
-                        if len(filtered_buckets) < len(buckets):
-                            if len(filtered_buckets) == 0:
-                                _redis_client.delete(bucket_redis_key)
-                            else:
-                                _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets))
-                            _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_c_expense_buckets')
-                    
-                except Exception as e:
-                    pass
-            
-            # Sync updated categories to Ntropy (non-blocking)
-            _trigger_ntropy_sync(current_user.id)
-            
-            return jsonify({'status': 'success'})
+                # Track pending entry deletions
+                if deleted_entry_ids and app.config.get('REDIS_OK'):
+                    pending_key = f"pending_deletes:c_expense_entries:{current_user.id}"
+                    _redis_client.sadd(pending_key, *deleted_entry_ids)
+                    _redis_client.expire(pending_key, 604800)
+                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_entries')
+        
+        # 2. Remove recurring_c_expense records for this category
+        if app.config.get('REDIS_OK'):
+            try:
+                recurring_redis_key = f"recurring_c_expense:v1:{current_user.id}"
+                recurring_data = _redis_client.get(recurring_redis_key)
+                if recurring_data:
+                    recurring_list = json.loads(recurring_data)
+                    filtered_recurring = [r for r in recurring_list if int(r.get('category_id', 0)) != category_id_int]
+                    if len(filtered_recurring) < len(recurring_list):
+                        if len(filtered_recurring) == 0:
+                            _redis_client.delete(recurring_redis_key)
+                        else:
+                            _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring, cls=DecimalEncoder))
+                        _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_c_expense')
+            except Exception as e:
+                app.logger.error(f"Error removing recurring_c_expense during convert-to-nonrecurring: {e}")
+        
+        # 3. Remove bucket records for this category
+        if app.config.get('REDIS_OK'):
+            try:
+                bucket_redis_key = f"recurring_c_expense_buckets:v1:{current_user.id}"
+                bucket_data = _redis_client.get(bucket_redis_key)
+                if bucket_data:
+                    buckets = json.loads(bucket_data)
+                    deleted_bucket_ids = []
+                    filtered_buckets = []
+                    for b in buckets:
+                        if int(b.get('category_id', 0)) == category_id_int:
+                            bucket_id = b.get('id')
+                            if bucket_id and int(bucket_id) > 0:
+                                deleted_bucket_ids.append(str(bucket_id))
+                        else:
+                            filtered_buckets.append(b)
+                    if len(filtered_buckets) < len(buckets):
+                        if len(filtered_buckets) == 0:
+                            _redis_client.delete(bucket_redis_key)
+                        else:
+                            _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets, cls=DecimalEncoder))
+                        if deleted_bucket_ids:
+                            pending_key = f"pending_deletes:recurring_c_expense_buckets:{current_user.id}"
+                            _redis_client.sadd(pending_key, *deleted_bucket_ids)
+                            _redis_client.expire(pending_key, 604800)
+                        _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_c_expense_buckets')
+            except Exception as e:
+                app.logger.error(f"Error removing recurring_c_expense_buckets during convert-to-nonrecurring: {e}")
+        
+        # 4. Set category to non-recurring in Redis
+        _update_category_in_redis('c_expense_categories', current_user.id, category_id, {
+            'is_recurring': 0,
+            'no_end_date': 0
+        })
+        
+        # Sync updated categories to Ntropy (non-blocking)
+        _trigger_ntropy_sync(current_user.id)
+        
+        return jsonify({'status': 'success', 'message': 'Recurring category converted to regular category.'})
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
@@ -7073,6 +7323,29 @@ def update_expense_category():
     category_id = request.form['category_id']  # Use the category_id
     new_name = request.form['new_name']
 
+    # Get the OLD name before updating (needed for syncing to c_expense_categories)
+    old_name = None
+    if app.config.get('REDIS_OK'):
+        try:
+            redis_key = f"expense_categories:v1:{current_user.id}"
+            cached = _redis_client.get(redis_key)
+            if cached:
+                categories = json.loads(cached)
+                for cat in categories:
+                    if int(cat.get('id')) == int(category_id):
+                        old_name = cat.get('name')
+                        break
+        except Exception:
+            pass
+    if old_name is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM expense_categories WHERE id = %s AND user_id = %s", (category_id, current_user.id))
+            row = cursor.fetchone()
+            cursor.close()
+            if row:
+                old_name = row[0]
+
     # Update in Redis first
     if app.config.get('REDIS_OK'):
         try:
@@ -7100,6 +7373,10 @@ def update_expense_category():
         conn.commit()
         cursor.close()
 
+    # Sync rename to all c_expense_categories with the same old name
+    if old_name and old_name != new_name:
+        _sync_rename_to_credit_accounts(current_user.id, old_name, new_name)
+
     # Sync updated categories to Ntropy (non-blocking)
     _trigger_ntropy_sync(current_user.id)
 
@@ -7108,40 +7385,9 @@ def update_expense_category():
 @app.route('/update_ca_category', methods=['POST'])
 @login_required
 def update_ca_category():
-    category_id = request.form['category_id']
-    new_name = request.form['new_name']
-
-    # Update in Redis first (c_expense_categories keyed by user_id)
-    if app.config.get('REDIS_OK'):
-        try:
-            redis_key = f"c_expense_categories:v1:{current_user.id}"
-            cached = _redis_client.get(redis_key)
-            if cached:
-                categories = json.loads(cached)
-                for cat in categories:
-                    if int(cat.get('id')) == int(category_id):
-                        cat['name'] = new_name
-                        break
-                _redis_client.setex(redis_key, 604800, json.dumps(categories, cls=DecimalEncoder))
-                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_categories')
-        except Exception as e:
-            app.logger.error(f"Error updating CA category in Redis: {e}")
-
-    # Also update MySQL directly for consistency
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE c_expense_categories
-            SET name = %s
-            WHERE id = %s
-        """, (new_name, category_id))
-        conn.commit()
-        cursor.close()
-
-    # Sync updated categories to Ntropy (non-blocking)
-    _trigger_ntropy_sync(current_user.id)
-
-    return jsonify({'status': 'success'})
+    # DISABLED: Credit account categories are synced from expense_categories.
+    # Rename the expense category instead — it will automatically sync to all credit accounts.
+    return jsonify({'status': 'error', 'message': 'Credit account categories cannot be renamed directly. Rename the category in Expenses instead — it will sync to all credit accounts.'}), 400
 
 @app.route('/fetch-latest-data')
 def fetch_latest_data():
@@ -7587,6 +7833,53 @@ def dashboard():
         quiltt_flags=quiltt_flags
     )
 
+
+@app.route('/get-recurring-id-for-category', methods=['POST'])
+@login_required
+def get_recurring_id_for_category():
+    """Look up the recurring record ID for a given category ID and type."""
+    data = request.get_json()
+    category_id = data.get('category_id')
+    category_type = data.get('category_type')  # 'income', 'expense', 'ca'
+
+    if not category_id or not category_type:
+        return jsonify({'status': 'error', 'message': 'Missing fields'}), 400
+
+    try:
+        table_map = {
+            'income': 'recurring_income',
+            'expense': 'recurring_expense',
+            'ca': 'recurring_c_expense'
+        }
+        table_name = table_map.get(category_type)
+        if not table_name:
+            return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
+
+        # Try Redis first
+        cached = _get_recurring_from_redis(table_name, current_user.id)
+        if cached:
+            for rec in cached:
+                if int(rec.get('category_id', 0)) == int(category_id):
+                    return jsonify({'status': 'success', 'recurring_id': rec.get('id')})
+
+        # Fallback to MySQL
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT id FROM {table_name} WHERE category_id = %s AND user_id = %s LIMIT 1
+            """, (category_id, current_user.id))
+            row = cursor.fetchone()
+            cursor.close()
+            if row:
+                return jsonify({'status': 'success', 'recurring_id': row[0]})
+
+        return jsonify({'status': 'error', 'message': 'Recurring record not found'}), 404
+
+    except Exception as e:
+        app.logger.error(f"Error looking up recurring ID: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/get_total_income', methods=['GET'])
 @login_required
 def get_total_income():
@@ -7977,6 +8270,13 @@ def update_income_order():
         conn.commit()
         cursor.close()
 
+    # Clear Redis cache so new order is picked up
+    try:
+        if _redis_client:
+            _redis_client.delete(f"income_categories:v1:{user_id}")
+    except Exception:
+        pass
+
     return jsonify({'status': 'success'})
 
 @app.route('/update_expense_order', methods=['POST'])
@@ -7997,8 +8297,32 @@ def update_expense_order():
                 WHERE user_id = %s AND name = %s
             """, (display_order, user_id, category_name))
 
+        # Sync display_order to c_expense_categories across all credit accounts
+        cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
+        credit_accounts = cursor.fetchall()
+        if credit_accounts:
+            account_ids = [row[0] if isinstance(row, tuple) else row['id'] for row in credit_accounts]
+            for item in order_data:
+                category_name = item['name']
+                display_order = item['order']
+                for account_id in account_ids:
+                    cursor.execute("""
+                        UPDATE c_expense_categories
+                        SET display_order = %s
+                        WHERE account_id = %s AND name = %s
+                          AND is_interest = 0 AND is_auto_adjustment = 0
+                    """, (display_order, account_id, category_name))
+
         conn.commit()
         cursor.close()
+
+    # Clear Redis cache for c_expense_categories so new order is picked up
+    try:
+        if _redis_client:
+            _redis_client.delete(f"c_expense_categories:v1:{user_id}")
+            _redis_client.delete(f"expense_categories:v1:{user_id}")
+    except Exception:
+        pass
 
     return jsonify({'status': 'success'})
 
@@ -9431,7 +9755,7 @@ def dashboard_3m():
                 FROM c_expense_categories cec
                 JOIN credit_accounts ca ON cec.account_id = ca.id
                 WHERE ca.user_id = %s
-                ORDER BY cec.display_order DESC, cec.id ASC
+                ORDER BY cec.display_order DESC, cec.id DESC
             """, (current_user.id,))
             c_expense_categories = list(cursor.fetchall())
         else:
@@ -9440,6 +9764,9 @@ def dashboard_3m():
             for cat in all_ca_categories:
                 cat['account_name'] = account_names.get(cat.get('account_id'), '')
             c_expense_categories = all_ca_categories
+
+        # Sort c_expense_categories by display_order DESC to match expense categories convention
+        c_expense_categories.sort(key=lambda x: (-(x.get('display_order') or 0), -(x.get('id') or 0)))
 
         # Try Redis first for CA balances
         c_a_balances_m = _get_ca_balances_from_redis('c_a_balances_m', current_user.id)
@@ -10129,6 +10456,9 @@ def dashboard_m():
                 cat['account_name'] = account_names.get(cat.get('account_id'), '')
             c_expense_categories = all_ca_categories
 
+
+        # Sort c_expense_categories by display_order DESC to match expense categories convention
+        c_expense_categories.sort(key=lambda x: (-(x.get('display_order') or 0), -(x.get('id') or 0)))
         # CA entries
         # Try Redis first
         c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
@@ -10472,7 +10802,7 @@ def dashboard_y():
                 FROM c_expense_categories cec
                 JOIN credit_accounts ca ON cec.account_id = ca.id
                 WHERE ca.user_id = %s
-                ORDER BY cec.display_order ASC, cec.id ASC
+                ORDER BY cec.display_order DESC, cec.id DESC
             """, (current_user.id,))
             c_expense_categories = list(cursor.fetchall())
         else:
@@ -10728,7 +11058,7 @@ def dashboard_summary():
                 FROM c_expense_categories cec
                 JOIN credit_accounts ca ON cec.account_id = ca.id
                 WHERE ca.user_id = %s
-                ORDER BY cec.display_order ASC
+                ORDER BY cec.display_order DESC
             """, (current_user.id,))
             all_c_expense_categories = list(cursor.fetchall())
             cursor.close()
@@ -11731,6 +12061,81 @@ def check_quiltt_reconnect():
         return jsonify({'needs_reconnect': False, 'connections': []})
 
 
+################################################################################
+########################### MANAGE CATEGORIES PAGE #############################
+################################################################################
+
+@app.route('/manage-categories')
+@login_required
+def manage_categories():
+    user_id = current_user.id
+
+    # Try Redis first for income categories
+    income_categories = _get_entries_from_redis('income_categories', user_id)
+    if income_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM income_categories WHERE user_id = %s ORDER BY display_order DESC", (user_id,))
+            income_categories = cursor.fetchall()
+            cursor.close()
+    else:
+        income_categories = sorted(income_categories, key=lambda x: x.get('display_order', 0) or 0, reverse=True)
+
+    # Try Redis first for expense categories
+    expense_categories = _get_entries_from_redis('expense_categories', user_id)
+    if expense_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM expense_categories WHERE user_id = %s ORDER BY display_order DESC", (user_id,))
+            expense_categories = cursor.fetchall()
+            cursor.close()
+    else:
+        expense_categories = sorted(expense_categories, key=lambda x: x.get('display_order', 0) or 0, reverse=True)
+
+    # Filter out hidden=0 categories — show ALL categories on this page
+    # (hidden ones will get a visual style, but are still shown)
+
+    # Fetch user profile data
+    user_data = None
+    redis_key = f"users:v1:{user_id}"
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+        except Exception as e:
+            app.logger.error(f"[REDIS ERROR] manage_categories user data: {str(e)}")
+
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT profile_picture, first_name, last_name, landing_page, currency_type FROM users WHERE id = %s", (user_id,))
+            user_data = cursor.fetchone()
+            cursor.close()
+
+    profile_picture = user_data.get('profile_picture') if user_data else None
+    first_name = user_data.get('first_name', '') if user_data else ''
+    last_name = user_data.get('last_name', '') if user_data else ''
+    landing_page = user_data.get('landing_page', 'dashboard_3m') if user_data else 'dashboard_3m'
+    currency_type = user_data.get('currency_type', 'USD') if user_data else 'USD'
+
+    # Get unread notification count
+    notifications_list = _get_entries_from_redis('notifications', user_id) or []
+    unread_notifications_count = sum(1 for n in notifications_list if not n.get('is_read'))
+
+    return render_template(
+        'manage_categories.html',
+        income_categories=income_categories,
+        expense_categories=expense_categories,
+        profile_picture=profile_picture,
+        nav_first_name=first_name,
+        nav_last_name=last_name,
+        landing_page=landing_page,
+        currency_type=currency_type,
+        unread_notifications_count=unread_notifications_count
+    )
+
+
 @app.route('/settings', methods=['GET'])
 @login_required
 def settings():
@@ -12663,9 +13068,19 @@ def recurring_income():
             record['bucket_date'] = None
 
     # Pass landing_page to the template
+    # Get all income categories for the searchable dropdown
+    all_income_categories = _get_categories_from_redis('income_categories', current_user.id)
+    if all_income_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT id, name, is_recurring, hidden FROM income_categories WHERE user_id = %s", (current_user.id,))
+            all_income_categories = cursor.fetchall()
+            cursor.close()
+
     return render_template(
         'recurring_i.html', 
         recurring_income_records=recurring_income_records,
+        income_categories=all_income_categories,
         profile_picture=profile_picture,
         first_name=first_name,
         last_name=last_name,
@@ -12685,6 +13100,7 @@ def add_recurring_income():
 
     # Extract data from the request
     category_name = data.get('category_name')
+    category_id = data.get('category_id')  # For selecting an existing category
     amount = data.get('amount')
     cadence_interval = data.get('cadence_interval')
     cadence_unit = data.get('cadence_unit')
@@ -12697,40 +13113,57 @@ def add_recurring_income():
     no_end_date = data.get('no_end_date', 0)
     wage_bill = data.get('wage_bill', 0)
 
-    # Validate the data
-    if not all([category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
+    # Validate the data - need either category_name or category_id
+    if not category_id and not category_name:
+        return jsonify({'status': 'error', 'message': 'Missing category name or ID'}), 400
+    if not all([amount, cadence_interval, cadence_unit, start_date, end_date]):
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
     try:
-        # Step 1: Get max display_order - try Redis first, fallback to MySQL
-        categories = _get_categories_from_redis('income_categories', current_user.id)
-        if categories is not None:
-            max_display_order = max([cat.get('display_order', 0) for cat in categories], default=0)
+        if category_id:
+            # Using an existing category - update it to be recurring
+            categories = _get_categories_from_redis('income_categories', current_user.id)
+            if categories:
+                cat = next((c for c in categories if str(c['id']) == str(category_id)), None)
+                if cat:
+                    cat['is_recurring'] = 1
+                    cat['no_end_date'] = no_end_date
+                    _update_category_in_redis('income_categories', current_user.id, category_id, cat)
+                    category_name = cat['name']
+                else:
+                    return jsonify({'status': 'error', 'message': 'Category not found'}), 404
+            else:
+                return jsonify({'status': 'error', 'message': 'Could not load categories'}), 500
         else:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT COALESCE(MAX(display_order), 0) FROM income_categories WHERE user_id = %s
-                """, (current_user.id,))
-                max_display_order = cursor.fetchone()[0]
-                cursor.close()
+            # Step 1: Get max display_order - try Redis first, fallback to MySQL
+            categories = _get_categories_from_redis('income_categories', current_user.id)
+            if categories is not None:
+                max_display_order = max([cat.get('display_order', 0) for cat in categories], default=0)
+            else:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT COALESCE(MAX(display_order), 0) FROM income_categories WHERE user_id = %s
+                    """, (current_user.id,))
+                    max_display_order = cursor.fetchone()[0]
+                    cursor.close()
 
-        # Step 2: Create category in Redis first (flush worker will sync to MySQL)
-        new_category = {
-            'user_id': current_user.id,
-            'name': category_name,
-            'display_order': max_display_order + 1,
-            'group_id': None,
-            'is_recurring': 1,
-            'is_auto_adjustment': 0,
-            'no_end_date': no_end_date,
-            'hidden': 0
-        }
-        
-        category_id = _add_category_to_redis('income_categories', current_user.id, new_category)
-        
-        if category_id is None:
-            return jsonify({'status': 'error', 'message': 'Failed to create category'}), 500
+            # Step 2: Create category in Redis first (flush worker will sync to MySQL)
+            new_category = {
+                'user_id': current_user.id,
+                'name': category_name,
+                'display_order': max_display_order + 1,
+                'group_id': None,
+                'is_recurring': 1,
+                'is_auto_adjustment': 0,
+                'no_end_date': no_end_date,
+                'hidden': 0
+            }
+            
+            category_id = _add_category_to_redis('income_categories', current_user.id, new_category)
+            
+            if category_id is None:
+                return jsonify({'status': 'error', 'message': 'Failed to create category'}), 500
 
         # Step 3: Create recurring income record in Redis
         recurring_data = {
@@ -12943,37 +13376,152 @@ def delete_recurring_income():
         if not category_id:
             return jsonify({'status': 'error', 'message': 'Category ID not found for recurring income.'}), 404
         
-        # Log the category_id we're about to delete
-        
-        # Redis-only operations - let flush worker handle MySQL
+        # Convert to non-recurring instead of deleting the category
+        # Keep past entries, remove future entries, remove recurring/bucket records
         today = date.today()
+        category_id_int = int(category_id)
         
-        # Delete all entries (past and future) from Redis for this category
-        _delete_entry_in_redis('income_entries', current_user.id, category_id, date(1900, 1, 1), date(9999, 12, 31))
+        # 1. Remove future entries (today and onward), keep past entries
+        entries = _get_entries_from_redis('income_entries', current_user.id)
+        if entries:
+            filtered_entries = []
+            deleted_entry_ids = []
+            for e in entries:
+                if int(e.get('category_id', 0)) == category_id_int:
+                    entry_date = datetime.strptime(e.get('date'), '%Y-%m-%d').date() if isinstance(e.get('date'), str) else e.get('date')
+                    if entry_date >= today:
+                        # Future entry - mark for deletion
+                        entry_id = e.get('id')
+                        if entry_id and int(entry_id) > 0:
+                            deleted_entry_ids.append(str(entry_id))
+                    else:
+                        # Past entry - keep
+                        filtered_entries.append(e)
+                else:
+                    filtered_entries.append(e)
+            
+            if len(filtered_entries) < len(entries):
+                _set_entries_to_redis('income_entries', current_user.id, filtered_entries)
+                
+                # Track pending entry deletions
+                if deleted_entry_ids and app.config.get('REDIS_OK'):
+                    pending_key = f"pending_deletes:income_entries:{current_user.id}"
+                    _redis_client.sadd(pending_key, *deleted_entry_ids)
+                    _redis_client.expire(pending_key, 604800)
+                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'income_entries')
         
-        # Delete all buckets for this category from Redis
+        # 2. Delete all buckets for this category from Redis
         _delete_buckets_in_redis('recurring_income_buckets', current_user.id, category_id)
         
-        # Delete the recurring record from Redis (marks for deletion)
+        # 3. Delete the recurring record from Redis (marks for deletion)
         _delete_recurring_in_redis('recurring_income', current_user.id, recurring_id)
         
-        # Delete the category from Redis cache (marks for deletion)
-        _delete_category_in_redis('income_categories', current_user.id, category_id)
-        
-        # Flush worker will handle:
-        # - Moving past entries to Uncategorized in MySQL
-        # - Deleting category from MySQL (CASCADE deletes entries)
-        # - Cleaning up recurring record from MySQL
-        # - Cleaning up buckets from MySQL
+        # 4. Set category to non-recurring (keep the category itself)
+        _update_category_in_redis('income_categories', current_user.id, category_id, {
+            'is_recurring': 0,
+            'no_end_date': 0
+        })
         
         # Sync updated categories to Ntropy (non-blocking)
         _trigger_ntropy_sync(current_user.id)
         
-        return jsonify({'status': 'success', 'message': 'Recurring income and associated category deleted successfully!'})
+        return jsonify({'status': 'success', 'message': 'Recurring income converted to regular category.'})
 
     except Exception as e:
         app.logger.error(f"Error deleting recurring income: {e}")
         return jsonify({'status': 'error', 'message': 'An error occurred while deleting the recurring income.'}), 500
+
+
+@app.route('/convert-to-recurring-income', methods=['POST'])
+@login_required
+def convert_to_recurring_income():
+    """Convert an existing non-recurring income category to recurring."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No data received'}), 400
+
+    category_id = data.get('category_id')
+    amount = data.get('amount')
+    cadence_interval = data.get('cadence_interval')
+    cadence_unit = data.get('cadence_unit')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    weekdays = data.get('weekdays')
+    monthly_days = data.get('monthly_days')
+    yearly_day = data.get('yearly_day')
+    yearly_month = data.get('yearly_month')
+    no_end_date = data.get('no_end_date', 0)
+    wage_bill = data.get('wage_bill', 0)
+
+    if not all([category_id, amount, cadence_interval, cadence_unit, start_date, end_date]):
+        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+
+    try:
+        # Verify the category exists and belongs to this user
+        categories = _get_categories_from_redis('income_categories', current_user.id)
+        category_name = None
+        if categories is not None:
+            for cat in categories:
+                if int(cat.get('id')) == int(category_id) and int(cat.get('user_id', 0)) == current_user.id:
+                    category_name = cat.get('name')
+                    break
+
+        if category_name is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT name FROM income_categories WHERE id = %s AND user_id = %s
+                """, (category_id, current_user.id))
+                row = cursor.fetchone()
+                cursor.close()
+                if row:
+                    category_name = row[0]
+                else:
+                    return jsonify({'status': 'error', 'message': 'Invalid category'}), 400
+
+        # Mark the category as recurring in Redis
+        _update_category_in_redis('income_categories', current_user.id, category_id, {
+            'is_recurring': 1,
+            'no_end_date': no_end_date
+        })
+
+        # Create recurring income record in Redis
+        recurring_data = {
+            'id': None,
+            'user_id': current_user.id,
+            'category_id': int(category_id),
+            'category_name': category_name,
+            'amount': float(amount),
+            'cadence_interval': cadence_interval,
+            'cadence_unit': cadence_unit,
+            'weekdays': ','.join(weekdays) if weekdays else None,
+            'monthly_days': ','.join(map(str, monthly_days)) if monthly_days else None,
+            'yearly_day': yearly_day if yearly_day else None,
+            'yearly_month': yearly_month if yearly_month else None,
+            'start_date': start_date,
+            'end_date': end_date,
+            'no_end_date': no_end_date,
+            'wage_bill': wage_bill
+        }
+
+        _update_recurring_in_redis('recurring_income', current_user.id, recurring_data)
+
+        recurring_id = recurring_data['id']
+
+        if recurring_id:
+            generate_income_entries(
+                recurring_id, int(category_id), amount, cadence_interval, cadence_unit,
+                start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month, current_user.id
+            )
+
+        _trigger_ntropy_sync(current_user.id)
+
+        return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Category converted to recurring successfully!'})
+
+    except Exception as e:
+        app.logger.error(f"Error converting income to recurring: {e}")
+        return jsonify({'status': 'error', 'message': f'An error occurred: {str(e)}'}), 500
+
 
 @app.route('/update-recurring-income', methods=['POST'])
 @login_required
@@ -13034,49 +13582,42 @@ def update_recurring_income_inner(data, user_id):
                     return jsonify({'status': 'error', 'message': 'Recurring income not found'}), 404
                 category_id = result[0]
         
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
+        # Step 2: Update the category name/flags in Redis (Redis-first)
+        _update_category_in_redis('income_categories', user_id, category_id, {
+            'name': category_name,
+            'is_recurring': 1,
+            'no_end_date': no_end_date
+        })
 
-            # Step 2: Update the category name in the income_categories table
-            cursor.execute("""
-                UPDATE income_categories
-                SET name = %s, is_recurring = 1, no_end_date = %s
-                WHERE id = %s
-            """, (category_name, no_end_date, category_id))
+        # Convert the monthly_days array into a comma-separated string for storage, if it exists
+        monthly_days_str = ','.join(map(str, monthly_days)) if monthly_days else None
 
-            # Convert the monthly_days array into a comma-separated string for storage, if it exists
-            monthly_days_str = ','.join(map(str, monthly_days)) if monthly_days else None
+        # Step 2b: Update the recurring income record in Redis
+        recurring_data = {
+            'id': recurring_id,
+            'user_id': user_id,
+            'category_id': category_id,
+            'category_name': category_name,  # Include the category name
+            'amount': float(amount),
+            'cadence_interval': cadence_interval,
+            'cadence_unit': cadence_unit,
+            'weekdays': ','.join(weekdays) if weekdays else None,
+            'monthly_days': monthly_days_str,
+            'yearly_day': yearly_day if yearly_day else None,
+            'yearly_month': yearly_month if yearly_month else None,
+            'start_date': start_date,
+            'end_date': end_date,
+            'no_end_date': no_end_date,
+            'wage_bill': wage_bill
+        }
+        
+        _update_recurring_in_redis('recurring_income', user_id, recurring_data)
 
-            # Step 2: Update the recurring income record in Redis
-            recurring_data = {
-                'id': recurring_id,
-                'user_id': user_id,
-                'category_id': category_id,
-                'category_name': category_name,  # Include the category name
-                'amount': float(amount),
-                'cadence_interval': cadence_interval,
-                'cadence_unit': cadence_unit,
-                'weekdays': ','.join(weekdays) if weekdays else None,
-                'monthly_days': monthly_days_str,
-                'yearly_day': yearly_day if yearly_day else None,
-                'yearly_month': yearly_month if yearly_month else None,
-                'start_date': start_date,
-                'end_date': end_date,
-                'no_end_date': no_end_date,
-                'wage_bill': wage_bill
-            }
-            
-            _update_recurring_in_redis('recurring_income', user_id, recurring_data)
-
-            # Step 3: Delete old income entries for today and the future from Redis
-            _delete_entry_in_redis('income_entries', user_id, category_id, today, date(9999, 12, 31))
-            
-            # Step 3b: Delete future bucket records for this category
-            _delete_future_buckets_in_redis('recurring_income_buckets', user_id, category_id, today)
-
-            # Commit the category changes
-            conn.commit()
-            cursor.close()
+        # Step 3: Delete old income entries for today and the future from Redis
+        _delete_entry_in_redis('income_entries', user_id, category_id, today, date(9999, 12, 31))
+        
+        # Step 3b: Delete future bucket records for this category
+        _delete_future_buckets_in_redis('recurring_income_buckets', user_id, category_id, today)
 
         # Step 4: Recreate the income entries with the updated details (only for today and future)
         # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
@@ -13283,9 +13824,13 @@ def recurring_expense():
             record['bucket_date'] = None
 
     # Pass landing_page to the template
+    # Get all expense categories for the searchable dropdown
+    all_expense_categories = expense_categories
+
     return render_template(
         'recurring_e.html', 
         recurring_expense_records=recurring_expense_records,
+        expense_categories=all_expense_categories,
         profile_picture=profile_picture,
         first_name=first_name,
         last_name=last_name,
@@ -13305,57 +13850,75 @@ def add_recurring_expense():
 
     # Extract data from the request
     category_name = data.get('category_name')
+    category_id = data.get('category_id')  # For selecting an existing category
     amount = data.get('amount')
     cadence_interval = data.get('cadence_interval')
     cadence_unit = data.get('cadence_unit')
     start_date = data.get('start_date')
     end_date = data.get('end_date')
-    weekdays = data.get('weekdays')  # Extract the weekdays array
-    monthly_days = data.get('monthly_days')  # Extract the multiple monthly days array, if any
-    yearly_day = data.get('yearly_day')  # Extract the yearly day, if any
-    yearly_month = data.get('yearly_month')  # Extract the yearly month, if any
+    weekdays = data.get('weekdays')
+    monthly_days = data.get('monthly_days')
+    yearly_day = data.get('yearly_day')
+    yearly_month = data.get('yearly_month')
     no_end_date = data.get('no_end_date', 0)
     wage_bill = data.get('wage_bill', 0)
 
-    # Validate the data
-    if not all([category_name, amount, cadence_interval, cadence_unit, start_date, end_date]):
+    # Validate the data - need either category_name or category_id
+    if not category_id and not category_name:
+        return jsonify({'status': 'error', 'message': 'Missing category name or ID'}), 400
+    if not all([amount, cadence_interval, cadence_unit, start_date, end_date]):
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
     try:
-        # Step 1: Get max display_order - try Redis first, fallback to MySQL
-        categories = _get_categories_from_redis('expense_categories', current_user.id)
-        if categories is not None:
-            max_display_order = max([cat.get('display_order', 0) for cat in categories], default=0)
+        if category_id:
+            # Using an existing category - update it to be recurring
+            categories = _get_categories_from_redis('expense_categories', current_user.id)
+            if categories:
+                cat = next((c for c in categories if str(c['id']) == str(category_id)), None)
+                if cat:
+                    cat['is_recurring'] = 1
+                    cat['no_end_date'] = no_end_date
+                    _update_category_in_redis('expense_categories', current_user.id, category_id, cat)
+                    category_name = cat['name']
+                else:
+                    return jsonify({'status': 'error', 'message': 'Category not found'}), 404
+            else:
+                return jsonify({'status': 'error', 'message': 'Could not load categories'}), 500
         else:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT COALESCE(MAX(display_order), 0) FROM expense_categories WHERE user_id = %s
-                """, (current_user.id,))
-                max_display_order = cursor.fetchone()[0]
-                cursor.close()
+            # Step 1: Get max display_order - try Redis first, fallback to MySQL
+            categories = _get_categories_from_redis('expense_categories', current_user.id)
+            if categories is not None:
+                max_display_order = max([cat.get('display_order', 0) for cat in categories], default=0)
+            else:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT COALESCE(MAX(display_order), 0) FROM expense_categories WHERE user_id = %s
+                    """, (current_user.id,))
+                    max_display_order = cursor.fetchone()[0]
+                    cursor.close()
 
-        # Step 2: Create category in Redis first (flush worker will sync to MySQL)
-        new_category = {
-            'user_id': current_user.id,
-            'name': category_name,
-            'display_order': max_display_order + 1,
-            'group_id': None,
-            'is_recurring': 1,
-            'is_auto_adjustment': 0,
-            'no_end_date': no_end_date,
-            'hidden': 0,
-            'is_bud': 0,
-            'is_credit_account': 0
-        }
-        
-        category_id = _add_category_to_redis('expense_categories', current_user.id, new_category)
-        
-        if category_id is None:
-            return jsonify({'status': 'error', 'message': 'Failed to create category'}), 500
+            # Step 2: Create category in Redis first (flush worker will sync to MySQL)
+            new_category = {
+                'user_id': current_user.id,
+                'name': category_name,
+                'display_order': max_display_order + 1,
+                'group_id': None,
+                'is_recurring': 1,
+                'is_auto_adjustment': 0,
+                'no_end_date': no_end_date,
+                'hidden': 0,
+                'is_bud': 0,
+                'is_credit_account': 0
+            }
+            
+            category_id = _add_category_to_redis('expense_categories', current_user.id, new_category)
+            
+            if category_id is None:
+                return jsonify({'status': 'error', 'message': 'Failed to create category'}), 500
 
-        # Sync to all credit accounts (creates NON-RECURRING c_expense categories)
-        _sync_expense_category_to_credit_accounts(current_user.id, category_name, max_display_order + 1)
+            # Sync to all credit accounts (creates NON-RECURRING c_expense categories)
+            _sync_expense_category_to_credit_accounts(current_user.id, category_name, max_display_order + 1)
 
         # Step 3: Create recurring expense record in Redis
         recurring_data = {
@@ -13568,35 +14131,152 @@ def delete_recurring_expense():
         if not category_id:
             return jsonify({'status': 'error', 'message': 'Category ID not found for recurring expense.'}), 404
         
-        # Redis-only operations - let flush worker handle MySQL
+        # Convert to non-recurring instead of deleting the category
+        # Keep past entries, remove future entries, remove recurring/bucket records
         today = date.today()
+        category_id_int = int(category_id)
         
-        # Delete all entries (past and future) from Redis for this category
-        _delete_entry_in_redis('expense_entries', current_user.id, category_id, date(1900, 1, 1), date(9999, 12, 31))
+        # 1. Remove future entries (today and onward), keep past entries
+        entries = _get_entries_from_redis('expense_entries', current_user.id)
+        if entries:
+            filtered_entries = []
+            deleted_entry_ids = []
+            for e in entries:
+                if int(e.get('category_id', 0)) == category_id_int:
+                    entry_date = datetime.strptime(e.get('date'), '%Y-%m-%d').date() if isinstance(e.get('date'), str) else e.get('date')
+                    if entry_date >= today:
+                        # Future entry - mark for deletion
+                        entry_id = e.get('id')
+                        if entry_id and int(entry_id) > 0:
+                            deleted_entry_ids.append(str(entry_id))
+                    else:
+                        # Past entry - keep
+                        filtered_entries.append(e)
+                else:
+                    filtered_entries.append(e)
+            
+            if len(filtered_entries) < len(entries):
+                _set_entries_to_redis('expense_entries', current_user.id, filtered_entries)
+                
+                # Track pending entry deletions
+                if deleted_entry_ids and app.config.get('REDIS_OK'):
+                    pending_key = f"pending_deletes:expense_entries:{current_user.id}"
+                    _redis_client.sadd(pending_key, *deleted_entry_ids)
+                    _redis_client.expire(pending_key, 604800)
+                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_entries')
         
-        # Delete all buckets for this category from Redis
+        # 2. Delete all buckets for this category from Redis
         _delete_buckets_in_redis('recurring_expense_buckets', current_user.id, category_id)
         
-        # Delete the recurring record from Redis (marks for deletion)
+        # 3. Delete the recurring record from Redis (marks for deletion)
         _delete_recurring_in_redis('recurring_expense', current_user.id, recurring_id)
         
-        # Delete the category from Redis cache (marks for deletion)
-        _delete_category_in_redis('expense_categories', current_user.id, category_id)
-        
-        # Flush worker will handle:
-        # - Moving past entries to Uncategorized in MySQL
-        # - Deleting category from MySQL (CASCADE deletes entries)
-        # - Cleaning up recurring record from MySQL
-        # - Cleaning up buckets from MySQL
+        # 4. Set category to non-recurring (keep the category itself)
+        _update_category_in_redis('expense_categories', current_user.id, category_id, {
+            'is_recurring': 0,
+            'no_end_date': 0
+        })
         
         # Sync updated categories to Ntropy (non-blocking)
         _trigger_ntropy_sync(current_user.id)
         
-        return jsonify({'status': 'success', 'message': 'Recurring expense and associated category deleted successfully!'})
+        return jsonify({'status': 'success', 'message': 'Recurring expense converted to regular category.'})
 
     except Exception as e:
         app.logger.error(f"Error deleting recurring expense: {e}")
         return jsonify({'status': 'error', 'message': 'An error occurred while deleting the recurring expense.'}), 500
+
+
+@app.route('/convert-to-recurring-expense', methods=['POST'])
+@login_required
+def convert_to_recurring_expense():
+    """Convert an existing non-recurring expense category to recurring."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No data received'}), 400
+
+    category_id = data.get('category_id')
+    amount = data.get('amount')
+    cadence_interval = data.get('cadence_interval')
+    cadence_unit = data.get('cadence_unit')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    weekdays = data.get('weekdays')
+    monthly_days = data.get('monthly_days')
+    yearly_day = data.get('yearly_day')
+    yearly_month = data.get('yearly_month')
+    no_end_date = data.get('no_end_date', 0)
+    wage_bill = data.get('wage_bill', 0)
+
+    if not all([category_id, amount, cadence_interval, cadence_unit, start_date, end_date]):
+        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+
+    try:
+        # Verify the category exists and belongs to this user
+        categories = _get_categories_from_redis('expense_categories', current_user.id)
+        category_name = None
+        if categories is not None:
+            for cat in categories:
+                if int(cat.get('id')) == int(category_id) and int(cat.get('user_id', 0)) == current_user.id:
+                    category_name = cat.get('name')
+                    break
+
+        if category_name is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT name FROM expense_categories WHERE id = %s AND user_id = %s
+                """, (category_id, current_user.id))
+                row = cursor.fetchone()
+                cursor.close()
+                if row:
+                    category_name = row[0]
+                else:
+                    return jsonify({'status': 'error', 'message': 'Invalid category'}), 400
+
+        # Mark the category as recurring in Redis
+        _update_category_in_redis('expense_categories', current_user.id, category_id, {
+            'is_recurring': 1,
+            'no_end_date': no_end_date
+        })
+
+        # Create recurring expense record in Redis
+        recurring_data = {
+            'id': None,
+            'user_id': current_user.id,
+            'category_id': int(category_id),
+            'category_name': category_name,
+            'amount': float(amount),
+            'cadence_interval': cadence_interval,
+            'cadence_unit': cadence_unit,
+            'weekdays': ','.join(weekdays) if weekdays else None,
+            'monthly_days': ','.join(map(str, monthly_days)) if monthly_days else None,
+            'yearly_day': yearly_day if yearly_day else None,
+            'yearly_month': yearly_month if yearly_month else None,
+            'start_date': start_date,
+            'end_date': end_date,
+            'no_end_date': no_end_date,
+            'wage_bill': wage_bill
+        }
+
+        _update_recurring_in_redis('recurring_expense', current_user.id, recurring_data)
+
+        recurring_id = recurring_data['id']
+
+        if recurring_id:
+            generate_expense_entries(
+                recurring_id, int(category_id), amount, cadence_interval, cadence_unit,
+                start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month, current_user.id
+            )
+
+        _trigger_ntropy_sync(current_user.id)
+
+        return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Category converted to recurring successfully!'})
+
+    except Exception as e:
+        app.logger.error(f"Error converting expense to recurring: {e}")
+        return jsonify({'status': 'error', 'message': f'An error occurred: {str(e)}'}), 500
+
 
 @app.route('/update-recurring-expense', methods=['POST'])
 @login_required
@@ -13657,49 +14337,63 @@ def update_recurring_expense_inner(data, user_id):
                     return jsonify({'status': 'error', 'message': 'Recurring expense not found'}), 404
                 category_id = result[0]
         
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
+        # Capture old name before updating (for CA sync)
+        old_expense_name = None
+        cached_categories = _get_categories_from_redis('expense_categories', user_id)
+        if cached_categories:
+            for cat in cached_categories:
+                if int(cat.get('id')) == int(category_id):
+                    old_expense_name = cat.get('name')
+                    break
+        if not old_expense_name:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM expense_categories WHERE id = %s", (category_id,))
+                row = cursor.fetchone()
+                cursor.close()
+                if row:
+                    old_expense_name = row[0]
 
-            # Step 2: Update the category name in the expense_categories table
-            cursor.execute("""
-                UPDATE expense_categories
-                SET name = %s, is_recurring = 1, no_end_date = %s
-                WHERE id = %s
-            """, (category_name, no_end_date, category_id))
+        # Step 2: Update the category name/flags in Redis (Redis-first)
+        _update_category_in_redis('expense_categories', user_id, category_id, {
+            'name': category_name,
+            'is_recurring': 1,
+            'no_end_date': no_end_date
+        })
 
-            # Convert the monthly_days array into a comma-separated string for storage, if it exists
-            monthly_days_str = ','.join(map(str, monthly_days)) if monthly_days else None
+        # Convert the monthly_days array into a comma-separated string for storage, if it exists
+        monthly_days_str = ','.join(map(str, monthly_days)) if monthly_days else None
 
-            # Step 2: Update the recurring expense record in Redis
-            recurring_data = {
-                'id': recurring_id,
-                'user_id': user_id,
-                'category_id': category_id,
-                'category_name': category_name,  # Include the category name
-                'amount': float(amount),
-                'cadence_interval': cadence_interval,
-                'cadence_unit': cadence_unit,
-                'weekdays': ','.join(weekdays) if weekdays else None,
-                'monthly_days': monthly_days_str,
-                'yearly_day': yearly_day if yearly_day else None,
-                'yearly_month': yearly_month if yearly_month else None,
-                'start_date': start_date,
-                'end_date': end_date,
-                'no_end_date': no_end_date,
-                'wage_bill': wage_bill
-            }
-            
-            _update_recurring_in_redis('recurring_expense', user_id, recurring_data)
+        # Step 2b: Update the recurring expense record in Redis
+        recurring_data = {
+            'id': recurring_id,
+            'user_id': user_id,
+            'category_id': category_id,
+            'category_name': category_name,  # Include the category name
+            'amount': float(amount),
+            'cadence_interval': cadence_interval,
+            'cadence_unit': cadence_unit,
+            'weekdays': ','.join(weekdays) if weekdays else None,
+            'monthly_days': monthly_days_str,
+            'yearly_day': yearly_day if yearly_day else None,
+            'yearly_month': yearly_month if yearly_month else None,
+            'start_date': start_date,
+            'end_date': end_date,
+            'no_end_date': no_end_date,
+            'wage_bill': wage_bill
+        }
+        
+        _update_recurring_in_redis('recurring_expense', user_id, recurring_data)
 
-            # Step 3: Delete old expense entries for today and the future from Redis
-            _delete_entry_in_redis('expense_entries', user_id, category_id, today, date(9999, 12, 31))
-            
-            # Step 3b: Delete future bucket records for this category
-            _delete_future_buckets_in_redis('recurring_expense_buckets', user_id, category_id, today)
+        # Step 3: Delete old expense entries for today and the future from Redis
+        _delete_entry_in_redis('expense_entries', user_id, category_id, today, date(9999, 12, 31))
+        
+        # Step 3b: Delete future bucket records for this category
+        _delete_future_buckets_in_redis('recurring_expense_buckets', user_id, category_id, today)
 
-            # Commit the category changes
-            conn.commit()
-            cursor.close()
+        # Step 3c: Sync rename to credit account categories if name changed
+        if old_expense_name and old_expense_name != category_name:
+            _sync_rename_to_credit_accounts(user_id, old_expense_name, category_name)
         
         # Step 4: Recreate the expense entries with the updated details (only for today and future)
         # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
@@ -13850,17 +14544,13 @@ def recurring_ca_expense():
         """, (current_user.id,))
         credit_accounts = cursor.fetchall()
 
-        # Fetch c_expense_categories for the category dropdown (non-recurring, non-hidden, non-system)
+        # Fetch ALL c_expense_categories for the searchable category dropdown
         cursor.execute("""
-            SELECT cec.id, cec.account_id, cec.name, cec.is_recurring, cec.hidden,
-                   cec.is_interest, cec.is_auto_adjustment
+            SELECT cec.id, cec.account_id, cec.name, cec.display_order, cec.is_recurring, cec.hidden,
+                   cec.is_interest, cec.is_auto_adjustment, cec.is_bud
             FROM c_expense_categories cec
             WHERE cec.account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
-              AND cec.hidden = 0
-              AND cec.is_recurring = 0
-              AND cec.is_interest = 0
-              AND cec.is_auto_adjustment = 0
-            ORDER BY cec.account_id, cec.display_order
+            ORDER BY cec.account_id, cec.display_order DESC
         """, (current_user.id,))
         ca_categories_for_dropdown = cursor.fetchall()
 
@@ -14281,31 +14971,56 @@ def delete_recurring_ca_expense():
                 cursor.close()
                 account_id = account_row[0] if account_row else None
         
-        # Redis-only operations - let flush worker handle MySQL
+        # Convert to non-recurring instead of deleting the category
+        # Keep past entries, remove future entries, remove recurring/bucket records
         today = date.today()
+        category_id_int = int(category_id)
         
-        # Delete all entries (past and future) from Redis for this category
-        _delete_entry_in_redis('c_expense_entries', current_user.id, category_id, date(1900, 1, 1), date(9999, 12, 31))
+        # 1. Remove future entries (today and onward), keep past entries
+        entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+        if entries:
+            filtered_entries = []
+            deleted_entry_ids = []
+            for e in entries:
+                if int(e.get('category_id', 0)) == category_id_int:
+                    entry_date = datetime.strptime(e.get('date'), '%Y-%m-%d').date() if isinstance(e.get('date'), str) else e.get('date')
+                    if entry_date >= today:
+                        # Future entry - mark for deletion
+                        entry_id = e.get('id')
+                        if entry_id and int(entry_id) > 0:
+                            deleted_entry_ids.append(str(entry_id))
+                    else:
+                        # Past entry - keep
+                        filtered_entries.append(e)
+                else:
+                    filtered_entries.append(e)
+            
+            if len(filtered_entries) < len(entries):
+                _set_entries_to_redis('c_expense_entries', current_user.id, filtered_entries)
+                
+                # Track pending entry deletions
+                if deleted_entry_ids and app.config.get('REDIS_OK'):
+                    pending_key = f"pending_deletes:c_expense_entries:{current_user.id}"
+                    _redis_client.sadd(pending_key, *deleted_entry_ids)
+                    _redis_client.expire(pending_key, 604800)
+                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_entries')
         
-        # Delete all buckets for this category from Redis (buckets are now keyed by user_id)
+        # 2. Delete all buckets for this category from Redis
         _delete_buckets_in_redis('recurring_c_expense_buckets', current_user.id, category_id)
         
-        # Delete the recurring record from Redis (marks for deletion)
+        # 3. Delete the recurring record from Redis (marks for deletion)
         _delete_recurring_in_redis('recurring_c_expense', current_user.id, recurring_id)
         
-        # Delete the category from Redis cache (c_expense_categories are now keyed by user_id)
-        _delete_category_in_redis('c_expense_categories', current_user.id, category_id)
-        
-        # Flush worker will handle:
-        # - Moving past entries to Uncategorized in MySQL
-        # - Deleting category from MySQL (CASCADE deletes entries)
-        # - Cleaning up recurring record from MySQL
-        # - Cleaning up buckets from MySQL
+        # 4. Set category to non-recurring (keep the category itself)
+        _update_category_in_redis('c_expense_categories', current_user.id, category_id, {
+            'is_recurring': 0,
+            'no_end_date': 0
+        })
         
         # Sync updated categories to Ntropy (non-blocking)
         _trigger_ntropy_sync(current_user.id)
         
-        return jsonify({'status': 'success', 'message': 'Recurring CA expense deleted successfully!'})
+        return jsonify({'status': 'success', 'message': 'Recurring category converted to regular category.'})
 
     except Exception as e:
         app.logger.error(f"Error deleting recurring CA expense: {e}")
@@ -16451,7 +17166,7 @@ def credit_accounts():
                 FROM c_expense_categories cec
                 JOIN credit_accounts ca ON cec.account_id = ca.id
                 WHERE ca.user_id = %s
-                ORDER BY cec.display_order ASC, cec.id ASC
+                ORDER BY cec.display_order DESC, cec.id DESC
             """, (current_user.id,))
             c_expense_categories = cursor.fetchall()
             cursor.close()
@@ -16679,6 +17394,9 @@ def add_credit_account():
     c_expense_cats = _get_categories_from_redis('c_expense_categories', current_user.id)
     starting_balance_cat = next((cat for cat in c_expense_cats if cat.get('name') == 'Starting Balance' and cat.get('account_id') == temp_account_id), None)
     starting_balance_cat_id = starting_balance_cat.get('id') if starting_balance_cat else None
+    
+    # Copy all existing expense categories to this new credit account
+    _copy_expense_categories_to_new_credit_account(current_user.id, temp_account_id)
     
     # Check if user wants recurring payment reminder
     recurring_payment = data.get('recurring_payment', False)
@@ -18752,6 +19470,9 @@ def quiltt_sync_profile():
                                 'is_interest': 0,
                                 'is_auto_adjustment': 0
                             })
+                            
+                            # Copy all existing expense categories to this new credit account
+                            _copy_expense_categories_to_new_credit_account(current_user.id, temp_account_id)
                             
                             # Create matching expense_categories record for payment
                             payment_category_name = f"{account_name} payment"
@@ -21474,6 +22195,9 @@ def quiltt_toggle_sync():
                                     'is_interest': 0,
                                     'is_auto_adjustment': 0
                                 })
+                                
+                                # Copy all existing expense categories to this new credit account
+                                _copy_expense_categories_to_new_credit_account(current_user.id, temp_account_id)
                                 
                                 # Create matching expense_categories record for payment
                                 payment_category_name = f"{account_name} payment"
