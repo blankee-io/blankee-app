@@ -8,6 +8,11 @@
         </div>
 
         <div class="nav-right-content">
+            <!-- Feedback icon -->
+            <a href="{{ url_for('feedback_page') }}" class="nav-feedback" title="Feedback">
+                <i class="fa-kit fa-regular-message-dots-lightbulb"></i>
+            </a>
+
             <!-- Notifications bell icon -->
             <a href="{{ url_for('notifications') }}" class="nav-notifications">
                 <i class="fa-solid fa-bell"></i>
@@ -72,6 +77,30 @@
         </div>
     </div>
 </div>
+
+<button id="feedback-fab" class="feedback-fab" title="Feedback">
+    <i class="fa-regular fa-comment-dots"></i>
+</button>
+
+<div id="feedback-quick-modal" class="modal">
+    <div class="modal-content feedback-modal-content">
+        <span id="close-feedback-quick" class="close-modal">&times;</span>
+        <h3>Share feedback</h3>
+        <form id="feedback-quick-form" class="feedback-form">
+            <label for="quick-title">Title</label>
+            <input type="text" id="quick-title" name="title" placeholder="What would you like to see?" required>
+            <label for="quick-description">Details</label>
+            <textarea id="quick-description" name="description" rows="4" placeholder="Add context (optional)"></textarea>
+            <input type="hidden" name="context_tag" value="">
+            <button type="submit" class="primary-btn">Submit</button>
+        </form>
+        <div class="feedback-quick-list-header">Related to this page</div>
+        <div id="feedback-quick-list" class="feedback-list feedback-list-compact"></div>
+        <div id="feedback-quick-status" class="feedback-status"></div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/feedback.js') }}" defer></script>
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
