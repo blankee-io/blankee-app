@@ -29,11 +29,22 @@
     --success:            #28A745;
     --success-hover:      #5FAB71;
 
+    --overlay-dim:        rgb(0 0 0 / 15%);
+
     --shadow-sm:          rgb(0 0 0 / 6%);
     --shadow-md:          rgb(0 0 0 / 10%);
     --shadow-lg:          rgb(0 0 0 / 14%);
     --shadow-xl:          rgb(0 0 0 / 20%);
     --shadow-xxl:         rgb(0 0 0 / 35%);
+}
+
+/* Universal hover transition for all interactive elements */
+a, button, input, select, textarea, th, td, tr, div, span, label, li, img,
+.nav-button, .footer-button, .dashboard-button, [class*="btn"],
+[class*="button"], [class*="link"], [class*="card"], [class*="option"],
+[class*="item"], [class*="toggle"], [class*="handle"], [class*="close"],
+[class*="submit"], [class*="action"] {
+    transition: all 0.2s ease;
 }
 
 
@@ -510,7 +521,6 @@ body {
 }
 
 .nav-feedback:hover {
-    transform: scale(1.05);
     background-color: var(--primary-hover);
 }
 
@@ -530,7 +540,6 @@ body {
 }
 
 .nav-notifications:hover {
-    transform: scale(1.05);
     background-color: var(--primary-hover);
 }
 
@@ -566,7 +575,7 @@ body {
 }
 
 .sidenavfooter a:hover {
-    color: var(--text-dark); 
+    color: var(--text-dark);
 }
 
 .sidenav-profile {
@@ -588,7 +597,6 @@ body {
 }
 
 .sidenav-profile:hover .sidenav-profile-pic {
-    transform: scale(1.05);
 }
 
 .sidenav-profile-pic {
@@ -1017,6 +1025,7 @@ body {
 
 .footer-button-label:hover {
     background-color: var(--primary-lighter);
+    transform: scale(1.2);
 }
 
 .footer-bar.active #footer-income-label {
@@ -1033,6 +1042,7 @@ body {
 
 .footer-income-label:hover {
     background-color: var(--primary-lighter);
+    transform: scale(1.2);
 }
 
 .footer-bar.active #footer-expense-label {
@@ -1050,6 +1060,7 @@ body {
 
 .footer-expense-label:hover {
     background-color: var(--primary-lighter);
+    transform: scale(1.2);
 }
 
 .footer-bar.active #footer-ca-label {
@@ -1067,6 +1078,7 @@ body {
 
 .footer-ca-label:hover {
     background-color: var(--primary-lighter);
+    transform: scale(1.2);
 }
 
 .footer-bar.active #footer-autobalance-label {
@@ -1084,6 +1096,7 @@ body {
 
 .footer-autobalance-label:hover {
     background-color: var(--primary-lighter);
+    transform: scale(1.2);
 }
 
 #footer-income-label span,
@@ -1099,6 +1112,7 @@ body {
 #footer-autobalance-button:hover ~ #footer-autobalance-label span,
 #footer-autobalance-button:focus ~ #footer-autobalance-label span {
     opacity: 1;
+transform: scale(1.2);
 }
 
 /* Modal container */
@@ -1144,6 +1158,7 @@ body {
     color: var(--text-dark);
     text-decoration: none;
     cursor: pointer;
+transform: scale(1.2);
 }
 
 /* Modal header */
@@ -1350,6 +1365,7 @@ button#autobalance-submit:active {
     color: var(--text-dark);
     text-decoration: none;
     cursor: pointer;
+transform: scale(1.2);
 }
 
 .add-credit-account-modal-content h3 {
@@ -1434,6 +1450,7 @@ button#autobalance-submit:active {
 
 #autobalance-modal button[type="\"button\""]:hover {
     background: var(--success);
+    transform: scale(1.2);
 }
 
 /* /////////////////////////////////  Calendar Nav /////////////////////////// */
@@ -1638,6 +1655,7 @@ button#autobalance-submit:active {
 
 .nav-select:hover {
     color: var(--text-dark);
+    transform: scale(1.05);
 }
 
 .nav-tooltip {
@@ -1768,6 +1786,7 @@ button#autobalance-submit:active {
 .logincontainer p a:hover {
     color: var(--accent);
     text-decoration: underline;
+    transform: scale(1.2);
 }
 
 .logincontainer form {
@@ -1850,6 +1869,7 @@ button#autobalance-submit:active {
 
 .password-toggle-icon:hover {
     color: var(--accent);
+    transform: scale(1.2);
 }
 
 /* Login Button */
@@ -1898,6 +1918,7 @@ button.login-button:active {
 
 .register-link:hover {
     text-decoration: underline;
+    transform: scale(1.2);
 }
 
 /* Align password change form with MFA form */
@@ -2229,11 +2250,13 @@ input#setup-profile-starting-savings {
 .setup-profile-submit-button:hover {
     box-shadow: 0 4px 16px var(--shadow-lg);
     background-color: var(--primary-hover);
+transform: scale(1.2);
 }
 
 .setup-profile-previous-button:hover {
     box-shadow: 0 4px 16px var(--shadow-lg);
     background-color: var(--accent-hover);
+    transform: scale(1.2);
 }
 
 .setup-profile-previous-button:active,
@@ -2289,6 +2312,7 @@ input#setup-profile-starting-savings {
 
 .account-selection-item:hover {
     border-color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 .account-selection-item.disabled {
@@ -2413,6 +2437,7 @@ input#setup-profile-starting-savings {
 
 .recommended-categories-table tbody tr:hover {
     background-color: var(--secondary-lighter);
+    transform: scale(1.2);
 }
 
 .edit-category-recommendation-btn,
@@ -2427,10 +2452,12 @@ input#setup-profile-starting-savings {
 
 .edit-category-recommendation-btn:hover {
     color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 .delete-category-recommendation-btn:hover {
     color: var(--danger);
+    transform: scale(1.2);
 }
 
 /* Category Confirmation Summary */
@@ -2846,6 +2873,7 @@ tr[data-category-id] td.before-member-since {
 
 .dashboard-d-add-entry-btn:hover {
     background-color: var(--secondary);
+    transform: scale(1.2);
 }
 
 /* Container for rows */
@@ -3256,6 +3284,7 @@ tr[data-category-id] td.before-member-since {
     color: var(--text-dark);
     text-decoration: none;
     cursor: pointer;
+transform: scale(1.2);
 }
 
 /* Modal header */
@@ -3317,6 +3346,7 @@ tr[data-category-id] td.before-member-since {
 
 .dashboard-d-form-group button[type="submit"]:hover {
     background-color: var(--accent-hover); 
+    transform: scale(1.2);
 }
 
 /* Mobile responsiveness */
@@ -3830,9 +3860,12 @@ tr[data-category-id] td.before-member-since {
 
 .clear-filter-btn:hover {
     color: var(--text-dark); 
+    transform: scale(1.2);
 }
 
 .category-btn-container {
+    position: relative;
+    z-index: 2;
     display: flex;
     flex-direction: row;
     justify-content: flex-end; 
@@ -3935,7 +3968,8 @@ tr[data-category-id] td.before-member-since {
 }
 
 .add-category-btn:hover {
-    color: var(--text-dark); 
+    color: var(--secondary);
+    transform: scale(1.2);
 }
 
 .edit-category-btn {
@@ -3967,7 +4001,8 @@ tr[data-category-id] td.before-member-since {
 }
 
 .edit-category-btn:hover {
-    color: var(--text-dark); 
+    color: var(--secondary);
+    transform: scale(1.2);
 }
 
 .add-recurring-btn {
@@ -3999,7 +4034,8 @@ tr[data-category-id] td.before-member-since {
 }
 
 .add-recurring-btn:hover {
-    color: var(--text-dark); 
+    color: var(--secondary);
+    transform: scale(1.2);
 }
 
 .toggle-hidden-btn {
@@ -4031,7 +4067,8 @@ tr[data-category-id] td.before-member-since {
 }
 
 .toggle-hidden-btn:hover {
-    color: var(--text-dark); 
+    color: var(--secondary);
+    transform: scale(1.2);
 }
 
 .editable {
@@ -4138,6 +4175,7 @@ tr[data-category-id] td.before-member-since {
 #expense-category-input-container button:hover,
 #ca-category-input-container button:hover {
     background: var(--primary-hover);
+transform: scale(1.2);
 }
 
 #income-category-input-container button:disabled,
@@ -4205,10 +4243,16 @@ tr[data-category-id] td.before-member-since {
     transform: translateY(-50%);
     cursor: pointer;
     background-color: transparent;
+    transition: all 0.2s ease;
+}
+
+.rename-category-btn:hover {
+    transform: translateY(-50%) scale(1.2);
 }
 
 .category-cell.editing .category-cell:hover .delete-category-btn {
     display: inline;
+    transform: scale(1.2);
 }
 
 .income-cell-input,
@@ -4409,6 +4453,7 @@ td:has(.bucket-progress-container) {
 
 #close-email-pending-btn:hover {
     background-color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 /* Close Button */
@@ -4423,6 +4468,7 @@ td:has(.bucket-progress-container) {
     color: var(--text-dark);
     text-decoration: none;
     cursor: pointer;
+transform: scale(1.2);
 }
 
 /* Buttons */
@@ -4640,6 +4686,7 @@ td:has(.bucket-progress-container) {
 
 #entryUpdateCancelBtn:hover {
     background-color: var(--secondary);
+    transform: scale(1.2);
 }
 
 #entryUpdateConfirmBtn {
@@ -4652,6 +4699,7 @@ td:has(.bucket-progress-container) {
 
 #entryUpdateConfirmBtn:hover {
     background-color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 #quilttDeleteCancelBtn {
@@ -4665,6 +4713,7 @@ td:has(.bucket-progress-container) {
 
 #quilttDeleteCancelBtn:hover {
     background-color: var(--secondary);
+    transform: scale(1.2);
 }
 
 #quilttDeleteConfirmBtn {
@@ -4677,6 +4726,7 @@ td:has(.bucket-progress-container) {
 
 #quilttDeleteConfirmBtn:hover {
     background-color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 #quilttErrorOkBtn {
@@ -4689,6 +4739,7 @@ td:has(.bucket-progress-container) {
 
 #quilttErrorOkBtn:hover {
     background-color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 /* Only show the exclamation bubble for negative cells in the yearly dashboard calendar */
@@ -4843,8 +4894,9 @@ td:has(.bucket-progress-container) {
 
 .month-dropdown:hover,
 .year-dropdown:hover {
-    border: 1px solid var(--secondary);
+    border: none;
     border-radius: 8px;
+    transform: scale(1.05);
 }
 
 .month-dropdown::after,
@@ -4965,7 +5017,15 @@ td:has(.bucket-progress-container) {
 }
 
 #fridays-table th:hover {
-    background-color: var(--secondary-hover);
+    background-color: var(--secondary);
+}
+
+#fridays-table th:first-child:hover {
+    border-top-left-radius: 10px;
+}
+
+#fridays-table th:last-child:hover {
+    border-top-right-radius: 10px;
 }
 
 #fridays-table th.current-week {
@@ -5197,8 +5257,12 @@ td:has(.bucket-progress-container) {
 
 /* Text color for remainder values below the threshold */
 .above-threshold {
-    /* Yellow-orange color */
-    color: var(--primary) !important; 
+    color: white !important; 
+}
+
+/* Only show colored above-threshold in the yearly dashboard calendar */
+.dashboard-y-calendar-table .above-threshold {
+    color: var(--primary) !important;
 }
 
 /* Hide the text cursor in readonly cells */
@@ -5234,6 +5298,7 @@ td:has(.bucket-progress-container) {
     background-color: var(--accent-hover);
     border-radius: 10px;
     border-top-right-radius: 0 !important;
+    transform: scale(1.2);
 }
 
 /* Context menu base style (assume .dashboard-context-menu is the menu) */
@@ -5395,8 +5460,9 @@ td:has(.bucket-progress-container) {
 
 .dashboard-m-month-dropdown:hover,
 .dashboard-m-year-dropdown:hover {
-    border: 1px solid var(--secondary);
+    border: none;
     border-radius: 8px;
+    transform: scale(1.05);
 }
 
 .dashboard-m-month-dropdown::after,
@@ -5544,8 +5610,8 @@ td:has(.bucket-progress-container) {
     position: absolute;
     inset: 0;
     z-index: 1;
-    /* Much darker overlay */
-    background-color: var(--secondary-dark); 
+    /* Subtle dimming overlay for non-current-month days */
+    background-color: var(--overlay-dim);
     border-radius: 10px;
     content: '';
     pointer-events: none;
@@ -5578,6 +5644,7 @@ td:has(.bucket-progress-container) {
 
 .dashboard-m-date:hover {
     opacity: 0.8;
+    transform: scale(1.02);
 }
 
 .dashboard-m-day-label {
@@ -5962,6 +6029,7 @@ td:has(.bucket-progress-container) {
 .today-floating-banner:hover {
     background: var(--accent);
     box-shadow: 0 3px 10px var(--accent-hover);
+    transform: scale(1.2);
 }
 
 .today-floating-banner:active {
@@ -6230,6 +6298,7 @@ td:has(.bucket-progress-container) {
 
 .pic-edit-button:hover {
     background-color: var(--primary);
+    transform: scale(1.2);
 }
 
 .center-modal-overlay {
@@ -6340,6 +6409,7 @@ td:has(.bucket-progress-container) {
 
 .profile-pic-placeholder:hover {
     background: var(--primary-lighter);
+    transform: scale(1.2);
 }
 
 .file-input {
@@ -6369,6 +6439,7 @@ td:has(.bucket-progress-container) {
 .file-input + label:hover,
 .file-input-label:hover {
     color: var(--text-dark);
+transform: scale(1.2);
 }
 
 /* Image cropping container */
@@ -6430,6 +6501,7 @@ td:has(.bucket-progress-container) {
 #zoom-in-btn:hover,
 #zoom-out-btn:hover {
     background-color: var(--secondary-dark);
+transform: scale(1.2);
 }
 
 #profile-upload-form {
@@ -6637,6 +6709,7 @@ td:has(.bucket-progress-container) {
 
 .profile-form .submit-button:hover {
     background-color: var(--accent-hover);
+    transform: scale(1.2);
 }
 
 .input-status {
@@ -6909,6 +6982,7 @@ td:has(.bucket-progress-container) {
 
 .remove-pic-button:hover {
     background-color: var(--danger-hover);
+    transform: scale(1.2);
 }
 
 .delete-account-button {
@@ -7101,6 +7175,7 @@ td:has(.bucket-progress-container) {
 
 .notification-message a:hover {
     color: var(--primary);
+    transform: scale(1.2);
 }
 
 .notification-buttons {
@@ -7130,7 +7205,7 @@ td:has(.bucket-progress-container) {
 }
 
 .delete-notification-button {
-    background-color: var(--accent);
+    background-color: var(--danger);
     color: white;
     border: none;
     border-radius: 50%;
@@ -7142,7 +7217,7 @@ td:has(.bucket-progress-container) {
 }
 
 .delete-notification-button:hover {
-    background-color: var(--accent);
+    background-color: var(--danger-hover);
 }
 
 .delete-notification-button i {
@@ -7150,7 +7225,7 @@ td:has(.bucket-progress-container) {
 }
 
 .clear-read-button {
-    color: var(--accent);
+    color: var(--danger);
     background: none;
     cursor: pointer;
     border: none;
@@ -7158,7 +7233,8 @@ td:has(.bucket-progress-container) {
 }
 
 .clear-read-button:hover {
-    color: var(--accent) !important;
+    color: var(--danger-hover) !important;
+    transform: scale(1.2);
 }
 
 .mark-all-read-button {
@@ -7175,6 +7251,7 @@ td:has(.bucket-progress-container) {
 
 .mark-all-read-button:hover .envelope-back {
     color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 /* Stacked envelope icons for Mark All Read button */
@@ -7256,6 +7333,7 @@ td:has(.bucket-progress-container) {
 }
 #mfa-qr-modal #close-mfa-modal:hover {
     color: var(--accent);
+    transform: scale(1.2);
 }
 
 #mfa-qr-modal #mfa-qr-image img {
@@ -7494,6 +7572,7 @@ td:has(.bucket-progress-container) {
 
 .mfa-copy-button:hover {
     background-color: var(--primary);
+    transform: scale(1.2);
 }
 
 .mfa-verify-form {
@@ -7895,6 +7974,7 @@ td:has(.bucket-progress-container) {
 .edit-recurring-btn:hover {
     /* Add a hover effect if desired */
     color: var(--text-dark); 
+    transform: scale(1.2);
 }
 
 /* Responsive design */
@@ -8070,6 +8150,7 @@ td:has(.bucket-progress-container) {
 
 .close-modal:hover {
     color: var(--text-dark);
+    transform: scale(1.2);
 }
 
 .modal-buttons {
@@ -8277,6 +8358,7 @@ td:has(.bucket-progress-container) {
 
 .remove-monthly-day-btn:hover {
     background: var(--danger);
+    transform: scale(1.2);
 }
 
 /* Special Widths for Category and Amount */
@@ -8526,6 +8608,7 @@ td:has(.bucket-progress-container) {
 
 .remove-day-btn:hover {
     opacity: 0.85;
+    transform: scale(1.2);
 }
 
 /* Yearly Options */
@@ -9003,6 +9086,7 @@ form button[type="submit"] {
 .delete-recurring-btn:hover {
     /* Add a hover effect if desired */
     color: var(--text-dark); 
+    transform: scale(1.2);
 }
 
 /* Cadence Inputs */
@@ -9407,6 +9491,7 @@ form button[type="submit"] {
 .ca-recurring-title .add-ca-btn:hover,
 .ca-recurring-title .add-ca-btn:focus {
     color: var(--secondary);
+transform: scale(1.2);
 }
 
 .recurring-header.ca span {
@@ -9846,6 +9931,7 @@ form button[type="submit"] {
 
 .recurring-ca-credit-link:hover {
     color: var(--accent-hover);
+    transform: scale(1.2);
 }
 
 /* /////////////////////////////  Buds /////////////////////////// */
@@ -9928,6 +10014,7 @@ form button[type="submit"] {
 
 .add-bud-btn:hover {
     Color: var(--text-dark);
+    transform: scale(1.2);
 }
 
 .bud-header {
@@ -9963,6 +10050,7 @@ form button[type="submit"] {
 
 .delete-bud-btn:hover {
     color: var(--danger);
+    transform: scale(1.2);
 }
 
 .bud-table {
@@ -10052,6 +10140,7 @@ form button[type="submit"] {
 
 .bud-input-container button:hover {
     background: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 .bud-item-action-cell {
@@ -10081,6 +10170,7 @@ form button[type="submit"] {
 
 .delete-bud-item-btn:hover {
     color: var(--text-dark);
+    transform: scale(1.2);
 }
 
 .add-bud-items {
@@ -10097,6 +10187,7 @@ form button[type="submit"] {
 
 .add-bud-items a:hover {
     color: var(--secondary-hover);
+    transform: scale(1.2);
 }
 
 .bud-item-input-row td {
@@ -10337,6 +10428,7 @@ form button[type="submit"] {
 .bud-toggle-container:hover .bud-toggle-tooltip {
     visibility: visible;
     opacity: 1;
+    transform: scale(1.2);
 }
 
 /* /////////////////////////////  Credit Accounts /////////////////////////// */
@@ -10536,6 +10628,7 @@ td.credit-account-action-cell button {
 
 .edit-credit-account-btn:hover {
     color: var(--text-dark);
+    transform: scale(1.2);
 }
 
 .delete-credit-account-btn {
@@ -10550,6 +10643,7 @@ td.credit-account-action-cell button {
 
 .delete-credit-account-btn:hover {
     color: var(--text-dark);
+    transform: scale(1.2);
 }
 
 .quiltt-linked-btn {
@@ -10577,6 +10671,7 @@ td.credit-account-action-cell button {
 
 .add-credit-account a:hover {
     color: var(--secondary-hover);
+    transform: scale(1.2);
 }
 
 .credit-account-input-row td {
@@ -10692,6 +10787,7 @@ td.credit-account-action-cell button {
 
 .category-dropdown-item:hover {
     background-color: var(--secondary-lighter);
+    transform: scale(1.2);
 }
 
 .category-dropdown-item.create-new-category {
@@ -10704,6 +10800,7 @@ td.credit-account-action-cell button {
 .category-dropdown-item.create-new-category:hover {
     background-color: var(--primary-lighter);
     color: var(--primary);
+    transform: scale(1.2);
 }
 
 .category-dropdown-item.create-new-category i {
@@ -10845,6 +10942,7 @@ html.modal-open {
 
 .help-text .resend-link:hover {
     text-decoration: underline;
+    transform: scale(1.2);
 }
 
 .login-header i.fa-check-circle {
@@ -10895,6 +10993,7 @@ html.modal-open {
 
 .verification-modal-resend-btn:hover {
     color: var(--primary);
+    transform: scale(1.2);
 }
 
 /* Modal Content Styles */
@@ -11082,11 +11181,13 @@ html.modal-open {
 
 .reconnect-btn:hover {
     background-color: var(--primary);
+    transform: scale(1.2);
 }
 
 .disconnect-btn:hover,
 .delete-connection-btn:hover {
     background-color: var(--danger-hover);
+transform: scale(1.2);
 }
 
 .disconnect-btn i,
@@ -11360,6 +11461,7 @@ html.modal-open {
 
 .resend-verification-btn:hover {
     background-color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 .cancel-pending-email-btn {
@@ -11381,6 +11483,7 @@ html.modal-open {
 
 .cancel-pending-email-btn:hover {
     background-color: var(--danger-hover);
+    transform: scale(1.2);
 }
 
 .cancel-pending-email {
@@ -11450,6 +11553,7 @@ html.modal-open {
 
 .quiltt-modal-header .close-modal:hover {
     color: var(--text-dark);
+    transform: scale(1.2);
 }
 
 .quiltt-modal-body {
@@ -11500,6 +11604,7 @@ html.modal-open {
 .account-selection-item:hover {
     border-color: var(--primary);
     background: var(--primary-lighter);
+    transform: scale(1.2);
 }
 
 .account-selection-check {
@@ -11558,6 +11663,7 @@ html.modal-open {
 
 .quiltt-save-btn:hover {
     background: var(--primary);
+    transform: scale(1.2);
 }
 
 .quiltt-save-btn:active {
@@ -11890,6 +11996,7 @@ html.modal-open {
 .test-purchase-open-btn:hover {
     background: var(--accent);
     color: var(--text-light);
+    transform: scale(1.05);
 }
 
 .view-details-btn {
@@ -11909,6 +12016,7 @@ html.modal-open {
 .view-details-btn:hover {
     background: var(--primary);
     color: var(--text-light);
+    transform: scale(1.05);
 }
 
 /* Balance Graph Section */
@@ -11968,6 +12076,7 @@ html.modal-open {
 
 .graph-toggle-btn:hover {
     background: var(--secondary-lighter);
+    transform: scale(1.2);
 }
 
 .graph-toggle-btn.active {
@@ -12109,6 +12218,7 @@ html.modal-open {
 
 .test-purchase-modal-close:hover {
     color: var(--text-dark);
+    transform: scale(1.2);
 }
 
 .test-purchase-modal-body {
@@ -12647,6 +12757,7 @@ html.modal-open {
 
 .pending-transactions-category-dropdown-item:hover {
     background-color: var(--secondary-lighter);
+    transform: scale(1.2);
 }
 
 .pending-transactions-category-dropdown-item.create-new-category {
@@ -12669,6 +12780,7 @@ html.modal-open {
 
 .pending-transactions-category-dropdown-item.ai-suggestion:hover {
     background-color: var(--primary-lighter);
+    transform: scale(1.2);
 }
 
 .pending-transactions-category-dropdown-item.ai-suggestion i {
@@ -12746,6 +12858,8 @@ html.modal-open {
 
 .confirm-btn:hover {
     background-color: var(--primary-hover);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+    transform: translateY(-1px);
 }
 
 .confirm-btn:disabled {
@@ -12799,6 +12913,8 @@ html.modal-open {
 
 .confirm-all-btn:hover {
     background-color: var(--primary);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+    transform: translateY(-1px);
 }
 
 .pending-count-badge {
@@ -12877,6 +12993,7 @@ html.modal-open {
 
 .alert-modal-buttons .btn-secondary:hover {
     background: var(--secondary-hover);
+    transform: scale(1.2);
 }
 
 .alert-modal-buttons .btn-primary {
@@ -12886,6 +13003,7 @@ html.modal-open {
 
 .alert-modal-buttons .btn-primary:hover {
     background: var(--primary);
+    transform: scale(1.2);
 }
 
 .alert-modal-buttons .btn-primary i {
@@ -12958,6 +13076,7 @@ html.modal-open {
 
 .manage-cat-btn:hover {
     background-color: var(--secondary-dark);
+    transform: scale(1.2);
 }
 
 /* Add category buttons: circles matching section color */
@@ -12974,6 +13093,7 @@ html.modal-open {
 
 .income .manage-cat-btn.add-cat-btn:hover {
     background-color: var(--primary);
+    transform: scale(1.2);
 }
 
 .expenses .manage-cat-btn.add-cat-btn {
@@ -12982,6 +13102,7 @@ html.modal-open {
 
 .expenses .manage-cat-btn.add-cat-btn:hover {
     background-color: var(--accent);
+    transform: scale(1.2);
 }
 
 .manage-cat-btn .hidden-count-bubble {
@@ -13147,6 +13268,7 @@ html.modal-open {
 
 .manage-cat-table .sort-handle:hover {
     color: inherit;
+    transform: scale(1.2);
 }
 
 /* Rename button (always visible in manage page) - must override global .rename-category-btn */
@@ -13164,6 +13286,11 @@ html.modal-open {
 
 .manage-cat-table .rename-category-btn:hover {
     color: inherit;
+    transform: scale(1.2) !important;
+}
+
+.manage-cat-table .rename-category-btn {
+    transition: all 0.2s ease;
 }
 
 /* Category cell flex layout */
@@ -13212,6 +13339,7 @@ html.modal-open {
 
     .manage-cat-table .sort-handle:hover {
         color: var(--secondary-hover);
+        transform: scale(1.2);
     }
 
 }
@@ -13513,6 +13641,11 @@ html.modal-open {
     align-items: center;
     justify-content: center;
     font-size: 20px;
+    transition: all 0.2s ease;
+}
+
+.feedback-fab:hover {
+    transform: scale(1.2);
 }
 
 .feedback-modal-content {
@@ -13535,8 +13668,8 @@ html.modal-open {
     color: var(--primary);
 }
 
-@media (max-width: 960px) {
-    .feedback-container {
+@media (max-width: 900px) {
+    .feedback-wrapper {
         grid-template-columns: 1fr;
     }
     .feedback-left, .feedback-right {
