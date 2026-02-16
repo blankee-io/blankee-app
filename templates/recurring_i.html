@@ -367,15 +367,6 @@
         </div>        
     </div>
 
-    <!-- Modal for delete confirmation -->
-    <div id="deleteRecurringModal" class="category-delete-modal">
-        <div class="category-delete-modal-content">
-            <h3>Stop this recurring income? Future entries will be removed, but past entries will be kept. The category will remain as a regular (non-recurring) category.</h3>
-            <button id="confirmDeleteRecurring" class="confirm-delete-category-btn">Stop Recurring</button>
-            <button id="cancelDeleteRecurring" class="cancel-delete-category-btn">Cancel</button>
-        </div>
-    </div>
-
     <!-- Include the recurring modal template -->
     {% include 'loading_modals.html' %}
 
@@ -586,14 +577,6 @@
             editIncomeModal.addEventListener(evtType, function(event) {
                 closeModalOnOverlay(event, editIncomeModal, false);
             });
-        });
-
-        // Close category-delete-modal when clicking outside the modal content (blur)
-        document.getElementById('deleteRecurringModal').addEventListener('mousedown', function(event) {
-            var modalContent = document.querySelector('.category-delete-modal-content');
-            if (event.target === this && !modalContent.contains(event.target)) {
-                this.style.display = 'none';
-            }
         });
 
         // For Add Recurring Income modal
@@ -1210,43 +1193,34 @@
         }
 
         // Function to open the delete confirmation modal and handle delete logic
-        function openRecurringDeleteModal(recurringId, event) {
-            const deleteModal = document.getElementById('deleteRecurringModal');
-            const confirmDeleteButton = document.getElementById('confirmDeleteRecurring');
-            const cancelDeleteButton = document.getElementById('cancelDeleteRecurring');
-
-            // Show the modal
-            deleteModal.style.display = 'block';
-
-            // Attach event to delete confirmation button (only for this specific recurring ID)
-            confirmDeleteButton.onclick = function() {
-                document.getElementById('loading-screen').style.display = 'flex';
-                $.ajax({
-                    url: '/delete-recurring-income',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ recurring_id: recurringId }), // Send the correct recurring_id
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            // Close the modal and remove the row without a page refresh
-                            deleteModal.style.display = 'none';
-                            $(`tr[data-recurring-id="${recurringId}"]`).remove();  // Remove the row from the table
-                            saveDailyTotalsAndRemainders();
-                            document.getElementById('loading-screen').style.display = 'none';
-                        } else {
-                            showToast('Failed to delete recurring income: ' + response.message, 'error');
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        showToast('An error occurred: ' + xhr.responseText, 'error');
+        async function openRecurringDeleteModal(recurringId, event) {
+            const confirmed = await showConfirmModal({
+                title: 'Stop Recurring',
+                message: 'Stop this recurring income? Future entries will be removed, but past entries will be kept. The category will remain as a regular (non-recurring) category.',
+                confirmText: 'Stop Recurring',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
+            document.getElementById('loading-screen').style.display = 'flex';
+            $.ajax({
+                url: '/delete-recurring-income',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ recurring_id: recurringId }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        $(`tr[data-recurring-id="${recurringId}"]`).remove();
+                        saveDailyTotalsAndRemainders();
+                        document.getElementById('loading-screen').style.display = 'none';
+                    } else {
+                        showToast('Failed to delete recurring income: ' + response.message, 'error');
                     }
-                });
-            };
-
-            // Cancel button closes the modal
-            cancelDeleteButton.onclick = function() {
-                deleteModal.style.display = 'none';
-            };
+                },
+                error: function(xhr, status, error) {
+                    showToast('An error occurred: ' + xhr.responseText, 'error');
+                }
+            });
         }
 
         function openEditModal(recurringId) {

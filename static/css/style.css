@@ -4420,33 +4420,6 @@ td:has(.bucket-progress-container) {
 }
 
 
-/* The Modal (background) */
-.category-delete-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1000;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: var(--shadow-xxl);
-}
-
-/* Modal Content */
-.category-delete-modal-content {
-    width: 100%;
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 20px;
-    background-color: var(--text-light);
-    border: 1px solid var(--text-dark);
-    border-radius: 15px;
-    text-align: center;
-}
-
 #close-email-pending-btn {
     background-color: var(--primary);
 }
@@ -4454,21 +4427,6 @@ td:has(.bucket-progress-container) {
 #close-email-pending-btn:hover {
     background-color: var(--primary-hover);
     transform: scale(1.2);
-}
-
-/* Close Button */
-.close-delete-modal {
-    color: var(--secondary);
-    float: right;
-    font-weight: bold;
-}
-
-.close-delete-modal:hover,
-.close-delete-modal:focus {
-    color: var(--text-dark);
-    text-decoration: none;
-    cursor: pointer;
-transform: scale(1.2);
 }
 
 /* Buttons */
@@ -4620,126 +4578,8 @@ transform: scale(1.2);
     border-radius: 10px 0 10px 10px !important;
 }
 
-/* Modal Container Centering */
-#entryUpdateModal.modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 10000;
-    /* toggled to flex via JavaScript */
-    display: none; 
-    justify-content: center;
-    align-items: center;
-    width: 100vw;
-    height: 100vh;
-}
-
-/* Modal Content */
-#entryUpdateModal .modal-content {
-    width: 90%;
-    max-width: 400px;
-    padding: 24px;
-    background: var(--text-light);
-    border-radius: 16px;
-    box-shadow: 0 10px 40px var(--shadow-lg);
-
-    /* ensures padding is included within width */
-    box-sizing: border-box; 
-}
-
-#entryUpdateModal .modal-content p {
-    width: 100%;
-    margin-bottom: 20px;
-    font-size: 14px;
-}
-
-#entryUpdateModal h3 {
-    margin-top: 0;
-}
-
 .modal-checkbox-row {
     font-size: 13px;
-}
-
-/* Checkbox styling */
-#entryUpdateDontShowAgain {
-    accent-color: var(--primary);
-    width: 15px;
-    height: 15px;
-    cursor: pointer;
-}
-
-#entryUpdateModal .modal-actions {
-    display: flex;
-    justify-content: center;
-    margin-top: 15px;
-}
-
-#entryUpdateCancelBtn {
-    margin-right: 12px;
-    padding: 5px 10px;
-    background-color: var(--secondary-dark);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#entryUpdateCancelBtn:hover {
-    background-color: var(--secondary);
-    transform: scale(1.2);
-}
-
-#entryUpdateConfirmBtn {
-    padding: 5px 10px;
-    background-color: var(--primary);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#entryUpdateConfirmBtn:hover {
-    background-color: var(--primary-hover);
-    transform: scale(1.2);
-}
-
-#quilttDeleteCancelBtn {
-    margin-right: 12px;
-    padding: 5px 10px;
-    background-color: var(--secondary-dark);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#quilttDeleteCancelBtn:hover {
-    background-color: var(--secondary);
-    transform: scale(1.2);
-}
-
-#quilttDeleteConfirmBtn {
-    padding: 5px 10px;
-    background-color: var(--primary);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#quilttDeleteConfirmBtn:hover {
-    background-color: var(--primary-hover);
-    transform: scale(1.2);
-}
-
-#quilttErrorOkBtn {
-    padding: 5px 10px;
-    background-color: var(--primary);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#quilttErrorOkBtn:hover {
-    background-color: var(--primary-hover);
-    transform: scale(1.2);
 }
 
 /* Only show the exclamation bubble for negative cells in the yearly dashboard calendar */
@@ -10228,98 +10068,6 @@ transform: scale(1.2);
     box-shadow: 0 0 0 3px var(--primary-lighter);
 }
 
-/* The Modal (background) */
-.delete-bud-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1000;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: var(--shadow-xxl);
-}
-
-/* Modal Content */
-.delete-bud-modal-content {
-    width: 100%;
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 20px;
-    background-color: var(--text-light);
-    border: 1px solid var(--text-dark);
-    border-radius: 15px;
-    text-align: center;
-}
-
-/* Buttons */
-.delete-bud-confirm-btn, .delete-bud-cancel-btn {
-    margin: 10px;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 15px;
-    cursor: pointer;
-}
-
-.delete-bud-confirm-btn {
-    background-color: var(--danger);
-    color: white;
-}
-
-.delete-bud-cancel-btn {
-    background-color: var(--secondary);
-    color: white;
-}
-
-/* The Modal (background) */
-.delete-bud-item-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1000;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: var(--shadow-xxl);
-}
-
-/* Modal Content */
-.delete-bud-item-modal-content {
-    width: 100%;
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 20px;
-    background-color: var(--text-light);
-    border: 1px solid var(--text-dark);
-    border-radius: 15px;
-    text-align: center;
-}
-
-/* Buttons */
-.delete-bud-item-confirm-btn, .delete-bud-item-cancel-btn {
-    margin: 10px;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 15px;
-    cursor: pointer;
-}
-
-.delete-bud-item-confirm-btn {
-    background-color: var(--danger);
-    color: white;
-}
-
-.delete-bud-item-cancel-btn {
-    background-color: var(--secondary);
-    color: white;
-}
-
 .bud-total {
     display: flex;
     flex-direction: row;
@@ -10712,52 +10460,6 @@ td.credit-account-action-cell button {
     background-color: var(--text-light);
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-lighter);
-}
-
-/* The Modal (background) */
-.delete-credit-account-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1000;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: var(--shadow-xxl);
-}
-
-/* Modal Content */
-.delete-credit-account-modal-content {
-    width: 100%;
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 20px;
-    background-color: var(--text-light);
-    border: 1px solid var(--text-dark);
-    border-radius: 15px;
-    text-align: center;
-}
-
-/* Buttons */
-.delete-credit-account-confirm-btn, .delete-credit-account-cancel-btn {
-    margin: 10px;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 15px;
-    cursor: pointer;
-}
-
-.delete-credit-account-confirm-btn {
-    background-color: var(--danger);
-    color: white;
-}
-
-.delete-credit-account-cancel-btn {
-    background-color: var(--secondary);
-    color: white;
 }
 
 /* Category Dropdown Autocomplete Styles */
@@ -13792,6 +13494,26 @@ transform: scale(1.2);
     margin-bottom: 20px;
     font-size: 14px;
     line-height: 1.5;
+}
+
+#generic-confirm-modal .modal-checkbox-row {
+    margin-bottom: 16px;
+    font-size: 13px;
+    text-align: center;
+}
+
+#generic-confirm-checkbox {
+    accent-color: var(--primary);
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
+#generic-confirm-checkbox + label {
+    cursor: pointer;
+    vertical-align: middle;
 }
 
 #generic-confirm-btn {

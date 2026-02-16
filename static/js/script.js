@@ -78,6 +78,14 @@ function _removeToast(el) {
  */
 function showConfirmModal(opts) {
     return new Promise(function(resolve) {
+        // Checkbox with storageKey: auto-confirm if user previously opted out
+        if (opts.checkbox && opts.checkbox.storageKey) {
+            if (localStorage.getItem(opts.checkbox.storageKey) === '1') {
+                resolve(true);
+                return;
+            }
+        }
+
         // Ensure modal exists in DOM
         var modal = document.getElementById('generic-confirm-modal');
         if (!modal) {
@@ -89,6 +97,10 @@ function showConfirmModal(opts) {
                     '<span id="generic-confirm-close" class="close-modal">&times;</span>' +
                     '<h2 id="generic-confirm-title">Confirm</h2>' +
                     '<p id="generic-confirm-message"></p>' +
+                    '<div id="generic-confirm-checkbox-row" class="modal-checkbox-row" style="display:none;">' +
+                        '<input type="checkbox" id="generic-confirm-checkbox">' +
+                        '<label for="generic-confirm-checkbox" id="generic-confirm-checkbox-label"></label>' +
+                    '</div>' +
                     '<div class="modal-buttons">' +
                         '<button id="generic-confirm-btn">Confirm</button>' +
                         '<button id="generic-cancel-btn">Cancel</button>' +
@@ -97,21 +109,36 @@ function showConfirmModal(opts) {
             document.body.appendChild(modal);
         }
 
-        var titleEl   = document.getElementById('generic-confirm-title');
-        var msgEl     = document.getElementById('generic-confirm-message');
-        var confirmBtn= document.getElementById('generic-confirm-btn');
-        var cancelBtn = document.getElementById('generic-cancel-btn');
-        var closeBtn  = document.getElementById('generic-confirm-close');
+        var titleEl      = document.getElementById('generic-confirm-title');
+        var msgEl        = document.getElementById('generic-confirm-message');
+        var confirmBtn   = document.getElementById('generic-confirm-btn');
+        var cancelBtn    = document.getElementById('generic-cancel-btn');
+        var closeBtn     = document.getElementById('generic-confirm-close');
+        var checkboxRow  = document.getElementById('generic-confirm-checkbox-row');
+        var checkboxEl   = document.getElementById('generic-confirm-checkbox');
+        var checkboxLbl  = document.getElementById('generic-confirm-checkbox-label');
 
         titleEl.textContent   = opts.title || 'Confirm';
         msgEl.textContent     = opts.message || '';
         confirmBtn.textContent= opts.confirmText || 'Confirm';
         cancelBtn.textContent = opts.cancelText || 'Cancel';
 
+        // Hide cancel button if requested (for OK-only informational modals)
+        cancelBtn.style.display = opts.hideCancel ? 'none' : '';
+
         if (opts.danger) {
             confirmBtn.classList.add('danger');
         } else {
             confirmBtn.classList.remove('danger');
+        }
+
+        // Checkbox setup
+        if (opts.checkbox && opts.checkbox.label) {
+            checkboxRow.style.display = '';
+            checkboxLbl.textContent = opts.checkbox.label;
+            checkboxEl.checked = false;
+        } else {
+            checkboxRow.style.display = 'none';
         }
 
         modal.style.display = 'flex';
@@ -124,7 +151,13 @@ function showConfirmModal(opts) {
             modal.removeEventListener('click', onBackdrop);
             resolve(result);
         }
-        function onConfirm() { cleanup(true); }
+        function onConfirm() {
+            // If checkbox is shown and checked, persist the preference
+            if (opts.checkbox && opts.checkbox.storageKey && checkboxEl.checked) {
+                localStorage.setItem(opts.checkbox.storageKey, '1');
+            }
+            cleanup(true);
+        }
         function onCancel()  { cleanup(false); }
         function onBackdrop(e) { if (e.target === modal) cleanup(false); }
 

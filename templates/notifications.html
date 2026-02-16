@@ -81,38 +81,10 @@
 
     {% include 'loading_modals.html' %}
 
-    <!-- Delete Single Notification Modal -->
-    <div id="delete-notification-modal" class="modal">
-        <div class="modal-content">
-            <span id="close-delete-notification-modal" class="close-modal">&times;</span>
-            <h2>Delete Notification</h2>
-            <p>Are you sure you want to delete this notification?</p>
-            <div class="modal-buttons">
-                <button id="confirm-delete-notification-btn" class="confirm-delete-category-btn">Delete</button>
-                <button id="cancel-delete-notification-btn" class="cancel-delete-category-btn">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Clear Read Notifications Modal -->
-    <div id="clear-read-modal" class="modal">
-        <div class="modal-content">
-            <span id="close-clear-read-modal" class="close-modal">&times;</span>
-            <h2>Clear Read Notifications</h2>
-            <p id="clear-read-message"></p>
-            <div class="modal-buttons">
-                <button id="confirm-clear-read-btn" class="confirm-delete-category-btn">Delete All</button>
-                <button id="cancel-clear-read-btn" class="cancel-delete-category-btn">Cancel</button>
-            </div>
-        </div>
-    </div>
-
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 
     <script type="text/javascript">
         document.getElementById('loading-screen').style.display = 'none';
-
-        let currentNotificationId = null;
 
         // Helper function to update the notification badge in nav
         function updateNotificationBadge() {
@@ -199,107 +171,72 @@
             });
         }
 
-        function deleteNotification(notificationId) {
-            // Show confirmation modal
-            currentNotificationId = notificationId;
-            $('#delete-notification-modal').css('display', 'flex');
-        }
+        async function deleteNotification(notificationId) {
+            const confirmed = await showConfirmModal({
+                title: 'Delete Notification',
+                message: 'Are you sure you want to delete this notification?',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
 
-        function clearReadNotifications() {
-            const readCount = $('.notification-item.notification-read').length;
-            
-            if (readCount === 0) {
-                // Show a simple message without modal
-                const messageDiv = $('<div class="profile-section" style="background-color: #f8d7da; border-color: #f5c6cb; color: #721c24; text-align: center; padding: 15px; margin: 10px 0;">No read notifications to clear.</div>');
-                $('.profile-actions').prepend(messageDiv);
-                setTimeout(function() {
-                    messageDiv.fadeOut(300, function() { $(this).remove(); });
-                }, 2000);
-                return;
-            }
-            
-            $('#clear-read-message').text('Are you sure you want to delete all ' + readCount + ' read notification' + (readCount > 1 ? 's' : '') + '?');
-            $('#clear-read-modal').css('display', 'flex');
-        }
-
-        // Delete notification modal handlers
-        $('#confirm-delete-notification-btn').on('click', function() {
-            const notificationToDelete = currentNotificationId;
-            const notificationItem = $('[data-notification-id="' + notificationToDelete + '"]');
+            const notificationItem = $('[data-notification-id="' + notificationId + '"]');
             const wasUnread = !notificationItem.hasClass('notification-read');
-            
-            // Hide modal and start fade out immediately
-            $('#delete-notification-modal').css('display', 'none');
+
             notificationItem.fadeOut(300, function() {
                 $(this).remove();
-                
-                // Check if there are any notifications left
                 if ($('.notification-item').length === 0) {
-                    // Show "no notifications" message
-                    $('.profile-actions').html('<div class="profile-section"><p style="text-align: center; color: #666;">No notifications.</p></div>');
-                    // Hide both buttons
+                    $('.profile-actions').html('<div class="profile-section"><p style="text-align: center; color: var(--secondary-dark);">No notifications.</p></div>');
                     $('.clear-read-button').hide();
                     $('.mark-all-read-button').hide();
                 }
-                
-                // Update the badge if we deleted an unread notification
                 if (wasUnread) {
                     updateNotificationBadge();
                 }
             });
-            
-            // Send delete request in background
+
             $.ajax({
                 url: '/delete-notification',
                 method: 'POST',
                 contentType: 'application/json',
-                data: JSON.stringify({ notification_id: notificationToDelete }),
+                data: JSON.stringify({ notification_id: notificationId }),
                 error: function() {
-                    // If deletion fails, reload the page to restore state
                     location.reload();
                 }
             });
-            
-            currentNotificationId = null;
-        });
+        }
 
-        $('#cancel-delete-notification-btn, #close-delete-notification-modal').on('click', function() {
-            $('#delete-notification-modal').css('display', 'none');
-            currentNotificationId = null;
-        });
+        async function clearReadNotifications() {
+            const readCount = $('.notification-item.notification-read').length;
 
-        // Click outside modal to close
-        $('#delete-notification-modal').on('click', function(e) {
-            if (e.target === this) {
-                $(this).css('display', 'none');
-                currentNotificationId = null;
+            if (readCount === 0) {
+                showToast('No read notifications to clear.', 'info');
+                return;
             }
-        });
 
-        // Clear read notifications modal handlers
-        $('#confirm-clear-read-btn').on('click', function() {
-            $('#clear-read-modal').css('display', 'none');
-            
+            const confirmed = await showConfirmModal({
+                title: 'Clear Read Notifications',
+                message: 'Are you sure you want to delete all ' + readCount + ' read notification' + (readCount > 1 ? 's' : '') + '?',
+                confirmText: 'Delete All',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
+
             $.ajax({
                 url: '/clear-read-notifications',
                 method: 'POST',
                 contentType: 'application/json',
                 success: function(response) {
                     if (response.success) {
-                        // Remove all read notifications with fade out animation
                         $('.notification-item.notification-read').fadeOut(300, function() {
                             $(this).remove();
-                            
-                            // Check if there are any notifications left
                             if ($('.notification-item').length === 0) {
-                                // Show "no notifications" message
-                                $('.profile-actions').html('<div class="profile-section"><p style="text-align: center; color: #666;">No notifications.</p></div>');
-                                // Hide both buttons
+                                $('.profile-actions').html('<div class="profile-section"><p style="text-align: center; color: var(--secondary-dark);">No notifications.</p></div>');
                                 $('.clear-read-button').hide();
                                 $('.mark-all-read-button').hide();
                             }
-                            
-                            // Badge doesn't need updating since we only cleared read notifications
                         });
                     }
                 },
@@ -307,18 +244,7 @@
                     showToast('Failed to clear read notifications.', 'error');
                 }
             });
-        });
-
-        $('#cancel-clear-read-btn, #close-clear-read-modal').on('click', function() {
-            $('#clear-read-modal').css('display', 'none');
-        });
-
-        // Click outside modal to close
-        $('#clear-read-modal').on('click', function(e) {
-            if (e.target === this) {
-                $(this).css('display', 'none');
-            }
-        });
+        }
     </script>
 </body>
 </html>

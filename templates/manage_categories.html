@@ -196,15 +196,6 @@
         </div>
     </div>
 
-    <!-- Modal for delete confirmation -->
-    <div id="deleteCategoryModal" class="category-delete-modal">
-        <div class="category-delete-modal-content">
-            <h3>Are you sure you want to delete this category? Past entries for this category will be added to Uncategorized and future entries will be deleted.</h3>
-            <button id="confirmDeleteCategory" class="confirm-delete-category-btn">Delete</button>
-            <button id="cancelDeleteCategory" class="cancel-delete-category-btn">Cancel</button>
-        </div>
-    </div>
-
     <!-- Modal for editing category name -->
     <div id="editCategoryModal" class="category-edit-modal">
         <div class="category-edit-modal-content">
@@ -504,22 +495,20 @@
         }
 
         // ===================== DELETE CATEGORY =====================
-        let deleteCategoryId = null;
-        let deleteCategoryType = null;
-
-        function openCategoryDeleteModal(categoryId, categoryType) {
-            deleteCategoryId = categoryId;
-            deleteCategoryType = categoryType;
-            document.getElementById('deleteCategoryModal').style.display = 'flex';
-        }
-
-        document.getElementById('confirmDeleteCategory').addEventListener('click', function() {
-            if (!deleteCategoryId || !deleteCategoryType) return;
-            const url = deleteCategoryType === 'income' ? "{{ url_for('delete_income_category') }}" : "{{ url_for('delete_expense_category') }}";
+        async function openCategoryDeleteModal(categoryId, categoryType) {
+            const confirmed = await showConfirmModal({
+                title: 'Delete Category',
+                message: 'Are you sure you want to delete this category? Past entries for this category will be added to Uncategorized and future entries will be deleted.',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
+            const url = categoryType === 'income' ? "{{ url_for('delete_income_category') }}" : "{{ url_for('delete_expense_category') }}";
             $.ajax({
                 url: url,
                 method: "POST",
-                data: { category_id: deleteCategoryId },
+                data: { category_id: categoryId },
                 success: function(response) {
                     if (response.status === 'success') {
                         location.reload();
@@ -531,12 +520,7 @@
                     showToast('An error occurred while deleting the category.', 'error');
                 }
             });
-            document.getElementById('deleteCategoryModal').style.display = 'none';
-        });
-
-        document.getElementById('cancelDeleteCategory').addEventListener('click', function() {
-            document.getElementById('deleteCategoryModal').style.display = 'none';
-        });
+        }
 
         // ===================== SORTABLE TABLES (Drag and Drop) =====================
         $(function() {

@@ -312,20 +312,6 @@
         </div>
     </div>
 
-    <div id="delete-account-modal" class="modal">
-        <div id="delete-account-modal-content" class="modal-content center-modal">
-            <span id="close-delete-account-modal" class="close-modal">&times;</span>
-            <h2>Delete Account</h2>
-            <p>
-                Are you sure you want to delete your account? This action cannot be undone.
-            </p>
-            <div id="delete-account-modal-buttons" class="modal-buttons">
-                <button id="confirm-delete-account-btn" class="confirm-delete-category-btn">Delete</button>
-                <button id="cancel-delete-account-btn" class="cancel-delete-category-btn">Cancel</button>
-            </div>
-        </div>
-    </div>
-
     
     <div id="mfa-qr-modal" class="modal">
         <div class="modal-content">
@@ -361,20 +347,6 @@
                 <input type="hidden" id="mfa-code" name="mfa-code">
                 <button type="submit" class="submit-button">Verify</button>
             </form>
-        </div>
-    </div>
-
-    <div id="delete-connection-modal" class="modal">
-        <div class="modal-content center-modal">
-            <span id="close-delete-connection-modal" class="close-modal">&times;</span>
-            <h2>Delete Bank Connection</h2>
-            <p id="delete-modal-message">
-                This will disconnect from your bank and permanently delete all associated data including accounts and transactions from your records.
-            </p>
-            <div class="modal-buttons">
-                <button id="confirm-delete-connection" class="confirm-delete-category-btn">Delete</button>
-                <button id="cancel-delete-connection" class="cancel-delete-category-btn">Cancel</button>
-            </div>
         </div>
     </div>
 
@@ -453,18 +425,6 @@
                     <button type="button" id="cancel-password-mfa-btn" class="cancel-delete-category-btn">Cancel</button>
                 </div>
             </form>
-        </div>
-    </div>
-
-    <div id="disable-mfa-modal" class="modal">
-        <div class="modal-content">
-            <span id="close-disable-mfa-modal" class="close-modal">&times;</span>
-            <h2>Disable Multi-Factor Authentication</h2>
-            <p>Are you sure you want to disable MFA? This will make your account less secure.</p>
-            <div class="modal-buttons">
-                <button id="confirm-disable-mfa-btn" class="confirm-delete-category-btn">Disable MFA</button>
-                <button id="cancel-disable-mfa-btn" class="cancel-delete-category-btn">Cancel</button>
-            </div>
         </div>
     </div>
 
@@ -553,8 +513,8 @@
                         }
                     });
                 } else {
-                    // Disabling MFA - show confirmation modal
-                    $('#disable-mfa-modal').css('display', 'flex');
+                    // Disabling MFA - show confirmation
+                    confirmDisableMfa();
                 }
             });
 
@@ -602,38 +562,32 @@
             });
 
             $('#disable-mfa-btn').on('click', function() {
-                $('#disable-mfa-modal').css('display', 'flex');
+                confirmDisableMfa();
             });
 
-            // Handle disable MFA modal
-            $('#close-disable-mfa-modal, #cancel-disable-mfa-btn').on('click', function() {
-                $('#disable-mfa-modal').css('display', 'none');
-                // Revert toggle back to on
-                $('#mfa-toggle').prop('checked', true);
-                $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
-            });
-
-            $('#disable-mfa-modal').on('click', function(e) {
-                if (e.target === this) {
-                    $('#disable-mfa-modal').css('display', 'none');
+            // Async function to confirm MFA disable
+            async function confirmDisableMfa() {
+                const confirmed = await showConfirmModal({
+                    title: 'Disable Multi-Factor Authentication',
+                    message: 'Are you sure you want to disable MFA? This will make your account less secure.',
+                    confirmText: 'Disable MFA',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) {
                     // Revert toggle back to on
                     $('#mfa-toggle').prop('checked', true);
                     $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
+                    return;
                 }
-            });
-
-            $('#confirm-disable-mfa-btn').on('click', function() {
                 $.post('/disable_mfa', function(data) {
-                    if (data.status === 'success') {
-                        $('#disable-mfa-modal').css('display', 'none');
-                    } else {
-                        $('#disable-mfa-modal').css('display', 'none');
+                    if (data.status !== 'success') {
                         // Revert toggle
                         $('#mfa-toggle').prop('checked', true);
                         $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
                     }
                 });
-            });
+            }
 
             // Function to cancel MFA setup
             function cancelMfaSetup() {
@@ -1258,35 +1212,19 @@
         });
 
         $(document).ready(function() {
-            const deleteAccountButton = $('.delete-account-button');
-            const deleteAccountModal = $('#delete-account-modal');
-            const closeDeleteModal = $('#close-delete-account-modal');
-            const confirmDeleteBtn = $('#confirm-delete-account-btn');
-            const cancelDeleteBtn = $('#cancel-delete-account-btn');
+            let deleteUrl = $('.delete-account-button').data('url');
 
-            let deleteUrl = deleteAccountButton.data('url');
-
-            deleteAccountButton.on('click', function(e) {
+            $('.delete-account-button').on('click', async function(e) {
                 e.preventDefault();
-                deleteAccountModal.css('display', 'flex');
-            });
+                const confirmed = await showConfirmModal({
+                    title: 'Delete Account',
+                    message: 'Are you sure you want to delete your account? This action cannot be undone.',
+                    confirmText: 'Delete',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
 
-            closeDeleteModal.on('click', function() {
-                deleteAccountModal.hide();
-            });
-
-            cancelDeleteBtn.on('click', function() {
-                deleteAccountModal.hide();
-            });
-
-            // Allow closing modal by clicking the background
-            deleteAccountModal.on('click', function(e) {
-                if (e.target === this) {
-                    deleteAccountModal.hide();
-                }
-            });
-
-            confirmDeleteBtn.on('click', function() {
                 $.ajax({
                     url: deleteUrl,
                     method: 'POST',
@@ -1304,7 +1242,6 @@
                         showToast('An error occurred while deleting your account.', 'error');
                     }
                 });
-                deleteAccountModal.hide();
             });
         });
 
@@ -2777,63 +2714,28 @@
                 });
             });
 
-            // Delete connection (disconnect from Quiltt + delete data)
-            let pendingDeleteConnectionId = null;
-            let pending$DeleteCard = null;
-            
-            $(document).on('click', '.delete-connection-btn', function() {
-                pendingDeleteConnectionId = $(this).data('connection-id');
-                pending$DeleteCard = $(this).closest('.connection-card');
-                const connectionStatus = pending$DeleteCard.find('.connection-status').text().trim();
-                
-                // Show appropriate modal message based on status
-                if (connectionStatus === 'DISCONNECTED') {
-                    $('#delete-modal-message').text('This will permanently delete this connection and all associated data including accounts and transactions from your records.');
-                } else {
-                    $('#delete-modal-message').text('This will disconnect from your bank and permanently delete all associated data including accounts and transactions from your records.');
-                }
-                
-                $('#delete-connection-modal').css('display', 'flex');
-                document.body.classList.add('modal-open');
-                document.documentElement.classList.add('modal-open');
-            });
-
-            // Close delete connection modal
-            $('#close-delete-connection-modal, #cancel-delete-connection').on('click', function() {
-                $('#delete-connection-modal').css('display', 'none');
-                document.body.classList.remove('modal-open');
-                document.documentElement.classList.remove('modal-open');
-                pendingDeleteConnectionId = null;
-                pending$DeleteCard = null;
-            });
-
-            // Close delete modal on backdrop click
-            $('#delete-connection-modal').on('click', function(e) {
-                if (e.target.id === 'delete-connection-modal') {
-                    $(this).css('display', 'none');
-                    document.body.classList.remove('modal-open');
-                    document.documentElement.classList.remove('modal-open');
-                    pendingDeleteConnectionId = null;
-                    pending$DeleteCard = null;
-                }
-            });
-
-            // Confirm delete connection
-            $('#confirm-delete-connection').on('click', function() {
-                if (!pendingDeleteConnectionId || !pending$DeleteCard) return;
-                
-                const connectionId = pendingDeleteConnectionId;
-                const $card = pending$DeleteCard;
+            // Delete connection with confirmation
+            $(document).on('click', '.delete-connection-btn', async function() {
+                const connectionId = $(this).data('connection-id');
+                const $card = $(this).closest('.connection-card');
                 const connectionStatus = $card.find('.connection-status').text().trim();
                 
+                const message = connectionStatus === 'DISCONNECTED'
+                    ? 'This will permanently delete this connection and all associated data including accounts and transactions from your records.'
+                    : 'This will disconnect from your bank and permanently delete all associated data including accounts and transactions from your records.';
+
+                const confirmed = await showConfirmModal({
+                    title: 'Delete Bank Connection',
+                    message: message,
+                    confirmText: 'Delete',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
+
                 // Show deleting state
                 $card.find('.connection-status').text('DELETING...');
-                
-                // Close modal first
-                $('#delete-connection-modal').css('display', 'none');
-                document.body.classList.remove('modal-open');
-                document.documentElement.classList.remove('modal-open');
-                
+
                 // If not disconnected, disconnect from Quiltt first
                 if (connectionStatus !== 'DISCONNECTED') {
                     $.ajax({
@@ -2842,22 +2744,15 @@
                         contentType: 'application/json',
                         data: JSON.stringify({ connection_id: connectionId }),
                         success: function() {
-                            // After disconnecting, delete the data
                             deleteConnectionData(connectionId, $card);
                         },
                         error: function(xhr) {
-                            // Even if disconnect fails, try to delete
                             deleteConnectionData(connectionId, $card);
                         }
                     });
                 } else {
-                    // Already disconnected, just delete the data
                     deleteConnectionData(connectionId, $card);
                 }
-                
-                // Clear pending state
-                pendingDeleteConnectionId = null;
-                pending$DeleteCard = null;
             });
             
             function deleteConnectionData(connectionId, $card) {

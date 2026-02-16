@@ -185,15 +185,6 @@
         </div>
     </div>
 
-    <!-- Modal for delete confirmation -->
-    <div id="delete-credit-account-modal" class="delete-credit-account-modal">
-        <div class="delete-credit-account-modal-content">
-            <h3>Are you sure you want to delete this item? If the date for this item is in the past, the amount will be moved to Uncategorized for that date.</h3>
-            <button id="delete-credit-account-confirm" class="delete-credit-account-confirm-btn">Delete</button>
-            <button id="delete-credit-account-cancel" class="delete-credit-account-cancel-btn">Cancel</button>
-        </div>
-    </div>
-
     <!-- Modal for editing credit account -->
     <div id="edit-credit-account-modal" class="footer-modal">
         <div class="add-credit-account-modal-content">
@@ -501,29 +492,24 @@
         });
 
         $(function() {
-            // Open modal on delete button click
-            $('.credit-accounts-table').on('click', '.delete-credit-account-btn', function(e) {
+            // Delete credit account with confirmation
+            $('.credit-accounts-table').on('click', '.delete-credit-account-btn', async function(e) {
                 e.preventDefault();
                 const $row = $(this).closest('tr');
                 const isQuiltt = $row.data('is-quiltt') == 1;
-                
-                // Don't allow deleting Quiltt-linked accounts
-                if (isQuiltt) {
-                    return;
-                }
-                
+
+                if (isQuiltt) return;
+
                 const accountId = $(this).data('account-id');
-                $('#delete-credit-account-modal').data('account-id', accountId).show();
-            });
+                const confirmed = await showConfirmModal({
+                    title: 'Delete Credit Account',
+                    message: 'Are you sure you want to delete this item? If the date for this item is in the past, the amount will be moved to Uncategorized for that date.',
+                    confirmText: 'Delete',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
 
-            // Cancel button closes modal
-            $('#delete-credit-account-cancel').on('click', function() {
-                $('#delete-credit-account-modal').hide();
-            });
-
-            // Confirm delete
-            $('#delete-credit-account-confirm').on('click', function() {
-                const accountId = $('#delete-credit-account-modal').data('account-id');
                 $('#loading-screen').show();
                 $.ajax({
                     url: '/delete-credit-account',
@@ -532,7 +518,6 @@
                     data: JSON.stringify({ id: accountId }),
                     success: function(response) {
                         $('#loading-screen').hide();
-                        $('#delete-credit-account-modal').hide();
                         if (response.status === 'success') {
                             location.reload();
                         } else {
@@ -541,7 +526,6 @@
                     },
                     error: function() {
                         $('#loading-screen').hide();
-                        $('#delete-credit-account-modal').hide();
                         showToast('Error deleting credit account.', 'error');
                     }
                 });
