@@ -27,17 +27,19 @@
                 </a>
             </div>
             {% if notifications %}
-                <button class="nav-button mark-all-read-button" onclick="markAllAsRead()">
-                    <span class="stacked-envelopes">
-                        <i class="fa-solid fa-envelope-open envelope-back"></i>
-                        <i class="fa-solid fa-envelope-open envelope-front"></i>
-                    </span>
-                    <span class="nav-tooltip">Mark All Read</span>
-                </button>
-                <button class="nav-button clear-read-button" onclick="clearReadNotifications()">
-                    <i class="fa-solid fa-broom-wide"></i>
-                    <span class="nav-tooltip">Clear Read</span>
-                </button>
+                <div class="nav-buttons">
+                    <button class="nav-button mark-all-read-button" onclick="markAllAsRead()">
+                        <span class="stacked-envelopes">
+                            <i class="fa-solid fa-envelope-open envelope-back"></i>
+                            <i class="fa-solid fa-envelope-open envelope-front"></i>
+                        </span>
+                        <span class="nav-tooltip">Mark All Read</span>
+                    </button>
+                    <button class="nav-button clear-read-button" onclick="clearReadNotifications()">
+                        <i class="fa-solid fa-broom-wide"></i>
+                        <span class="nav-tooltip">Clear Read</span>
+                    </button>
+                </div>
             {% endif %}
         </div>
     </div>

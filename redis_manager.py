@@ -558,7 +558,6 @@ def _dehydrate_user_data(user_id: int):
                 pending_key = f"pending_deletes:{table}:{user_id}"
                 _redis_client.delete(pending_key)
             # Clean up Quiltt-related keys
-            _redis_client.delete(f"pending_webhook_deletes:{user_id}")
             
             elapsed = time.time() - start_time
             logger.info(f"[DEHYDRATION] ✓ User {user_id} dehydrated: {len(keys_to_delete)} Redis keys deleted in {elapsed:.2f}s")
@@ -661,7 +660,6 @@ def _flush_redis_to_mysql():
             'quiltt_accounts',  # Quiltt bank accounts
             'quiltt_transactions',  # Quiltt transactions
             'quiltt_category_mappings',  # Quiltt category mappings
-            'quiltt_webhook_events',  # Quiltt webhook events
             # Deletion handlers (must run after updates)
             'quiltt_connections_deleted',
             'quiltt_accounts_deleted',
@@ -810,53 +808,6 @@ def _flush_table_to_mysql(table: str, user_id: int):
             # This is handled by quiltt_accounts_deleted (cascade delete via FK)
             # Just return 0
             return 0
-        
-        elif table == 'quiltt_webhook_events_deleted':
-            # Delete webhook events for deleted connections
-            logger.info(f"[FLUSH] Processing quiltt_webhook_events_deleted for user {user_id}")
-            
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                
-                delete_key = f"pending_webhook_deletes:{user_id}"
-                connection_ids = _redis_client.smembers(delete_key)
-                
-                logger.info(f"[FLUSH] Found {len(connection_ids) if connection_ids else 0} connection webhook events to delete")
-                
-                if not connection_ids:
-                    _redis_client.delete(delete_key)
-                    logger.info(f"[FLUSH] No webhook events to delete, cleared deletion set")
-                    return 0
-                
-                deleted_count = 0
-                for conn_id in connection_ids:
-                    conn_id_str = conn_id.decode('utf-8') if isinstance(conn_id, bytes) else conn_id
-                    
-                    # Delete webhook events for this connection
-                    cursor.execute("""
-                        DELETE FROM quiltt_webhook_events 
-                        WHERE connection_id = %s
-                    """, (conn_id_str,))
-                    
-                    deleted_count += cursor.rowcount
-                    logger.info(f"[FLUSH] Deleted {cursor.rowcount} webhook events for connection {conn_id_str}")
-                
-                conn.commit()
-                
-                # Clear the deletion set
-                _redis_client.delete(delete_key)
-                
-                # Also remove webhook events from Redis cache
-                webhook_events_key = f"quiltt_webhook_events:v1:{user_id}"
-                cached_events = _redis_client.get(webhook_events_key)
-                if cached_events:
-                    events = json.loads(cached_events)
-                    conn_ids_to_remove = {c.decode('utf-8') if isinstance(c, bytes) else c for c in connection_ids}
-                    events = [e for e in events if e.get('connection_id') not in conn_ids_to_remove]
-                    _redis_client.setex(webhook_events_key, 604800, json.dumps(events, cls=DecimalEncoder))
-                
-                cursor.close()
-                return deleted_count
         
         # Regular table flush logic
         redis_key = _get_redis_key(table, user_id)
@@ -3247,74 +3198,6 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 conn.commit()
                 cursor.close()
                 logger.debug(f"[FLUSH] → quiltt_category_mappings: {len(batch_data)} rows")
-                return len(batch_data)
-                
-            elif table == 'quiltt_webhook_events':
-                # Quiltt webhook events table
-                
-                # First, handle pending connection deletes
-                pending_key = f"pending_webhook_deletes:{user_id}"
-                pending_deletes = _redis_client.smembers(pending_key)
-                
-                if pending_deletes:
-                    for conn_id in pending_deletes:
-                        conn_id_str = conn_id.decode() if isinstance(conn_id, bytes) else conn_id
-                        
-                        if conn_id_str.startswith('__NULL__:'):
-                            # Delete webhook events with NULL connection_id for the specified profile
-                            # Format: __NULL__:profile_id
-                            profile_id = conn_id_str.split(':', 1)[1]
-                            cursor.execute(
-                                "DELETE FROM quiltt_webhook_events WHERE profile_id = %s AND connection_id IS NULL",
-                                (profile_id,)
-                            )
-                            deleted_count = cursor.rowcount
-                            logger.info(f"[FLUSH] Deleted {deleted_count} webhook events with NULL connection_id for profile {profile_id}")
-                        else:
-                            cursor.execute(
-                                "DELETE FROM quiltt_webhook_events WHERE connection_id = %s",
-                                (conn_id_str,)
-                            )
-                            logger.info(f"[FLUSH] Deleted webhook events for connection {conn_id_str}")
-                    _redis_client.delete(pending_key)
-                
-                if not rows:
-                    conn.commit()
-                    cursor.close()
-                    return 0
-                
-                batch_data = []
-                for row in rows:
-                    # Skip temp IDs that are too high (not yet in MySQL)
-                    row_id = row.get('id', 0)
-                    is_temp_id = row_id >= 1000000000
-                    
-                    batch_data.append((
-                        row.get('event_id'),
-                        row.get('event_type'),
-                        row.get('profile_id'),
-                        row.get('connection_id'),
-                        json.dumps(row.get('payload', {})) if isinstance(row.get('payload'), dict) else row.get('payload', '{}'),
-                        row.get('processed', 0),
-                        row.get('processed_at'),
-                        row.get('error_message')
-                    ))
-                
-                if batch_data:
-                    cursor.executemany("""
-                        INSERT INTO quiltt_webhook_events
-                        (event_id, event_type, profile_id, connection_id, payload, processed, processed_at, error_message)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            processed = VALUES(processed),
-                            processed_at = VALUES(processed_at),
-                            error_message = VALUES(error_message)
-                    """, batch_data)
-                    
-                    conn.commit()
-                    logger.debug(f"[FLUSH] → quiltt_webhook_events: {len(batch_data)} rows")
-                
-                cursor.close()
                 return len(batch_data)
                 
             elif table == 'income_categories':

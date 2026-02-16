@@ -733,8 +733,8 @@
             const entryDateObj = typeof entryDate === 'string' ? new Date(entryDate) : new Date(entryDate);
             entryDateObj.setHours(0, 0, 0, 0);
             
-            // Only lock entries from today or before
-            if (entryDateObj > today) return false;
+            // Only lock entries before today (today is editable)
+            if (entryDateObj >= today) return false;
             
             // Credit account entries - check if this specific account is Quiltt-linked
             if (entryType === 'ca' && accountId !== null) {
@@ -2974,6 +2974,97 @@
         document.body.insertAdjacentHTML('beforeend', entryUpdateModalHtml);
         }
 
+        // Add modal HTML for Quiltt partial delete confirmation
+        const quilttDeleteModalHtml = `
+        <div id="quilttDeleteModal" class="modal">
+        <div class="modal-content">
+            <h3>Bank-Connected Account</h3>
+            <p>You have your bank connected for this account. This will delete entries from today forward. Past bank transactions will remain.<br><br>Are you sure you want to proceed?</p>
+            <div class="modal-actions">
+            <button id="quilttDeleteCancelBtn">Cancel</button>
+            <button id="quilttDeleteConfirmBtn" tabindex="0">Confirm</button>
+            </div>
+        </div>
+        </div>`;
+        if (!document.getElementById('quilttDeleteModal')) {
+        document.body.insertAdjacentHTML('beforeend', quilttDeleteModalHtml);
+        }
+
+        // Add modal HTML for Quiltt partial error message
+        const quilttErrorModalHtml = `
+        <div id="quilttErrorModal" class="modal">
+        <div class="modal-content">
+            <h3>Cannot Update Entry</h3>
+            <p id="quilttErrorMessage"></p>
+            <div class="modal-actions">
+            <button id="quilttErrorOkBtn" tabindex="0">OK</button>
+            </div>
+        </div>
+        </div>`;
+        if (!document.getElementById('quilttErrorModal')) {
+        document.body.insertAdjacentHTML('beforeend', quilttErrorModalHtml);
+        }
+
+        function showQuilttDeleteModal(onConfirm, onCancel) {
+            const modal = document.getElementById('quilttDeleteModal');
+            modal.style.display = 'flex';
+            const confirmBtn = document.getElementById('quilttDeleteConfirmBtn');
+            const cancelBtn = document.getElementById('quilttDeleteCancelBtn');
+            const modalContent = modal.querySelector('.modal-content');
+
+            function cleanup() {
+                modal.style.display = 'none';
+                confirmBtn.removeEventListener('click', onConfirmHandler);
+                cancelBtn.removeEventListener('click', onCancelHandler);
+                document.removeEventListener('keydown', onKeyDownHandler);
+                modal.removeEventListener('click', onOutsideClickHandler);
+            }
+            function onConfirmHandler() {
+                cleanup();
+                if (onConfirm) onConfirm();
+            }
+            function onCancelHandler() {
+                cleanup();
+                if (onCancel) onCancel();
+            }
+            function onKeyDownHandler(e) {
+                if (e.key === 'Enter') { e.preventDefault(); onConfirmHandler(); }
+                else if (e.key === 'Escape') { e.preventDefault(); onCancelHandler(); }
+            }
+            function onOutsideClickHandler(e) {
+                if (e.target === modal && !modalContent.contains(e.target)) { onCancelHandler(); }
+            }
+            confirmBtn.addEventListener('click', onConfirmHandler);
+            cancelBtn.addEventListener('click', onCancelHandler);
+            document.addEventListener('keydown', onKeyDownHandler);
+            modal.addEventListener('click', onOutsideClickHandler);
+        }
+
+        function showQuilttErrorModal(message) {
+            const modal = document.getElementById('quilttErrorModal');
+            document.getElementById('quilttErrorMessage').textContent = message;
+            modal.style.display = 'flex';
+            const okBtn = document.getElementById('quilttErrorOkBtn');
+            const modalContent = modal.querySelector('.modal-content');
+
+            function cleanup() {
+                modal.style.display = 'none';
+                okBtn.removeEventListener('click', onOkHandler);
+                document.removeEventListener('keydown', onKeyDownHandler);
+                modal.removeEventListener('click', onOutsideClickHandler);
+            }
+            function onOkHandler() { cleanup(); }
+            function onKeyDownHandler(e) {
+                if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); cleanup(); }
+            }
+            function onOutsideClickHandler(e) {
+                if (e.target === modal && !modalContent.contains(e.target)) { cleanup(); }
+            }
+            okBtn.addEventListener('click', onOkHandler);
+            document.addEventListener('keydown', onKeyDownHandler);
+            modal.addEventListener('click', onOutsideClickHandler);
+        }
+
         function showEntryUpdateModal(onConfirm, onCancel) {
         // If user opted out, skip modal and auto-confirm
         if (localStorage.getItem('entryUpdateModalDontShow') === '1') {
@@ -3127,6 +3218,14 @@
 
             input.addEventListener('blur', function () {
                 
+                // If a Quiltt error just restored the value, sync originalValue and skip processing
+                if (input.dataset.quilttErrorReset === '1') {
+                    delete input.dataset.quilttErrorReset;
+                    originalValue = input.value.trim().replace(currencySymbol, '').replace(/,/g, '').trim();
+                    entryProcessed = false;
+                    return;
+                }
+
                 // Check if we should skip processing (but not formatting)
                 const shouldSkipProcessing = ignoreBlur || entryProcessed;
                 
@@ -3956,7 +4055,7 @@
             
             showDashboardSpinner(true);
             // Strip currency symbol if present (needed when called after blur reformats the value)
-            const newValue = input.value.trim().replace(currencySymbol, '').trim();
+            const newValue = input.value.trim().replace(currencySymbol, '').replace(/,/g, '').trim();
 
             const categoryId = td.closest('tr').getAttribute('data-category-id');
             const date = new Date(td.getAttribute('data-date'));
@@ -3965,13 +4064,37 @@
             const startDate = startOfWeek.toISOString().split('T')[0];
             const endDate = endOfWeek.toISOString().split('T')[0];
 
+            // Quiltt partial edit/delete: check if this category has Quiltt-protected past entries in this period
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayStr = today.toISOString().split('T')[0];
+            let useQuilttPartial = false;
+            if (quiltt_flags && startDate < todayStr && endDate >= todayStr) {
+                // Period spans today - check if this category/account is Quiltt-protected
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
+                // For CA entries, get the accountId from the table
+                let accountIdForQuiltt = null;
+                if (type === 'ca') {
+                    const caTable = td.closest('table[id^="ca-categories-table-"]');
+                    accountIdForQuiltt = caTable ? caTable.id.replace('ca-categories-table-', '') : null;
+                }
+                useQuilttPartial = isEntryLockedByQuiltt(yesterday, categoryId, type, accountIdForQuiltt);
+            }
+
             if (newValue === "") {
-                const data = {
-                    category_id: categoryId,
-                    start_date: startDate,
-                    end_date: endDate,
-                    type: type
-                };
+                // Wrap the delete AJAX in a function so it can be called from modal callback
+                function proceedWithDelete() {
+                    const data = {
+                        category_id: categoryId,
+                        start_date: startDate,
+                        end_date: endDate,
+                        type: type
+                    };
+                    if (useQuilttPartial) {
+                        data.quiltt_partial = true;
+                        data.today_date = todayStr;
+                    }
                 $.ajax({
                     url: "/delete-week-entry",
                     method: "POST",
@@ -3980,20 +4103,24 @@
                     success: function(response) {
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
-                            input.value = '';
-                            // Remove processed status from the cell
-                            td.removeAttribute('data-processed');
-                            td.setAttribute('data-processed', '0');
-                            td.classList.remove('paid');
+                            // Quiltt partial: show remaining past_sum instead of clearing
+                            if (useQuilttPartial && response.past_sum > 0) {
+                                input.value = currencySymbol + formatNumberWithCommas(response.past_sum);
+                                updateLocalState(type, categoryId, fridayDateStr, response.past_sum, false, fridayDateStr);
+                            } else {
+                                input.value = '';
+                                // Remove processed status from the cell
+                                td.removeAttribute('data-processed');
+                                td.setAttribute('data-processed', '0');
+                                td.classList.remove('paid');
+                                updateLocalState(type, categoryId, fridayDateStr, 0, true, fridayDateStr);
+                            }
                             
                             // Remove any bucket progress bar from the deleted cell
                             const existingBar = td.querySelector('.bucket-progress-container');
                             if (existingBar) {
                                 existingBar.remove();
                             }
-                            
-                            // Use fridayDateStr (the cell's data-date) since entries are keyed by Friday
-                            updateLocalState(type, categoryId, fridayDateStr, 0, true, fridayDateStr);
                             
                             // Update bucket entries if returned from server
                             // Process ALL returned buckets - depleting an entry can affect buckets in other weeks
@@ -4093,6 +4220,31 @@
                         showDashboardSpinner(false);
                     }
                 });
+                } // end proceedWithDelete
+
+                // Quiltt partial: show styled confirmation modal instead of deleting immediately
+                if (useQuilttPartial) {
+                    showDashboardSpinner(false);
+                    showQuilttDeleteModal(
+                        function() {
+                            // User confirmed - proceed with delete
+                            showDashboardSpinner(true);
+                            proceedWithDelete();
+                        },
+                        function() {
+                            // User cancelled - restore the original value
+                            const entryList = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
+                            const existingEntry = entryList.find(e => String(e.category_id) === String(categoryId) && e.date === fridayDateStr);
+                            if (existingEntry) {
+                                const origVal = parseFloat(existingEntry.total_amount ?? existingEntry.amount ?? 0);
+                                input.value = origVal > 0 ? currencySymbol + formatNumberWithCommas(origVal) : '';
+                            }
+                        }
+                    );
+                    return;
+                }
+
+                proceedWithDelete();
             } else {
                 const validValue = newValue.match(/^\d*(\.\d{0,2})?$/);
                 if (!validValue) {
@@ -4112,6 +4264,10 @@
                     amount: amount,
                     type: type
                 };
+                if (useQuilttPartial) {
+                    data.quiltt_partial = true;
+                    data.today_date = todayStr;
+                }
                 $.ajax({
                     url: "/update-week-entry",
                     method: "POST",
@@ -4235,8 +4391,20 @@
                         }
                         showDashboardSpinner(false);
                     },
-                    error: function() {
+                    error: function(xhr) {
                         showDashboardSpinner(false);
+                        // Quiltt partial: show error message if past entries exceed new amount
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            // Restore original value and flag input so blur handler skips re-triggering modal
+                            const entryList = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
+                            const existingEntry = entryList.find(e => String(e.category_id) === String(categoryId) && e.date === fridayDateStr);
+                            if (existingEntry) {
+                                const origVal = parseFloat(existingEntry.total_amount ?? existingEntry.amount ?? 0);
+                                input.value = origVal > 0 ? currencySymbol + formatNumberWithCommas(origVal) : '';
+                            }
+                            input.dataset.quilttErrorReset = '1';
+                            showQuilttErrorModal(xhr.responseJSON.message);
+                        }
                     }
                 });
             }
