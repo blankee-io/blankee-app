@@ -808,7 +808,6 @@ class QuilttClient:
         - Custom metadata associated with the Profile
         
         Note: This process can take up to 15 minutes to complete on Quiltt's side.
-        A profile.deleted webhook event will be sent when deletion is complete.
         
         Args:
             profile_id: The Quiltt Profile ID (e.g., 'p_1hyoxpVVFib1HngGwKAzIr')

@@ -12934,12 +12934,6 @@ def delete_user(username):
             
             if quiltt_profile and quiltt_profile[0]:
                 quiltt_profile_id = quiltt_profile[0]
-                # Delete webhook events for this profile from database
-                with get_db_pool().get_connection() as conn2:
-                    cursor2 = conn2.cursor()
-                    cursor2.execute("DELETE FROM quiltt_webhook_events WHERE profile_id = %s", (quiltt_profile_id,))
-                    conn2.commit()
-                    cursor2.close()
                 # Delete profile from Quiltt's side
                 quiltt_client.delete_profile(quiltt_profile_id)
     except Exception as e:
@@ -19109,11 +19103,6 @@ def quiltt_delete():
         
         app.logger.info(f"Deleting connection {connection_id} for user {current_user.id}, is_last={is_last_connection}, remaining={len(remaining_connections)}")
         
-        # Delete webhook events for this connection (Redis-first)
-        # If last connection, also delete events with NULL connection_id
-        from quiltt_redis import delete_quiltt_webhook_events_for_connection
-        delete_quiltt_webhook_events_for_connection(connection_id, current_user.id, is_last_connection)
-        
         # Delete using Redis-first operation
         app.logger.info(f"[APP_DELETE] About to call delete_quiltt_connection for {connection_id}")
         success = delete_quiltt_connection(connection_id, current_user.id)
@@ -19192,13 +19181,6 @@ def quiltt_delete_unconfirmed():
                 app.logger.info(f"[DELETE_UNCONFIRMED] Successfully disconnected from Quiltt API")
             except Exception as e:
                 app.logger.warning(f"[DELETE_UNCONFIRMED] Failed to disconnect from Quiltt API: {e}, continuing with local delete")
-        
-        # Delete webhook events
-        from quiltt_redis import delete_quiltt_webhook_events_for_connection
-        remaining_connections = [c for c in connections if c.get('connection_id') != connection_id]
-        is_last_connection = len(remaining_connections) == 0
-        delete_quiltt_webhook_events_for_connection(connection_id, current_user.id, is_last_connection)
-        app.logger.info(f"[DELETE_UNCONFIRMED] Deleted webhook events for {connection_id}")
         
         # Delete the connection and all associated data from our database
         success = delete_quiltt_connection(connection_id, current_user.id)
@@ -20128,8 +20110,8 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
     
     Args:
         user_id: The user ID to sync transactions for
-        start_date: Optional start date (YYYY-MM-DD) from webhook metadata
-        end_date: Optional end date (YYYY-MM-DD) from webhook metadata
+        start_date: Optional start date (YYYY-MM-DD)
+        end_date: Optional end date (YYYY-MM-DD)
         specific_account_id: Optional Quiltt account_id to sync only that account (e.g., "acct_xxx")
         skip_auto_import: If True, only store transactions in quiltt_transactions without
                           creating income/expense entries (used during initial setup)
@@ -20165,7 +20147,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             if expires_at <= datetime.now():
                 app.logger.info(f"Session token expired for user {user_id} (expired at {session_expires_at}), refreshing...")
                 
-                # Get user's username for refresh - we need to look it up since this is called from webhook
+                # Get user's username for refresh - we need to look it up since this may be called externally
                 with get_db_pool().get_connection() as conn:
                     cursor = conn.cursor(pymysql.cursors.DictCursor)
                     cursor.execute("SELECT username FROM users WHERE id = %s", (user_id,))
@@ -20238,14 +20220,14 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         total_synced = 0
         total_imported = 0
         
-        # Use provided dates from webhook metadata, or default to last 1 day
+        # Use provided dates or default to last 1 day
         from datetime import datetime, timedelta
         if not start_date or not end_date:
             start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
             end_date = datetime.now().strftime('%Y-%m-%d')
             app.logger.info(f"No date range provided, using default: {start_date} to {end_date}")
         else:
-            app.logger.info(f"Using webhook date range: {start_date} to {end_date}")
+            app.logger.info(f"Using provided date range: {start_date} to {end_date}")
         
         # Get existing transactions from Redis to check for duplicates
         existing_transactions = get_quiltt_transactions(user_id)
@@ -22698,8 +22680,7 @@ def quiltt_analyze_transactions_for_categories():
     
     Note: Ntropy enrichment data is not immediately available after bank connection.
     We use generic starter categories instead and will use Ntropy for future
-    enhancements like transaction auto-categorization after the webhook confirms
-    enrichment is complete.
+    enhancements like transaction auto-categorization.
     """
     try:
         app.logger.info(f"Returning static category recommendations for user_id={current_user.id}")
@@ -23124,368 +23105,7 @@ def quiltt_toggle_auto_import():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@app.route('/quiltt/webhook', methods=['POST'])
-def quiltt_webhook():
-    """
-    Handle webhooks from Quiltt.
-    Verifies webhook signature and processes various event types including:
-    - connection.synced.successful* (initial, historical)
-    - connection.synced.errored.* (repairable, institution, provider, service)
-    - connection.disconnected
-    - balance.created
-    - account.* events
-    - profile.* events
-    """
-    # Log immediately at entry point
-    app.logger.info(f"===== QUILTT WEBHOOK ENTRY =====")
-    
-    try:
-        # Get raw payload for signature verification
-        raw_payload = request.get_data(as_text=True)
-        app.logger.info(f"Quiltt webhook raw payload length: {len(raw_payload) if raw_payload else 0}")
-        payload = request.get_json()
-        
-        if not payload:
-            app.logger.error("Received empty webhook payload")
-            return jsonify({'status': 'error', 'message': 'Empty payload'}), 400
-        
-        # Verify webhook signature (optional but recommended)
-        quiltt_signature = request.headers.get('Quiltt-Signature')
-        quiltt_timestamp = request.headers.get('Quiltt-Timestamp')
-        app.logger.info(f"Quiltt webhook headers: signature={quiltt_signature is not None}, timestamp={quiltt_timestamp}")
-        
-        if quiltt_signature and quiltt_timestamp:
-            webhook_secret = os.environ.get('QUILTT_WEBHOOK_SECRET')
-            app.logger.info(f"Quiltt webhook secret configured: {webhook_secret is not None}")
-            if webhook_secret:
-                import hmac
-                import hashlib
-                import base64
-                import time
-                
-                # Check timestamp is within 5 minutes
-                current_time = int(time.time())
-                webhook_time = int(quiltt_timestamp)
-                if abs(current_time - webhook_time) > 300:  # 5 minutes
-                    app.logger.warning(f"Quiltt webhook timestamp expired: webhook_time={webhook_time}, current_time={current_time}, diff={abs(current_time - webhook_time)}s")
-                    return '', 204
-                
-                # Verify signature
-                version = 1
-                message = f"{version}{quiltt_timestamp}{raw_payload}"
-                expected_signature = base64.b64encode(
-                    hmac.new(
-                        webhook_secret.encode('utf-8'),
-                        message.encode('utf-8'),
-                        hashlib.sha256
-                    ).digest()
-                ).decode('utf-8')
-                
-                if quiltt_signature != expected_signature:
-                    app.logger.error(f"Webhook signature verification failed. Received: {quiltt_signature[:20]}..., Expected: {expected_signature[:20]}...")
-                    # Log for debugging but continue processing - signature may be calculated differently
-                    app.logger.warning("Continuing webhook processing despite signature mismatch (debug mode)")
-                else:
-                    app.logger.info("Webhook signature verified successfully")
-                
-        
-        # Log incoming webhook for debugging
-        app.logger.info(f"Quiltt webhook received: eventTypes={payload.get('eventTypes', [])}, events_count={len(payload.get('events', []))}")
-        
-        event_types = payload.get('eventTypes', [])
-        events = payload.get('events', [])
-        
-        if not events:
-            app.logger.warning(f"Quiltt webhook had no events. Full payload: {payload}")
-            return '', 204
-        
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            for event in events:
-                event_id = event.get('id')
-                event_type = event.get('type')
-                event_at = event.get('at')
-                profile_obj = event.get('profile', {})
-                record_obj = event.get('record', {})
-                metadata_obj = event.get('metadata', {})
-                
-                profile_id = profile_obj.get('id')
-                
-                # Connection ID could be in record or metadata depending on event type
-                connection_id = record_obj.get('id') if 'connection' in event_type else None
-                
-                
-                # Get user_id from profile_id
-                from quiltt_redis import get_user_id_by_profile_id, upsert_quiltt_webhook_event
-                user_id = get_user_id_by_profile_id(profile_id)
-                
-                if not user_id:
-                    app.logger.warning(f"Quiltt webhook: No user found for profile_id={profile_id}, event_type={event_type}")
-                    continue
-                
-                app.logger.info(f"Quiltt webhook: Found user_id={user_id} for profile_id={profile_id}, event_type={event_type}")
-                
-                # Store webhook event in Redis (will flush to MySQL periodically)
-                store_result = upsert_quiltt_webhook_event({
-                    'event_id': event_id,
-                    'event_type': event_type,
-                    'profile_id': profile_id,
-                    'connection_id': connection_id,
-                    'payload': event,
-                    'processed': 0
-                }, user_id)
-                app.logger.info(f"Quiltt webhook: Stored event {event_id} in Redis: {store_result}")
-                
-                # Process different event types
-                
-                # ===== CONNECTION SYNC SUCCESS EVENTS =====
-                if event_type and event_type.startswith('connection.synced.successful'):
-                    pass
-                    
-                    # Update connection status in MySQL
-                    if connection_id:
-                        # Check if this connection is being deleted - if so, skip update
-                        delete_key = f"quiltt_connections_to_delete:{user_id}"
-                        is_pending_delete = _redis_client.sismember(delete_key, connection_id) if _redis_client else False
-                        
-                        if is_pending_delete:
-                            app.logger.info(f"Skipping webhook update for {connection_id} - pending delete")
-                        else:
-                            cursor.execute("""
-                                UPDATE quiltt_connections 
-                                SET status = 'SYNCED', last_synced_at = NOW()
-                                WHERE user_id = %s AND connection_id = %s
-                            """, (user_id, connection_id))
-                            
-                            # Update Redis
-                            from quiltt_redis import upsert_quiltt_connection
-                            upsert_quiltt_connection({
-                                'connection_id': connection_id,
-                                'status': 'SYNCED'
-                            }, user_id)
-                        
-                    
-                    conn.commit()
-                    
-                    # Extract date range from metadata if available
-                    start_date = metadata_obj.get('startDate')
-                    end_date = metadata_obj.get('endDate')
-                    
-                    # If no date range provided, default to last 1 day
-                    if not start_date or not end_date:
-                        from datetime import datetime, timedelta
-                        end_date = datetime.now().strftime('%Y-%m-%d')
-                        start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-                        app.logger.info(f"Webhook: No date range in metadata, using default: {start_date} to {end_date}")
-                    
-                    # Determine if this is the initial connection or a subsequent sync
-                    # Check when the connection was created - if within last 10 minutes, skip auto-import
-                    # This prevents auto-importing during initial bank connection setup
-                    skip_auto_import = False
-                    if connection_id:
-                        cursor.execute("""
-                            SELECT created_at FROM quiltt_connections 
-                            WHERE user_id = %s AND connection_id = %s
-                        """, (user_id, connection_id))
-                        conn_row = cursor.fetchone()
-                        if conn_row and conn_row.get('created_at'):
-                            from datetime import datetime, timedelta
-                            created_at = conn_row['created_at']
-                            minutes_since_creation = (datetime.now() - created_at).total_seconds() / 60
-                            if minutes_since_creation < 10:
-                                skip_auto_import = True
-                                app.logger.info(f"Webhook: Connection {connection_id} created {minutes_since_creation:.1f} mins ago - skipping auto-import")
-                            else:
-                                app.logger.info(f"Webhook: Connection {connection_id} created {minutes_since_creation:.1f} mins ago - enabling auto-import")
-                    
-                    success, count, message = _sync_quiltt_transactions_for_user(user_id, start_date, end_date, skip_auto_import=skip_auto_import)
-                    
-                    if success:
-                        app.logger.info(f"Webhook transaction sync: {message}")
-                    else:
-                        app.logger.error(f"Transaction sync failed: {message}")
-                
-                # ===== CONNECTION ERROR EVENTS =====
-                elif event_type and event_type.startswith('connection.synced.errored'):
-                    error_type = event_type.split('.')[-1]  # repairable, institution, provider, service
-                    
-                    app.logger.info(f"[WEBHOOK ERROR] Received {event_type} for connection {connection_id}, profile {profile_id}")
-                    app.logger.info(f"[WEBHOOK ERROR] Error type: {error_type}, Full payload: {event}")
-                    
-                    # Map error types to statuses
-                    status_map = {
-                        'repairable': 'ERROR_REPAIRABLE',
-                        'institution': 'ERROR_INSTITUTION',
-                        'provider': 'ERROR_PROVIDER',
-                        'service': 'ERROR_SERVICE'
-                    }
-                    
-                    new_status = status_map.get(error_type, 'ERROR')
-                    app.logger.info(f"[WEBHOOK ERROR] Mapped to status: {new_status}")
-                    
-                    if connection_id:
-                        # Check if this connection is being deleted - if so, skip update
-                        delete_key = f"quiltt_connections_to_delete:{user_id}"
-                        is_pending_delete = _redis_client.sismember(delete_key, connection_id) if _redis_client else False
-                        
-                        if is_pending_delete:
-                            app.logger.info(f"[WEBHOOK ERROR] Skipping update for {connection_id} - pending delete")
-                        else:
-                            # Get institution name for notification
-                            cursor.execute("""
-                                SELECT institution_name FROM quiltt_connections 
-                                WHERE user_id = %s AND connection_id = %s
-                            """, (user_id, connection_id))
-                            conn_row = cursor.fetchone()
-                            institution_name = conn_row['institution_name'] if conn_row else 'your bank'
-                            
-                            app.logger.info(f"[WEBHOOK ERROR] Updating connection {connection_id} ({institution_name}) to {new_status} for user {user_id}")
-                            
-                            cursor.execute("""
-                                UPDATE quiltt_connections 
-                                SET status = %s, last_synced_at = NOW()
-                                WHERE user_id = %s AND connection_id = %s
-                            """, (new_status, user_id, connection_id))
-                            
-                            # Update Redis
-                            from quiltt_redis import upsert_quiltt_connection
-                            upsert_quiltt_connection({
-                                'connection_id': connection_id,
-                                'status': new_status
-                            }, user_id)
-                            app.logger.info(f"[WEBHOOK ERROR] Updated Redis connection status to {new_status}")
-                            
-                            # Create or update notification for repairable errors
-                            if error_type == 'repairable':
-                                # Check if there's an existing unread notification for this connection
-                                cursor.execute("""
-                                    SELECT id FROM notifications
-                                    WHERE user_id = %s 
-                                    AND message LIKE %s
-                                    AND is_read = 0
-                                """, (user_id, f'%reconnect={connection_id}%'))
-                                existing = cursor.fetchone()
-                                
-                                if existing:
-                                    # Update existing notification's date
-                                    cursor.execute("""
-                                        UPDATE notifications SET date = NOW()
-                                        WHERE id = %s
-                                    """, (existing['id'],))
-                                    app.logger.info(f"[WEBHOOK ERROR] Updated existing notification #{existing['id']} for user {user_id}")
-                                else:
-                                    # Create new notification
-                                    notification_message = f'Your {institution_name} connection needs to be reconnected. <a href="/profile?reconnect={connection_id}" class="notification-link">Click here to reconnect</a>.'
-                                    add_notification(user_id, notification_message)
-                                    app.logger.info(f"[WEBHOOK ERROR] Created reconnection notification for user {user_id}: {institution_name} (connection: {connection_id})")
-                    else:
-                        app.logger.warning(f"[WEBHOOK ERROR] No connection_id in error event: {event}")
-                        
-                    
-                    conn.commit()
-                    app.logger.info(f"[WEBHOOK ERROR] Processing complete for {event_type}")
-                
-                # ===== CONNECTION DISCONNECTED EVENT =====
-                elif event_type == 'connection.disconnected':
-                    pass
-                    
-                    if connection_id:
-                        # Check if this connection is being deleted - if so, don't update Redis
-                        delete_key = f"quiltt_connections_to_delete:{user_id}"
-                        is_pending_delete = _redis_client.sismember(delete_key, connection_id) if _redis_client else False
-                        
-                        if is_pending_delete:
-                            app.logger.info(f"Skipping webhook update for {connection_id} - pending delete")
-                        else:
-                            cursor.execute("""
-                                UPDATE quiltt_connections 
-                                SET status = 'DISCONNECTED', last_synced_at = NOW()
-                                WHERE user_id = %s AND connection_id = %s
-                            """, (user_id, connection_id))
-                            
-                            # Update Redis
-                            from quiltt_redis import upsert_quiltt_connection
-                            upsert_quiltt_connection({
-                                'connection_id': connection_id,
-                                'status': 'DISCONNECTED'
-                            }, user_id)
-                        
-                    
-                    conn.commit()
-                
-                # ===== BALANCE CREATED EVENT =====
-                elif event_type == 'balance.created':
-                    balance = record_obj
-                    account_id = balance.get('account', {}).get('id') if isinstance(balance.get('account'), dict) else None
-                    
-                    
-                    if account_id:
-                        # Update account balance in Redis
-                        from quiltt_redis import get_quiltt_accounts, upsert_quiltt_account
-                        
-                        current_balance = balance.get('current')
-                        available_balance = balance.get('available')
-                        
-                        if current_balance is not None:
-                            upsert_quiltt_account({
-                                'account_id': account_id,
-                                'current_balance': current_balance,
-                                'available_balance': available_balance
-                            }, user_id)
-                            
-                
-                # ===== PROFILE READY EVENT =====
-                elif event_type == 'profile.ready':
-                    pass
-                    
-                    # Check if there's a connection_id in metadata
-                    conn_id_in_metadata = metadata_obj.get('connectionId')
-                    start_date = metadata_obj.get('startDate')
-                    end_date = metadata_obj.get('endDate')
-                    
-                    if conn_id_in_metadata and start_date and end_date:
-                        # Check if connection was recently created (within 10 mins) to skip auto-import
-                        skip_auto_import = False
-                        cursor.execute("""
-                            SELECT created_at FROM quiltt_connections 
-                            WHERE user_id = %s AND connection_id = %s
-                        """, (user_id, conn_id_in_metadata))
-                        conn_row = cursor.fetchone()
-                        if conn_row and conn_row.get('created_at'):
-                            from datetime import datetime, timedelta
-                            created_at = conn_row['created_at']
-                            minutes_since_creation = (datetime.now() - created_at).total_seconds() / 60
-                            if minutes_since_creation < 10:
-                                skip_auto_import = True
-                        
-                        success, count, message = _sync_quiltt_transactions_for_user(user_id, start_date, end_date, skip_auto_import=skip_auto_import)
-                        if success:
-                            pass
-                
-                # ===== ACCOUNT EVENTS =====
-                elif event_type in ['account.created', 'account.verified', 'account.reconnected']:
-                    account = record_obj
-                    account_id = account.get('id')
-                    
-                    
-                    # For account.reconnected, metadata contains old/new connection info
-                    if event_type == 'account.reconnected':
-                        from_conn = metadata_obj.get('from', {})
-                        to_conn = metadata_obj.get('to', {})
-                
-                else:
-                    pass
-            
-            cursor.close()
-        
-        # Return 204 No Content as per webhook best practices
-        return '', 204
-        
-    except Exception as e:
-        app.logger.error(f"Error processing Quiltt webhook: {e}", exc_info=True)
-        # Return 204 even on error to prevent retries for malformed data
-        return '', 204
+
 
 ############################################################################################
 ############################### FEEDBACK (FIDER) ###########################################
