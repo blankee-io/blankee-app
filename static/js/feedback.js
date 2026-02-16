@@ -242,7 +242,7 @@
         loadPosts({ container: listEl, view: 'trending', tag: pageTag, limit: 6, includeContext: true });
 
         fab.addEventListener('click', () => {
-            modal.style.display = 'block';
+            modal.style.display = 'flex';
         });
         closeBtn?.addEventListener('click', () => modal.style.display = 'none');
         window.addEventListener('click', (e) => {
