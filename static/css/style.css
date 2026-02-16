@@ -545,8 +545,11 @@ body {
 }
 
 .sidenav-profile:hover {
-    transform: scale(1.05);
     background-color: rgb(255 255 255 / 15%);
+}
+
+.sidenav-profile:hover .sidenav-profile-pic {
+    transform: scale(1.05);
 }
 
 .sidenav-profile-pic {
@@ -713,7 +716,7 @@ body {
 .dropdown-content {
     position: absolute;
     top: 58px;
-    right: -10px;
+    right: 0px;
     z-index: 10;
     display: none;
     display: flex;
@@ -3663,7 +3666,6 @@ tr[data-category-id] td.before-member-since {
     /* Single line with ellipsis above 600px */
     overflow: hidden;
     max-width: 150px;
-    height: 20px;
     line-height: 20px;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -7505,7 +7507,7 @@ td:has(.bucket-progress-container) {
 
     justify-content: center;
     align-items: center;
-    min-width: 350px;
+    min-width: 300px;
     max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
@@ -7541,6 +7543,42 @@ td:has(.bucket-progress-container) {
     color: #E45F1C;
 }
 
+/* Cadence Legend */
+.cadence-legend {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    width: 100%;
+    padding: 6px 0;
+    font-size: 14px;
+    color: #888;
+}
+
+.cadence-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.cadence-legend-item i {
+    font-size: 15px;
+    color: #aaa;
+}
+
+/* Mobile-only merge labels (Type into Category, End Date into Start Date) */
+.mobile-type-label,
+.mobile-end-date {
+    display: none;
+}
+
+/* Cadence two-line stacking on mobile */
+.cadence-detail {
+    display: block;
+    font-size: 0.85em;
+    color: #666;
+    margin-top: 1px;
+}
+
 .income-recurring-table {
     /* Subtract 20px from each side */
     width: 100%; 
@@ -7555,9 +7593,8 @@ td:has(.bucket-progress-container) {
 }
 
 .income-recurring-table th, .income-recurring-table td {
-    height: 20px;
-    padding-right: 10px;
-    padding-left: 10px;
+    height: 35px;
+    padding: 4px 12px;
     box-sizing: border-box;
 }
 
@@ -7608,12 +7645,12 @@ td:has(.bucket-progress-container) {
 
 .income-recurring-table th.income-amount-col,
 .income-recurring-table td.income-amount-col {
-    width: 10%;
+    width: 14%;
 }
 
 .income-recurring-table th.income-cadence-col,
 .income-recurring-table td.income-cadence-col {
-    width: 22%;
+    width: 12%;
 }
 
 /* Setup profile recommended categories - different widths */
@@ -7629,22 +7666,22 @@ td:has(.bucket-progress-container) {
 
 .recommended-categories-table.income-recurring-table th.income-amount-col,
 .recommended-categories-table.income-recurring-table td.income-amount-col {
-    width: 10%;
+    width: 15%;
 }
 
 .recommended-categories-table.income-recurring-table th.income-cadence-col,
 .recommended-categories-table.income-recurring-table td.income-cadence-col {
-    width: 30%;
+    width: 20%;
 }
 
 .income-recurring-table th.income-start-date-col,
 .income-recurring-table td.income-start-date-col {
-    width: 12%;
+    width: 10%;
 }
 
 .income-recurring-table th.income-end-date-col,
 .income-recurring-table td.income-end-date-col {
-    width: 12%;
+    width: 10%;
 }
 
 .income-recurring-table th.income-bucket-col,
@@ -7654,7 +7691,7 @@ td:has(.bucket-progress-container) {
 
 .income-recurring-table th.income-action-col,
 .income-recurring-table td.income-action-col {
-    width: 8%;
+    width: 18%;
 }
 
 .recommended-categories-table.income-recurring-table th.income-action-col,
@@ -7800,28 +7837,103 @@ td:has(.bucket-progress-container) {
 
     .income-recurring-table th.income-amount-col,
     .income-recurring-table td.income-amount-col {
-        width: 5%;
+        width: 9%;
     }
 
     .income-recurring-table th.income-cadence-col,
     .income-recurring-table td.income-cadence-col {
-        width: 25%;
+        width: 15%;
     }
 
     .income-recurring-table th.income-start-date-col,
     .income-recurring-table td.income-start-date-col {
-        width: 15%;
+        width: 13%;
     }
 
     .income-recurring-table th.income-end-date-col,
     .income-recurring-table td.income-end-date-col {
-        width: 15%;
+        width: 13%;
     }
 
     .income-recurring-table th.income-action-col,
     .income-recurring-table td.income-action-col {
-        width: 20%;
+        width: 30%;
     }
+}
+
+@media (max-width: 600px) {
+    .recurring-income-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .income-recurring-table {
+        min-width: 380px;
+    }
+
+    .income-recurring-table th,
+    .income-recurring-table td {
+        padding: 4px 5px;
+    }
+
+    /* Hide Type and End Date columns (merged into Category and Start Date) */
+    .income-recurring-table th.income-type-col,
+    .income-recurring-table td.income-type,
+    .income-recurring-table th.income-end-date-col,
+    .income-recurring-table td.income-end-date {
+        display: none;
+    }
+
+    /* Show mobile merge labels */
+    .income-recurring-table .mobile-type-label,
+    .income-recurring-table .mobile-end-date {
+        display: block;
+        font-size: 0.8em;
+        color: #888;
+        margin-top: 1px;
+    }
+
+    /* Allow wrapping for merged cells */
+    .income-recurring-table td.income-category,
+    .income-recurring-table td.income-start-date,
+    .income-recurring-table td.income-cadence {
+        white-space: normal;
+    }
+
+    /* Abbreviate headers: "Current Status" → "Status", "Start Date" → "Dates" */
+    .income-recurring-table th.income-bucket-col {
+        font-size: 0;
+    }
+    .income-recurring-table th.income-bucket-col::after {
+        content: "Status";
+        font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    }
+    .income-recurring-table th.income-start-date-col {
+        font-size: 0;
+    }
+    .income-recurring-table th.income-start-date-col::after {
+        content: "Dates";
+        font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    }
+
+    /* Column widths for 6 visible columns */
+    .income-recurring-table th.income-category-col,
+    .income-recurring-table td.income-category { width: 22%; }
+
+    .income-recurring-table th.income-amount-col,
+    .income-recurring-table td.income-amount { width: 18%; }
+
+    .income-recurring-table th.income-cadence-col,
+    .income-recurring-table td.income-cadence { width: 17%; }
+
+    .income-recurring-table th.income-bucket-col,
+    .income-recurring-table td.income-bucket { width: 18%; }
+
+    .income-recurring-table th.income-start-date-col,
+    .income-recurring-table td.income-start-date { width: 18%; }
+
+    .income-recurring-table th.income-action-col,
+    .income-recurring-table td.income-actions { width: 7%; }
 }
 
 /* General Reset */
@@ -7924,7 +8036,6 @@ td:has(.bucket-progress-container) {
 .expense-form-container label,
 .convert-recurring-form-container label {
     display: block;
-    margin-bottom: 8px;
     color: #555;
     font-size: 14px;
     font-weight: bold;
@@ -8640,7 +8751,7 @@ form button[type="submit"] {
 
     justify-content: center;
     align-items: center;
-    min-width: 350px;
+    min-width: 300px;
     max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
@@ -8659,9 +8770,8 @@ form button[type="submit"] {
 }
 
 .expense-recurring-table th, .expense-recurring-table td {
-    height: 20px;
-    padding-right: 10px;
-    padding-left: 10px;
+    height: 35px;
+    padding: 4px 12px;
     box-sizing: border-box;
 }
 
@@ -8723,12 +8833,12 @@ form button[type="submit"] {
 
 .expense-recurring-table th.expense-amount-col,
 .expense-recurring-table td.expense-amount-col {
-    width: 10%;
+    width: 14%;
 }
 
 .expense-recurring-table th.expense-cadence-col,
 .expense-recurring-table td.expense-cadence-col {
-    width: 22%;
+    width: 12%;
 }
 
 /* Setup profile recommended categories - different widths */
@@ -8744,12 +8854,12 @@ form button[type="submit"] {
 
 .recommended-categories-table.expense-recurring-table th.expense-amount-col,
 .recommended-categories-table.expense-recurring-table td.expense-amount-col {
-    width: 10%;
+    width: 15%;
 }
 
 .recommended-categories-table.expense-recurring-table th.expense-cadence-col,
 .recommended-categories-table.expense-recurring-table td.expense-cadence-col {
-    width: 30%;
+    width: 20%;
 }
 
 .expense-recurring-table th.expense-bucket-col,
@@ -8759,17 +8869,17 @@ form button[type="submit"] {
 
 .expense-recurring-table th.expense-start-date-col,
 .expense-recurring-table td.expense-start-date-col {
-    width: 12%;
+    width: 10%;
 }
 
 .expense-recurring-table th.expense-end-date-col,
 .expense-recurring-table td.expense-end-date-col {
-    width: 12%;
+    width: 10%;
 }
 
 .expense-recurring-table th.expense-action-col,
 .expense-recurring-table td.expense-action-col {
-    width: 8%;
+    width: 18%;
 }
 
 .recommended-categories-table.expense-recurring-table th.expense-action-col,
@@ -8882,28 +8992,103 @@ form button[type="submit"] {
 
     .expense-recurring-table th.expense-amount-col,
     .expense-recurring-table td.expense-amount-col {
-        width: 5%;
+        width: 9%;
     }
 
     .expense-recurring-table th.expense-cadence-col,
     .expense-recurring-table td.expense-cadence-col {
-        width: 25%;
+        width: 15%;
     }
 
     .expense-recurring-table th.expense-start-date-col,
     .expense-recurring-table td.expense-start-date-col {
-        width: 15%;
+        width: 13%;
     }
 
     .expense-recurring-table th.expense-end-date-col,
     .expense-recurring-table td.expense-end-date-col {
-        width: 15%;
+        width: 13%;
     }
 
     .expense-recurring-table th.expense-action-col,
     .expense-recurring-table td.expense-action-col {
-        width: 20%;
+        width: 30%;
     }
+}
+
+@media (max-width: 600px) {
+    .recurring-expense-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .expense-recurring-table {
+        min-width: 380px;
+    }
+
+    .expense-recurring-table th,
+    .expense-recurring-table td {
+        padding: 4px 5px;
+    }
+
+    /* Hide Type and End Date columns (merged into Category and Start Date) */
+    .expense-recurring-table th.expense-type-col,
+    .expense-recurring-table td.expense-type,
+    .expense-recurring-table th.expense-end-date-col,
+    .expense-recurring-table td.expense-end-date {
+        display: none;
+    }
+
+    /* Show mobile merge labels */
+    .expense-recurring-table .mobile-type-label,
+    .expense-recurring-table .mobile-end-date {
+        display: block;
+        font-size: 0.8em;
+        color: #888;
+        margin-top: 1px;
+    }
+
+    /* Allow wrapping for merged cells */
+    .expense-recurring-table td.expense-category,
+    .expense-recurring-table td.expense-start-date,
+    .expense-recurring-table td.expense-cadence {
+        white-space: normal;
+    }
+
+    /* Abbreviate headers: "Current Status" → "Status", "Start Date" → "Dates" */
+    .expense-recurring-table th.expense-bucket-col {
+        font-size: 0;
+    }
+    .expense-recurring-table th.expense-bucket-col::after {
+        content: "Status";
+        font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    }
+    .expense-recurring-table th.expense-start-date-col {
+        font-size: 0;
+    }
+    .expense-recurring-table th.expense-start-date-col::after {
+        content: "Dates";
+        font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    }
+
+    /* Column widths for 6 visible columns */
+    .expense-recurring-table th.expense-category-col,
+    .expense-recurring-table td.expense-category { width: 22%; }
+
+    .expense-recurring-table th.expense-amount-col,
+    .expense-recurring-table td.expense-amount { width: 18%; }
+
+    .expense-recurring-table th.expense-cadence-col,
+    .expense-recurring-table td.expense-cadence { width: 17%; }
+
+    .expense-recurring-table th.expense-bucket-col,
+    .expense-recurring-table td.expense-bucket { width: 18%; }
+
+    .expense-recurring-table th.expense-start-date-col,
+    .expense-recurring-table td.expense-start-date { width: 18%; }
+
+    .expense-recurring-table th.expense-action-col,
+    .expense-recurring-table td.expense-actions { width: 7%; }
 }
 
 @media (width <= 507px) {
@@ -8913,7 +9098,7 @@ form button[type="submit"] {
 
     .expense-recurring-table td,
     .income-recurring-table td  {
-        height: 90px;
+        height: 55px;
     }
     
     .recommended-categories-table tfoot td,
@@ -9073,7 +9258,7 @@ form button[type="submit"] {
 
     justify-content: center;
     align-items: center;
-    min-width: 350px;
+    min-width: 300px;
     max-width: 875px;
     margin: 0 auto;
     background-color: transparent;
@@ -9093,9 +9278,8 @@ form button[type="submit"] {
 }
 
 .ca-recurring-table th, .ca-recurring-table td {
-    height: 20px;
-    padding-right: 10px;
-    padding-left: 10px;
+    height: 35px;
+    padding: 4px 12px;
     box-sizing: border-box;
 }
 
@@ -9186,6 +9370,10 @@ form button[type="submit"] {
     background-color: #EF9F77;
 }
 
+.ca-recurring-table tfoot tr {
+    background-color: #A9A9A9;
+}
+
 /* Set column widths */
 .ca-recurring-table th.ca-category-col,
 .ca-recurring-table td.ca-category-col {
@@ -9194,12 +9382,12 @@ form button[type="submit"] {
 
 .ca-recurring-table th.ca-amount-col,
 .ca-recurring-table td.ca-amount-col {
-    width: 10%;
+    width: 14%;
 }
 
 .ca-recurring-table th.ca-cadence-col,
 .ca-recurring-table td.ca-cadence-col {
-    width: 22%;
+    width: 12%;
 }
 
 .ca-recurring-table th.ca-bucket-col,
@@ -9209,17 +9397,17 @@ form button[type="submit"] {
 
 .ca-recurring-table th.ca-start-date-col,
 .ca-recurring-table td.ca-start-date-col {
-    width: 12%;
+    width: 10%;
 }
 
 .ca-recurring-table th.ca-end-date-col,
 .ca-recurring-table td.ca-end-date-col {
-    width: 12%;
+    width: 10%;
 }
 
 .ca-recurring-table th.ca-action-col,
 .ca-recurring-table td.ca-action-col {
-    width: 8%;
+    width: 18%;
 }
 
 .ca-action-col {
@@ -9329,28 +9517,103 @@ form button[type="submit"] {
 
     .ca-recurring-table th.ca-amount-col,
     .ca-recurring-table td.ca-amount-col {
-        width: 5%;
+        width: 9%;
     }
 
     .ca-recurring-table th.ca-cadence-col,
     .ca-recurring-table td.ca-cadence-col {
-        width: 25%;
+        width: 15%;
     }
 
     .ca-recurring-table th.ca-start-date-col,
     .ca-recurring-table td.ca-start-date-col {
-        width: 15%;
+        width: 13%;
     }
 
     .ca-recurring-table th.ca-end-date-col,
     .ca-recurring-table td.ca-end-date-col {
-        width: 15%;
+        width: 13%;
     }
 
     .ca-recurring-table th.ca-action-col,
     .ca-recurring-table td.ca-action-col {
-        width: 20%;
+        width: 30%;
     }
+}
+
+@media (max-width: 600px) {
+    .recurring-ca-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .ca-recurring-table {
+        min-width: 380px;
+    }
+
+    .ca-recurring-table th,
+    .ca-recurring-table td {
+        padding: 4px 5px;
+    }
+
+    /* Hide Type and End Date columns (merged into Category and Start Date) */
+    .ca-recurring-table th.ca-type-col,
+    .ca-recurring-table td.ca-type,
+    .ca-recurring-table th.ca-end-date-col,
+    .ca-recurring-table td.ca-end-date {
+        display: none;
+    }
+
+    /* Show mobile merge labels */
+    .ca-recurring-table .mobile-type-label,
+    .ca-recurring-table .mobile-end-date {
+        display: block;
+        font-size: 0.8em;
+        color: #888;
+        margin-top: 1px;
+    }
+
+    /* Allow wrapping for merged cells */
+    .ca-recurring-table td.ca-category,
+    .ca-recurring-table td.ca-start-date,
+    .ca-recurring-table td.ca-cadence {
+        white-space: normal;
+    }
+
+    /* Abbreviate headers: "Current Status" → "Status", "Start Date" → "Dates" */
+    .ca-recurring-table th.ca-bucket-col {
+        font-size: 0;
+    }
+    .ca-recurring-table th.ca-bucket-col::after {
+        content: "Status";
+        font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    }
+    .ca-recurring-table th.ca-start-date-col {
+        font-size: 0;
+    }
+    .ca-recurring-table th.ca-start-date-col::after {
+        content: "Dates";
+        font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    }
+
+    /* Column widths for 6 visible columns */
+    .ca-recurring-table th.ca-category-col,
+    .ca-recurring-table td.ca-category { width: 22%; }
+
+    .ca-recurring-table th.ca-amount-col,
+    .ca-recurring-table td.ca-amount { width: 18%; }
+
+    .ca-recurring-table th.ca-cadence-col,
+    .ca-recurring-table td.ca-cadence { width: 17%; }
+
+    .ca-recurring-table th.ca-bucket-col,
+    .ca-recurring-table td.ca-bucket { width: 18%; }
+
+    .ca-recurring-table th.ca-start-date-col,
+    .ca-recurring-table td.ca-start-date { width: 18%; }
+
+    .ca-recurring-table th.ca-action-col,
+    .ca-recurring-table td.ca-actions { width: 7%; }
 }
 
 @media (width <= 507px) {
@@ -9360,7 +9623,7 @@ form button[type="submit"] {
 
     .ca-recurring-table td,
     .income-recurring-table td  {
-        height: 90px;
+        height: 55px;
     }
     
     .recommended-categories-table tfoot td,
@@ -10086,7 +10349,7 @@ form button[type="submit"] {
     display: flex;
     justify-content: space-between;
     width: 100%;
-    height: 20px;
+    height: 35px;
     background-color: #676767;
     border-top-left-radius: 10px;
     border-top-right-radius: 10px; 
@@ -10109,9 +10372,8 @@ form button[type="submit"] {
 }
 
 .credit-accounts-table th, .credit-accounts-table td {
-    height: 20px;
-    padding-right: 10px;
-    padding-left: 10px;
+    height: 35px;
+    padding: 4px 12px;
     box-sizing: border-box;
 }
 
@@ -12724,7 +12986,7 @@ html.modal-open {
 
 .manage-cat-table th,
 .manage-cat-table td {
-    height: 36px;
+    height: 35px;
     padding: 4px 12px;
     box-sizing: border-box;
 }
@@ -12807,6 +13069,7 @@ html.modal-open {
 .manage-cat-table .sort-handle {
     cursor: move;
     margin-right: 8px;
+    margin-left: 12px;
     color: inherit;
     display: inline-block;
 }
@@ -12839,8 +13102,9 @@ html.modal-open {
     min-width: 0;
     max-width: none;
     overflow: hidden;
-    padding-right: 4px;
-    height: auto;
+    padding: 0;
+    height: 35px;
+    width: 100%;
 }
 
 .manage-cat-table .category-name {
@@ -12849,6 +13113,13 @@ html.modal-open {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+}
+
+.manage-cat-table .category-cell .category-name:first-child {
+    padding-left: 12px;
 }
 
 /* Hidden categories styling */

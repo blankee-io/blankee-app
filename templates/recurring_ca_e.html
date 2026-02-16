@@ -39,6 +39,13 @@
             <div class="recurring-header ca">
                 <span><i class="fa-solid fa-arrows-repeat"></i> Credit Expenses</span>
             </div>
+            <!-- Cadence Legend -->
+            <div class="cadence-legend">
+                <span class="cadence-legend-item"><i class="fa-solid fa-calendar-day"></i> Day</span>
+                <span class="cadence-legend-item"><i class="fa-solid fa-calendar-week"></i> Week</span>
+                <span class="cadence-legend-item"><i class="fa-solid fa-calendar-days"></i> Month</span>
+                <span class="cadence-legend-item"><i class="fa-solid fa-calendars"></i> Year</span>
+            </div>
             {% if credit_accounts and credit_accounts|length > 0 %}
                 {% for account in credit_accounts %}
                 <table class="ca-recurring-table" data-account-id="{{ account.id }}">
@@ -53,7 +60,7 @@
                             <th class="ca-category-col">Category</th>
                             <th class="ca-type-col">Type</th>
                             <th class="ca-amount-col">Amount</th>
-                            <th class="ca-cadence-col">Cadence</th>
+                            <th class="ca-cadence-col">Every...</th>
                             <th class="ca-bucket-col">Current Status</th>
                             <th class="ca-start-date-col">Start Date</th>
                             <th class="ca-end-date-col">End Date</th>
@@ -63,11 +70,11 @@
                     </thead>
                     <tbody>
                         {% for record in recurring_ca_expense_records if record.account_id == account.id %}
-                        <tr data-recurring-id="{{ record.id }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{{ record.no_end_date }}" data-wage-bill="{{ record.wage_bill }}">
-                            <td class="editable ca-category" data-column="category_name">{{ record.category_name }}</td>
+                        <tr data-recurring-id="{{ record.id }}" data-cadence-interval="{{ record.cadence_interval }}" data-cadence-unit="{{ record.cadence_unit }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}1{% else %}0{% endif %}" data-wage-bill="{{ record.wage_bill }}">
+                            <td class="editable ca-category" data-column="category_name">{{ record.category_name }}<span class="mobile-type-label">{{ 'Bill' if record.wage_bill == 1 else 'Allowance' }}</span></td>
                             <td class="ca-type" data-column="type">{{ 'Bill' if record.wage_bill == 1 else 'Allowance' }}</td>
                             <td class="editable ca-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
-                            <td class="editable ca-cadence" data-column="cadence">{{ record.cadence_description }}</td>
+                            <td class="editable ca-cadence" data-column="cadence" title="{{ record.cadence_description }}"><span class="cadence-top">{{ record.cadence_interval }} {% if record.cadence_unit == 'years' %}<i class="fa-solid fa-calendars"></i>{% elif record.cadence_unit == 'months' %}<i class="fa-solid fa-calendar-days"></i>{% elif record.cadence_unit == 'weeks' %}<i class="fa-solid fa-calendar-week"></i>{% else %}<i class="fa-solid fa-calendar-day"></i>{% endif %}</span>{% if record.cadence_unit == 'years' and record.yearly_month and record.yearly_day %}<span class="cadence-detail">{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][record.yearly_month | int] }} {{ record.yearly_day }}</span>{% elif record.cadence_unit == 'months' and record.monthly_days %}<span class="cadence-detail">{{ record.monthly_days }}</span>{% elif record.cadence_unit == 'weeks' and record.weekdays %}<span class="cadence-detail">{{ record.weekdays | replace('monday','Mo') | replace('tuesday','Tu') | replace('wednesday','We') | replace('thursday','Th') | replace('friday','Fr') | replace('saturday','Sa') | replace('sunday','Su') }}</span>{% endif %}</td>
                             <td class="ca-bucket" data-column="bucket">
                                 {% if record.wage_bill == 1 %}
                                     {% if record.bucket_original is not none %}
@@ -96,12 +103,12 @@
                                     {% endif %}
                                 {% endif %}
                             </td>
-                            <td class="editable ca-start-date" data-column="start_date">{{ record.start_date }}</td>
+                            <td class="editable ca-start-date" data-column="start_date">{{ record.start_date[2:] }}<span class="mobile-end-date">→ {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}No End{% else %}{{ record.end_date[2:] }}{% endif %}</span></td>
                             <td class="editable ca-end-date" data-column="end_date">
                                 {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}
-                                    No end date
+                                    No End
                                 {% else %}
-                                    {{ record.end_date }}
+                                    {{ record.end_date[2:] }}
                                 {% endif %}
                             </td>
                             <td class="ca-actions">
@@ -115,7 +122,7 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="7" class="recurring-footer"></td>
+                            <td colspan="8" class="recurring-footer"></td>
                         </tr>
                     </tfoot> 
                 </table>
@@ -1254,11 +1261,10 @@
             // Fetch the data from the corresponding row
             const row = $(`tr[data-recurring-id="${recurringId}"]`);
 
-            const categoryName = row.find('.ca-category').text().trim();
+            const categoryName = row.find('.ca-category').clone().children().remove().end().text().trim();
             const amountText = row.find('.ca-amount').text().trim();
             const amountValue = amountText.replace(/[^0-9.\-]/g, '');
-            const cadence = row.find('.ca-cadence').text().trim();
-            const startDate = row.find('.ca-start-date').text().trim();
+            const startDate = row.find('.ca-start-date').clone().children().remove().end().text().trim();
             const endDate = row.attr('data-end-date').trim();
             const weekdays = row.attr('data-weekdays') ? row.attr('data-weekdays').split(',') : [];
             const monthlyDays = row.attr('data-monthly-days') ? row.attr('data-monthly-days').split(',') : [];
@@ -1268,9 +1274,9 @@
             $('#edit-category-name').val(categoryName);
             $('#edit-amount').val(amountValue);
 
-            // Parse and populate cadence interval and unit
-            const cadenceInterval = parseCadenceInterval(cadence);
-            const cadenceUnit = parseCadenceUnit(cadence);
+            // Read cadence from data attributes
+            const cadenceInterval = row.attr('data-cadence-interval');
+            const cadenceUnit = row.attr('data-cadence-unit');
 
             $('#edit-cadence-interval').val(cadenceInterval);
             $('#edit-cadence-unit').val(cadenceUnit);
