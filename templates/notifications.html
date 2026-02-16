@@ -156,7 +156,7 @@
                     }
                 },
                 error: function() {
-                    alert('Failed to update notification status.');
+                    showToast('Failed to update notification status.', 'error');
                 }
             });
         }
@@ -194,7 +194,7 @@
                     }
                 },
                 error: function() {
-                    alert('Failed to mark all notifications as read.');
+                    showToast('Failed to mark all notifications as read.', 'error');
                 }
             });
         }
@@ -304,7 +304,7 @@
                     }
                 },
                 error: function() {
-                    alert('Failed to clear read notifications.');
+                    showToast('Failed to clear read notifications.', 'error');
                 }
             });
         });

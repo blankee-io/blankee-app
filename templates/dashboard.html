@@ -5754,11 +5754,11 @@
                                 // --- Add this line to update icons immediately ---
                                 updateHiddenIcons();
                             } else {
-                                alert('Failed to update hidden state.');
+                                showToast('Failed to update hidden state.', 'error');
                             }
                         },
                         error: function() {
-                            alert('An error occurred while updating the hidden state.');
+                            showToast('An error occurred while updating the hidden state.', 'error');
                         }
                     });
                 }
@@ -5926,7 +5926,7 @@
             const noEndDateChecked = $form.find('#convert-no-end-date-checkbox').is(':checked');
 
             if (!noEndDateChecked && new Date(endDate) < new Date(startDate)) {
-                alert("End date cannot be earlier than the start date.");
+                showToast("End date cannot be earlier than the start date.", 'warning');
                 return false;
             }
             if (!validateDateRange(startDate, endDate, noEndDateChecked)) {
@@ -5959,7 +5959,7 @@
                 const yearlyDay = $form.find('#convert-yearly-day').val();
                 const yearlyMonth = $form.find('#convert-yearly-month').val();
                 if (!yearlyDay || !yearlyMonth) {
-                    alert("Please select both a day and a month for yearly recurrence.");
+                    showToast("Please select both a day and a month for yearly recurrence.", 'warning');
                     return false;
                 }
                 formData.yearly_day = yearlyDay;
@@ -6014,12 +6014,12 @@
                         location.reload();
                     } else {
                         document.getElementById('loading-screen').style.display = 'none';
-                        alert('Failed to convert: ' + response.message);
+                        showToast('Failed to convert: ' + response.message, 'error');
                     }
                 },
                 error: function(xhr) {
                     document.getElementById('loading-screen').style.display = 'none';
-                    alert('An error occurred: ' + xhr.responseText);
+                    showToast('An error occurred: ' + xhr.responseText, 'error');
                 }
             });
         });
@@ -6076,7 +6076,7 @@
                         success: function(lookupResponse) {
                             if (lookupResponse.status !== 'success' || !lookupResponse.recurring_id) {
                                 document.getElementById('loading-screen').style.display = 'none';
-                                alert('Could not find recurring record. Please use the recurring page.');
+                                showToast('Could not find recurring record. Please use the recurring page.', 'warning');
                                 return;
                             }
                             $.ajax({
@@ -6094,18 +6094,18 @@
                                         location.reload();
                                     } else {
                                         document.getElementById('loading-screen').style.display = 'none';
-                                        alert('Failed to stop recurring: ' + response.message);
+                                        showToast('Failed to stop recurring: ' + response.message, 'error');
                                     }
                                 },
                                 error: function(xhr) {
                                     document.getElementById('loading-screen').style.display = 'none';
-                                    alert('An error occurred: ' + xhr.responseText);
+                                    showToast('An error occurred: ' + xhr.responseText, 'error');
                                 }
                             });
                         },
                         error: function(xhr) {
                             document.getElementById('loading-screen').style.display = 'none';
-                            alert('Could not look up recurring record: ' + xhr.responseText);
+                            showToast('Could not look up recurring record: ' + xhr.responseText, 'error');
                         }
                     });
                 };

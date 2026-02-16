@@ -403,13 +403,13 @@
                                 location.reload();
                             }, 500);
                         } else {
-                            alert(data.message || 'Error updating credit account.');
+                            showToast(data.message || 'Error updating credit account.', 'error');
                         }
                     },
                     error: function() {
                         $('#loading-screen').hide();
                         $('#edit-credit-account-modal').hide();
-                        alert('Error updating credit account.');
+                        showToast('Error updating credit account.', 'error');
                     }
                 });
             });
@@ -480,13 +480,13 @@
                         if (data.status === 'success') {
                             location.reload();
                         } else {
-                            alert(data.message || 'Error adding credit account.');
+                            showToast(data.message || 'Error adding credit account.', 'error');
                         }
                     },
                     error: function() {
                         $('#loading-screen').hide();
                         $('#add-credit-account-modal').hide();
-                        alert('Error adding credit account.');
+                        showToast('Error adding credit account.', 'error');
                     }
                 });
             });
@@ -536,13 +536,13 @@
                         if (response.status === 'success') {
                             location.reload();
                         } else {
-                            alert(response.message || 'Error deleting credit account.');
+                            showToast(response.message || 'Error deleting credit account.', 'error');
                         }
                     },
                     error: function() {
                         $('#loading-screen').hide();
                         $('#delete-credit-account-modal').hide();
-                        alert('Error deleting credit account.');
+                        showToast('Error deleting credit account.', 'error');
                     }
                 });
             });

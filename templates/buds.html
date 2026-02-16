@@ -286,7 +286,7 @@
                         budInputOverlay.style.display = 'none';
                         location.reload(); // Reload to show new bud
                     } else {
-                        alert(data.message || 'Error adding bud.');
+                        showToast(data.message || 'Error adding bud.', 'error');
                     }
                 });
             }
@@ -374,7 +374,7 @@
                             saveDailyTotalsAndRemainders();
                             location.reload();
                         } else {
-                            alert(data.message || 'Error updating bud status.');
+                            showToast(data.message || 'Error updating bud status.', 'error');
                         }
                     });
                 });
@@ -417,7 +417,7 @@
                 const itemAccount = $('#bud-item-account').val();
                 
                 if (!itemName || !itemValue || !itemDate || !itemAccount) {
-                    alert('Please fill in all fields.');
+                    showToast('Please fill in all fields.', 'warning');
                     return;
                 }
                 
@@ -444,12 +444,12 @@
                             saveDailyTotalsAndRemainders();
                             location.reload();
                         } else {
-                            alert(data.message || 'Error adding item.');
+                            showToast(data.message || 'Error adding item.', 'error');
                             document.getElementById('loading-screen').style.display = 'none';
                         }
                     },
                     error: function() {
-                        alert('Error adding item.');
+                        showToast('Error adding item.', 'error');
                         document.getElementById('loading-screen').style.display = 'none';
                     }
                 });
@@ -543,12 +543,12 @@
                                 saveDailyTotalsAndRemainders();
                                 location.reload();
                             } else {
-                                alert(data.message || 'Error updating item.');
+                                showToast(data.message || 'Error updating item.', 'error');
                                 $td.text(inputValue);
                             }
                         },
                         error: function() {
-                            alert('Error updating item.');
+                            showToast('Error updating item.', 'error');
                             $td.text(inputValue);
                         }
                     });
@@ -591,11 +591,11 @@
                                 saveDailyTotalsAndRemainders();
                                 location.reload();
                             } else {
-                                alert(data.message || 'Error deleting item.');
+                                showToast(data.message || 'Error deleting item.', 'error');
                             }
                         },
                         error: function() {
-                            alert('Error deleting item.');
+                            showToast('Error deleting item.', 'error');
                         }
                     });
                 });
@@ -662,12 +662,12 @@
                             saveDailyTotalsAndRemainders();
                             location.reload();
                         } else {
-                            alert(data.message || 'Error deleting bud.');
+                            showToast(data.message || 'Error deleting bud.', 'error');
                             document.getElementById('loading-screen').style.display = 'none';
                         }
                     },
                     error: function() {
-                        alert('Error deleting bud.');
+                        showToast('Error deleting bud.', 'error');
                         document.getElementById('loading-screen').style.display = 'none';
                     }
                 });

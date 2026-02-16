@@ -654,11 +654,11 @@
                             dashboardDCategoryHidden.value = cExpenseCategoryId;
                             dashboardDDropdown.style.display = 'none';
                         } else {
-                            alert('Failed to create category');
+                            showToast('Failed to create category', 'error');
                         }
                     },
                     error: function() {
-                        alert('Error creating category');
+                        showToast('Error creating category', 'error');
                     }
                 });
                 return;
@@ -691,11 +691,11 @@
                         dashboardDCategoryHidden.value = response.new_category_id;
                         dashboardDDropdown.style.display = 'none';
                     } else {
-                        alert('Failed to create category');
+                        showToast('Failed to create category', 'error');
                     }
                 },
                 error: function() {
-                    alert('Error creating category');
+                    showToast('Error creating category', 'error');
                 }
             });
         }
@@ -2725,7 +2725,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                     document.getElementById('loading-screen').style.display = 'none';
                 },
                 error: function() {
-                    alert('Failed to move entry.');
+                    showToast('Failed to move entry.', 'error');
                     document.getElementById('loading-screen').style.display = 'none';
                 }
             });

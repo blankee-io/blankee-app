@@ -913,7 +913,7 @@
             const start = new Date(startDate);
 
             if (start < minStartDate) {
-                alert(`Start date cannot be earlier than January 1, ${currentYear - 1}`);
+                showToast(`Start date cannot be earlier than January 1, ${currentYear - 1}`, 'warning');
                 return false;
             }
 
@@ -921,12 +921,12 @@
                 const end = new Date(endDate);
 
                 if (end > maxEndDate) {
-                    alert(`End date cannot be later than December 31, ${currentYear + 3}`);
+                    showToast(`End date cannot be later than December 31, ${currentYear + 3}`, 'warning');
                     return false;
                 }
 
                 if (start > end) {
-                    alert("End date cannot be earlier than the start date.");
+                    showToast("End date cannot be earlier than the start date.", 'warning');
                     return false;
                 }
             }
@@ -981,7 +981,7 @@
                 if (totalSelects > 1) {
                     container.removeChild(containerDiv);
                 } else {
-                    alert('At least one day must be selected.');
+                    showToast('At least one day must be selected.', 'warning');
                 }
             });
 
@@ -1000,7 +1000,7 @@
 
             // Validate that end date is not before start date
             if (new Date(endDate) < new Date(startDate)) {
-                alert("End date cannot be earlier than the start date.");
+                showToast("End date cannot be earlier than the start date.", 'warning');
                 return false;
             }
 
@@ -1052,7 +1052,7 @@
                 const yearlyMonth = $('#yearly-month').val();
 
                 if (!yearlyDay || !yearlyMonth) {
-                    alert("Please select both a day and a month for yearly recurrence.");
+                    showToast("Please select both a day and a month for yearly recurrence.", 'warning');
                     return false;
                 }
 
@@ -1098,11 +1098,11 @@
                         location.reload();
                         document.getElementById('loading-screen').style.display = 'none';
                     } else {
-                        alert('Failed to add recurring expense: ' + response.message);
+                        showToast('Failed to add recurring expense: ' + response.message, 'error');
                     }
                 },
                 error: function(xhr, status, error) {
-                    alert('An error occurred: ' + xhr.responseText);
+                    showToast('An error occurred: ' + xhr.responseText, 'error');
                 }
             });
         });
@@ -1180,7 +1180,7 @@
             const recurringId = $(this).closest('tr').attr('data-recurring-id');  // Correct way to retrieve the attribute
 
             if (recurringId === undefined || recurringId === null || recurringId === '') {
-                alert('Invalid recurring ID');
+                showToast('Invalid recurring ID', 'error');
                 return;
             }
 
@@ -1257,11 +1257,11 @@
                             saveDailyTotalsAndRemainders();
                             document.getElementById('loading-screen').style.display = 'none';
                         } else {
-                            alert('Failed to delete recurring expense: ' + response.message);
+                            showToast('Failed to delete recurring expense: ' + response.message, 'error');
                         }
                     },
                     error: function(xhr, status, error) {
-                        alert('An error occurred: ' + xhr.responseText);
+                        showToast('An error occurred: ' + xhr.responseText, 'error');
                     }
                 });
             };
@@ -1449,11 +1449,11 @@
                         location.reload();  // Reload the page to update the table
                         document.getElementById('loading-screen').style.display = 'none';
                     } else {
-                        alert('Error: ' + response.message);
+                        showToast('Error: ' + response.message, 'error');
                     }
                 },
                 error: function(xhr, status, error) {
-                    alert('An error occurred: ' + xhr.responseText);
+                    showToast('An error occurred: ' + xhr.responseText, 'error');
                 }
             });
         });

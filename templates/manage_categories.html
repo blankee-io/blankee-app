@@ -10,6 +10,7 @@
     <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
     <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/jquery-ui.css') }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <meta name="mobile-web-app-capable" content="yes">
@@ -263,7 +264,7 @@
                     }
                 },
                 error: function() {
-                    alert('Failed to add category.');
+                    showToast('Failed to add category.', 'error');
                 }
             });
         }
@@ -314,7 +315,7 @@
                     }
                 },
                 error: function() {
-                    alert('Failed to save order.');
+                    showToast('Failed to save order.', 'error');
                 }
             });
         }
@@ -523,11 +524,11 @@
                     if (response.status === 'success') {
                         location.reload();
                     } else {
-                        alert('Failed to delete category.');
+                        showToast('Failed to delete category.', 'error');
                     }
                 },
                 error: function() {
-                    alert('An error occurred while deleting the category.');
+                    showToast('An error occurred while deleting the category.', 'error');
                 }
             });
             document.getElementById('deleteCategoryModal').style.display = 'none';

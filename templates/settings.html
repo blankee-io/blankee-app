@@ -318,7 +318,7 @@
                         saveDailyTotalsAndRemainders();
                     },
                     error: function() {
-                        alert('An error occurred while updating the balance threshold.');
+                        showToast('An error occurred while updating the balance threshold.', 'error');
                     }
                 });
             });
@@ -358,11 +358,11 @@
                                 location.reload();
                             }, 1000);
                         } else {
-                            alert('Error updating currency: ' + response.message);
+                            showToast('Error updating currency: ' + response.message, 'error');
                         }
                     },
                     error: function() {
-                        alert('An error occurred while updating the currency.');
+                        showToast('An error occurred while updating the currency.', 'error');
                     }
                 });
             });
@@ -379,11 +379,11 @@
                         if (response.status === 'success') {
                             showSuccessMessage('Landing page updated successfully');
                         } else {
-                            alert('Error updating landing page: ' + response.message);
+                            showToast('Error updating landing page: ' + response.message, 'error');
                         }
                     },
                     error: function() {
-                        alert('An error occurred while updating the landing page.');
+                        showToast('An error occurred while updating the landing page.', 'error');
                     }
                 });
             });
@@ -408,11 +408,11 @@
                                 saveDailyTotalsAndRemainders();
                                 saveCaDailyBalance();
                             } else {
-                                alert('Error updating Goofy Week Mode: ' + response.message);
+                                showToast('Error updating Goofy Week Mode: ' + response.message, 'error');
                             }
                         },
                         error: function() {
-                            alert('An error occurred while updating Goofy Week Mode.');
+                            showToast('An error occurred while updating Goofy Week Mode.', 'error');
                         }
                     });
                 });
@@ -435,13 +435,13 @@
                             if (response.status === 'success') {
                                 showSuccessMessage('Email notifications ' + (emailNotifications ? 'enabled' : 'disabled'));
                             } else {
-                                alert('Error updating email notifications: ' + response.message);
+                                showToast('Error updating email notifications: ' + response.message, 'error');
                                 // Revert checkbox on error
                                 emailNotificationsCheckbox.prop('checked', !emailNotifications);
                             }
                         },
                         error: function() {
-                            alert('An error occurred while updating email notifications.');
+                            showToast('An error occurred while updating email notifications.', 'error');
                             // Revert checkbox on error
                             emailNotificationsCheckbox.prop('checked', !emailNotifications);
                         }
@@ -480,7 +480,7 @@
                             saveTotalsAndRemainders();
                         },
                         error: function() {
-                            alert('An error occurred while updating the starting balance.');
+                            showToast('An error occurred while updating the starting balance.', 'error');
                         },
                         complete: function() {
                             $('#starting-balance-modal').css('display', 'none');
@@ -533,12 +533,12 @@
                                 saveDailyTotalsAndRemainders();
                                 originalStartingSavings = pendingStartingSavings;
                             } else {
-                                alert('Error updating starting savings: ' + response.message);
+                                showToast('Error updating starting savings: ' + response.message, 'error');
                                 $('#starting_savings').val(originalStartingSavings);
                             }
                         },
                         error: function() {
-                            alert('An error occurred while updating the starting savings.');
+                            showToast('An error occurred while updating the starting savings.', 'error');
                             $('#starting_savings').val(originalStartingSavings);
                         },
                         complete: function() {

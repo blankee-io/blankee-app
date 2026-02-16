@@ -1,5 +1,140 @@
 // General Functions
 
+// ═══════════════════════════════════════════════════════════════
+// TOAST NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Show a temporary toast notification.
+ * @param {string} message - The message to display
+ * @param {string} [type='error'] - Toast type: 'error' | 'warning' | 'info' | 'success'
+ * @param {number} [duration=4000] - Auto-dismiss time in ms (0 to disable)
+ */
+function showToast(message, type, duration) {
+    if (type === undefined || type === null) type = 'error';
+    if (duration === undefined || duration === null) duration = 4000;
+
+    // Ensure container exists
+    var container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    var icons = {
+        error:   '<i class="fa-solid fa-circle-exclamation toast-icon"></i>',
+        warning: '<i class="fa-solid fa-triangle-exclamation toast-icon"></i>',
+        info:    '<i class="fa-solid fa-circle-info toast-icon"></i>',
+        success: '<i class="fa-solid fa-circle-check toast-icon"></i>'
+    };
+
+    var toast = document.createElement('div');
+    toast.className = 'toast toast-' + type;
+    toast.innerHTML =
+        (icons[type] || icons.error) +
+        '<span class="toast-message">' + _escapeHtml(message) + '</span>' +
+        '<button class="toast-close" aria-label="Close">&times;</button>';
+
+    container.appendChild(toast);
+
+    // Close on click
+    toast.querySelector('.toast-close').addEventListener('click', function() {
+        _removeToast(toast);
+    });
+
+    // Auto-dismiss
+    if (duration > 0) {
+        setTimeout(function() { _removeToast(toast); }, duration);
+    }
+}
+
+function _escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+}
+
+function _removeToast(el) {
+    if (!el || el.classList.contains('toast-removing')) return;
+    el.classList.add('toast-removing');
+    el.addEventListener('animationend', function() { el.remove(); });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GENERIC CONFIRM MODAL
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Show a confirm/cancel modal (replaces native confirm()).
+ * Returns a Promise<boolean>.
+ *
+ * @param {Object} opts
+ * @param {string} opts.message      - Body text
+ * @param {string} [opts.title]      - Modal title (default: 'Confirm')
+ * @param {string} [opts.confirmText]- Confirm button label (default: 'Confirm')
+ * @param {string} [opts.cancelText] - Cancel button label (default: 'Cancel')
+ * @param {boolean}[opts.danger]     - Use red confirm button (default: false)
+ */
+function showConfirmModal(opts) {
+    return new Promise(function(resolve) {
+        // Ensure modal exists in DOM
+        var modal = document.getElementById('generic-confirm-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'generic-confirm-modal';
+            modal.className = 'modal';
+            modal.innerHTML =
+                '<div class="modal-content center-modal">' +
+                    '<span id="generic-confirm-close" class="close-modal">&times;</span>' +
+                    '<h2 id="generic-confirm-title">Confirm</h2>' +
+                    '<p id="generic-confirm-message"></p>' +
+                    '<div class="modal-buttons">' +
+                        '<button id="generic-confirm-btn">Confirm</button>' +
+                        '<button id="generic-cancel-btn">Cancel</button>' +
+                    '</div>' +
+                '</div>';
+            document.body.appendChild(modal);
+        }
+
+        var titleEl   = document.getElementById('generic-confirm-title');
+        var msgEl     = document.getElementById('generic-confirm-message');
+        var confirmBtn= document.getElementById('generic-confirm-btn');
+        var cancelBtn = document.getElementById('generic-cancel-btn');
+        var closeBtn  = document.getElementById('generic-confirm-close');
+
+        titleEl.textContent   = opts.title || 'Confirm';
+        msgEl.textContent     = opts.message || '';
+        confirmBtn.textContent= opts.confirmText || 'Confirm';
+        cancelBtn.textContent = opts.cancelText || 'Cancel';
+
+        if (opts.danger) {
+            confirmBtn.classList.add('danger');
+        } else {
+            confirmBtn.classList.remove('danger');
+        }
+
+        modal.style.display = 'flex';
+
+        function cleanup(result) {
+            modal.style.display = 'none';
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', onCancel);
+            closeBtn.removeEventListener('click', onCancel);
+            modal.removeEventListener('click', onBackdrop);
+            resolve(result);
+        }
+        function onConfirm() { cleanup(true); }
+        function onCancel()  { cleanup(false); }
+        function onBackdrop(e) { if (e.target === modal) cleanup(false); }
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        closeBtn.addEventListener('click', onCancel);
+        modal.addEventListener('click', onBackdrop);
+    });
+}
+
 // ===== Quiltt Reconnection Alert =====
 // Check for bank connections needing reconnection on page load
 (function() {
@@ -143,8 +278,15 @@ function toggleSidenav() {
 }
 
 // Function to delete a user account
-function deleteUser(url) {
-    if (confirm('Are you sure you want to delete your account?')) {
+async function deleteUser(url) {
+    var confirmed = await showConfirmModal({
+        title: 'Delete Account',
+        message: 'Are you sure you want to delete your account? This action cannot be undone.',
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        danger: true
+    });
+    if (confirmed) {
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = url;

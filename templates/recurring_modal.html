@@ -653,7 +653,7 @@
                 if (totalSelects > 1) {
                     container.removeChild(containerDiv);
                 } else {
-                    alert('At least one day must be selected.');
+                    showToast('At least one day must be selected.', 'warning');
                 }
             });
             containerDiv.appendChild(minusButton);
@@ -667,7 +667,7 @@
             const endDate = $('#end_date').val();
             const noEndDateChecked = $('#no-end-date-checkbox').is(':checked');
             if (new Date(endDate) < new Date(startDate)) {
-                alert("End date cannot be earlier than the start date.");
+                showToast("End date cannot be earlier than the start date.", 'warning');
                 return false;
             }
             if (!validateDateRange(startDate, endDate, noEndDateChecked)) {
@@ -704,7 +704,7 @@
                 const yearlyDay = $('#yearly-day').val();
                 const yearlyMonth = $('#yearly-month').val();
                 if (!yearlyDay || !yearlyMonth) {
-                    alert("Please select both a day and a month for yearly recurrence.");
+                    showToast("Please select both a day and a month for yearly recurrence.", 'warning');
                     return false;
                 }
                 formData.yearly_day = yearlyDay;
@@ -746,11 +746,11 @@
                         location.reload();
                         document.getElementById('loading-screen').style.display = 'none';
                     } else {
-                        alert('Failed to add recurring income: ' + response.message);
+                        showToast('Failed to add recurring income: ' + response.message, 'error');
                     }
                 },
                 error: function(xhr, status, error) {
-                    alert('An error occurred: ' + xhr.responseText);
+                    showToast('An error occurred: ' + xhr.responseText, 'error');
                 }
             });
         });
@@ -890,7 +890,7 @@
             if (totalSelects > 1) {
                 container.removeChild(containerDiv);
             } else {
-                alert('At least one day must be selected.');
+                showToast('At least one day must be selected.', 'warning');
             }
         });
         containerDiv.appendChild(minusButton);
@@ -905,7 +905,7 @@
         const endDate = $form.find('#expense-end_date').val();
         const noEndDateChecked = $form.find('#expense-no-end-date-checkbox').is(':checked');
         if (new Date(endDate) < new Date(startDate)) {
-            alert("End date cannot be earlier than the start date.");
+            showToast("End date cannot be earlier than the start date.", 'warning');
             return false;
         }
         if (!validateDateRange(startDate, endDate, noEndDateChecked)) {
@@ -942,7 +942,7 @@
             const yearlyDay = $form.find('#expense-yearly-day').val();
             const yearlyMonth = $form.find('#expense-yearly-month').val();
             if (!yearlyDay || !yearlyMonth) {
-                alert("Please select both a day and a month for yearly recurrence.");
+                showToast("Please select both a day and a month for yearly recurrence.", 'warning');
                 return false;
             }
             formData.yearly_day = yearlyDay;
@@ -984,11 +984,11 @@
                     location.reload();
                     document.getElementById('loading-screen').style.display = 'none';
                 } else {
-                    alert('Failed to add recurring expense: ' + response.message);
+                    showToast('Failed to add recurring expense: ' + response.message, 'error');
                 }
             },
             error: function(xhr, status, error) {
-                alert('An error occurred: ' + xhr.responseText);
+                showToast('An error occurred: ' + xhr.responseText, 'error');
             }
         });
     });
@@ -1011,7 +1011,7 @@
         const start = new Date(startDate);
 
         if (start < minStartDate) {
-            alert(`Start date cannot be earlier than January 1, ${currentYear - 1}`);
+            showToast(`Start date cannot be earlier than January 1, ${currentYear - 1}`, 'warning');
             return false;
         }
 
@@ -1019,12 +1019,12 @@
             const end = new Date(endDate);
 
             if (end > maxEndDate) {
-                alert(`End date cannot be later than December 31, ${currentYear + 3}`);
+                showToast(`End date cannot be later than December 31, ${currentYear + 3}`, 'warning');
                 return false;
             }
 
             if (start > end) {
-                alert("End date cannot be earlier than the start date.");
+                showToast("End date cannot be earlier than the start date.", 'warning');
                 return false;
             }
         }
@@ -1218,7 +1218,7 @@
         const endDate = $form.find('#ca-end-date').val();
         const noEndDateChecked = $form.find('#ca-no-end-date-checkbox').is(':checked');
         if (new Date(endDate) < new Date(startDate)) {
-            alert("End date cannot be earlier than the start date.");
+            showToast("End date cannot be earlier than the start date.", 'warning');
             return false;
         }
         if (!validateDateRange(startDate, endDate, noEndDateChecked)) {
@@ -1234,7 +1234,7 @@
         });
         const caSelectedCategoryId = $form.find('#ca-category-id-hidden').val();
         if (!caSelectedCategoryId) {
-            alert('Please select a category from the dropdown.');
+            showToast('Please select a category from the dropdown.', 'warning');
             return false;
         }
         const formData = {
@@ -1253,7 +1253,7 @@
             const yearlyDay = $form.find('#ca-yearly-day').val();
             const yearlyMonth = $form.find('#ca-yearly-month').val();
             if (!yearlyDay || !yearlyMonth) {
-                alert("Please select both a day and a month for yearly recurrence.");
+                showToast("Please select both a day and a month for yearly recurrence.", 'warning');
                 return false;
             }
             formData.yearly_day = yearlyDay;
@@ -1295,11 +1295,11 @@
                     location.reload();
                     document.getElementById('loading-screen').style.display = 'none';
                 } else {
-                    alert('Failed to add recurring CA expense: ' + response.message);
+                    showToast('Failed to add recurring CA expense: ' + response.message, 'error');
                 }
             },
             error: function(xhr, status, error) {
-                alert('An error occurred: ' + xhr.responseText);
+                showToast('An error occurred: ' + xhr.responseText, 'error');
             }
         });
     });

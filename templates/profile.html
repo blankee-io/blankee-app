@@ -597,7 +597,7 @@
                         btn.html(originalHtml);
                     }, 2000);
                 }).catch(function(err) {
-                    alert('Failed to copy: ' + err);
+                    showToast('Failed to copy: ' + err, 'error');
                 });
             });
 
@@ -961,8 +961,15 @@
         });
 
         // Remove profile picture functionality
-        function removeProfilePicture() {
-            if (confirm('Are you sure you want to remove your profile picture?')) {
+        async function removeProfilePicture() {
+            var confirmed = await showConfirmModal({
+                title: 'Remove Picture',
+                message: 'Are you sure you want to remove your profile picture?',
+                confirmText: 'Remove',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (confirmed) {
                 $.ajax({
                     url: "{{ url_for('remove_profile_picture') }}",  // URL to send the request to
                     method: "POST",  // Request method
@@ -971,11 +978,11 @@
                             $('.profile-pic').attr('src', '{{ url_for('static', filename='uploads/DefaultProfilePicture.svg') }}');  // Set default profile picture
                             $('.remove-pic-button').hide();  // Hide the remove button
                         } else {
-                            alert('Failed to remove profile picture.');  // Alert if removal failed
+                            showToast('Failed to remove profile picture.', 'error');  // Alert if removal failed
                         }
                     },
                     error: function() {
-                        alert('An error occurred while removing the profile picture.');  // Alert if an error occurred
+                        showToast('An error occurred while removing the profile picture.', 'error');  // Alert if an error occurred
                     }
                 });
             }
@@ -1242,7 +1249,7 @@
                                 window.location.reload();
                             })
                             .catch(error => {
-                                alert('Error uploading profile picture');
+                                showToast('Error uploading profile picture', 'error');
                             });
                         }, 'image/png');
                     }
@@ -1290,11 +1297,11 @@
                                 window.location.href = "{{ url_for('login') }}";
                             }, 3000);
                         } else {
-                            alert('Error deleting account: ' + response.message);
+                            showToast('Error deleting account: ' + response.message, 'error');
                         }
                     },
                     error: function() {
-                        alert('An error occurred while deleting your account.');
+                        showToast('An error occurred while deleting your account.', 'error');
                     }
                 });
                 deleteAccountModal.hide();
@@ -2081,7 +2088,7 @@
                         // Another one is already checked, prevent this selection
                         checkbox.prop('checked', false);
                         const typeLabel = accountType === 'checking' ? 'Checking' : 'Savings';
-                        alert(`You can only select one ${typeLabel} account. Please deselect the other first.`);
+                        showToast(`You can only select one ${typeLabel} account. Please deselect the other first.`, 'warning');
                     }
                 }
             });
@@ -2094,7 +2101,7 @@
                 });
                 
                 if (selectedAccounts.length === 0) {
-                    alert('Please select at least one account to continue.');
+                    showToast('Please select at least one account to continue.', 'warning');
                     return;
                 }
                 
@@ -2377,7 +2384,7 @@
                 const connectorId = '{{ connector_id if connector_id else "" }}';
                 
                 if (!connectorId || connectorId === '') {
-                    alert('Quiltt Connector ID is missing.\n\nPlease:\n1. Go to https://dashboard.quiltt.dev/\n2. Create a new Connector\n3. Add QUILTT_CONNECTOR_ID to your .env file\n\nSee QUILTT_QUICK_START.md for details.');
+                    showToast('Quiltt Connector ID is missing.\n\nPlease:\n1. Go to https://dashboard.quiltt.dev/\n2. Create a new Connector\n3. Add QUILTT_CONNECTOR_ID to your .env file\n\nSee QUILTT_QUICK_START.md for details.', 'warning');
                     return;
                 }
 
@@ -2390,14 +2397,14 @@
                         if (response.status === 'success' && response.session_token) {
                             loadQuilttConnector(response.session_token, connectorId);
                         } else {
-                            alert('Unable to connect bank. Please check server logs for details.');
+                            showToast('Unable to connect bank. Please check server logs for details.', 'warning');
                         }
                     },
                     error: function(xhr, status, error) {
                         if (xhr.status === 500) {
-                            alert('Unable to connect bank. Quiltt API credentials may not be configured.\n\nPlease add QUILTT_API_KEY and QUILTT_ENVIRONMENT_ID to your server environment.\n\nSee QUILTT_QUICK_START.md for setup instructions.');
+                            showToast('Unable to connect bank. Quiltt API credentials may not be configured.\n\nPlease add QUILTT_API_KEY and QUILTT_ENVIRONMENT_ID to your server environment.\n\nSee QUILTT_QUICK_START.md for setup instructions.', 'warning');
                         } else {
-                            alert('Error connecting to bank service. Please try again.');
+                            showToast('Error connecting to bank service. Please try again.', 'warning');
                         }
                     }
                 });
@@ -2412,7 +2419,7 @@
                         openQuilttConnector(sessionToken, connectorId);
                     };
                     script.onerror = function() {
-                        alert('Failed to load Quiltt Connector SDK. Please check your internet connection.');
+                        showToast('Failed to load Quiltt Connector SDK. Please check your internet connection.', 'warning');
                     };
                     document.head.appendChild(script);
                 } else {
@@ -2429,7 +2436,7 @@
                         openQuilttReconnector(sessionToken, connectorId, connectionId);
                     };
                     script.onerror = function() {
-                        alert('Failed to load Quiltt Connector SDK. Please check your internet connection.');
+                        showToast('Failed to load Quiltt Connector SDK. Please check your internet connection.', 'warning');
                     };
                     document.head.appendChild(script);
                 } else {
@@ -2591,7 +2598,7 @@
                             delete window.reconnectingLastSynced;
                         },
                         onExitError: function(metadata) {
-                            alert('Error reconnecting bank. Please try again.');
+                            showToast('Error reconnecting bank. Please try again.', 'warning');
                             const $card = $('.reconnect-btn[data-connection-id="' + window.reconnectingConnectionId + '"]').closest('.connection-card');
                             $card.find('.connection-status').text('Disconnected').removeClass('connected').addClass('disconnected error');
                             delete window.reconnectingConnectionId;
@@ -2603,7 +2610,7 @@
                     
                     connector.open();
                 } catch (error) {
-                    alert('Error opening bank reconnection: ' + error.message);
+                    showToast('Error opening bank reconnection: ' + error.message, 'error');
                 }
             }
 
@@ -2659,7 +2666,7 @@
                                                 });
                                             },
                                             error: function(xhr) {
-                                                alert('Connection successful but sync failed. Please refresh the page.');
+                                                showToast('Connection successful but sync failed. Please refresh the page.', 'warning');
                                             }
                                         });
                                     },
@@ -2701,7 +2708,7 @@
                             // User cancelled connection
                         },
                         onExitError: function(metadata) {
-                            alert('Error connecting bank. Please try again.');
+                            showToast('Error connecting bank. Please try again.', 'warning');
                         },
                         onEvent: function(eventType, metadata) {
                             // Connector event
@@ -2710,7 +2717,7 @@
                     
                     connector.open();
                 } catch (error) {
-                    alert('Error opening bank connection: ' + error.message);
+                    showToast('Error opening bank connection: ' + error.message, 'error');
                 }
             }
 
@@ -2758,7 +2765,7 @@
                         loadQuilttReconnector(freshToken, connectorId, connectionId);
                     },
                     error: function(xhr) {
-                        alert('Failed to start reconnection. Please try again.');
+                        showToast('Failed to start reconnection. Please try again.', 'warning');
                         $status.text('Disconnected').removeClass('connected').addClass('disconnected error');
                         
                         // Clear reconnect state
@@ -2871,12 +2878,12 @@
                                 }
                             });
                         } else {
-                            alert('Failed to delete connection: ' + (response.message || 'Unknown error'));
+                            showToast('Failed to delete connection: ' + (response.message || 'Unknown error'), 'error');
                             $card.find('.connection-status').text('ERROR');
                         }
                     },
                     error: function() {
-                        alert('Error deleting connection. Please try again.');
+                        showToast('Error deleting connection. Please try again.', 'warning');
                         $card.find('.connection-status').text('ERROR');
                     }
                 });
@@ -3185,13 +3192,13 @@
                                 }, 1000);
                             }
                         } else {
-                            alert('Failed to update sync setting');
+                            showToast('Failed to update sync setting', 'error');
                             // Revert checkbox
                             $checkbox.prop('checked', !syncEnabled);
                         }
                     },
                     error: function() {
-                        alert('Error updating sync setting');
+                        showToast('Error updating sync setting', 'error');
                         // Revert checkbox
                         $checkbox.prop('checked', !syncEnabled);
                     }
