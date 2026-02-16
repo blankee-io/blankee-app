@@ -1427,8 +1427,12 @@ button#autobalance-submit:active {
 #recurring-i-body .calendarnavbuttonscontainer,
 #credit-accounts-body .calendarnavbuttonscontainer,
 #profile-body .calendarnavbuttonscontainer,
-#buds-body .calendarnavbuttonscontainer {
-    justify-content: flex-start;
+#buds-body .calendarnavbuttonscontainer,
+#feedback-page .calendarnavbuttonscontainer,
+#notifications-body .calendarnavbuttonscontainer,
+#pending-transactions-body .calendarnavbuttonscontainer,
+#manage-categories-body .calendarnavbuttonscontainer {
+    justify-content: space-between;
 }
 
 .calendarnavbuttonscontainer {
@@ -1464,6 +1468,28 @@ button#autobalance-submit:active {
     .calendarnavbuttonscontainer {
         justify-content: space-around;
     }
+
+    #recurring-i-body .calendarnavbuttonscontainer,
+    #credit-accounts-body .calendarnavbuttonscontainer,
+    #profile-body .calendarnavbuttonscontainer,
+    #buds-body .calendarnavbuttonscontainer,
+    #feedback-page .calendarnavbuttonscontainer,
+    #notifications-body .calendarnavbuttonscontainer,
+    #pending-transactions-body .calendarnavbuttonscontainer,
+    #manage-categories-body .calendarnavbuttonscontainer {
+        justify-content: space-between;
+    }
+
+    #recurring-i-body .calendarnav,
+    #credit-accounts-body .calendarnav,
+    #profile-body .calendarnav,
+    #buds-body .calendarnav,
+    #feedback-page .calendarnav,
+    #notifications-body .calendarnav,
+    #pending-transactions-body .calendarnav,
+    #manage-categories-body .calendarnav {
+        padding: 10px;
+    }
 }
 
 .calendarnavbuttons {
@@ -1471,6 +1497,12 @@ button#autobalance-submit:active {
 
     /* Aligns the buttons to the right inside this container */
     justify-content: flex-end; 
+}
+
+.nav-buttons {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .nav-dash-container {
