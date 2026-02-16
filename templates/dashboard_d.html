@@ -233,8 +233,8 @@
             const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD in local time
             
             // Simple string comparison works because YYYY-MM-DD sorts correctly
-            // Only lock entries from today or before
-            if (entryDate > todayStr) return false;
+            // Only lock entries before today (today is editable)
+            if (entryDate >= todayStr) return false;
             
             // Credit account entries - check if this specific account is Quiltt-linked
             if (entryType === 'ca' && accountId !== null) {
@@ -277,8 +277,8 @@
             const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD
             
             // Simple string comparison works because YYYY-MM-DD sorts correctly
-            // Future dates - always show add button
-            if (dateStr > todayStr) return true;
+            // Future dates and today - always show add button
+            if (dateStr >= todayStr) return true;
             
             // For today and past dates, check if there are any valid entry options
             

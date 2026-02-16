@@ -27,10 +27,12 @@
                 </a>
             </div>
             {% if pending_transactions %}
-                <button class="nav-button mark-all-read-button" onclick="confirmAllTransactions()">
-                    <i class="fa-solid fa-check-double"></i>
-                    <span class="nav-tooltip">Confirm All</span>
-                </button>
+                <div class="nav-buttons">
+                    <button class="nav-button mark-all-read-button" onclick="confirmAllTransactions()">
+                        <i class="fa-solid fa-check-double"></i>
+                        <span class="nav-tooltip">Confirm All</span>
+                    </button>
+                </div>
             {% endif %}
         </div>
     </div>

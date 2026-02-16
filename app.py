@@ -9072,9 +9072,25 @@ def delete_week_entry():
     start_date = data.get('start_date')
     end_date = data.get('end_date')
     friday_date = data.get('friday_date')  # You may need to pass this from frontend
+    quiltt_partial = data.get('quiltt_partial', False)
+    today_date = data.get('today_date')
 
     if not all([category_id, entry_type, start_date, end_date]):
         return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
+
+    # Quiltt partial delete: calculate past_sum before deleting
+    past_sum = 0
+    if quiltt_partial and today_date:
+        entries = _get_entries_from_redis(table_name_map.get(entry_type, ''), current_user.id)
+        if entries is None:
+            entries = []
+        for entry in entries:
+            entry_cat = int(entry.get('category_id', 0))
+            entry_date_str = entry.get('date', '')
+            if entry_cat == int(category_id) and start_date <= entry_date_str < today_date:
+                past_sum += float(entry.get('amount', 0))
+        # Narrow delete range to today onward
+        start_date = today_date
 
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -9134,7 +9150,17 @@ def delete_week_entry():
     # Don't filter by specific_date - return all buckets since the depleted bucket might be in a different period
     updated_buckets = _get_updated_buckets_from_redis(table_name, current_user.id, category_id, aggregation, None)
 
-    return jsonify({'status': 'success', 'updated_buckets': updated_buckets})
+    response_data = {'status': 'success', 'updated_buckets': updated_buckets}
+    if quiltt_partial:
+        response_data['past_sum'] = round(past_sum, 2)
+    return jsonify(response_data)
+
+# Helper map for entry_type -> table_name (used by quiltt_partial logic)
+table_name_map = {
+    'income': 'income_entries',
+    'expense': 'expense_entries',
+    'ca': 'c_expense_entries'
+}
 
 @app.route('/update-week-entry', methods=['POST'])
 @login_required
@@ -9146,6 +9172,8 @@ def update_week_entry():
     friday_date = data.get('friday_date')
     start_date = data.get('start_date')
     end_date = data.get('end_date')
+    quiltt_partial = data.get('quiltt_partial', False)
+    today_date = data.get('today_date')
 
 
     if category_id is None or not friday_date or amount is None or not entry_type or not start_date or not end_date:
@@ -9241,8 +9269,30 @@ def update_week_entry():
                     old_ca_amount = float(entry.get('amount', 0))
                     break
 
-    # Delete old entries and add new entry to Redis only - flush worker will persist
-    _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
+    # Quiltt partial edit: calculate past_sum and narrow delete range
+    past_sum = 0
+    delta_amount = float(amount)
+    if quiltt_partial and today_date:
+        entries = _get_entries_from_redis(table_name, current_user.id)
+        if entries is None:
+            entries = []
+        for entry in entries:
+            entry_cat = int(entry.get('category_id', 0))
+            entry_date_str = entry.get('date', '')
+            if entry_cat == int(category_id) and start_date <= entry_date_str < today_date:
+                past_sum += float(entry.get('amount', 0))
+        if float(amount) < past_sum:
+            return jsonify({
+                'status': 'error',
+                'message': f'Past bank transactions already total ${past_sum:.2f}. New value must be at least ${past_sum:.2f}.',
+                'past_sum': round(past_sum, 2)
+            }), 400
+        delta_amount = float(amount) - past_sum
+        # Only delete from today onward
+        _delete_entry_in_redis(table_name, current_user.id, category_id, today_date, end_date)
+    else:
+        # Original behavior - delete all entries in the range
+        _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
     
     # Check if this is a future-dated entry (should become a bucket)
     from datetime import date as date_type
@@ -9254,7 +9304,7 @@ def update_week_entry():
     entry_is_bucket = friday_date_parsed > today
     
     # Check for bucket entries and deplete them if this is a recurring category OR has manual buckets
-    if float(amount) != 0 and not entry_is_bucket:
+    if delta_amount != 0 and not entry_is_bucket:
         pass
         try:
             # Get recurring info for this category to determine cadence from Redis
@@ -9295,7 +9345,7 @@ def update_week_entry():
                 app.logger.info(f"[BUCKET] /update-week-entry: Found bucket to reduce: date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
                 process_manual_entry_with_bucket(
                     table_name, category_id, friday_date, 
-                    float(amount), current_user.id, recurring_info
+                    delta_amount, current_user.id, recurring_info
                 )
         except Exception as e:
             app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
@@ -9346,11 +9396,11 @@ def update_week_entry():
         else:
             pass
     
-    # If amount is 0, don't create a new entry (just delete old ones)
-    if float(amount) != 0:
+    # If delta is 0 (or amount is 0), don't create a new entry (just delete old ones)
+    if delta_amount != 0:
         pass
-        _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, float(amount),
-                              is_bucket=entry_is_bucket, original_amount=float(amount) if entry_is_bucket else None)
+        _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, delta_amount,
+                              is_bucket=entry_is_bucket, original_amount=delta_amount if entry_is_bucket else None)
         
         # Create bucket record for future-dated entries
         if entry_is_bucket:
@@ -9421,7 +9471,10 @@ def update_week_entry():
     # Don't filter by specific_date - return all buckets since the depleted bucket might be in a different period
     updated_buckets = _get_updated_buckets_from_redis(table_name, current_user.id, category_id, aggregation, None)
 
-    return jsonify({"status": "success", "updated_buckets": updated_buckets})
+    response_data = {"status": "success", "updated_buckets": updated_buckets}
+    if quiltt_partial:
+        response_data['past_sum'] = round(past_sum, 2)
+    return jsonify(response_data)
 
 
 ############################################################################################
