@@ -1938,7 +1938,7 @@ def dashboard_d():
             cursor.execute("""
                 SELECT * FROM credit_accounts
                 WHERE user_id = %s
-                ORDER BY id ASC
+                ORDER BY display_order ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
         else:
@@ -4981,6 +4981,11 @@ def _add_credit_account_to_redis(user_id, account_data):
         account_data['id'] = new_id
         account_data['user_id'] = user_id
         
+        # Assign display_order: max existing + 1
+        if 'display_order' not in account_data or account_data['display_order'] is None:
+            existing_orders = [int(row.get('display_order', 0)) for row in rows]
+            account_data['display_order'] = max(existing_orders) + 1 if existing_orders else 1
+        
         # Add to array
         rows.append(account_data)
         
@@ -7757,7 +7762,7 @@ def dashboard():
             cursor.execute("""
                 SELECT * FROM credit_accounts
                 WHERE user_id = %s
-                ORDER BY id ASC
+                ORDER BY display_order ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
         else:
@@ -8359,6 +8364,39 @@ def update_ca_order():
         cursor.close()
 
     return jsonify({'status': 'success'})
+
+@app.route('/update_credit_account_order', methods=['POST'])
+@login_required
+def update_credit_account_order():
+    """Reorder credit accounts by updating display_order in Redis (flushed to MySQL)."""
+    order_data = request.json.get('order', [])
+    user_id = current_user.id
+
+    if not order_data:
+        return jsonify({'status': 'error', 'message': 'No order data provided'}), 400
+
+    try:
+        # Update Redis in-place
+        accounts = _get_credit_accounts_from_redis(user_id)
+        if accounts:
+            # Build lookup: account_id → new display_order
+            order_map = {int(item['id']): int(item['order']) for item in order_data}
+            for account in accounts:
+                acct_id = int(account.get('id', 0))
+                if acct_id in order_map:
+                    account['display_order'] = order_map[acct_id]
+
+            # Sort by new display_order and save back
+            accounts.sort(key=lambda a: int(a.get('display_order', 0)))
+            redis_key = f"credit_accounts:v1:{user_id}"
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(accounts, cls=DecimalEncoder))
+            _redis_client.sadd(f"dirty_tables:{user_id}", 'credit_accounts')
+            _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
+
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        app.logger.error(f"Error updating credit account order: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregation='week', specific_date=None):
     """
@@ -9800,7 +9838,7 @@ def dashboard_3m():
             cursor.execute("""
                 SELECT * FROM credit_accounts
                 WHERE user_id = %s
-                ORDER BY id ASC
+                ORDER BY display_order ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
         else:
@@ -10491,7 +10529,7 @@ def dashboard_m():
             cursor.execute("""
                 SELECT * FROM credit_accounts
                 WHERE user_id = %s
-                ORDER BY id ASC
+                ORDER BY display_order ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
         else:
@@ -10846,7 +10884,7 @@ def dashboard_y():
             cursor.execute("""
                 SELECT * FROM credit_accounts
                 WHERE user_id = %s
-                ORDER BY id ASC
+                ORDER BY display_order ASC
             """, (current_user.id,))
             credit_accounts = list(cursor.fetchall())
         else:
@@ -14871,7 +14909,7 @@ def recurring_ca_expense():
         cursor.execute("""
             SELECT * FROM credit_accounts
             WHERE user_id = %s
-            ORDER BY id ASC
+            ORDER BY display_order ASC
         """, (current_user.id,))
         credit_accounts = cursor.fetchall()
 
@@ -15799,7 +15837,7 @@ def buds():
         cursor.execute("""
             SELECT * FROM credit_accounts
             WHERE user_id = %s
-            ORDER BY id ASC
+            ORDER BY display_order ASC
         """, (current_user.id,))
         credit_accounts = cursor.fetchall()
 
@@ -17470,7 +17508,7 @@ def credit_accounts():
             cursor.execute("""
                 SELECT * FROM credit_accounts
                 WHERE user_id = %s
-                ORDER BY id ASC
+                ORDER BY display_order ASC
             """, (current_user.id,))
             credit_accounts = cursor.fetchall()
             cursor.close()
@@ -19683,7 +19721,7 @@ def quiltt_sync_profile():
                     if not credit_accounts:
                         with get_db_pool().get_connection() as conn:
                             cursor = conn.cursor(pymysql.cursors.DictCursor)
-                            cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s", (current_user.id,))
+                            cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order ASC", (current_user.id,))
                             credit_accounts = list(cursor.fetchall())
                             cursor.close()
                             # Cache in Redis if we got data from MySQL
@@ -20842,7 +20880,7 @@ def quiltt_link_credit_account():
         else:
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s", (current_user.id,))
+                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order ASC", (current_user.id,))
                 credit_accounts = cursor.fetchall()
                 cursor.close()
         
@@ -22174,7 +22212,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
         if credit_accounts is None:
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s", (user_id,))
+                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order ASC", (user_id,))
                 credit_accounts = list(cursor.fetchall())
                 cursor.close()
         
@@ -22453,7 +22491,7 @@ def quiltt_toggle_sync():
                         if not credit_accounts:
                             with get_db_pool().get_connection() as conn:
                                 cursor = conn.cursor(pymysql.cursors.DictCursor)
-                                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s", (current_user.id,))
+                                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order ASC", (current_user.id,))
                                 credit_accounts = list(cursor.fetchall())
                                 cursor.close()
                                 # Cache in Redis if we got data from MySQL
