@@ -1,0 +1,26 @@
+White - #FFF
+Background - #F2F7F7
+
+Primary Teal - #2AAAA8
+Primary Teal Light/Hover - #59D6D4
+Primary Team Lighter - #E6FAF9
+
+Secondary Grey - #A9A9A9
+Secondary Grey Dark - #676767
+Secondary Grey Light/Hover - #D3D3D3
+Secondary Grey Lighter - #F4F4F4
+
+Accent Orange - #E45F1C
+Accent Orange Light/Hover - #EF9F77
+Accent Orange Lighter - #FDEEEE
+
+Text Dark - #575757
+Text Light - #FFFFFF
+
+Modal Background - #fcffff
+
+Danger/Negative - #F94449
+Danger/Negative Light/Hover - #EB6D6D
+
+Success - #28A745
+Success Light/Hover #5FAB71
