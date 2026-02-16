@@ -11214,6 +11214,282 @@ def dashboard_summary():
 
 
 ############################################################################################
+############################### WIDGET API ENDPOINTS #######################################
+############################################################################################
+
+@app.route('/api/widget/buffer-summary', methods=['GET'])
+@login_required
+def widget_buffer_summary():
+    """JSON API for iOS widget: returns current balance, next payday, and projected balance.
+    Replicates the client-side buffer card logic from dashboard_summary.html server-side."""
+    from datetime import date as date_cls
+
+    user_id = current_user.id
+    today = date_cls.today()
+    today_str = today.isoformat()
+
+    # --- Currency ---
+    user_data = None
+    redis_key = f"users:v1:{user_id}"
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+        except Exception:
+            pass
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT currency_type FROM users WHERE id = %s", (user_id,))
+            user_data = cursor.fetchone() or {}
+            cursor.close()
+
+    currency_type = (user_data.get('currency_type') or 'USD') if user_data else 'USD'
+    currency_symbols = {
+        'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CAD': 'C$',
+        'AUD': 'A$', 'CHF': 'Fr', 'CNY': '¥', 'INR': '₹', 'MXN': 'Mex$'
+    }
+    currency_symbol = currency_symbols.get(currency_type, '$')
+
+    # --- Current balance (most recent daily remainder ≤ today) ---
+    totals_remainders_d = _get_entries_from_redis('totals_remainders_d', user_id)
+    if totals_remainders_d is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT date, remainder FROM totals_remainders_d WHERE user_id = %s ORDER BY date",
+                (user_id,)
+            )
+            totals_remainders_d = cursor.fetchall() or []
+            cursor.close()
+        for row in totals_remainders_d:
+            if isinstance(row.get('date'), date_cls):
+                row['date'] = row['date'].isoformat()
+            if row.get('remainder') is not None:
+                row['remainder'] = float(row['remainder'])
+
+    current_balance = 0.0
+    latest_date = None
+    for tr in (totals_remainders_d or []):
+        tr_date_str = str(tr.get('date', ''))[:10]
+        if tr_date_str and tr_date_str <= today_str:
+            if latest_date is None or tr_date_str > latest_date:
+                latest_date = tr_date_str
+                current_balance = float(tr.get('remainder', 0) or 0)
+
+    # Fallback to starting balance
+    if latest_date is None:
+        starting_balance_data = _get_entries_from_redis('starting_balance', user_id)
+        if starting_balance_data is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT amount FROM starting_balance WHERE user_id = %s", (user_id,))
+                starting_balance_data = cursor.fetchone()
+                cursor.close()
+        elif isinstance(starting_balance_data, list) and len(starting_balance_data) > 0:
+            starting_balance_data = starting_balance_data[0]
+        if starting_balance_data and starting_balance_data.get('amount') is not None:
+            current_balance = float(starting_balance_data['amount'])
+
+    # --- Find next payday (next future income entry from a recurring category) ---
+    all_income_categories = _get_categories_from_redis('income_categories', user_id)
+    if all_income_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT id, is_recurring FROM income_categories WHERE user_id = %s", (user_id,))
+            all_income_categories = cursor.fetchall() or []
+            cursor.close()
+
+    recurring_cat_ids = {c['id'] for c in all_income_categories if c.get('is_recurring') == 1}
+
+    income_entries = _get_entries_from_redis('income_entries', user_id)
+    if income_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT category_id, date, amount FROM income_entries WHERE category_id IN "
+                "(SELECT id FROM income_categories WHERE user_id = %s)",
+                (user_id,)
+            )
+            income_entries = cursor.fetchall() or []
+            cursor.close()
+
+    next_payday_str = None
+    if recurring_cat_ids:
+        for entry in (income_entries or []):
+            if entry.get('category_id') not in recurring_cat_ids:
+                continue
+            entry_date_str = str(entry.get('date', ''))[:10]
+            if entry_date_str and entry_date_str > today_str:
+                if next_payday_str is None or entry_date_str < next_payday_str:
+                    next_payday_str = entry_date_str
+
+    # --- Projected balance (day before next payday) ---
+    projected_balance = None
+    days_until_payday = None
+    projected_date_str = None
+
+    if next_payday_str:
+        next_payday_date = datetime.strptime(next_payday_str, '%Y-%m-%d').date()
+        days_until_payday = (next_payday_date - today).days
+        projected_date = next_payday_date - timedelta(days=1)
+        projected_date_str = projected_date.isoformat()
+
+        # Try to find exact remainder for projected date
+        proj_found = False
+        for tr in (totals_remainders_d or []):
+            if str(tr.get('date', ''))[:10] == projected_date_str:
+                projected_balance = float(tr.get('remainder', 0) or 0)
+                proj_found = True
+                break
+
+        if not proj_found:
+            # Calculate: current balance + future income − future expenses between today and projected date
+            projected_balance = current_balance
+
+            for entry in (income_entries or []):
+                ed = str(entry.get('date', ''))[:10]
+                if ed and ed > today_str and ed <= projected_date_str:
+                    projected_balance += float(entry.get('amount', 0) or 0)
+
+            expense_entries = _get_entries_from_redis('expense_entries', user_id)
+            if expense_entries is None:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute(
+                        "SELECT date, amount FROM expense_entries WHERE category_id IN "
+                        "(SELECT id FROM expense_categories WHERE user_id = %s)",
+                        (user_id,)
+                    )
+                    expense_entries = cursor.fetchall() or []
+                    cursor.close()
+
+            for entry in (expense_entries or []):
+                ed = str(entry.get('date', ''))[:10]
+                if ed and ed > today_str and ed <= projected_date_str:
+                    projected_balance -= float(entry.get('amount', 0) or 0)
+
+    return jsonify({
+        'success': True,
+        'current_balance': round(current_balance, 2),
+        'next_payday_date': next_payday_str,
+        'days_until_payday': days_until_payday,
+        'projected_balance': round(projected_balance, 2) if projected_balance is not None else None,
+        'projected_date': projected_date_str,
+        'currency_symbol': currency_symbol,
+        'currency_type': currency_type
+    })
+
+
+@app.route('/api/widget/pending-transactions', methods=['GET'])
+@login_required
+def widget_pending_transactions():
+    """JSON API for iOS widget: returns pending transaction count and list.
+    Mirrors the logic in pending_transactions() but returns JSON instead of HTML."""
+
+    user_id = current_user.id
+
+    # --- Currency ---
+    user_data = None
+    redis_key = f"users:v1:{user_id}"
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+        except Exception:
+            pass
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT currency_type FROM users WHERE id = %s", (user_id,))
+            user_data = cursor.fetchone() or {}
+            cursor.close()
+
+    currency_type = (user_data.get('currency_type') or 'USD') if user_data else 'USD'
+    currency_symbols = {
+        'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CAD': 'C$',
+        'AUD': 'A$', 'CHF': 'Fr', 'CNY': '¥', 'INR': '₹', 'MXN': 'Mex$'
+    }
+    currency_symbol = currency_symbols.get(currency_type, '$')
+
+    from quiltt_redis import get_quiltt_transactions, get_quiltt_accounts
+    quiltt_transactions = get_quiltt_transactions(user_id)
+    quiltt_accounts = get_quiltt_accounts(user_id)
+
+    account_lookup = {acc.get('account_id'): acc for acc in (quiltt_accounts or [])}
+
+    # Collect pending/auto-confirmed entry IDs across all entry types
+    pending_entry_ids = {'income': set(), 'expense': set(), 'c_expense': set()}
+    entry_category_lookup = {'income': {}, 'expense': {}, 'c_expense': {}}
+    entry_auto_confirmed_lookup = {'income': {}, 'expense': {}, 'c_expense': {}}
+
+    for entry_type, table_name in [('income', 'income_entries'), ('expense', 'expense_entries'), ('c_expense', 'c_expense_entries')]:
+        entries = _get_entries_from_redis(table_name, user_id) or []
+        for entry in entries:
+            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
+                eid = entry.get('id')
+                pending_entry_ids[entry_type].add(eid)
+                entry_category_lookup[entry_type][eid] = entry.get('category_id')
+                entry_auto_confirmed_lookup[entry_type][eid] = entry.get('auto_confirmed', 0)
+
+    # Load visible categories for name lookup
+    expense_categories = [c for c in (_get_categories_from_redis('expense_categories', user_id) or []) if not c.get('hidden')]
+    income_categories = [c for c in (_get_categories_from_redis('income_categories', user_id) or []) if not c.get('hidden')]
+    c_expense_categories = [c for c in (_get_categories_from_redis('c_expense_categories', user_id) or [])
+                            if not c.get('hidden') and c.get('name', '').lower() != 'starting balance']
+
+    category_name_lookup = {}
+    for cat in income_categories:
+        category_name_lookup[('income', cat.get('id'))] = cat.get('name')
+    for cat in expense_categories:
+        category_name_lookup[('expense', cat.get('id'))] = cat.get('name')
+    for cat in c_expense_categories:
+        category_name_lookup[('c_expense', cat.get('id'))] = cat.get('name')
+
+    # Build pending transactions list
+    pending_txns = []
+    for txn in (quiltt_transactions or []):
+        imported_entry_id = txn.get('imported_to_entry_id')
+        entry_type = txn.get('imported_entry_type')
+        if not imported_entry_id or not entry_type:
+            continue
+        if entry_type not in pending_entry_ids or imported_entry_id not in pending_entry_ids[entry_type]:
+            continue
+
+        account_info = account_lookup.get(txn.get('account_id'), {})
+        current_category_id = entry_category_lookup.get(entry_type, {}).get(imported_entry_id)
+        is_auto_confirmed = entry_auto_confirmed_lookup.get(entry_type, {}).get(imported_entry_id, 0) == 1
+        category_name = category_name_lookup.get((entry_type, current_category_id), '')
+
+        pending_txns.append({
+            'transaction_id': txn.get('transaction_id'),
+            'merchant_name': txn.get('merchant_name'),
+            'description': txn.get('description'),
+            'amount': float(txn.get('amount', 0)),
+            'date': txn.get('date'),
+            'account_name': account_info.get('account_name', 'Unknown'),
+            'entry_type': entry_type,
+            'is_expense': entry_type in ('expense', 'c_expense'),
+            'current_category_name': category_name,
+            'is_auto_confirmed': is_auto_confirmed
+        })
+
+    # Sort by date (newest first)
+    pending_txns.sort(key=lambda x: x.get('date', ''), reverse=True)
+
+    return jsonify({
+        'success': True,
+        'count': len(pending_txns),
+        'pending_transactions': pending_txns,
+        'currency_symbol': currency_symbol,
+        'currency_type': currency_type,
+        'categorization_url': 'https://app.blankee.io/pending-transactions'
+    })
+
+
+############################################################################################
 ############################### PROFILE PAGE ###############################################
 ############################################################################################
 
