@@ -2910,12 +2910,12 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             dashboardDEntryTypeHidden.value = '';
             dashboardDEntryTypeDropdown.style.display = 'none';
             
-            // Determine if this is a locked date (today or before)
+            // Determine if this is a locked date (before today only — today is allowed)
             let isLockedDate = false;
             if (quiltt_flags && dateStr) {
                 const today = new Date();
                 const todayStr = today.toLocaleDateString('en-CA'); // YYYY-MM-DD format
-                isLockedDate = dateStr <= todayStr;
+                isLockedDate = dateStr < todayStr;
             }
             
             // For future dates or if no checking linked, show Income/Expense options

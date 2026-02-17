@@ -2275,13 +2275,13 @@ def dashboard_d_add_entry():
             entry_date_parsed = entry_date
         today = date_type.today()
         
-        # PHASE 3 (Feb 2026): Future-dated entries become buckets
-        entry_is_bucket = entry_date_parsed > today
+        # PHASE 3 (Feb 2026): Today or future entries become buckets
+        entry_is_bucket = entry_date_parsed >= today
         
         if entry_is_bucket:
-            app.logger.info(f"[BUCKET] Future entry date {entry_date} > today {today}, will create as bucket")
+            app.logger.info(f"[BUCKET] Entry date {entry_date} >= today {today}, will create as bucket")
         else:
-            # PHASE 2 (Feb 2026): Process bucket reduction for today/past entries
+            # PHASE 2 (Feb 2026): Process bucket reduction for past entries
             # Works for BOTH recurring categories and non-recurring categories with manual buckets
             from bucket_utils import find_next_bucket_for_category
             
@@ -9497,7 +9497,7 @@ def update_week_entry():
     else:
         friday_date_parsed = friday_date
     today = date_type.today()
-    entry_is_bucket = friday_date_parsed > today
+    entry_is_bucket = friday_date_parsed >= today
     
     # Check for bucket entries and deplete them if this is a recurring category OR has manual buckets
     if delta_amount != 0 and not entry_is_bucket:
@@ -15819,13 +15819,13 @@ def footer_add_entry():
             entry_date_parsed = entry_date
         today = date_type.today()
         
-        # PHASE 3 (Feb 2026): Future-dated entries become buckets
-        entry_is_bucket = entry_date_parsed > today
+        # PHASE 3 (Feb 2026): Today or future entries become buckets
+        entry_is_bucket = entry_date_parsed >= today
         
         if entry_is_bucket:
-            app.logger.info(f"[BUCKET] Future entry date {entry_date} > today {today}, will create as bucket")
+            app.logger.info(f"[BUCKET] Entry date {entry_date} >= today {today}, will create as bucket")
         else:
-            # PHASE 2 (Feb 2026): Process bucket reduction for today/past entries
+            # PHASE 2 (Feb 2026): Process bucket reduction for past entries
             # Works for BOTH recurring categories and non-recurring categories with manual buckets
             from bucket_utils import find_next_bucket_for_category
             
