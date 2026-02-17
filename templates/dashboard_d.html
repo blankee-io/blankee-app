@@ -64,7 +64,7 @@
             </div>
             <div class="calendarnavbuttons"> 
                 <a id="previous-nav-btn" class="nav-button" href="javascript:previousWeek()"><i class="fa-solid fa-left"></i><span class="nav-tooltip">Previous Week</span></a>
-                <a id="current-nav-btn" class="nav-button" href="javascript:goToCurrentWeek()">Today<span class="nav-tooltip">Go to Current Week</span></a>
+                <a id="current-nav-btn" class="nav-button" href="javascript:goToCurrentWeek()"><i class="fa-kit fa-solid-calendar-day-circle-arrow-down-tl"></i><span class="nav-tooltip">Go to Current Week</span></a>
                 <a id="next-nav-btn" class="nav-button" href="javascript:nextWeek()"><i class="fa-solid fa-right"></i><span class="nav-tooltip">Next Week</span></a>
                 <div id="next-indicator" style="display:none;text-align:center;">
                     <span class="indicator-dot">!</span>
@@ -654,11 +654,11 @@
                             dashboardDCategoryHidden.value = cExpenseCategoryId;
                             dashboardDDropdown.style.display = 'none';
                         } else {
-                            alert('Failed to create category');
+                            showToast('Failed to create category', 'error');
                         }
                     },
                     error: function() {
-                        alert('Error creating category');
+                        showToast('Error creating category', 'error');
                     }
                 });
                 return;
@@ -691,11 +691,11 @@
                         dashboardDCategoryHidden.value = response.new_category_id;
                         dashboardDDropdown.style.display = 'none';
                     } else {
-                        alert('Failed to create category');
+                        showToast('Failed to create category', 'error');
                     }
                 },
                 error: function() {
-                    alert('Error creating category');
+                    showToast('Error creating category', 'error');
                 }
             });
         }
@@ -857,7 +857,7 @@
                 // Hide add button if date is before member_since OR if no valid entry types available (Quiltt locking)
                 const isBeforeMemberSince = normalizedMemberSinceDate && date < normalizedMemberSinceDate;
                 const hasValidEntryTypes = shouldShowAddButton(date);
-                const addButton = (isBeforeMemberSince || !hasValidEntryTypes) ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-solid fa-plus"></i><span class="nav-tooltip">Add New Entry</span></button>`;
+                const addButton = (isBeforeMemberSince || !hasValidEntryTypes) ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-kit fa-solid-money-bill-transfer-circle-plus-bl fa-flip-horizontal"></i><span class="nav-tooltip">Add New Entry</span></button>`;
                 
                 dayHeader.innerHTML = `${formattedDate} ${addButton}${memberSinceIcon}`;
                 container.appendChild(dayHeader);
@@ -1311,6 +1311,7 @@
             const categoryId = row.getAttribute('data-category-id');
             const date = new Date(row.getAttribute('data-date'));
             const formattedDate = date.toISOString().split('T')[0];
+            const entryId = row.getAttribute('data-entry-id');
 
             // Use the same value for start_date and end_date
             const startDate = formattedDate;
@@ -1326,11 +1327,21 @@
                 } else if (type === 'ca') {
                     entriesArray = c_expense_entries;
                 }
-                // Remove the entry from the array
-                for (let i = entriesArray.length - 1; i >= 0; i--) {
-                    let entryDateString = new Date(entriesArray[i].date).toISOString().split('T')[0];
-                    if (String(entriesArray[i].category_id) === String(categoryId) && entryDateString === endDate) {
-                        entriesArray.splice(i, 1);
+                // Remove only the specific entry by ID (not all entries for category+date)
+                if (entryId && entryId !== 'new') {
+                    for (let i = entriesArray.length - 1; i >= 0; i--) {
+                        if (String(entriesArray[i].id) === String(entryId)) {
+                            entriesArray.splice(i, 1);
+                            break;
+                        }
+                    }
+                } else {
+                    // Fallback: remove by category+date
+                    for (let i = entriesArray.length - 1; i >= 0; i--) {
+                        let entryDateString = new Date(entriesArray[i].date).toISOString().split('T')[0];
+                        if (String(entriesArray[i].category_id) === String(categoryId) && entryDateString === endDate) {
+                            entriesArray.splice(i, 1);
+                        }
                     }
                 }
 
@@ -1359,7 +1370,8 @@
                     category_id: categoryId,
                     start_date: startDate,
                     end_date: endDate,
-                    type: type // 'income', 'expense', or 'ca'
+                    type: type, // 'income', 'expense', or 'ca'
+                    entry_id: (entryId && entryId !== 'new') ? entryId : null
                 };
 
                 $.ajax({
@@ -1434,7 +1446,8 @@
                     category_id: categoryId,
                     date: endDate,
                     amount: amount,
-                    type: type // 'income', 'expense', or 'ca'
+                    type: type, // 'income', 'expense', or 'ca'
+                    entry_id: (entryId && entryId !== 'new') ? entryId : null
                 };
                 $.ajax({
                     url: "/update-entry",
@@ -1454,15 +1467,26 @@
                             } else if (type === 'ca') {
                                 entriesArray = c_expense_entries;
                             }
-                            // Find and update the entry by category_id and date
+                            // Find and update the specific entry by ID
                             let found = false;
-                            entriesArray.forEach(entry => {
-                                let entryDateString = new Date(entry.date).toISOString().split('T')[0];
-                                if (String(entry.category_id) === String(categoryId) && entryDateString === endDate) {
-                                    entry.amount = amount;
-                                    found = true;
-                                }
-                            });
+                            if (entryId && entryId !== 'new') {
+                                entriesArray.forEach(entry => {
+                                    if (String(entry.id) === String(entryId)) {
+                                        entry.amount = amount;
+                                        found = true;
+                                    }
+                                });
+                            }
+                            if (!found) {
+                                // Fallback: match by category_id and date
+                                entriesArray.forEach(entry => {
+                                    let entryDateString = new Date(entry.date).toISOString().split('T')[0];
+                                    if (String(entry.category_id) === String(categoryId) && entryDateString === endDate) {
+                                        entry.amount = amount;
+                                        found = true;
+                                    }
+                                });
+                            }
                             // If not found, add new entry locally
                             if (!found) {
                                 entriesArray.push({
@@ -1656,6 +1680,14 @@
             
             // Update today banner after navigation
             setTimeout(updateTodayBanner, 100);
+
+            // Scroll to today's container
+            setTimeout(function() {
+                const todayContainer = document.querySelector('.dashboard-d-container.today-outline');
+                if (todayContainer) {
+                    todayContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 400);
         }
 
 
@@ -2725,7 +2757,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                     document.getElementById('loading-screen').style.display = 'none';
                 },
                 error: function() {
-                    alert('Failed to move entry.');
+                    showToast('Failed to move entry.', 'error');
                     document.getElementById('loading-screen').style.display = 'none';
                 }
             });

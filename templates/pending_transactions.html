@@ -323,11 +323,11 @@
                         hiddenInput.value = categoryIdToUse;
                         dropdown.style.display = 'none';
                     } else {
-                        alert('Failed to create category');
+                        showToast('Failed to create category', 'error');
                     }
                 },
                 error: function() {
-                    alert('Failed to create category');
+                    showToast('Failed to create category', 'error');
                 }
             });
         }
@@ -383,7 +383,7 @@
             const confirmBtn = item.find('.confirm-btn');
             
             if (!categoryId) {
-                alert('Please select a category');
+                showToast('Please select a category', 'warning');
                 return;
             }
             
@@ -416,13 +416,13 @@
                             });
                         }, 1000);
                     } else {
-                        alert('Error: ' + response.message);
+                        showToast('Error: ' + response.message, 'error');
                         confirmBtn.prop('disabled', false);
                         confirmBtn.html('<i class="fa-solid fa-check"></i> Confirm');
                     }
                 },
                 error: function() {
-                    alert('Failed to confirm transaction. Please try again.');
+                    showToast('Failed to confirm transaction. Please try again.', 'warning');
                     confirmBtn.prop('disabled', false);
                     confirmBtn.html('<i class="fa-solid fa-check"></i> Confirm');
                 }
@@ -473,12 +473,12 @@
                             });
                         }, 1000);
                     } else {
-                        alert('Error: ' + response.message);
+                        showToast('Error: ' + response.message, 'error');
                         items.find('.confirm-btn').prop('disabled', false);
                     }
                 },
                 error: function() {
-                    alert('Failed to confirm transactions. Please try again.');
+                    showToast('Failed to confirm transactions. Please try again.', 'warning');
                     items.find('.confirm-btn').prop('disabled', false);
                 }
             });

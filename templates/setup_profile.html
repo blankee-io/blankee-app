@@ -598,7 +598,7 @@
                 const connectorId = '{{ connector_id|default("") }}';
                 
                 if (!connectorId || connectorId === '') {
-                    alert('Bank connection is not configured. Please skip for now and set up manually.');
+                    showToast('Bank connection is not configured. Please skip for now and set up manually.', 'warning');
                     return;
                 }
 
@@ -617,12 +617,12 @@
                             loadQuilttConnectorSetup(response.session_token, connectorId);
                         } else {
                             $('#loading-screen').hide();
-                            alert('Unable to connect bank. Please skip for now.');
+                            showToast('Unable to connect bank. Please skip for now.', 'warning');
                         }
                     },
                     error: function() {
                         $('#loading-screen').hide();
-                        alert('Error connecting to bank service. Please skip for now.');
+                        showToast('Error connecting to bank service. Please skip for now.', 'warning');
                     }
                 });
             });
@@ -636,7 +636,7 @@
                         openQuilttConnectorSetup(sessionToken, connectorId);
                     };
                     script.onerror = function() {
-                        alert('Failed to load bank connection tool.');
+                        showToast('Failed to load bank connection tool.', 'error');
                     };
                     document.head.appendChild(script);
                 } else {
@@ -669,12 +669,12 @@
                                                 loadAccountSelection();
                                             }, 500);
                                         } else {
-                                            alert('Connection successful but sync failed. Continuing with manual setup.');
+                                            showToast('Connection successful but sync failed. Continuing with manual setup.', 'error');
                                             $('#name-modal-setup').show();
                                         }
                                     },
                                     error: function() {
-                                        alert('Connection successful but sync failed. Continuing with manual setup.');
+                                        showToast('Connection successful but sync failed. Continuing with manual setup.', 'error');
                                         $('#name-modal-setup').show();
                                     }
                                 });
@@ -685,16 +685,16 @@
                                 }, 500);
                             } else {
                                 // Max attempts reached, proceed anyway
-                                alert('Bank connection taking longer than expected. Balance data may not be available yet.');
+                                showToast('Bank connection taking longer than expected. Balance data may not be available yet.', 'info');
                                 loadAccountSelection();
                             }
                         } else {
-                            alert('Unable to verify connection status. Continuing with manual setup.');
+                            showToast('Unable to verify connection status. Continuing with manual setup.', 'error');
                             $('#name-modal-setup').show();
                         }
                     },
                     error: function() {
-                        alert('Error checking connection status. Continuing with manual setup.');
+                        showToast('Error checking connection status. Continuing with manual setup.', 'error');
                         $('#name-modal-setup').show();
                     }
                 });
@@ -729,13 +729,13 @@
                                         }, 2000);
                                     } else {
                                         $('#setup-profile-loading-modal').hide();
-                                        alert('Connection successful but sync failed. Continuing with manual setup.');
+                                        showToast('Connection successful but sync failed. Continuing with manual setup.', 'error');
                                         $('#name-modal-setup').show();
                                     }
                                 },
                                 error: function() {
                                     $('#setup-profile-loading-modal').hide();
-                                    alert('Connection successful but sync failed. Continuing with manual setup.');
+                                    showToast('Connection successful but sync failed. Continuing with manual setup.', 'error');
                                     $('#name-modal-setup').show();
                                 }
                             });
@@ -745,7 +745,7 @@
                             $('#bank-connection-modal-setup').show();
                         },
                         onExitError: function(metadata) {
-                            alert('Failed to connect bank. Please try again or skip.');
+                            showToast('Failed to connect bank. Please try again or skip.', 'warning');
                             $('#bank-connection-modal-setup').show();
                         },
                         onEvent: function(eventType, metadata) {
@@ -755,7 +755,7 @@
                     
                     connector.open();
                 } catch (error) {
-                    alert('Error opening bank connection: ' + error.message);
+                    showToast('Error opening bank connection: ' + error.message, 'error');
                 }
             }
 
@@ -862,13 +862,13 @@
                             if (hasAccounts) {
                                 $('#account-selection-modal-setup').show();
                             } else {
-                                alert('No accounts found. Continuing with manual setup.');
+                                showToast('No accounts found. Continuing with manual setup.', 'info');
                                 $('#name-modal-setup').show();
                             }
                         }
                     },
                     error: function() {
-                        alert('Failed to load accounts. Continuing with manual setup.');
+                        showToast('Failed to load accounts. Continuing with manual setup.', 'error');
                         $('#name-modal-setup').show();
                     }
                 });
@@ -891,7 +891,7 @@
                         // Another one is already checked, prevent this selection
                         checkbox.prop('checked', false);
                         const typeLabel = accountType === 'checking' ? 'Checking' : 'Savings';
-                        alert(`You can only select one ${typeLabel} account. Please deselect the other first.`);
+                        showToast(`You can only select one ${typeLabel} account. Please deselect the other first.`, 'warning');
                     }
                 }
             });
@@ -904,7 +904,7 @@
                 });
                 
                 if (selectedAccounts.length === 0) {
-                    alert('Please select at least one account to continue, or skip bank connection.');
+                    showToast('Please select at least one account to continue, or skip bank connection.', 'warning');
                     return;
                 }
                 
@@ -956,7 +956,7 @@
                         analyzeCategoriesForSetup(selectedAccountIds);
                     })
                     .catch(function(error) {
-                        alert('Error updating accounts. Continuing with manual setup.');
+                        showToast('Error updating accounts. Continuing with manual setup.', 'error');
                         $('#account-selection-modal-setup').hide();
                         $('#name-modal-setup').show();
                     });
@@ -994,7 +994,7 @@
                         }
                     },
                     error: function() {
-                        alert('Connected but failed to fetch balances. Continuing with manual setup.');
+                        showToast('Connected but failed to fetch balances. Continuing with manual setup.', 'error');
                         $('#account-selection-modal-setup').hide();
                         $('#name-modal-setup').show();
                     }
@@ -1030,7 +1030,7 @@
                         }
                     },
                     error: function() {
-                        alert('Connected but failed to fetch balances. Continuing with manual setup.');
+                        showToast('Connected but failed to fetch balances. Continuing with manual setup.', 'error');
                         $('#account-selection-modal-setup').hide();
                         $('#name-modal-setup').show();
                     }
@@ -1463,7 +1463,7 @@
                     // Update/set category from form values
                     const categoryName = $('#edit-category-name-input').val().trim();
                     if (!categoryName) {
-                        alert('Please enter a category name.');
+                        showToast('Please enter a category name.', 'warning');
                         return;
                     }
                     
@@ -1611,8 +1611,15 @@
             
             // Delete category recommendation
             // Make globally accessible for onclick handlers
-            window.deleteCategoryRecommendation = function(type, index) {
-                if (!confirm('Remove this category?')) return;
+            window.deleteCategoryRecommendation = async function(type, index) {
+                var confirmed = await showConfirmModal({
+                    title: 'Remove Category',
+                    message: 'Remove this category?',
+                    confirmText: 'Remove',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
                 
                 if (type === 'income') {
                     recommendedCategories.income.splice(index, 1);
@@ -1680,7 +1687,7 @@
             $('#confirm-category-recommendations').on('click', function() {
                 // Validate that we have at least one category
                 if (recommendedCategories.income.length === 0 && recommendedCategories.expense.length === 0) {
-                    alert('Please add at least one category or click "Create Categories Later" to skip.');
+                    showToast('Please add at least one category or click "Create Categories Later" to skip.', 'warning');
                     return;
                 }
                 
@@ -1819,11 +1826,11 @@
                                 $('#setup-profile-currency-type').focus();
                             }
                         } else {
-                            alert('Failed to save name: ' + response.message);
+                            showToast('Failed to save name: ' + response.message, 'error');
                         }
                     },
                     error: function() {
-                        alert('An error occurred while saving your name.');
+                        showToast('An error occurred while saving your name.', 'error');
                     }
                 });
             });
@@ -2068,12 +2075,12 @@
                                 createPendingCategoriesAndFinish();
                             } else {
                                 document.getElementById('building-budget-loading-modal').style.display = 'none';
-                                alert('Profile setup failed: ' + response.message);
+                                showToast('Profile setup failed: ' + response.message, 'error');
                             }
                         },
                         error: function (error) {
                             document.getElementById('building-budget-loading-modal').style.display = 'none';
-                            alert('An error occurred during profile setup.');
+                            showToast('An error occurred during profile setup.', 'error');
                         }
                     });
                 }, 10); // 10ms delay to allow DOM repaint

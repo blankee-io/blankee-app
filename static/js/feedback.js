@@ -114,7 +114,7 @@
         const description = formEl.querySelector('[name="description"]').value.trim();
         const context = formEl.querySelector('[name="context_tag"]')?.value || '';
         if (!title) {
-            alert('Please add a title');
+            showToast('Please add a title', 'warning');
             return;
         }
         try {
@@ -126,7 +126,7 @@
             formEl.reset();
             if (typeof onDone === 'function') onDone();
         } catch (err) {
-            alert(err.message || 'Failed to create post');
+            showToast(err.message || 'Failed to create post', 'error');
         } finally {
             formEl.querySelector('button[type="submit"]').disabled = false;
         }
@@ -145,7 +145,7 @@
             formEl.reset();
             if (typeof onDone === 'function') onDone();
         } catch (err) {
-            alert(err.message || 'Failed to add comment');
+            showToast(err.message || 'Failed to add comment', 'error');
         } finally {
             formEl.querySelector('button[type="submit"]').disabled = false;
         }
@@ -225,7 +225,7 @@
                     loadPostDetail(number, detailEl, commentsEl);
                     loadPosts({ container: listEl, view: viewSelect.value, query: searchInput.value, tag: tagSelect.value, limit: 30, includeContext: false });
                 })
-                .catch(err => alert(err.message || 'Failed to vote'))
+                .catch(err => showToast(err.message || 'Failed to vote', 'error'))
                 .finally(() => { voteBtn.disabled = false; });
         });
     }
@@ -270,7 +270,7 @@
             const number = card.dataset.number;
             fetchJson(`/api/feedback/posts/${number}/votes`, { method: 'POST' })
                 .then(() => loadPosts({ container: listEl, view: 'trending', tag: pageTag, limit: 6, includeContext: true }))
-                .catch(err => alert(err.message || 'Failed to vote'));
+                .catch(err => showToast(err.message || 'Failed to vote', 'error'));
         });
     }
 

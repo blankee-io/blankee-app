@@ -68,7 +68,7 @@
                     <span class="nav-tooltip">Previous Month</span>
                 </a>
                 <a id="current-nav-btn" class="nav-button" href="javascript:goToCurrentCluster()">
-                    Today
+                    <i class="fa-kit fa-solid-calendar-day-circle-arrow-down-tl"></i>
                     <span class="nav-tooltip">Go to Current Month</span>
                 </a>
                 <a id="next-month-btn" class="nav-button" href="javascript:nextCluster()">
@@ -118,7 +118,7 @@
                     </div>
                     <div class="type-selector-wrapper">
                         <button class="add-category-btn unified" id="unified-add-btn">
-                            <i class="fa-solid fa-folder-plus"></i>
+                            <i class="fa-kit fa-solid-folder-circle-plus"></i>
                             <span class="nav-tooltip">Add Category</span>
                         </button>
                         <div class="type-selector-popover" id="add-type-selector" style="display:none;">
@@ -439,15 +439,6 @@
         </div>
     </div>
 
-    <!-- Modal for delete confirmation -->
-    <div id="deleteCategoryModal" class="category-delete-modal">
-        <div class="category-delete-modal-content">
-            <h3>Are you sure you want to delete this category? Past entries for this category will be added to Uncategorized and future entries will be deleted.</h3>
-            <button id="confirmDeleteCategory" class="confirm-delete-category-btn">Delete</button>
-            <button id="cancelDeleteCategory" class="cancel-delete-category-btn">Cancel</button>
-        </div>
-    </div>
-
     <!-- Modal for editing category name -->
     <div id="editCategoryModal" class="category-edit-modal">
         <div class="category-edit-modal-content">
@@ -553,15 +544,6 @@
                 <br>
                 <button type="submit">Submit</button>
             </form>
-        </div>
-    </div>
-
-    <!-- Modal for stopping recurring (confirm) -->
-    <div id="stopRecurringModal" class="category-delete-modal">
-        <div class="category-delete-modal-content">
-            <h3>Stop recurring? Future entries will be removed, but past entries will be kept.</h3>
-            <button id="confirmStopRecurring" class="confirm-delete-category-btn">Stop Recurring</button>
-            <button id="cancelStopRecurring" class="cancel-delete-category-btn">Cancel</button>
         </div>
     </div>
 
@@ -687,15 +669,6 @@
 
         const nextMonthBtn = document.getElementById('next-month-btn'); // Reference to the "Next Month" button
         const previousMonthBtn = document.getElementById('previous-nav-btn');
-
-        let categoryIdForDeletion = null; // Store the category ID to delete
-        let categoryTypeForDeletion = null; // Store the category type (income/expense)
-
-        // Get the modal and the buttons
-        const deleteCategoryModal = document.getElementById('deleteCategoryModal');
-        const closeDeleteCategoryModal = document.getElementById('closeDeleteCategoryModal');
-        const confirmDeleteCategoryBtn = document.getElementById('confirmDeleteCategory');
-        const cancelDeleteCategoryBtn = document.getElementById('cancelDeleteCategory');
 
         let touchHandled = false;
 
@@ -2879,220 +2852,35 @@
             });
         }
 
-        function openCategoryDeleteModal(categoryId, categoryType, event) {
-
-
-            // Stop the event propagation to prevent it from affecting other click handlers
-            if (event) {
-                event.stopPropagation();
-            }
-
-            const deleteModal = document.getElementById('deleteCategoryModal');
-            const confirmButton = document.getElementById('confirmDeleteCategory');
-            const cancelButton = document.getElementById('cancelDeleteCategory');
-
-            // Set modal open flag before displaying the modal
+        async function openCategoryDeleteModal(categoryId, categoryType, event) {
+            if (event) event.stopPropagation();
             isModalOpen = true;
 
-            // Show the delete modal
-            deleteModal.style.display = 'flex';
+            const confirmed = await showConfirmModal({
+                title: 'Delete Category',
+                message: 'Are you sure you want to delete this category? Past entries for this category will be added to Uncategorized and future entries will be deleted.',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                danger: true
+            });
 
-            // Handle confirming deletion
-            confirmButton.onclick = function(event) {
-                event.stopPropagation();
-                if (categoryType === 'income') {
-                    deleteIncomeCategory(categoryId);
-                } else if (categoryType === 'expense') {
-                    deleteExpenseCategory(categoryId);
-                } else if (categoryType === 'ca') {
-                    deleteCaCategory(categoryId);
-                }
-                deleteModal.style.display = 'none';
-                isModalOpen = false;
-            };
+            isModalOpen = false;
+            if (!confirmed) return;
 
-            // Handle canceling the deletion
-            cancelDeleteCategoryBtn.onclick = function(event) {
-                event.stopPropagation(); // Prevent this click from propagating to the document click handler
-                deleteModal.style.display = 'none'; // Close the modal
-                isModalOpen = false; // Mark modal as closed
-            };
-
-            // Close modal when clicking outside the modal itself
-            window.onclick = function(event) {
-                if (event.target === deleteModal) {
-                    deleteModal.style.display = 'none'; // Close the modal
-                    isModalOpen = false; // Reset modal open flag
-                }
-            };
-        }
-
-        // Add modal HTML for entry update confirmation
-        const entryUpdateModalHtml = `
-        <div id="entryUpdateModal" class="modal">
-        <div class="modal-content">
-            <h3>Confirm Entry Update</h3>
-            <p>You are about to delete all entries for this month and substitute it with this new entry.<br>Are you sure you want to proceed?</p>
-            <div class="modal-checkbox-row">
-            <input type="checkbox" id="entryUpdateDontShowAgain">
-            <label for="entryUpdateDontShowAgain">Don't show this message again</label>
-            </div>
-            <div class="modal-actions">
-            <button id="entryUpdateCancelBtn">Cancel</button>
-            <button id="entryUpdateConfirmBtn" tabindex="0">Confirm</button>
-            </div>
-        </div>
-        </div>`;
-        if (!document.getElementById('entryUpdateModal')) {
-        document.body.insertAdjacentHTML('beforeend', entryUpdateModalHtml);
-        }
-
-        // Quiltt partial delete confirmation modal
-        const quilttDeleteModalHtml = `
-        <div id="quilttDeleteModal" class="modal">
-        <div class="modal-content">
-            <h3>Bank-Connected Account</h3>
-            <p>You have your bank connected for this account. This will delete entries from today forward. Past bank transactions will remain.<br><br>Are you sure you want to proceed?</p>
-            <div class="modal-actions">
-            <button id="quilttDeleteCancelBtn">Cancel</button>
-            <button id="quilttDeleteConfirmBtn" tabindex="0">Confirm</button>
-            </div>
-        </div>
-        </div>`;
-        if (!document.getElementById('quilttDeleteModal')) {
-        document.body.insertAdjacentHTML('beforeend', quilttDeleteModalHtml);
-        }
-
-        // Quiltt partial error message modal
-        const quilttErrorModalHtml = `
-        <div id="quilttErrorModal" class="modal">
-        <div class="modal-content">
-            <h3>Cannot Update Entry</h3>
-            <p id="quilttErrorMessage"></p>
-            <div class="modal-actions">
-            <button id="quilttErrorOkBtn" tabindex="0">OK</button>
-            </div>
-        </div>
-        </div>`;
-        if (!document.getElementById('quilttErrorModal')) {
-        document.body.insertAdjacentHTML('beforeend', quilttErrorModalHtml);
-        }
-
-        function showQuilttDeleteModal(onConfirm, onCancel) {
-            const modal = document.getElementById('quilttDeleteModal');
-            modal.style.display = 'flex';
-            const confirmBtn = document.getElementById('quilttDeleteConfirmBtn');
-            const cancelBtn = document.getElementById('quilttDeleteCancelBtn');
-            const modalContent = modal.querySelector('.modal-content');
-
-            function cleanup() {
-                modal.style.display = 'none';
-                confirmBtn.removeEventListener('click', onConfirmHandler);
-                cancelBtn.removeEventListener('click', onCancelHandler);
-                document.removeEventListener('keydown', onKeyDownHandler);
-                modal.removeEventListener('click', onOutsideClickHandler);
-            }
-            function onConfirmHandler() {
-                cleanup();
-                if (onConfirm) onConfirm();
-            }
-            function onCancelHandler() {
-                cleanup();
-                if (onCancel) onCancel();
-            }
-            function onKeyDownHandler(e) {
-                if (e.key === 'Enter') { e.preventDefault(); onConfirmHandler(); }
-                else if (e.key === 'Escape') { e.preventDefault(); onCancelHandler(); }
-            }
-            function onOutsideClickHandler(e) {
-                if (e.target === modal && !modalContent.contains(e.target)) { onCancelHandler(); }
-            }
-            confirmBtn.addEventListener('click', onConfirmHandler);
-            cancelBtn.addEventListener('click', onCancelHandler);
-            document.addEventListener('keydown', onKeyDownHandler);
-            modal.addEventListener('click', onOutsideClickHandler);
-        }
-
-        function showQuilttErrorModal(message) {
-            const modal = document.getElementById('quilttErrorModal');
-            document.getElementById('quilttErrorMessage').textContent = message;
-            modal.style.display = 'flex';
-            const okBtn = document.getElementById('quilttErrorOkBtn');
-            const modalContent = modal.querySelector('.modal-content');
-
-            function cleanup() {
-                modal.style.display = 'none';
-                okBtn.removeEventListener('click', onOkHandler);
-                document.removeEventListener('keydown', onKeyDownHandler);
-                modal.removeEventListener('click', onOutsideClickHandler);
-            }
-            function onOkHandler() { cleanup(); }
-            function onKeyDownHandler(e) {
-                if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); cleanup(); }
-            }
-            function onOutsideClickHandler(e) {
-                if (e.target === modal && !modalContent.contains(e.target)) { cleanup(); }
-            }
-            okBtn.addEventListener('click', onOkHandler);
-            document.addEventListener('keydown', onKeyDownHandler);
-            modal.addEventListener('click', onOutsideClickHandler);
-        }
-
-        function showEntryUpdateModal(onConfirm, onCancel) {
-        // If user opted out, skip modal and auto-confirm
-        if (localStorage.getItem('entryUpdateModalDontShow') === '1') {
-            if (onConfirm) onConfirm();
-            return;
-        }
-        const modal = document.getElementById('entryUpdateModal');
-        modal.style.display = 'flex';
-        const confirmBtn = document.getElementById('entryUpdateConfirmBtn');
-        const cancelBtn = document.getElementById('entryUpdateCancelBtn');
-        const dontShowCheckbox = document.getElementById('entryUpdateDontShowAgain');
-        const modalContent = modal.querySelector('.modal-content');
-        // Reset checkbox state every time modal is shown
-        dontShowCheckbox.checked = false;
-
-        function cleanup() {
-            modal.style.display = 'none';
-            confirmBtn.removeEventListener('click', onConfirmHandler);
-            cancelBtn.removeEventListener('click', onCancelHandler);
-            document.removeEventListener('keydown', onKeyDownHandler);
-            modal.removeEventListener('click', onOutsideClickHandler);
-        }
-        function onConfirmHandler() {
-            if (dontShowCheckbox.checked) {
-            localStorage.setItem('entryUpdateModalDontShow', '1');
-            }
-            cleanup();
-            if (onConfirm) onConfirm();
-        }
-        function onCancelHandler() {
-            cleanup();
-            if (onCancel) onCancel();
-        }
-        function onKeyDownHandler(e) {
-            if (e.key === 'Enter') {
-            e.preventDefault();
-            onConfirmHandler();
-            } else if (e.key === 'Escape') {
-            e.preventDefault();
-            onCancelHandler();
+            if (categoryType === 'income') {
+                deleteIncomeCategory(categoryId);
+            } else if (categoryType === 'expense') {
+                deleteExpenseCategory(categoryId);
+            } else if (categoryType === 'ca') {
+                deleteCaCategory(categoryId);
             }
         }
-        // Add handler for clicks outside the modal content
-        function onOutsideClickHandler(e) {
-            // If the click is on the modal background (not on the modal content)
-            if (e.target === modal && !modalContent.contains(e.target)) {
-            onCancelHandler();
-            }
-        }
-        confirmBtn.addEventListener('click', onConfirmHandler);
-        cancelBtn.addEventListener('click', onCancelHandler);
-        document.addEventListener('keydown', onKeyDownHandler);
-        modal.addEventListener('click', onOutsideClickHandler);
-        // Do NOT focus the confirm button, so it is not highlighted by default
-        }
+
+
+
+
+
+
 
         function handleInputEdit(input, type) {
             let originalValue = '';
@@ -3166,21 +2954,23 @@
                     }
                     if (newValue !== originalValue) {
                         // Editing an existing entry
-                        showEntryUpdateModal(
-                            function() { 
+                        (async function() {
+                            const confirmed = await showConfirmModal({
+                                title: 'Confirm Entry Update',
+                                message: 'You are about to delete all entries for this month and substitute it with this new entry. Are you sure you want to proceed?',
+                                confirmText: 'Confirm',
+                                cancelText: 'Cancel',
+                                checkbox: { label: "Don't show this message again", storageKey: 'entryUpdateModalDontShow' }
+                            });
+                            if (confirmed) {
                                 updateEntryInput(input, type);
-                                // Refocus immediately after blur and select text
-                                setTimeout(() => {
-                                    input.focus();
-                                    input.select();
-                                }, 0);
-                            },
-                            function() { 
+                                setTimeout(() => { input.focus(); input.select(); }, 0);
+                            } else {
                                 input.value = originalValue;
                                 ignoreBlur = false;
                                 entryProcessed = false;
                             }
-                        );
+                        })();
                     }
                 }
             });
@@ -3231,15 +3021,21 @@
                             return; // Exit after create
                         } else {
                             // Only show the modal when editing an existing value
-                            showEntryUpdateModal(
-                                function() { 
+                            (async function() {
+                                const confirmed = await showConfirmModal({
+                                    title: 'Confirm Entry Update',
+                                    message: 'You are about to delete all entries for this month and substitute it with this new entry. Are you sure you want to proceed?',
+                                    confirmText: 'Confirm',
+                                    cancelText: 'Cancel',
+                                    checkbox: { label: "Don't show this message again", storageKey: 'entryUpdateModalDontShow' }
+                                });
+                                if (confirmed) {
                                     updateEntryInput(input, type);
-                                },
-                                function() { 
+                                } else {
                                     input.value = originalValue;
                                     entryProcessed = false;
                                 }
-                            );
+                            })();
                             return; // Exit while modal is showing
                         }
                     }
@@ -4009,7 +3805,7 @@
             return { startOfMonth, endOfMonth };
         }
 
-        function updateEntryInput(input, type) {
+        async function updateEntryInput(input, type) {
             // Similar to your updateEntry, but get data from input.parentElement (td)
             const td = input.parentElement;
             
@@ -4203,25 +3999,27 @@
                 });
                 } // end proceedWithDelete
 
-                // Quiltt partial: show styled confirmation modal instead of deleting immediately
+                // Quiltt partial: show confirmation via generic modal
                 if (useQuilttPartial) {
                     showDashboardSpinner(false);
-                    showQuilttDeleteModal(
-                        function() {
-                            // User confirmed - proceed with delete
-                            showDashboardSpinner(true);
-                            proceedWithDelete();
-                        },
-                        function() {
-                            // User cancelled - restore the original value
-                            const entryList = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
-                            const existingEntry = entryList.find(e => String(e.category_id) === String(categoryId) && e.date === endDate);
-                            if (existingEntry) {
-                                const origVal = parseFloat(existingEntry.total_amount ?? existingEntry.amount ?? 0);
-                                input.value = origVal > 0 ? currencySymbol + formatNumberWithCommas(origVal) : '';
-                            }
+                    const confirmed = await showConfirmModal({
+                        title: 'Bank-Connected Account',
+                        message: 'You have your bank connected for this account. This will delete entries from today forward. Past bank transactions will remain.\n\nAre you sure you want to proceed?',
+                        confirmText: 'Confirm',
+                        cancelText: 'Cancel',
+                        danger: true
+                    });
+                    if (confirmed) {
+                        showDashboardSpinner(true);
+                        proceedWithDelete();
+                    } else {
+                        const entryList = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
+                        const existingEntry = entryList.find(e => String(e.category_id) === String(categoryId) && e.date === endDate);
+                        if (existingEntry) {
+                            const origVal = parseFloat(existingEntry.total_amount ?? existingEntry.amount ?? 0);
+                            input.value = origVal > 0 ? currencySymbol + formatNumberWithCommas(origVal) : '';
                         }
-                    );
+                    }
                     return;
                 }
 
@@ -4409,7 +4207,7 @@
                                 input.value = origVal > 0 ? currencySymbol + formatNumberWithCommas(origVal) : '';
                             }
                             input.dataset.quilttErrorReset = '1';
-                            showQuilttErrorModal(xhr.responseJSON.message);
+                            showConfirmModal({ title: 'Cannot Update Entry', message: xhr.responseJSON.message, confirmText: 'OK', hideCancel: true });
                         }
                     }
                 });
@@ -4837,7 +4635,7 @@
                 const isExpenseTableClicked =
                     $(event.target).closest('#expense-categories-table').length > 0 ||
                     isUnifiedBtnClicked;
-                const isDeleteModalClicked = $(event.target).closest('#deleteCategoryModal').length > 0;
+                const isDeleteModalClicked = $(event.target).closest('#generic-confirm-modal').length > 0;
 
                 // CA: Check if click is inside any CA table
                 let isCaTableClicked = isUnifiedBtnClicked;
@@ -5777,11 +5575,11 @@
                                 // --- Add this line to update icons immediately ---
                                 updateHiddenIcons();
                             } else {
-                                alert('Failed to update hidden state.');
+                                showToast('Failed to update hidden state.', 'error');
                             }
                         },
                         error: function() {
-                            alert('An error occurred while updating the hidden state.');
+                            showToast('An error occurred while updating the hidden state.', 'error');
                         }
                     });
                 }
@@ -5949,7 +5747,7 @@
             const noEndDateChecked = $form.find('#convert-no-end-date-checkbox').is(':checked');
 
             if (!noEndDateChecked && new Date(endDate) < new Date(startDate)) {
-                alert("End date cannot be earlier than the start date.");
+                showToast("End date cannot be earlier than the start date.", 'warning');
                 return false;
             }
             if (!validateDateRange(startDate, endDate, noEndDateChecked)) {
@@ -5982,7 +5780,7 @@
                 const yearlyDay = $form.find('#convert-yearly-day').val();
                 const yearlyMonth = $form.find('#convert-yearly-month').val();
                 if (!yearlyDay || !yearlyMonth) {
-                    alert("Please select both a day and a month for yearly recurrence.");
+                    showToast("Please select both a day and a month for yearly recurrence.", 'warning');
                     return false;
                 }
                 formData.yearly_day = yearlyDay;
@@ -6035,102 +5833,79 @@
                         location.reload();
                     } else {
                         document.getElementById('loading-screen').style.display = 'none';
-                        alert('Failed to convert: ' + response.message);
+                        showToast('Failed to convert: ' + response.message, 'error');
                     }
                 },
                 error: function(xhr) {
                     document.getElementById('loading-screen').style.display = 'none';
-                    alert('An error occurred: ' + xhr.responseText);
+                    showToast('An error occurred: ' + xhr.responseText, 'error');
                 }
             });
         });
 
         // ==================== Stop Recurring Modal ====================
 
-        let stopRecurringCategoryId = null;
-        let stopRecurringCategoryType = null;
+        async function openStopRecurringModal(categoryId, categoryType) {
+            const confirmed = await showConfirmModal({
+                title: 'Stop Recurring',
+                message: 'Stop recurring? Future entries will be removed, but past entries will be kept.',
+                confirmText: 'Stop Recurring',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
 
-        function openStopRecurringModal(categoryId, categoryType) {
-            stopRecurringCategoryId = categoryId;
-            stopRecurringCategoryType = categoryType;
-            document.getElementById('stopRecurringModal').style.display = 'flex';
-        }
+            document.getElementById('loading-screen').style.display = 'flex';
 
-        (function() {
-            const stopModal = document.getElementById('stopRecurringModal');
-            const confirmBtn = document.getElementById('confirmStopRecurring');
-            const cancelBtn = document.getElementById('cancelStopRecurring');
+            let deleteUrl;
+            if (categoryType === 'income') deleteUrl = '/delete-recurring-income';
+            else if (categoryType === 'expense') deleteUrl = '/delete-recurring-expense';
+            else if (categoryType === 'ca') deleteUrl = '/delete-recurring-ca-expense';
 
-            if (cancelBtn) {
-                cancelBtn.onclick = function() {
-                    stopModal.style.display = 'none';
-                };
-            }
-
-            if (stopModal) {
-                stopModal.addEventListener('mousedown', function(e) {
-                    if (e.target === stopModal) {
-                        stopModal.style.display = 'none';
+            $.ajax({
+                url: '/get-recurring-id-for-category',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    category_id: categoryId,
+                    category_type: categoryType
+                }),
+                success: function(lookupResponse) {
+                    if (lookupResponse.status !== 'success' || !lookupResponse.recurring_id) {
+                        document.getElementById('loading-screen').style.display = 'none';
+                        showToast('Could not find recurring record. Please use the recurring page.', 'warning');
+                        return;
                     }
-                });
-            }
-
-            if (confirmBtn) {
-                confirmBtn.onclick = function() {
-                    stopModal.style.display = 'none';
-                    document.getElementById('loading-screen').style.display = 'flex';
-
-                    let deleteUrl;
-                    if (stopRecurringCategoryType === 'income') deleteUrl = '/delete-recurring-income';
-                    else if (stopRecurringCategoryType === 'expense') deleteUrl = '/delete-recurring-expense';
-                    else if (stopRecurringCategoryType === 'ca') deleteUrl = '/delete-recurring-ca-expense';
-
                     $.ajax({
-                        url: '/get-recurring-id-for-category',
+                        url: deleteUrl,
                         method: 'POST',
                         contentType: 'application/json',
-                        data: JSON.stringify({
-                            category_id: stopRecurringCategoryId,
-                            category_type: stopRecurringCategoryType
-                        }),
-                        success: function(lookupResponse) {
-                            if (lookupResponse.status !== 'success' || !lookupResponse.recurring_id) {
-                                document.getElementById('loading-screen').style.display = 'none';
-                                alert('Could not find recurring record. Please use the recurring page.');
-                                return;
-                            }
-                            $.ajax({
-                                url: deleteUrl,
-                                method: 'POST',
-                                contentType: 'application/json',
-                                data: JSON.stringify({ recurring_id: lookupResponse.recurring_id }),
-                                success: function(response) {
-                                    if (response.status === 'success') {
-                                        if (stopRecurringCategoryType === 'ca') {
-                                            saveCaDailyBalance();
-                                        } else {
-                                            saveDailyTotalsAndRemainders();
-                                        }
-                                        location.reload();
-                                    } else {
-                                        document.getElementById('loading-screen').style.display = 'none';
-                                        alert('Failed to stop recurring: ' + response.message);
-                                    }
-                                },
-                                error: function(xhr) {
-                                    document.getElementById('loading-screen').style.display = 'none';
-                                    alert('An error occurred: ' + xhr.responseText);
+                        data: JSON.stringify({ recurring_id: lookupResponse.recurring_id }),
+                        success: function(response) {
+                            if (response.status === 'success') {
+                                if (categoryType === 'ca') {
+                                    saveCaDailyBalance();
+                                } else {
+                                    saveDailyTotalsAndRemainders();
                                 }
-                            });
+                                location.reload();
+                            } else {
+                                document.getElementById('loading-screen').style.display = 'none';
+                                showToast('Failed to stop recurring: ' + response.message, 'error');
+                            }
                         },
                         error: function(xhr) {
                             document.getElementById('loading-screen').style.display = 'none';
-                            alert('Could not look up recurring record: ' + xhr.responseText);
+                            showToast('An error occurred: ' + xhr.responseText, 'error');
                         }
                     });
-                };
-            }
-        })();
+                },
+                error: function(xhr) {
+                    document.getElementById('loading-screen').style.display = 'none';
+                    showToast('Could not look up recurring record: ' + xhr.responseText, 'error');
+                }
+            });
+        }
 
         // ==================== End Convert/Stop Recurring ====================
 

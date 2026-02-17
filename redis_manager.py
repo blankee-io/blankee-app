@@ -356,6 +356,9 @@ def _hydrate_table(table: str, user_id: int):
                     INNER JOIN credit_accounts ca ON cec.account_id = ca.id
                     WHERE ca.user_id = %s
                 """
+            elif table == 'credit_accounts':
+                # Credit accounts ordered by display_order
+                query = "SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order ASC"
             else:
                 # Default: table has direct user_id column
                 query = f"SELECT * FROM {table} WHERE user_id = %s"
@@ -3779,8 +3782,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     if is_temp:
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
-                            INSERT INTO credit_accounts (id, user_id, name, mask, quiltt_account_id, interest_rate, starting_balance, is_card, is_line, is_quiltt)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO credit_accounts (id, user_id, name, mask, quiltt_account_id, interest_rate, starting_balance, is_card, is_line, is_quiltt, display_order)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
                             row.get('name'),
@@ -3790,7 +3793,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             float(row.get('starting_balance', 0)),
                             int(row.get('is_card', 0)),
                             int(row.get('is_line', 0)),
-                            int(row.get('is_quiltt', 0))
+                            int(row.get('is_quiltt', 0)),
+                            int(row.get('display_order', 0))
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
@@ -3798,8 +3802,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
-                            INSERT INTO credit_accounts (id, user_id, name, mask, quiltt_account_id, interest_rate, starting_balance, is_card, is_line, is_quiltt)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO credit_accounts (id, user_id, name, mask, quiltt_account_id, interest_rate, starting_balance, is_card, is_line, is_quiltt, display_order)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 mask = VALUES(mask),
@@ -3808,7 +3812,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 starting_balance = VALUES(starting_balance),
                                 is_card = VALUES(is_card),
                                 is_line = VALUES(is_line),
-                                is_quiltt = VALUES(is_quiltt)
+                                is_quiltt = VALUES(is_quiltt),
+                                display_order = VALUES(display_order)
                         """, (
                             old_id,
                             user_id,
@@ -3819,7 +3824,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             float(row.get('starting_balance', 0)),
                             int(row.get('is_card', 0)),
                             int(row.get('is_line', 0)),
-                            int(row.get('is_quiltt', 0))
+                            int(row.get('is_quiltt', 0)),
+                            int(row.get('display_order', 0))
                         ))
                 
                 conn.commit()

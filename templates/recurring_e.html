@@ -38,8 +38,8 @@
         <div class="recurring-expense-container">
             <!-- Recurring Expense Header -->
             <div class="recurring-header expenses">
-                <span><i class="fa-solid fa-arrows-repeat"></i> Expenses</span>
-                <button id="add-expense-btn" class="add-expense-btn" type="button"><strong><i class="fa-solid fa-plus"></i> Add Category</strong></button>
+                <span>Recurring Expenses</span>
+                <button id="add-expense-btn" class="add-expense-btn" type="button" title="Add Category"><i class="fa-kit fa-solid-arrows-repeat-circle-plus"></i></button>
             </div>
             <!-- Cadence Legend -->
             <div class="cadence-legend">
@@ -109,7 +109,7 @@
                             </td>
                             <td class="expense-actions">
                                 <button class="edit-recurring-btn" onclick="openEditModal('{{ record.id }}')">
-                                    <i class="fas fa-pencil-alt"></i>
+                                    <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
                                 <button class="delete-recurring-btn" onclick="openRecurringDeleteModal('{{ record.id }}', event)"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>
                             </td>
@@ -130,7 +130,7 @@
                         They help you track things like monthly bills, subscriptions, or regular payments so you always know what to expect.
                     </p>
                     <p>
-                        To add a recurring expense, click the <strong><i class="fa-solid fa-plus"></i> Add Category</strong> button above.
+                        To add a recurring expense, click the <strong><i class="fa-kit fa-solid-arrows-repeat-circle-plus"></i></strong> button above.
                     </p>
                 </div>
             {% endif %}
@@ -370,15 +370,6 @@
         </div>        
     </div>
 
-    <!-- Modal for delete confirmation -->
-    <div id="deleteRecurringModal" class="category-delete-modal">
-        <div class="category-delete-modal-content">
-            <h3>Stop this recurring expense? Future entries will be removed, but past entries will be kept. The category will remain as a regular (non-recurring) category.</h3>
-            <button id="confirmDeleteRecurring" class="confirm-delete-category-btn">Stop Recurring</button>
-            <button id="cancelDeleteRecurring" class="cancel-delete-category-btn">Cancel</button>
-        </div>
-    </div>
-
     <!-- Include the recurring modal template -->
     {% include 'loading_modals.html' %}
 
@@ -586,14 +577,6 @@
             editExpenseModal.addEventListener(evtType, function(event) {
                 closeModalOnOverlay(event, editExpenseModal, false);
             });
-        });
-
-        // Close category-delete-modal when clicking outside the modal content (blur)
-        document.getElementById('deleteRecurringModal').addEventListener('mousedown', function(event) {
-            var modalContent = document.querySelector('.category-delete-modal-content');
-            if (event.target === this && !modalContent.contains(event.target)) {
-                this.style.display = 'none';
-            }
         });
 
         // For Add Recurring Expense modal
@@ -913,7 +896,7 @@
             const start = new Date(startDate);
 
             if (start < minStartDate) {
-                alert(`Start date cannot be earlier than January 1, ${currentYear - 1}`);
+                showToast(`Start date cannot be earlier than January 1, ${currentYear - 1}`, 'warning');
                 return false;
             }
 
@@ -921,12 +904,12 @@
                 const end = new Date(endDate);
 
                 if (end > maxEndDate) {
-                    alert(`End date cannot be later than December 31, ${currentYear + 3}`);
+                    showToast(`End date cannot be later than December 31, ${currentYear + 3}`, 'warning');
                     return false;
                 }
 
                 if (start > end) {
-                    alert("End date cannot be earlier than the start date.");
+                    showToast("End date cannot be earlier than the start date.", 'warning');
                     return false;
                 }
             }
@@ -981,7 +964,7 @@
                 if (totalSelects > 1) {
                     container.removeChild(containerDiv);
                 } else {
-                    alert('At least one day must be selected.');
+                    showToast('At least one day must be selected.', 'warning');
                 }
             });
 
@@ -1000,7 +983,7 @@
 
             // Validate that end date is not before start date
             if (new Date(endDate) < new Date(startDate)) {
-                alert("End date cannot be earlier than the start date.");
+                showToast("End date cannot be earlier than the start date.", 'warning');
                 return false;
             }
 
@@ -1052,7 +1035,7 @@
                 const yearlyMonth = $('#yearly-month').val();
 
                 if (!yearlyDay || !yearlyMonth) {
-                    alert("Please select both a day and a month for yearly recurrence.");
+                    showToast("Please select both a day and a month for yearly recurrence.", 'warning');
                     return false;
                 }
 
@@ -1098,11 +1081,11 @@
                         location.reload();
                         document.getElementById('loading-screen').style.display = 'none';
                     } else {
-                        alert('Failed to add recurring expense: ' + response.message);
+                        showToast('Failed to add recurring expense: ' + response.message, 'error');
                     }
                 },
                 error: function(xhr, status, error) {
-                    alert('An error occurred: ' + xhr.responseText);
+                    showToast('An error occurred: ' + xhr.responseText, 'error');
                 }
             });
         });
@@ -1180,7 +1163,7 @@
             const recurringId = $(this).closest('tr').attr('data-recurring-id');  // Correct way to retrieve the attribute
 
             if (recurringId === undefined || recurringId === null || recurringId === '') {
-                alert('Invalid recurring ID');
+                showToast('Invalid recurring ID', 'error');
                 return;
             }
 
@@ -1232,44 +1215,34 @@
         }
 
         // Function to open the delete confirmation modal and handle delete logic
-        function openRecurringDeleteModal(recurringId, event) {
-            const deleteModal = document.getElementById('deleteRecurringModal');
-            const confirmDeleteButton = document.getElementById('confirmDeleteRecurring');
-            const cancelDeleteButton = document.getElementById('cancelDeleteRecurring');
-
-            // Show the modal
-            deleteModal.style.display = 'block';
-
-            // Attach event to delete confirmation button (only for this specific recurring ID)
-            confirmDeleteButton.onclick = function() {
-                document.getElementById('loading-screen').style.display = 'flex';
-                $.ajax({
-                    url: '/delete-recurring-expense',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ recurring_id: recurringId }), // Send the correct recurring_id
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            // Close the modal and remove the row without a page refresh
-                            deleteModal.style.display = 'none';
-                            document.getElementById('loading-screen').style.display = 'flex';
-                            $(`tr[data-recurring-id="${recurringId}"]`).remove();  // Remove the row from the table
-                            saveDailyTotalsAndRemainders();
-                            document.getElementById('loading-screen').style.display = 'none';
-                        } else {
-                            alert('Failed to delete recurring expense: ' + response.message);
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        alert('An error occurred: ' + xhr.responseText);
+        async function openRecurringDeleteModal(recurringId, event) {
+            const confirmed = await showConfirmModal({
+                title: 'Stop Recurring',
+                message: 'Stop this recurring expense? Future entries will be removed, but past entries will be kept. The category will remain as a regular (non-recurring) category.',
+                confirmText: 'Stop Recurring',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
+            document.getElementById('loading-screen').style.display = 'flex';
+            $.ajax({
+                url: '/delete-recurring-expense',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ recurring_id: recurringId }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        $(`tr[data-recurring-id="${recurringId}"]`).remove();
+                        saveDailyTotalsAndRemainders();
+                        document.getElementById('loading-screen').style.display = 'none';
+                    } else {
+                        showToast('Failed to delete recurring expense: ' + response.message, 'error');
                     }
-                });
-            };
-
-            // Cancel button closes the modal
-            cancelDeleteButton.onclick = function() {
-                deleteModal.style.display = 'none';
-            };
+                },
+                error: function(xhr, status, error) {
+                    showToast('An error occurred: ' + xhr.responseText, 'error');
+                }
+            });
         }
 
         function openEditModal(recurringId) {
@@ -1449,11 +1422,11 @@
                         location.reload();  // Reload the page to update the table
                         document.getElementById('loading-screen').style.display = 'none';
                     } else {
-                        alert('Error: ' + response.message);
+                        showToast('Error: ' + response.message, 'error');
                     }
                 },
                 error: function(xhr, status, error) {
-                    alert('An error occurred: ' + xhr.responseText);
+                    showToast('An error occurred: ' + xhr.responseText, 'error');
                 }
             });
         });

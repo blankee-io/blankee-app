@@ -370,11 +370,11 @@
                         refreshNotificationBadge();
                     }
                 } else {
-                    alert('Failed to add entry: ' + response.message);
+                    showToast('Failed to add entry: ' + response.message, 'error');
                 }
             },
             error: function(error) {
-                alert('An error occurred while adding the entry.');
+                showToast('An error occurred while adding the entry.', 'error');
             },
             complete: function() {
                 // If a new category was created, reload the page
@@ -440,7 +440,7 @@
             const balanceInput = document.getElementById('autobalance-current-balance');
             const currentBalance = parseFloat(balanceInput.value);
             if (isNaN(currentBalance)) {
-                alert('Please enter your current bank balance.');
+                showToast('Please enter your current bank balance.', 'warning');
                 return;
             }
             abModal.style.display = 'none';
@@ -480,7 +480,7 @@
                                 if (catResp.status === 'success' && Array.isArray(catResp.categories)) {
                                     const autoCat = catResp.categories.find(c => c.is_auto_adjustment == 1 || c.is_auto_adjustment === true);
                                     if (!autoCat) {
-                                        alert('No Uncategorized category found for ' + entryType + '.');
+                                        showToast('No Uncategorized category found for ' + entryType + '.', 'error');
                                         document.getElementById('loading-screen').style.display = 'none';
                                         return;
                                     }
@@ -520,11 +520,11 @@
                                                 saveDailyTotalsAndRemainders(); // Optional local function
                                                 document.getElementById('loading-screen').style.display = 'none';
                                             } else {
-                                                alert('Failed to add auto balance entry: ' + addResp.message);
+                                                showToast('Failed to add auto balance entry: ' + addResp.message, 'error');
                                             }
                                         },
                                         error: function(err) {
-                                            alert('Error adding auto balance entry.');
+                                            showToast('Error adding auto balance entry.', 'error');
                                         },
                                         complete: function() {
                                             document.getElementById('loading-screen').style.display = 'none';
@@ -532,22 +532,22 @@
                                         }
                                     });
                                 } else {
-                                    alert('Could not find Uncategorized category.');
+                                    showToast('Could not find Uncategorized category.', 'error');
                                     document.getElementById('loading-screen').style.display = 'none';
                                 }
                             },
                             error: function() {
-                                alert('Error fetching categories.');
+                                showToast('Error fetching categories.', 'error');
                                 document.getElementById('loading-screen').style.display = 'none';
                             }
                         });
                     } else {
-                        alert('Could not fetch today\'s remainder.');
+                        showToast('Could not fetch today\'s remainder.', 'error');
                         document.getElementById('loading-screen').style.display = 'none';
                     }
                 },
                 error: function() {
-                    alert('Error fetching today\'s remainder.');
+                    showToast('Error fetching today\'s remainder.', 'error');
                     document.getElementById('loading-screen').style.display = 'none';
                 }
             });
@@ -792,11 +792,11 @@
                             saveDailyTotalsAndRemainders();
                         }
                     } else {
-                        alert('Failed to add entry: ' + response.message);
+                        showToast('Failed to add entry: ' + response.message, 'error');
                     }
                 },
                 error: function(error) {
-                    alert('An error occurred while adding the entry.');
+                    showToast('An error occurred while adding the entry.', 'error');
                 },
                 complete: function() {
                     // If a new category was created, reload the page
@@ -1031,11 +1031,11 @@
                     footerCategoryHidden.value = response.new_category_id;
                     footerDropdown.style.display = 'none';
                 } else {
-                    alert('Failed to create category');
+                    showToast('Failed to create category', 'error');
                 }
             },
             error: function() {
-                alert('Error creating category');
+                showToast('Error creating category', 'error');
             }
         });
     }
@@ -1192,11 +1192,11 @@
                     footerCaCategoryHidden.value = cExpenseCategoryId;
                     footerCaDropdown.style.display = 'none';
                 } else {
-                    alert('Failed to create category');
+                    showToast('Failed to create category', 'error');
                 }
             },
             error: function() {
-                alert('Error creating category');
+                showToast('Error creating category', 'error');
             }
         });
     }

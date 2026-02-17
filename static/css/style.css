@@ -565,6 +565,24 @@ body {
     border: 2px solid var(--primary);
 }
 
+/* Pending transactions badge in nav dropdown */
+.pending-txn-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text-light);
+    background-color: var(--danger);
+    border-radius: 9px;
+    vertical-align: middle;
+}
+
 .sidenavheader {
     display: flex;
     flex-direction: column;
@@ -1622,6 +1640,7 @@ transform: scale(1.2);
 
 #current-nav-btn:hover {
     transform: scale(1.07);
+    color: var(--primary-hover);
 }
 
 .nav-button a {
@@ -2852,18 +2871,15 @@ tr[data-category-id] td.before-member-since {
     justify-content: center;
     align-items: center;
     flex-shrink: 0;
-    width: 32px;
-    height: 32px;
     padding: 0;
-    background-color: var(--secondary-dark);
+    background: none;
     border: none;
-    border-radius: 50%;
-    color: white;
-    font-size: 16px;
+    color: var(--secondary-dark);
+    font-size: 25px;
     cursor: pointer;
     box-sizing: border-box;
     transition: all 0.2s ease;
-    box-shadow: 0 2px 12px var(--shadow-lg);
+    margin-right: 16px;
 }
 
 .dashboard-d-add-entry-btn i {
@@ -2872,7 +2888,7 @@ tr[data-category-id] td.before-member-since {
 }
 
 .dashboard-d-add-entry-btn:hover {
-    background-color: var(--secondary);
+    color: var(--secondary);
     transform: scale(1.2);
 }
 
@@ -4420,33 +4436,6 @@ td:has(.bucket-progress-container) {
 }
 
 
-/* The Modal (background) */
-.category-delete-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1000;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: var(--shadow-xxl);
-}
-
-/* Modal Content */
-.category-delete-modal-content {
-    width: 100%;
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 20px;
-    background-color: var(--text-light);
-    border: 1px solid var(--text-dark);
-    border-radius: 15px;
-    text-align: center;
-}
-
 #close-email-pending-btn {
     background-color: var(--primary);
 }
@@ -4454,21 +4443,6 @@ td:has(.bucket-progress-container) {
 #close-email-pending-btn:hover {
     background-color: var(--primary-hover);
     transform: scale(1.2);
-}
-
-/* Close Button */
-.close-delete-modal {
-    color: var(--secondary);
-    float: right;
-    font-weight: bold;
-}
-
-.close-delete-modal:hover,
-.close-delete-modal:focus {
-    color: var(--text-dark);
-    text-decoration: none;
-    cursor: pointer;
-transform: scale(1.2);
 }
 
 /* Buttons */
@@ -4620,126 +4594,8 @@ transform: scale(1.2);
     border-radius: 10px 0 10px 10px !important;
 }
 
-/* Modal Container Centering */
-#entryUpdateModal.modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 10000;
-    /* toggled to flex via JavaScript */
-    display: none; 
-    justify-content: center;
-    align-items: center;
-    width: 100vw;
-    height: 100vh;
-}
-
-/* Modal Content */
-#entryUpdateModal .modal-content {
-    width: 90%;
-    max-width: 400px;
-    padding: 24px;
-    background: var(--text-light);
-    border-radius: 16px;
-    box-shadow: 0 10px 40px var(--shadow-lg);
-
-    /* ensures padding is included within width */
-    box-sizing: border-box; 
-}
-
-#entryUpdateModal .modal-content p {
-    width: 100%;
-    margin-bottom: 20px;
-    font-size: 14px;
-}
-
-#entryUpdateModal h3 {
-    margin-top: 0;
-}
-
 .modal-checkbox-row {
     font-size: 13px;
-}
-
-/* Checkbox styling */
-#entryUpdateDontShowAgain {
-    accent-color: var(--primary);
-    width: 15px;
-    height: 15px;
-    cursor: pointer;
-}
-
-#entryUpdateModal .modal-actions {
-    display: flex;
-    justify-content: center;
-    margin-top: 15px;
-}
-
-#entryUpdateCancelBtn {
-    margin-right: 12px;
-    padding: 5px 10px;
-    background-color: var(--secondary-dark);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#entryUpdateCancelBtn:hover {
-    background-color: var(--secondary);
-    transform: scale(1.2);
-}
-
-#entryUpdateConfirmBtn {
-    padding: 5px 10px;
-    background-color: var(--primary);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#entryUpdateConfirmBtn:hover {
-    background-color: var(--primary-hover);
-    transform: scale(1.2);
-}
-
-#quilttDeleteCancelBtn {
-    margin-right: 12px;
-    padding: 5px 10px;
-    background-color: var(--secondary-dark);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#quilttDeleteCancelBtn:hover {
-    background-color: var(--secondary);
-    transform: scale(1.2);
-}
-
-#quilttDeleteConfirmBtn {
-    padding: 5px 10px;
-    background-color: var(--primary);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#quilttDeleteConfirmBtn:hover {
-    background-color: var(--primary-hover);
-    transform: scale(1.2);
-}
-
-#quilttErrorOkBtn {
-    padding: 5px 10px;
-    background-color: var(--primary);
-    border: none;
-    border-radius: 15px;
-    color: var(--text-light);
-}
-
-#quilttErrorOkBtn:hover {
-    background-color: var(--primary-hover);
-    transform: scale(1.2);
 }
 
 /* Only show the exclamation bubble for negative cells in the yearly dashboard calendar */
@@ -7678,7 +7534,6 @@ transform: scale(1.2);
 .recurring-header span {
     position: relative;
     flex: 1;  
-    padding-left: 120px;
     color: var(--primary);
     font-size: 19px;
     font-weight: bold;
@@ -7946,16 +7801,19 @@ transform: scale(1.2);
 }
 
 .add-income-btn {
-    position: relative;
-    width: 125px;
-    height: 35px;
-    padding: 0;
-    background-color: transparent;
+    background: none;
     border: none;
-    border-radius: 50%;
-    color: white;
-    color: var(--accent);
+    color: var(--primary);
+    font-size: 22px;
     cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: transform 0.15s ease, color 0.2s ease;
+}
+
+.add-income-btn:hover {
+    color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 .edit-recurring-btn {
@@ -8100,10 +7958,13 @@ transform: scale(1.2);
     z-index: 200;
     display: none;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     width: 100vw;
     height: 100vh;
-    overflow: auto;
+    height: 100dvh;
+    overflow-y: auto;
+    padding: 20px 5px;
+    box-sizing: border-box;
     background: var(--shadow-xl);
     background-color: transparent;
     backdrop-filter: blur(8px);
@@ -8122,6 +7983,7 @@ transform: scale(1.2);
     padding: 20px 30px;
     width: 400px;
     max-width: 90%;
+    margin: auto;
     box-shadow: 0 4px 20px var(--shadow-xl);
     position: relative;
     text-align: center;
@@ -8165,12 +8027,43 @@ transform: scale(1.2);
 .ca-form-container,
 .convert-recurring-form-container {
     width: 350px;
-    margin: 15% auto;
+    max-width: calc(100vw - 10px);
+    max-height: calc(100vh - 40px);
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+    margin: auto;
     padding: 20px;
     background-color: var(--text-light);
     border: 1px solid var(--text-dark);
     border-radius: 10px;
     box-shadow: 0 4px 8px var(--shadow-lg);
+}
+
+/* Pulsing scroll indicator for modal forms */
+.modal-scroll-indicator {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    justify-content: center;
+    padding: 6px 0 2px;
+    pointer-events: none;
+    z-index: 10;
+    transition: opacity 0.25s ease;
+}
+
+.modal-scroll-indicator.hidden {
+    opacity: 0;
+}
+
+.modal-scroll-indicator i {
+    color: var(--primary);
+    font-size: 24px;
+    animation: modal-scroll-bounce 1.5s ease-in-out infinite;
+}
+
+@keyframes modal-scroll-bounce {
+    0%, 100% { transform: translateY(0); opacity: 0.5; }
+    50% { transform: translateY(5px); opacity: 1; }
 }
 
 .expense-form-container h2,
@@ -8250,7 +8143,7 @@ transform: scale(1.2);
     font-weight: 500;
     transition: all 0.2s ease;
     cursor: pointer;
-    background-color: var(--accent);
+    background-color: var(--primary);
     width: 100%;
 }
 
@@ -8260,7 +8153,7 @@ transform: scale(1.2);
 .convert-recurring-form-container button[type="submit"]:hover {
     box-shadow: 0 4px 16px var(--shadow-lg);
     transform: translateY(-1px);
-    background-color: var(--accent-hover);
+    background-color: var(--primary-hover);
 }
 
 .income-form-container button[type="submit"]:active,
@@ -9059,16 +8952,19 @@ form button[type="submit"] {
 }    
 
 .add-expense-btn {
-    position: relative;
-    width: 120px;
-    height: 35px;
-    padding: 0;
-    background-color: transparent;
+    background: none;
     border: none;
-    border-radius: 50%;
-    color: white;
-    color: var(--primary);
+    color: var(--accent);
+    font-size: 24px;
     cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: transform 0.15s ease, color 0.2s ease;
+}
+
+.add-expense-btn:hover {
+    color: var(--accent-hover);
+    transform: scale(1.2);
 }
 
 .delete-recurring-btn {
@@ -9474,7 +9370,7 @@ form button[type="submit"] {
 .ca-recurring-title .add-ca-btn {
     position: absolute;
     top: 0;
-    right: 0;
+    right: 8px;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -9482,16 +9378,18 @@ form button[type="submit"] {
     background: none;
     border: none;
     color: var(--text-light);
-    transition: background 0.2s;
+    font-size: 20px;
+    transition: transform 0.15s ease, color 0.2s ease;
     cursor: pointer;
-    min-width: 120px;
+    padding: 0;
+    min-width: auto;
     border-top-right-radius: 10px;
 }
 
 .ca-recurring-title .add-ca-btn:hover,
 .ca-recurring-title .add-ca-btn:focus {
     color: var(--secondary);
-transform: scale(1.2);
+    transform: scale(1.2);
 }
 
 .recurring-header.ca span {
@@ -9580,17 +9478,19 @@ transform: scale(1.2);
 }    
 
 .add-ca-btn {
-    position: relative;
-    width: 20px;
-    height: 20px;
-    margin-right: 5px;
-    padding: auto;
-    background-color: transparent;
-    background-color: var(--primary);
+    background: none;
     border: none;
-    border-radius: 50%;
-    color: white;
+    color: var(--accent);
+    font-size: 20px;
     cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: transform 0.15s ease, color 0.2s ease;
+}
+
+.add-ca-btn:hover {
+    color: var(--accent-hover);
+    transform: scale(1.2);
 }
 
 /* Cadence Inputs */
@@ -10228,98 +10128,6 @@ transform: scale(1.2);
     box-shadow: 0 0 0 3px var(--primary-lighter);
 }
 
-/* The Modal (background) */
-.delete-bud-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1000;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: var(--shadow-xxl);
-}
-
-/* Modal Content */
-.delete-bud-modal-content {
-    width: 100%;
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 20px;
-    background-color: var(--text-light);
-    border: 1px solid var(--text-dark);
-    border-radius: 15px;
-    text-align: center;
-}
-
-/* Buttons */
-.delete-bud-confirm-btn, .delete-bud-cancel-btn {
-    margin: 10px;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 15px;
-    cursor: pointer;
-}
-
-.delete-bud-confirm-btn {
-    background-color: var(--danger);
-    color: white;
-}
-
-.delete-bud-cancel-btn {
-    background-color: var(--secondary);
-    color: white;
-}
-
-/* The Modal (background) */
-.delete-bud-item-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1000;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: var(--shadow-xxl);
-}
-
-/* Modal Content */
-.delete-bud-item-modal-content {
-    width: 100%;
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 20px;
-    background-color: var(--text-light);
-    border: 1px solid var(--text-dark);
-    border-radius: 15px;
-    text-align: center;
-}
-
-/* Buttons */
-.delete-bud-item-confirm-btn, .delete-bud-item-cancel-btn {
-    margin: 10px;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 15px;
-    cursor: pointer;
-}
-
-.delete-bud-item-confirm-btn {
-    background-color: var(--danger);
-    color: white;
-}
-
-.delete-bud-item-cancel-btn {
-    background-color: var(--secondary);
-    color: white;
-}
-
 .bud-total {
     display: flex;
     flex-direction: row;
@@ -10488,7 +10296,6 @@ transform: scale(1.2);
 .credit-accounts-title span {
     position: relative;
     flex: 1;  
-    padding-left: 150px;
     color: var(--primary);
     font-size: 19px;
     font-weight: bold;
@@ -10496,16 +10303,19 @@ transform: scale(1.2);
 }
 
 .add-cas-btn {
-    position: relative;
-    width: 150px;
-    height: 35px;
-    padding: 0;
-    background-color: transparent;
+    background: none;
     border: none;
-    border-radius: 50%;
-    color: white;
-    color: var(--accent);
+    color: var(--primary);
+    font-size: 24px;
     cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: transform 0.15s ease, color 0.2s ease;
+}
+
+.add-cas-btn:hover {
+    color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 .credit-accounts-header {
@@ -10542,27 +10352,53 @@ transform: scale(1.2);
 
 .credit-accounts-table th:nth-child(1),
 .credit-accounts-table td:nth-child(1) {
-    width: 35%;
+    width: 30px;
+    padding: 4px 4px 4px 8px;
 }
 
 .credit-accounts-table th:nth-child(2),
 .credit-accounts-table td:nth-child(2) {
-    width: 12%;
+    width: 32%;
 }
 
 .credit-accounts-table th:nth-child(3),
 .credit-accounts-table td:nth-child(3) {
-    width: 13%;
+    width: 12%;
 }
 
 .credit-accounts-table th:nth-child(4),
 .credit-accounts-table td:nth-child(4) {
-    width: 20%;
+    width: 13%;
 }
 
 .credit-accounts-table th:nth-child(5),
 .credit-accounts-table td:nth-child(5) {
     width: 20%;
+}
+
+.credit-accounts-table th:nth-child(6),
+.credit-accounts-table td:nth-child(6) {
+    width: 20%;
+}
+
+.credit-account-sort-cell {
+    text-align: center;
+}
+
+.credit-accounts-table .sort-handle {
+    cursor: move;
+    color: inherit;
+    display: inline-block;
+}
+
+.credit-accounts-table .sort-handle:hover {
+    color: inherit;
+    transform: scale(1.2);
+}
+
+.credit-accounts-table .sort-handle i {
+    font-size: 14px;
+    vertical-align: middle;
 }
 
 td.credit-account-action-cell {
@@ -10712,52 +10548,6 @@ td.credit-account-action-cell button {
     background-color: var(--text-light);
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-lighter);
-}
-
-/* The Modal (background) */
-.delete-credit-account-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1000;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: var(--shadow-xxl);
-}
-
-/* Modal Content */
-.delete-credit-account-modal-content {
-    width: 100%;
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 20px;
-    background-color: var(--text-light);
-    border: 1px solid var(--text-dark);
-    border-radius: 15px;
-    text-align: center;
-}
-
-/* Buttons */
-.delete-credit-account-confirm-btn, .delete-credit-account-cancel-btn {
-    margin: 10px;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 15px;
-    cursor: pointer;
-}
-
-.delete-credit-account-confirm-btn {
-    background-color: var(--danger);
-    color: white;
-}
-
-.delete-credit-account-cancel-btn {
-    background-color: var(--secondary);
-    color: white;
 }
 
 /* Category Dropdown Autocomplete Styles */
@@ -13079,29 +12869,31 @@ transform: scale(1.2);
     transform: scale(1.2);
 }
 
-/* Add category buttons: circles matching section color */
+/* Add category buttons: icon-only matching section color */
 .manage-cat-btn.add-cat-btn {
-    border-radius: 50%;
-    width: 32px;
-    height: 32px;
-    font-size: 15px;
+    background: none;
+    width: auto;
+    height: auto;
+    font-size: 20px;
 }
 
 .income .manage-cat-btn.add-cat-btn {
-    background-color: var(--primary);
+    color: var(--primary);
 }
 
 .income .manage-cat-btn.add-cat-btn:hover {
-    background-color: var(--primary);
+    color: var(--primary-hover);
+    background: none;
     transform: scale(1.2);
 }
 
 .expenses .manage-cat-btn.add-cat-btn {
-    background-color: var(--accent);
+    color: var(--accent);
 }
 
 .expenses .manage-cat-btn.add-cat-btn:hover {
-    background-color: var(--accent);
+    color: var(--accent-hover);
+    background: none;
     transform: scale(1.2);
 }
 
@@ -13344,13 +13136,7 @@ transform: scale(1.2);
 
 }
 
-/* Ensure dropdown works inside recurring add modals */
-.income-form-container,
-.expense-form-container,
-.ca-form-container {
-    overflow: visible;
-}
-
+/* Category dropdown styles inside recurring add modals */
 .income-form-container .category-input-wrapper,
 .expense-form-container .category-input-wrapper,
 .ca-form-container .category-input-wrapper {
@@ -13675,4 +13461,197 @@ transform: scale(1.2);
     .feedback-left, .feedback-right {
         min-height: auto;
     }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOAST NOTIFICATIONS
+   ═══════════════════════════════════════════════════════════════ */
+#toast-container {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    width: 90%;
+    max-width: 420px;
+}
+
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 10px;
+    color: var(--text-light);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.4;
+    box-shadow: 0 4px 20px var(--shadow-xl);
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateY(-20px);
+    animation: toastIn 0.3s ease forwards;
+}
+
+.toast.toast-removing {
+    animation: toastOut 0.25s ease forwards;
+}
+
+.toast-error {
+    background-color: var(--danger);
+}
+
+.toast-warning {
+    background-color: var(--accent);
+}
+
+.toast-info {
+    background-color: var(--primary);
+}
+
+.toast-success {
+    background-color: var(--success);
+}
+
+.toast-icon {
+    flex-shrink: 0;
+    font-size: 16px;
+}
+
+.toast-message {
+    flex: 1;
+    word-break: break-word;
+}
+
+.toast-close {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--text-light);
+    font-size: 18px;
+    cursor: pointer;
+    opacity: 0.7;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.toast-close:hover {
+    opacity: 1;
+    transform: none;
+}
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateY(-20px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toastOut {
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(-20px); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GENERIC CONFIRM MODAL
+   ═══════════════════════════════════════════════════════════════ */
+#generic-confirm-modal.modal {
+    z-index: 9000;
+}
+
+#generic-confirm-modal .modal-content {
+    max-width: 400px;
+}
+
+#generic-confirm-modal .modal-content h2 {
+    color: var(--primary);
+    margin-bottom: 15px;
+    font-size: 20px;
+}
+
+#generic-confirm-modal .modal-content p {
+    color: var(--text-dark);
+    margin-bottom: 20px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+#generic-confirm-modal .modal-checkbox-row {
+    margin-bottom: 16px;
+    font-size: 13px;
+    text-align: center;
+}
+
+#generic-confirm-checkbox {
+    accent-color: var(--primary);
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
+#generic-confirm-checkbox + label {
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+#generic-confirm-btn {
+    width: 45%;
+    padding: 14px 24px;
+    margin: 10px;
+    border: none;
+    border-radius: 12px;
+    color: white;
+    font-size: 17px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 12px var(--shadow-lg);
+    background-color: var(--primary);
+}
+
+#generic-confirm-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+    background-color: var(--primary-hover);
+}
+
+#generic-confirm-btn:active {
+    transform: translateY(0);
+}
+
+#generic-confirm-btn.danger {
+    background-color: var(--danger);
+}
+
+#generic-confirm-btn.danger:hover {
+    background-color: var(--danger-hover);
+}
+
+#generic-cancel-btn {
+    width: 45%;
+    padding: 14px 24px;
+    margin: 10px;
+    border: none;
+    border-radius: 12px;
+    color: white;
+    font-size: 17px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 12px var(--shadow-lg);
+    background-color: var(--secondary);
+}
+
+#generic-cancel-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+    background-color: var(--secondary-hover);
+}
+
+#generic-cancel-btn:active {
+    transform: translateY(0);
 }

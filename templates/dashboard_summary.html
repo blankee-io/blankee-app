@@ -58,7 +58,7 @@
             </div>
             <div class="calendarnavbuttons" style="visibility: hidden;"> 
                 <div id="previous-nav-btn" class="nav-button"><i class="fa-solid fa-left"></i></div>
-                <div id="current-nav-btn" class="nav-button">Today</div>
+                <div id="current-nav-btn" class="nav-button"><i class="fa-kit fa-solid-calendar-day-circle-arrow-down-tl"></i></div>
                 <div id="next-nav-btn" class="nav-button"><i class="fa-solid fa-right"></i></div>
                 <div id="next-indicator" style="display:none;text-align:center;">
                     <span class="indicator-dot">!</span>
@@ -186,7 +186,7 @@
         // Catch and display any errors before page might reload
         window.onerror = function(msg, url, lineNo, columnNo, error) {
             console.error('JS Error:', msg, 'at', url, 'line', lineNo);
-            alert('JS Error: ' + msg + '\nLine: ' + lineNo + '\nFile: ' + url);
+            showToast('JS Error: ' + msg + ' (Line ' + lineNo + ')', 'error');
             return false;
         };
         

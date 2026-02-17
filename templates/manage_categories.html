@@ -10,6 +10,7 @@
     <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
     <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/jquery-ui.css') }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <meta name="mobile-web-app-capable" content="yes">
@@ -38,10 +39,10 @@
         <!-- ======================== INCOME SECTION ======================== -->
         <div class="manage-categories-container">
             <div class="recurring-header income">
-                <span><i class="fa-solid fa-plus-large" style="font-size:14px; margin-right:6px;"></i>Income</span>
+                <span>Income Categories</span>
                 <div class="manage-cat-btn-group">
                     <button class="manage-cat-btn add-cat-btn" id="add-income-btn" title="Add Category">
-                        <i class="fa-solid fa-folder-plus"></i>
+                        <i class="fa-kit fa-solid-folder-plus-circle-plus"></i>
                     </button>
                 </div>
             </div>
@@ -116,10 +117,10 @@
         <!-- ======================== EXPENSE SECTION ======================== -->
         <div class="manage-categories-container">
             <div class="recurring-header expenses">
-                <span><i class="fa-solid fa-minus" style="font-size:14px; margin-right:6px;"></i>Expenses</span>
+                <span>Expense Categories</span>
                 <div class="manage-cat-btn-group">
                     <button class="manage-cat-btn add-cat-btn" id="add-expense-btn" title="Add Category">
-                        <i class="fa-solid fa-folder-plus"></i>
+                        <i class="fa-kit fa-solid-folder-minus-circle-plus"></i>
                     </button>
                 </div>
             </div>
@@ -195,15 +196,6 @@
         </div>
     </div>
 
-    <!-- Modal for delete confirmation -->
-    <div id="deleteCategoryModal" class="category-delete-modal">
-        <div class="category-delete-modal-content">
-            <h3>Are you sure you want to delete this category? Past entries for this category will be added to Uncategorized and future entries will be deleted.</h3>
-            <button id="confirmDeleteCategory" class="confirm-delete-category-btn">Delete</button>
-            <button id="cancelDeleteCategory" class="cancel-delete-category-btn">Cancel</button>
-        </div>
-    </div>
-
     <!-- Modal for editing category name -->
     <div id="editCategoryModal" class="category-edit-modal">
         <div class="category-edit-modal-content">
@@ -263,7 +255,7 @@
                     }
                 },
                 error: function() {
-                    alert('Failed to add category.');
+                    showToast('Failed to add category.', 'error');
                 }
             });
         }
@@ -314,7 +306,7 @@
                     }
                 },
                 error: function() {
-                    alert('Failed to save order.');
+                    showToast('Failed to save order.', 'error');
                 }
             });
         }
@@ -503,39 +495,32 @@
         }
 
         // ===================== DELETE CATEGORY =====================
-        let deleteCategoryId = null;
-        let deleteCategoryType = null;
-
-        function openCategoryDeleteModal(categoryId, categoryType) {
-            deleteCategoryId = categoryId;
-            deleteCategoryType = categoryType;
-            document.getElementById('deleteCategoryModal').style.display = 'flex';
-        }
-
-        document.getElementById('confirmDeleteCategory').addEventListener('click', function() {
-            if (!deleteCategoryId || !deleteCategoryType) return;
-            const url = deleteCategoryType === 'income' ? "{{ url_for('delete_income_category') }}" : "{{ url_for('delete_expense_category') }}";
+        async function openCategoryDeleteModal(categoryId, categoryType) {
+            const confirmed = await showConfirmModal({
+                title: 'Delete Category',
+                message: 'Are you sure you want to delete this category? Past entries for this category will be added to Uncategorized and future entries will be deleted.',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
+            const url = categoryType === 'income' ? "{{ url_for('delete_income_category') }}" : "{{ url_for('delete_expense_category') }}";
             $.ajax({
                 url: url,
                 method: "POST",
-                data: { category_id: deleteCategoryId },
+                data: { category_id: categoryId },
                 success: function(response) {
                     if (response.status === 'success') {
                         location.reload();
                     } else {
-                        alert('Failed to delete category.');
+                        showToast('Failed to delete category.', 'error');
                     }
                 },
                 error: function() {
-                    alert('An error occurred while deleting the category.');
+                    showToast('An error occurred while deleting the category.', 'error');
                 }
             });
-            document.getElementById('deleteCategoryModal').style.display = 'none';
-        });
-
-        document.getElementById('cancelDeleteCategory').addEventListener('click', function() {
-            document.getElementById('deleteCategoryModal').style.display = 'none';
-        });
+        }
 
         // ===================== SORTABLE TABLES (Drag and Drop) =====================
         $(function() {
