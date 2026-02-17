@@ -10577,7 +10577,6 @@ td.credit-account-action-cell button {
 
 .category-dropdown-item:hover {
     background-color: var(--secondary-lighter);
-    transform: scale(1.2);
 }
 
 .category-dropdown-item.create-new-category {
@@ -10590,7 +10589,6 @@ td.credit-account-action-cell button {
 .category-dropdown-item.create-new-category:hover {
     background-color: var(--primary-lighter);
     color: var(--primary);
-    transform: scale(1.2);
 }
 
 .category-dropdown-item.create-new-category i {
@@ -12547,7 +12545,6 @@ transform: scale(1.2);
 
 .pending-transactions-category-dropdown-item:hover {
     background-color: var(--secondary-lighter);
-    transform: scale(1.2);
 }
 
 .pending-transactions-category-dropdown-item.create-new-category {
@@ -12570,7 +12567,6 @@ transform: scale(1.2);
 
 .pending-transactions-category-dropdown-item.ai-suggestion:hover {
     background-color: var(--primary-lighter);
-    transform: scale(1.2);
 }
 
 .pending-transactions-category-dropdown-item.ai-suggestion i {
