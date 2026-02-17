@@ -357,7 +357,7 @@ def check_all_connections():
                             stats['already_notified'] += 1
                         else:
                             # Create new notification
-                            notification_message = f'Your {institution_name} connection needs to be reconnected. <a href="/profile?reconnect={connection_id}" class="notification-link">Click here to reconnect</a>.'
+                            notification_message = f'Your {institution_name} connection needs to be reconnected. <a href="/bank_accounts?reconnect={connection_id}" class="notification-link">Click here to reconnect</a>.'
                             add_notification(cursor, user_id, notification_message)
                             stats['notifications_created'] += 1
                             logger.info(f"  Created reconnection notification for user {user_id}")

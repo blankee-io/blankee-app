@@ -149,6 +149,7 @@ function showConfirmModal(opts) {
             cancelBtn.removeEventListener('click', onCancel);
             closeBtn.removeEventListener('click', onCancel);
             modal.removeEventListener('click', onBackdrop);
+            document.removeEventListener('keydown', onKeydown);
             resolve(result);
         }
         function onConfirm() {
@@ -160,11 +161,16 @@ function showConfirmModal(opts) {
         }
         function onCancel()  { cleanup(false); }
         function onBackdrop(e) { if (e.target === modal) cleanup(false); }
+        function onKeydown(e) {
+            if (e.key === 'Enter') { e.preventDefault(); onConfirm(); }
+            else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+        }
 
         confirmBtn.addEventListener('click', onConfirm);
         cancelBtn.addEventListener('click', onCancel);
         closeBtn.addEventListener('click', onCancel);
         modal.addEventListener('click', onBackdrop);
+        document.addEventListener('keydown', onKeydown);
     });
 }
 
@@ -240,7 +246,7 @@ function goToReconnect() {
     if (window._quilttReconnectData && window._quilttReconnectData.length > 0) {
         // Go to profile page with reconnect parameter for first connection
         const connectionId = window._quilttReconnectData[0].connection_id;
-        window.location.href = '/profile?reconnect=' + encodeURIComponent(connectionId);
+        window.location.href = '/bank_accounts?reconnect=' + encodeURIComponent(connectionId);
     } else {
         window.location.href = '/profile';
     }
@@ -496,115 +502,73 @@ function showDashboardSpinner(show = true, context = "") {
 }
 
 // Function to scale font size to fit text within container width
+// Fit text to container — shrinks font only when text overflows, restores when space is available
 function fitTextToContainer() {
-    // For bottom rows and special rows (direct text in td)
-    const tdSelector = '#income-bottom-row td, #last-remainder-row-right td, #expenses-bottom-row td, .ca-bottom-row td, #remainder-row-right td, #savings-row-right td';
-    document.querySelectorAll(tdSelector).forEach(function(td) {
-        if (!td.textContent.trim()) return;
-        
-        const text = td.textContent;
-        const span = document.createElement('span');
-        span.style.visibility = 'hidden';
-        span.style.position = 'absolute';
-        span.style.whiteSpace = 'nowrap';
+    var minFontSize = 8;
+
+    // Get the CSS base font size from the table itself (never has inline overrides)
+    function getBaseFontSize(el) {
+        var table = el.closest('#income-table, #expenses-table, .cas-table, #remainder-row-right, #savings-row-right');
+        if (table) return parseFloat(window.getComputedStyle(table).fontSize);
+        // For dashboard-d cells, read from parent container
+        var wrapper = el.closest('#dashboard-wrapper');
+        if (wrapper) return parseFloat(window.getComputedStyle(wrapper).fontSize);
+        return parseFloat(window.getComputedStyle(el).fontSize);
+    }
+
+    // Measure text width at a given font size
+    function textWidth(text, fontSize, fontWeight, fontFamily) {
+        var span = document.createElement('span');
+        span.style.cssText = 'visibility:hidden;position:absolute;white-space:nowrap;font-size:' + fontSize + 'px;font-weight:' + fontWeight + ';font-family:' + fontFamily;
         span.textContent = text;
         document.body.appendChild(span);
-        
-        td.style.fontSize = '';
-        let fontSize = parseFloat(window.getComputedStyle(td).fontSize);
-        const minFontSize = 5;
-        
-        const style = window.getComputedStyle(td);
-        const paddingLeft = parseFloat(style.paddingLeft) || 0;
-        const paddingRight = parseFloat(style.paddingRight) || 0;
-        const availableWidth = td.offsetWidth - paddingLeft - paddingRight;
-        
-        span.style.fontSize = fontSize + 'px';
-        span.style.fontWeight = style.fontWeight;
-        span.style.fontFamily = style.fontFamily;
-        
-        while (span.offsetWidth > availableWidth && fontSize > minFontSize) {
-            fontSize -= 0.5;
-            span.style.fontSize = fontSize + 'px';
-        }
-        
-        td.style.fontSize = fontSize + 'px';
+        var w = span.offsetWidth;
         document.body.removeChild(span);
-    });
-    
-    // For table cells with inputs inside (income/expense/ca tables - weekly dashboard)
-    const inputSelector = '#income-table td:not(.category-cell) input, #expenses-table td:not(.category-cell) input, .cas-table td:not(.category-cell) input';
-    document.querySelectorAll(inputSelector).forEach(function(input) {
-        const text = input.value;
-        if (!text.trim()) return;
-        
-        const td = input.closest('td');
-        if (!td) return;
-        
-        const span = document.createElement('span');
-        span.style.visibility = 'hidden';
-        span.style.position = 'absolute';
-        span.style.whiteSpace = 'nowrap';
-        span.textContent = text;
-        document.body.appendChild(span);
-        
-        input.style.fontSize = '';
-        let fontSize = parseFloat(window.getComputedStyle(input).fontSize);
-        const minFontSize = 5;
-        
-        const style = window.getComputedStyle(input);
-        const inputPaddingLeft = parseFloat(style.paddingLeft) || 0;
-        const inputPaddingRight = parseFloat(style.paddingRight) || 0;
-        const availableWidth = input.offsetWidth - inputPaddingLeft - inputPaddingRight;
-        
-        span.style.fontSize = fontSize + 'px';
-        span.style.fontWeight = style.fontWeight;
-        span.style.fontFamily = style.fontFamily;
-        
-        while (span.offsetWidth > availableWidth && fontSize > minFontSize) {
-            fontSize -= 0.5;
-            span.style.fontSize = fontSize + 'px';
+        return w;
+    }
+
+    // Fit a single element: shrink if needed, restore if possible
+    function fitElement(el, text, availableWidth) {
+        if (!text.trim() || availableWidth <= 0) { el.style.fontSize = ''; return; }
+        var baseFontSize = getBaseFontSize(el);
+        var style = window.getComputedStyle(el);
+        var fw = style.fontWeight, ff = style.fontFamily;
+
+        // Check if text fits at the base (CSS) font size
+        if (textWidth(text, baseFontSize, fw, ff) <= availableWidth) {
+            el.style.fontSize = ''; // fits — remove any inline override
+            return;
         }
-        
-        input.style.fontSize = fontSize + 'px';
-        document.body.removeChild(span);
+        // Shrink until it fits
+        var fs = baseFontSize;
+        while (fs > minFontSize && textWidth(text, fs, fw, ff) > availableWidth) {
+            fs -= 0.5;
+        }
+        el.style.fontSize = fs + 'px';
+    }
+
+    // Bottom rows / special rows (direct text in td)
+    document.querySelectorAll('#income-bottom-row td, #last-remainder-row-right td, #expenses-bottom-row td, .ca-bottom-row td, #remainder-row-right td, #savings-row-right td').forEach(function(td) {
+        var s = window.getComputedStyle(td);
+        var avail = td.offsetWidth - (parseFloat(s.paddingLeft) || 0) - (parseFloat(s.paddingRight) || 0);
+        fitElement(td, td.textContent, avail);
     });
-    
-    // For dashboard-d amount cells (day view dashboard)
-    // Handle both direct text content and inputs inside amount cells
+
+    // Input cells in weekly dashboard tables
+    document.querySelectorAll('#income-table td:not(.category-cell) input, #expenses-table td:not(.category-cell) input, .cas-table td:not(.category-cell) input').forEach(function(input) {
+        var s = window.getComputedStyle(input);
+        var avail = input.offsetWidth - (parseFloat(s.paddingLeft) || 0) - (parseFloat(s.paddingRight) || 0);
+        fitElement(input, input.value, avail);
+    });
+
+    // Dashboard-d amount cells
     document.querySelectorAll('.dashboard-d-amount-cell').forEach(function(cell) {
-        const input = cell.querySelector('input');
-        const targetElement = input || cell;
-        const text = input ? input.value : cell.textContent;
-        if (!text.trim()) return;
-        
-        const span = document.createElement('span');
-        span.style.visibility = 'hidden';
-        span.style.position = 'absolute';
-        span.style.whiteSpace = 'nowrap';
-        span.textContent = text;
-        document.body.appendChild(span);
-        
-        targetElement.style.fontSize = '';
-        let fontSize = parseFloat(window.getComputedStyle(targetElement).fontSize);
-        const minFontSize = 5;
-        
-        const style = window.getComputedStyle(targetElement);
-        const paddingLeft = parseFloat(style.paddingLeft) || 0;
-        const paddingRight = parseFloat(style.paddingRight) || 0;
-        const availableWidth = targetElement.offsetWidth - paddingLeft - paddingRight;
-        
-        span.style.fontSize = fontSize + 'px';
-        span.style.fontWeight = style.fontWeight;
-        span.style.fontFamily = style.fontFamily;
-        
-        while (span.offsetWidth > availableWidth && fontSize > minFontSize) {
-            fontSize -= 0.5;
-            span.style.fontSize = fontSize + 'px';
-        }
-        
-        targetElement.style.fontSize = fontSize + 'px';
-        document.body.removeChild(span);
+        var input = cell.querySelector('input');
+        var target = input || cell;
+        var text = input ? input.value : cell.textContent;
+        var s = window.getComputedStyle(target);
+        var avail = target.offsetWidth - (parseFloat(s.paddingLeft) || 0) - (parseFloat(s.paddingRight) || 0);
+        fitElement(target, text, avail);
     });
 }
 
@@ -612,7 +576,7 @@ function fitTextToContainer() {
 let fitTextTimeout;
 function fitTextDebounced() {
     clearTimeout(fitTextTimeout);
-    fitTextTimeout = setTimeout(fitTextToContainer, 50);
+    fitTextTimeout = setTimeout(fitTextToContainer, 150);
 }
 
 // Run fitText on load and resize
@@ -635,3 +599,69 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 window.addEventListener('resize', fitTextDebounced);
+
+/* Modal scroll indicator — pulsing arrow when submit button is out of view */
+document.addEventListener('DOMContentLoaded', function() {
+    var formSelectors = '.income-form-container, .expense-form-container, .ca-form-container, .convert-recurring-form-container';
+
+    document.querySelectorAll(formSelectors).forEach(function(container) {
+        var submitBtn = container.querySelector('button[type="submit"]');
+        if (!submitBtn) return;
+
+        var indicator = document.createElement('div');
+        indicator.className = 'modal-scroll-indicator hidden';
+        indicator.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
+        submitBtn.parentNode.insertBefore(indicator, submitBtn);
+
+        function checkSubmitVisible() {
+            var cRect = container.getBoundingClientRect();
+            // Skip if container has no size (not rendered yet)
+            if (cRect.height === 0) return;
+            var bRect = submitBtn.getBoundingClientRect();
+            // Submit is visible when its top edge is within the container's visible area
+            if (bRect.top < cRect.bottom - 10) {
+                indicator.classList.add('hidden');
+            } else {
+                indicator.classList.remove('hidden');
+            }
+        }
+
+        container.addEventListener('scroll', checkSubmitVisible, { passive: true });
+        // Also listen on the modal itself in case it's the scroll container
+        var modal = container.closest('.modal');
+        if (modal) {
+            modal.addEventListener('scroll', checkSubmitVisible, { passive: true });
+        }
+
+        // Detect when the parent .modal is shown
+        if (modal) {
+            var obs = new MutationObserver(function() {
+                if (modal.style.display === 'flex' || modal.style.display === 'block') {
+                    // Poll until container has layout, then check
+                    var attempts = 0;
+                    var poll = setInterval(function() {
+                        attempts++;
+                        checkSubmitVisible();
+                        if (container.getBoundingClientRect().height > 0 || attempts > 10) {
+                            clearInterval(poll);
+                        }
+                    }, 50);
+                }
+            });
+            obs.observe(modal, { attributes: true, attributeFilter: ['style'] });
+        }
+
+        // Also check on window resize (keyboard open/close on mobile)
+        window.addEventListener('resize', checkSubmitVisible);
+
+        // Watch for DOM changes inside the form (e.g. cadence change showing/hiding fields)
+        var contentObs = new MutationObserver(function() {
+            // Small delay to let layout settle after DOM change
+            setTimeout(checkSubmitVisible, 30);
+        });
+        contentObs.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+
+        // Also listen for input/select changes that may toggle field visibility
+        container.addEventListener('change', function() { setTimeout(checkSubmitVisible, 30); });
+    });
+});

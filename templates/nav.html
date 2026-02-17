@@ -39,13 +39,12 @@
                     </div>
                 </div>
                 <div class="dropdown-menu-section">
-                    <div class="dropdown-link"><a href="{{ url_for('profile') }}">Profile and security</a><i class="fa-regular fa-user"></i></div>
+                    <div class="dropdown-link"><a href="{{ url_for('profile') }}">Profile</a><i class="fa-regular fa-user"></i></div>
                 </div>
                 <div class="dropdown-divider"></div>
                 <div class="dropdown-menu-section">
                     <div class="dropdown-profile-label"><span>Blankee</span></div>
-                    <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Manage Categories</a><i class="fa-solid fa-layer-group"></i></div>
-                    <div class="dropdown-link"><a href="{{ url_for('pending_transactions') }}">Pending Transactions</a><i class="fa-solid fa-clock-rotate-left"></i></div>
+                    <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Manage Categories</a><i class="fa-solid fa-folder-tree"></i></div>
                     <div class="dropdown-link">
                         <a href="javascript:void(0);" id="toggle-recurring-btn">Manage Recurring</a>
                         <i class="fa-solid fa-arrows-repeat"></i>
@@ -67,6 +66,14 @@
                     <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Manage Credit Accounts</a><i class="fa-solid fa-credit-card"></i></div>
                     <!--<div class="dropdown-link"><a href="{{ url_for('buds') }}">Manage Buds&trade;</a><i class="fa-regular fa-seedling"></i></div>-->
                     <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-regular fa-sliders"></i></div>
+                </div>
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-menu-section">
+                    <div class="dropdown-profile-label"><span>Bank Accounts</span></div>
+                    <div class="dropdown-link"><a href="{{ url_for('bank_accounts') }}">{% if has_quiltt_connections %}Manage Connections{% else %}Connect Accounts{% endif %}</a><i class="fa-solid fa-building-columns"></i></div>
+                    {% if has_quiltt_accounts %}
+                    <div class="dropdown-link"><a href="{{ url_for('pending_transactions') }}">Pending Transactions{% if pending_transactions_count > 0 %}<span class="pending-txn-badge">{{ pending_transactions_count }}</span>{% endif %}</a><i class="fa-kit fa-light-money-bill-circle-question"></i></div>
+                    {% endif %}
                 </div>
                 <div class="dropdown-divider"></div>
                 <div class="dropdown-menu-section">

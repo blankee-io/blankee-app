@@ -175,11 +175,7 @@
 
         // Helper function to show success messages
         function showSuccessMessage(message) {
-            const successMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: #2aaaa8; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">' + message + '</div>');
-            $('body').append(successMsg);
-            setTimeout(function() {
-                successMsg.fadeOut(300, function() { $(this).remove(); });
-            }, 2000);
+            showToast(message, 'success');
         }
 
         $(document).ready(function() {

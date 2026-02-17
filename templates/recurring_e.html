@@ -38,7 +38,7 @@
         <div class="recurring-expense-container">
             <!-- Recurring Expense Header -->
             <div class="recurring-header expenses">
-                <span><i class="fa-solid fa-arrows-repeat"></i> Expenses</span>
+                <span>Recurring Expenses</span>
                 <button id="add-expense-btn" class="add-expense-btn" type="button" title="Add Category"><i class="fa-kit fa-solid-arrows-repeat-circle-plus"></i></button>
             </div>
             <!-- Cadence Legend -->
@@ -109,7 +109,7 @@
                             </td>
                             <td class="expense-actions">
                                 <button class="edit-recurring-btn" onclick="openEditModal('{{ record.id }}')">
-                                    <i class="fas fa-pencil-alt"></i>
+                                    <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
                                 <button class="delete-recurring-btn" onclick="openRecurringDeleteModal('{{ record.id }}', event)"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>
                             </td>

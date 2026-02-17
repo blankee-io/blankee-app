@@ -565,6 +565,24 @@ body {
     border: 2px solid var(--primary);
 }
 
+/* Pending transactions badge in nav dropdown */
+.pending-txn-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text-light);
+    background-color: var(--danger);
+    border-radius: 9px;
+    vertical-align: middle;
+}
+
 .sidenavheader {
     display: flex;
     flex-direction: column;
@@ -1622,6 +1640,7 @@ transform: scale(1.2);
 
 #current-nav-btn:hover {
     transform: scale(1.07);
+    color: var(--primary-hover);
 }
 
 .nav-button a {
@@ -2852,18 +2871,15 @@ tr[data-category-id] td.before-member-since {
     justify-content: center;
     align-items: center;
     flex-shrink: 0;
-    width: 32px;
-    height: 32px;
     padding: 0;
-    background-color: var(--secondary-dark);
+    background: none;
     border: none;
-    border-radius: 50%;
-    color: white;
-    font-size: 16px;
+    color: var(--secondary-dark);
+    font-size: 25px;
     cursor: pointer;
     box-sizing: border-box;
     transition: all 0.2s ease;
-    box-shadow: 0 2px 12px var(--shadow-lg);
+    margin-right: 16px;
 }
 
 .dashboard-d-add-entry-btn i {
@@ -2872,7 +2888,7 @@ tr[data-category-id] td.before-member-since {
 }
 
 .dashboard-d-add-entry-btn:hover {
-    background-color: var(--secondary);
+    color: var(--secondary);
     transform: scale(1.2);
 }
 
@@ -7788,7 +7804,7 @@ transform: scale(1.2);
     background: none;
     border: none;
     color: var(--primary);
-    font-size: 24px;
+    font-size: 22px;
     cursor: pointer;
     padding: 0;
     line-height: 1;
@@ -7942,10 +7958,13 @@ transform: scale(1.2);
     z-index: 200;
     display: none;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     width: 100vw;
     height: 100vh;
-    overflow: auto;
+    height: 100dvh;
+    overflow-y: auto;
+    padding: 20px 5px;
+    box-sizing: border-box;
     background: var(--shadow-xl);
     background-color: transparent;
     backdrop-filter: blur(8px);
@@ -7964,6 +7983,7 @@ transform: scale(1.2);
     padding: 20px 30px;
     width: 400px;
     max-width: 90%;
+    margin: auto;
     box-shadow: 0 4px 20px var(--shadow-xl);
     position: relative;
     text-align: center;
@@ -8007,12 +8027,43 @@ transform: scale(1.2);
 .ca-form-container,
 .convert-recurring-form-container {
     width: 350px;
-    margin: 15% auto;
+    max-width: calc(100vw - 10px);
+    max-height: calc(100vh - 40px);
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+    margin: auto;
     padding: 20px;
     background-color: var(--text-light);
     border: 1px solid var(--text-dark);
     border-radius: 10px;
     box-shadow: 0 4px 8px var(--shadow-lg);
+}
+
+/* Pulsing scroll indicator for modal forms */
+.modal-scroll-indicator {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    justify-content: center;
+    padding: 6px 0 2px;
+    pointer-events: none;
+    z-index: 10;
+    transition: opacity 0.25s ease;
+}
+
+.modal-scroll-indicator.hidden {
+    opacity: 0;
+}
+
+.modal-scroll-indicator i {
+    color: var(--primary);
+    font-size: 24px;
+    animation: modal-scroll-bounce 1.5s ease-in-out infinite;
+}
+
+@keyframes modal-scroll-bounce {
+    0%, 100% { transform: translateY(0); opacity: 0.5; }
+    50% { transform: translateY(5px); opacity: 1; }
 }
 
 .expense-form-container h2,
@@ -8092,7 +8143,7 @@ transform: scale(1.2);
     font-weight: 500;
     transition: all 0.2s ease;
     cursor: pointer;
-    background-color: var(--accent);
+    background-color: var(--primary);
     width: 100%;
 }
 
@@ -8102,7 +8153,7 @@ transform: scale(1.2);
 .convert-recurring-form-container button[type="submit"]:hover {
     box-shadow: 0 4px 16px var(--shadow-lg);
     transform: translateY(-1px);
-    background-color: var(--accent-hover);
+    background-color: var(--primary-hover);
 }
 
 .income-form-container button[type="submit"]:active,
@@ -13085,13 +13136,7 @@ transform: scale(1.2);
 
 }
 
-/* Ensure dropdown works inside recurring add modals */
-.income-form-container,
-.expense-form-container,
-.ca-form-container {
-    overflow: visible;
-}
-
+/* Category dropdown styles inside recurring add modals */
 .income-form-container .category-input-wrapper,
 .expense-form-container .category-input-wrapper,
 .ca-form-container .category-input-wrapper {
