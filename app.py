@@ -4849,6 +4849,62 @@ def _add_category_to_redis(table_name, user_id, category_data):
         app.logger.error(f"Error adding category to {table_name} in Redis: {e}")
         return None
 
+def _add_categories_batch_to_redis(table_name, user_id, categories_list):
+    """
+    Add multiple categories to Redis in a SINGLE read-modify-write operation.
+    This prevents race conditions with the background flush worker which can 
+    overwrite categories added in separate _add_category_to_redis calls.
+    
+    Args:
+        table_name: 'income_categories', 'expense_categories', or 'c_expense_categories'
+        user_id: User ID
+        categories_list: List of category data dictionaries
+    
+    Returns:
+        List of new category IDs (negative temporary IDs), or empty list on failure.
+        IDs are in the same order as categories_list.
+    """
+    if not app.config.get('REDIS_OK') or not categories_list:
+        return []
+    
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        
+        # Single read
+        cached = _redis_client.get(redis_key)
+        rows = json.loads(cached) if cached else []
+        
+        # Generate sequential negative IDs for all new categories
+        existing_ids = [int(row.get('id', 0)) for row in rows]
+        min_id = min(existing_ids) if existing_ids else 0
+        next_id = min_id - 1 if min_id <= 0 else -1
+        
+        new_ids = []
+        for cat_data in categories_list:
+            cat_data['id'] = next_id
+            new_ids.append(next_id)
+            rows.append(cat_data)
+            next_id -= 1
+        
+        # Single write
+        _redis_client.setex(
+            redis_key,
+            PERSISTENT_CACHE_TTL,
+            json.dumps(rows, cls=DecimalEncoder)
+        )
+        
+        # Mark as dirty once
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        return new_ids
+        
+    except Exception as e:
+        app.logger.error(f"Error batch-adding categories to {table_name} in Redis: {e}")
+        return []
+
+
 def _update_category_in_redis(table_name, user_id, category_id, updates):
     """
     Update a category in Redis cache.
@@ -17866,53 +17922,48 @@ def add_credit_account():
             temp_account_id = cursor.lastrowid
             cursor.close()
     
-    # Add default categories for the credit account to Redis (keyed by user_id)
-    # "Interest Charge" category
-    _add_category_to_redis('c_expense_categories', current_user.id, {
-        'account_id': temp_account_id,
-        'name': 'Interest Charge',
-        'display_order': 2,
-        'group_id': None,
-        'is_recurring': 0,
-        'no_end_date': 0,
-        'hidden': 0,
-        'is_bud': 0,
-        'is_interest': 1,
-        'is_auto_adjustment': 0
-    })
-    
-    # "Uncategorized" category
-    _add_category_to_redis('c_expense_categories', current_user.id, {
-        'account_id': temp_account_id,
-        'name': 'Uncategorized',
-        'display_order': 0,
-        'group_id': None,
-        'is_recurring': 0,
-        'no_end_date': 0,
-        'hidden': 0,
-        'is_bud': 0,
-        'is_interest': 0,
-        'is_auto_adjustment': 1
-    })
-    
-    # "Starting Balance" category
-    _add_category_to_redis('c_expense_categories', current_user.id, {
-        'account_id': temp_account_id,
-        'name': 'Starting Balance',
-        'display_order': 1,
-        'group_id': None,
-        'is_recurring': 0,
-        'no_end_date': 0,
-        'hidden': 0,
-        'is_bud': 0,
-        'is_interest': 0,
-        'is_auto_adjustment': 0
-    })
-    
-    # Get the Starting Balance category ID from Redis after creation (filter by account_id)
-    c_expense_cats = _get_categories_from_redis('c_expense_categories', current_user.id)
-    starting_balance_cat = next((cat for cat in c_expense_cats if cat.get('name') == 'Starting Balance' and cat.get('account_id') == temp_account_id), None)
-    starting_balance_cat_id = starting_balance_cat.get('id') if starting_balance_cat else None
+    # Add all 3 default categories in a SINGLE Redis write to prevent race conditions
+    # with the background flush worker (which can overwrite categories added separately)
+    default_cat_ids = _add_categories_batch_to_redis('c_expense_categories', current_user.id, [
+        {
+            'account_id': temp_account_id,
+            'name': 'Interest Charge',
+            'display_order': 2,
+            'group_id': None,
+            'is_recurring': 0,
+            'no_end_date': 0,
+            'hidden': 0,
+            'is_bud': 0,
+            'is_interest': 1,
+            'is_auto_adjustment': 0
+        },
+        {
+            'account_id': temp_account_id,
+            'name': 'Uncategorized',
+            'display_order': 0,
+            'group_id': None,
+            'is_recurring': 0,
+            'no_end_date': 0,
+            'hidden': 0,
+            'is_bud': 0,
+            'is_interest': 0,
+            'is_auto_adjustment': 1
+        },
+        {
+            'account_id': temp_account_id,
+            'name': 'Starting Balance',
+            'display_order': 1,
+            'group_id': None,
+            'is_recurring': 0,
+            'no_end_date': 0,
+            'hidden': 0,
+            'is_bud': 0,
+            'is_interest': 0,
+            'is_auto_adjustment': 0
+        }
+    ])
+    # IDs are in order: [Interest Charge, Uncategorized, Starting Balance]
+    starting_balance_cat_id = default_cat_ids[2] if len(default_cat_ids) >= 3 else None
     
     # Copy all existing expense categories to this new credit account
     _copy_expense_categories_to_new_credit_account(current_user.id, temp_account_id)
@@ -17925,28 +17976,9 @@ def add_credit_account():
     # Create matching expense_categories record for payment
     payment_category_name = f"{name} payment"
     
-    # Payment categories sit just above system categories (Savings/Uncategorized)
-    # Find the lowest display_order among existing payment categories, or the lowest
-    # non-system category if no payment categories exist yet
+    # Payment categories always get display_order 1 (top of list)
     expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
-    existing_payment_orders = []
-    non_system_orders = []
-    if expense_categories:
-        for cat in expense_categories:
-            do = cat.get('display_order', 0)
-            if cat.get('is_credit_account') == 1:
-                existing_payment_orders.append(do)
-            elif cat.get('is_auto_adjustment') != 1:
-                non_system_orders.append(do)
-    
-    if existing_payment_orders:
-        # Place at same level as lowest payment category (they cluster together)
-        new_display_order = min(existing_payment_orders)
-    elif non_system_orders:
-        # First payment category — place at the lowest non-system position
-        new_display_order = min(non_system_orders)
-    else:
-        new_display_order = 1
+    new_display_order = 1
     
     # Shift all non-system, non-payment categories at or above this position up by 1
     if expense_categories:
@@ -19985,47 +20017,47 @@ def quiltt_sync_profile():
                         
                         # Add default categories for the credit account
                         if temp_account_id:
-                            # "Interest Charge" category
-                            _add_category_to_redis('c_expense_categories', current_user.id, {
-                                'account_id': temp_account_id,
-                                'name': 'Interest Charge',
-                                'display_order': 2,
-                                'group_id': None,
-                                'is_recurring': 0,
-                                'no_end_date': 0,
-                                'hidden': 0,
-                                'is_bud': 0,
-                                'is_interest': 1,
-                                'is_auto_adjustment': 0
-                            })
-                            
-                            # "Uncategorized" category
-                            _add_category_to_redis('c_expense_categories', current_user.id, {
-                                'account_id': temp_account_id,
-                                'name': 'Uncategorized',
-                                'display_order': 0,
-                                'group_id': None,
-                                'is_recurring': 0,
-                                'no_end_date': 0,
-                                'hidden': 0,
-                                'is_bud': 0,
-                                'is_interest': 0,
-                                'is_auto_adjustment': 1
-                            })
-                            
-                            # "Starting Balance" category
-                            starting_balance_cat_id = _add_category_to_redis('c_expense_categories', current_user.id, {
-                                'account_id': temp_account_id,
-                                'name': 'Starting Balance',
-                                'display_order': 1,
-                                'group_id': None,
-                                'is_recurring': 0,
-                                'no_end_date': 0,
-                                'hidden': 0,
-                                'is_bud': 0,
-                                'is_interest': 0,
-                                'is_auto_adjustment': 0
-                            })
+                            # Add all 3 default categories in a SINGLE Redis write to prevent race conditions
+                            default_cat_ids = _add_categories_batch_to_redis('c_expense_categories', current_user.id, [
+                                {
+                                    'account_id': temp_account_id,
+                                    'name': 'Interest Charge',
+                                    'display_order': 2,
+                                    'group_id': None,
+                                    'is_recurring': 0,
+                                    'no_end_date': 0,
+                                    'hidden': 0,
+                                    'is_bud': 0,
+                                    'is_interest': 1,
+                                    'is_auto_adjustment': 0
+                                },
+                                {
+                                    'account_id': temp_account_id,
+                                    'name': 'Uncategorized',
+                                    'display_order': 0,
+                                    'group_id': None,
+                                    'is_recurring': 0,
+                                    'no_end_date': 0,
+                                    'hidden': 0,
+                                    'is_bud': 0,
+                                    'is_interest': 0,
+                                    'is_auto_adjustment': 1
+                                },
+                                {
+                                    'account_id': temp_account_id,
+                                    'name': 'Starting Balance',
+                                    'display_order': 1,
+                                    'group_id': None,
+                                    'is_recurring': 0,
+                                    'no_end_date': 0,
+                                    'hidden': 0,
+                                    'is_bud': 0,
+                                    'is_interest': 0,
+                                    'is_auto_adjustment': 0
+                                }
+                            ])
+                            # IDs are in order: [Interest Charge, Uncategorized, Starting Balance]
+                            starting_balance_cat_id = default_cat_ids[2] if len(default_cat_ids) >= 3 else None
                             
                             # Copy all existing expense categories to this new credit account
                             _copy_expense_categories_to_new_credit_account(current_user.id, temp_account_id)
@@ -20033,13 +20065,44 @@ def quiltt_sync_profile():
                             # Create matching expense_categories record for payment
                             payment_category_name = f"{account_name} payment"
                             
-                            # Get max display_order for expense_categories
+                            # Payment categories always get display_order 1 (top of list)
                             expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+                            new_display_order = 1
+                            
+                            # Shift non-system, non-payment categories at or above this position up by 1
                             if expense_categories:
-                                max_display_order = max([cat.get('display_order', 0) for cat in expense_categories])
-                            else:
-                                max_display_order = 0
-                            new_display_order = max_display_order + 1
+                                shifted = False
+                                for cat in expense_categories:
+                                    if cat.get('is_auto_adjustment') == 1 or cat.get('is_credit_account') == 1:
+                                        continue
+                                    if cat.get('display_order', 0) >= new_display_order:
+                                        cat['display_order'] = cat.get('display_order', 0) + 1
+                                        shifted = True
+                                if shifted:
+                                    _redis_client.set(
+                                        f"expense_categories:v1:{current_user.id}",
+                                        json.dumps(expense_categories, cls=DecimalEncoder)
+                                    )
+                                    _redis_client.expire(f"expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL)
+                                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+                            
+                            # Also shift c_expense_categories display_order to stay in sync
+                            c_expense_cats_sync = _get_categories_from_redis('c_expense_categories', current_user.id)
+                            if c_expense_cats_sync:
+                                shifted = False
+                                for cat in c_expense_cats_sync:
+                                    if cat.get('is_auto_adjustment') == 1 or cat.get('is_interest') == 1:
+                                        continue
+                                    if cat.get('display_order', 0) >= new_display_order:
+                                        cat['display_order'] = cat.get('display_order', 0) + 1
+                                        shifted = True
+                                if shifted:
+                                    _redis_client.set(
+                                        f"c_expense_categories:v1:{current_user.id}",
+                                        json.dumps(c_expense_cats_sync, cls=DecimalEncoder)
+                                    )
+                                    _redis_client.expire(f"c_expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL)
+                                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_categories')
                             
                             payment_category_id = _add_category_to_redis('expense_categories', current_user.id, {
                                 'user_id': current_user.id,
@@ -20056,7 +20119,8 @@ def quiltt_sync_profile():
                             
                             # Create starting balance entry if starting_balance > 0
                             if starting_balance and float(starting_balance) > 0.0:
-                                today_str = date.today().strftime('%Y-%m-%d')
+                                from datetime import timedelta as _td_sync
+                                yesterday_str = (date.today() - _td_sync(days=1)).strftime('%Y-%m-%d')
                                 
                                 # Add starting balance entry to Redis
                                 try:
@@ -20073,7 +20137,7 @@ def quiltt_sync_profile():
                                     entries.append({
                                         'id': entry_id,
                                         'category_id': starting_balance_cat_id,
-                                        'date': today_str,
+                                        'date': yesterday_str,
                                         'amount': float(starting_balance),
                                         'recurring_id': None,
                                         'is_bucket': 0,
@@ -22388,6 +22452,13 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
         account_id = target_account.get('id')
         starting_balance = float(target_account.get('starting_balance', 0))
         
+        # NOTE: We do NOT skip auto-adjustment based on Starting Balance entry existence.
+        # The callers handle the "just created" case:
+        #   - toggle-sync uses credit_account_was_created flag to skip calling this function
+        #   - sync-profile only calls this for existing accounts (not newly created ones)
+        # If an existing account has a Starting Balance entry but the bank balance differs,
+        # the auto-adjustment should still run to reconcile the difference.
+        
         # Get current calculated balance for this credit account
         # The balance = starting_balance + expenses - payments
         # We need to find the current calculated balance and adjust to match bank
@@ -22441,7 +22512,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
             # Balance needs to go UP (bank balance higher than calculated)
             # Create a c_expense_entries record
             
-            # Find Uncategorized category for this credit account
+            # Get categories for this credit account
             c_expense_categories = None
             cat_key = f"c_expense_categories:v1:{user_id}"
             if app.config.get('REDIS_OK'):
@@ -22461,15 +22532,29 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                     c_expense_categories = list(cursor.fetchall())
                     cursor.close()
             
-            # Find auto adjustment category for this account
-            auto_cat = None
+            # Prefer Starting Balance category over Uncategorized for the adjustment.
+            # This makes the balance reconciliation more transparent to the user.
+            target_cat = None
+            
+            # First look for Starting Balance category for this account
             for cat in (c_expense_categories or []):
-                if str(cat.get('account_id')) == str(account_id) and cat.get('is_auto_adjustment') == 1:
-                    auto_cat = cat
+                if (str(cat.get('account_id')) == str(account_id) and 
+                    cat.get('name') == 'Starting Balance' and 
+                    not cat.get('is_auto_adjustment')):
+                    target_cat = cat
+                    app.logger.info(f"[CA-AUTO-ADJUST] Using Starting Balance category (id={cat.get('id')}) for adjustment")
                     break
             
-            if not auto_cat:
-                # Create the Uncategorized category if it doesn't exist
+            # Fall back to Uncategorized (auto-adjustment) category
+            if not target_cat:
+                for cat in (c_expense_categories or []):
+                    if str(cat.get('account_id')) == str(account_id) and cat.get('is_auto_adjustment') == 1:
+                        target_cat = cat
+                        app.logger.info(f"[CA-AUTO-ADJUST] No Starting Balance category found, using Uncategorized (id={cat.get('id')})")
+                        break
+            
+            if not target_cat:
+                # Create the Uncategorized category if nothing exists
                 app.logger.info(f"[CA-AUTO-ADJUST] Creating missing Uncategorized category for account {account_id}")
                 new_cat_id = _add_category_to_redis('c_expense_categories', user_id, {
                     'account_id': account_id,
@@ -22486,16 +22571,50 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                 
                 if new_cat_id:
                     app.logger.info(f"[CA-AUTO-ADJUST] Created Uncategorized category with ID {new_cat_id}")
-                    auto_cat = {'id': new_cat_id, 'account_id': account_id, 'is_auto_adjustment': 1}
+                    target_cat = {'id': new_cat_id, 'account_id': account_id, 'is_auto_adjustment': 1}
                 else:
                     app.logger.error(f"[CA-AUTO-ADJUST] Failed to create Uncategorized category for account {account_id}")
-                    return False, f"Failed to create Uncategorized category for credit account"
+                    return False, f"Failed to create category for credit account adjustment"
             
-            category_id = auto_cat.get('id')
+            category_id = target_cat.get('id')
             
-            # Create expense entry to increase balance
+            # Check if a Starting Balance entry already exists — if so, UPDATE it instead of creating a new entry
+            is_starting_balance = (target_cat.get('name') == 'Starting Balance')
+            if is_starting_balance:
+                c_expense_entries = _get_entries_from_redis('c_expense_entries', user_id)
+                if c_expense_entries is None:
+                    c_expense_entries = []
+                
+                existing_sb_entry = None
+                for entry in c_expense_entries:
+                    if int(entry.get('category_id', 0)) == int(category_id):
+                        existing_sb_entry = entry
+                        break
+                
+                if existing_sb_entry:
+                    # Update existing Starting Balance entry to match bank balance
+                    old_amount = float(existing_sb_entry.get('amount', 0))
+                    new_amount = old_amount + adjustment_amount
+                    existing_sb_entry['amount'] = new_amount
+                    existing_sb_entry['original_amount'] = new_amount
+                    
+                    # Save back to Redis
+                    redis_key_entries = f"c_expense_entries:v1:{user_id}"
+                    _redis_client.setex(
+                        redis_key_entries,
+                        PERSISTENT_CACHE_TTL,
+                        json.dumps(c_expense_entries, cls=DecimalEncoder)
+                    )
+                    dirty_key = f"dirty_tables:{user_id}"
+                    _redis_client.sadd(dirty_key, 'c_expense_entries')
+                    _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                    
+                    app.logger.info(f"[CA-AUTO-ADJUST] Updated Starting Balance entry from ${old_amount} to ${new_amount}")
+                    return True, f"Starting Balance updated: ${old_amount:.2f} → ${new_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
+            
+            # Create new expense entry to increase balance
             _update_entry_in_redis('c_expense_entries', user_id, category_id, today_str, float(adjustment_amount), processed=1, is_auto_adjustment=True)
-            app.logger.info(f"[CA-AUTO-ADJUST] Created expense entry for ${adjustment_amount} to increase balance")
+            app.logger.info(f"[CA-AUTO-ADJUST] Created {'Starting Balance' if is_starting_balance else 'expense'} entry for ${adjustment_amount} to increase balance")
             
             return True, f"Credit account expense adjustment: +${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
         
@@ -22713,47 +22832,47 @@ def quiltt_toggle_sync():
                             
                             # Add default categories for the credit account
                             if temp_account_id:
-                                # "Interest Charge" category
-                                _add_category_to_redis('c_expense_categories', current_user.id, {
-                                    'account_id': temp_account_id,
-                                    'name': 'Interest Charge',
-                                    'display_order': 2,
-                                    'group_id': None,
-                                    'is_recurring': 0,
-                                    'no_end_date': 0,
-                                    'hidden': 0,
-                                    'is_bud': 0,
-                                    'is_interest': 1,
-                                    'is_auto_adjustment': 0
-                                })
-                                
-                                # "Uncategorized" category
-                                _add_category_to_redis('c_expense_categories', current_user.id, {
-                                    'account_id': temp_account_id,
-                                    'name': 'Uncategorized',
-                                    'display_order': 0,
-                                    'group_id': None,
-                                    'is_recurring': 0,
-                                    'no_end_date': 0,
-                                    'hidden': 0,
-                                    'is_bud': 0,
-                                    'is_interest': 0,
-                                    'is_auto_adjustment': 1
-                                })
-                                
-                                # "Starting Balance" category
-                                starting_balance_cat_id = _add_category_to_redis('c_expense_categories', current_user.id, {
-                                    'account_id': temp_account_id,
-                                    'name': 'Starting Balance',
-                                    'display_order': 1,
-                                    'group_id': None,
-                                    'is_recurring': 0,
-                                    'no_end_date': 0,
-                                    'hidden': 0,
-                                    'is_bud': 0,
-                                    'is_interest': 0,
-                                    'is_auto_adjustment': 0
-                                })
+                                # Add all 3 default categories in a SINGLE Redis write to prevent race conditions
+                                default_cat_ids = _add_categories_batch_to_redis('c_expense_categories', current_user.id, [
+                                    {
+                                        'account_id': temp_account_id,
+                                        'name': 'Interest Charge',
+                                        'display_order': 2,
+                                        'group_id': None,
+                                        'is_recurring': 0,
+                                        'no_end_date': 0,
+                                        'hidden': 0,
+                                        'is_bud': 0,
+                                        'is_interest': 1,
+                                        'is_auto_adjustment': 0
+                                    },
+                                    {
+                                        'account_id': temp_account_id,
+                                        'name': 'Uncategorized',
+                                        'display_order': 0,
+                                        'group_id': None,
+                                        'is_recurring': 0,
+                                        'no_end_date': 0,
+                                        'hidden': 0,
+                                        'is_bud': 0,
+                                        'is_interest': 0,
+                                        'is_auto_adjustment': 1
+                                    },
+                                    {
+                                        'account_id': temp_account_id,
+                                        'name': 'Starting Balance',
+                                        'display_order': 1,
+                                        'group_id': None,
+                                        'is_recurring': 0,
+                                        'no_end_date': 0,
+                                        'hidden': 0,
+                                        'is_bud': 0,
+                                        'is_interest': 0,
+                                        'is_auto_adjustment': 0
+                                    }
+                                ])
+                                # IDs are in order: [Interest Charge, Uncategorized, Starting Balance]
+                                starting_balance_cat_id = default_cat_ids[2] if len(default_cat_ids) >= 3 else None
                                 
                                 # Copy all existing expense categories to this new credit account
                                 _copy_expense_categories_to_new_credit_account(current_user.id, temp_account_id)
@@ -22761,13 +22880,44 @@ def quiltt_toggle_sync():
                                 # Create matching expense_categories record for payment
                                 payment_category_name = f"{account_name} payment"
                                 
-                                # Get max display_order for expense_categories
+                                # Payment categories always get display_order 1 (top of list)
                                 expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+                                new_display_order = 1
+                                
+                                # Shift non-system, non-payment categories at or above this position up by 1
                                 if expense_categories:
-                                    max_display_order = max([cat.get('display_order', 0) for cat in expense_categories])
-                                else:
-                                    max_display_order = 0
-                                new_display_order = max_display_order + 1
+                                    shifted = False
+                                    for cat in expense_categories:
+                                        if cat.get('is_auto_adjustment') == 1 or cat.get('is_credit_account') == 1:
+                                            continue
+                                        if cat.get('display_order', 0) >= new_display_order:
+                                            cat['display_order'] = cat.get('display_order', 0) + 1
+                                            shifted = True
+                                    if shifted:
+                                        _redis_client.set(
+                                            f"expense_categories:v1:{current_user.id}",
+                                            json.dumps(expense_categories, cls=DecimalEncoder)
+                                        )
+                                        _redis_client.expire(f"expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL)
+                                        _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+                                
+                                # Also shift c_expense_categories display_order to stay in sync
+                                c_expense_cats_toggle = _get_categories_from_redis('c_expense_categories', current_user.id)
+                                if c_expense_cats_toggle:
+                                    shifted = False
+                                    for cat in c_expense_cats_toggle:
+                                        if cat.get('is_auto_adjustment') == 1 or cat.get('is_interest') == 1:
+                                            continue
+                                        if cat.get('display_order', 0) >= new_display_order:
+                                            cat['display_order'] = cat.get('display_order', 0) + 1
+                                            shifted = True
+                                    if shifted:
+                                        _redis_client.set(
+                                            f"c_expense_categories:v1:{current_user.id}",
+                                            json.dumps(c_expense_cats_toggle, cls=DecimalEncoder)
+                                        )
+                                        _redis_client.expire(f"c_expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL)
+                                        _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_categories')
                                 
                                 _add_category_to_redis('expense_categories', current_user.id, {
                                     'user_id': current_user.id,
