@@ -858,10 +858,11 @@ def complete_profile_setup():
         _update_user_setting_in_redis(current_user.id, 'starting_savings', starting_savings)
         _update_user_setting_in_redis(current_user.id, 'currency_type', currency_type)
         
-        # Set member_since to the income_entry_date (when user's budget tracking starts)
-        # This is set here instead of registration so it reflects when they completed setup
-        print(f"[complete_profile_setup] Setting member_since to: {income_entry_date}")
-        _update_user_setting_in_redis(current_user.id, 'member_since', income_entry_date)
+        # Set member_since to TODAY (when user completed setup)
+        # Note: income_entry_date is yesterday (for starting balance), but member_since is today
+        member_since_date = date.today().strftime('%Y-%m-%d')
+        print(f"[complete_profile_setup] Setting member_since to: {member_since_date}")
+        _update_user_setting_in_redis(current_user.id, 'member_since', member_since_date)
         
         # Update name fields if they exist
         if first_name and last_name:
@@ -22090,15 +22091,16 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
     """
     Create an auto-adjustment entry to match Blankee remainder with bank balance.
     Called when a checking account is connected or enabled.
+    Uses YESTERDAY's date so the adjustment doesn't interfere with today's entries.
     
     Returns: (success: bool, message: str)
     """
     try:
-        from datetime import date as date_class
-        today = date_class.today()
-        today_str = today.strftime('%Y-%m-%d')
+        from datetime import date as date_class, timedelta as td
+        yesterday = date_class.today() - td(days=1)
+        today_str = yesterday.strftime('%Y-%m-%d')
         
-        # Get today's remainder from Redis or MySQL
+        # Get yesterday's remainder from Redis or MySQL
         today_remainder = None
         
         # Try Redis first
@@ -22106,7 +22108,7 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
         if cached_daily:
             for row in cached_daily:
                 row_date = datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']
-                if row_date == today:
+                if row_date == yesterday:
                     today_remainder = float(row.get('remainder', 0))
                     break
         
@@ -22127,7 +22129,7 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
                     today_remainder = float(result['remainder'])
                 else:
                     pass
-                    return False, "No remainder data found for today"
+                    return False, "No remainder data found for yesterday"
         
         bank_balance_float = float(bank_balance)
         
@@ -22221,6 +22223,7 @@ def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_acco
     Create a savings adjustment entry to reconcile with the bank balance.
     The adjustment stores the DELTA (difference) between bank balance and calculated balance.
     This delta persists through recalculations and is ADDED to the calculated value.
+    Uses YESTERDAY's date so the adjustment doesn't interfere with today's entries.
     
     Args:
         user_id: User ID
@@ -22230,9 +22233,9 @@ def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_acco
     Returns: (success: bool, message: str)
     """
     try:
-        from datetime import date as date_class
-        today = date_class.today()
-        today_str = today.strftime('%Y-%m-%d')
+        from datetime import date as date_class, timedelta as td
+        yesterday = date_class.today() - td(days=1)
+        today_str = yesterday.strftime('%Y-%m-%d')
         
         app.logger.info(f"[SAVINGS-ADJUST] Creating adjustment for user {user_id}: bank balance ${bank_savings_balance}")
         
@@ -22247,7 +22250,7 @@ def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_acco
                     if entry_date == today_str:
                         current_calculated_savings = float(entry.get('amount', 0))
                         break
-                elif entry_date == today:
+                elif entry_date == yesterday:
                     current_calculated_savings = float(entry.get('amount', 0))
                     break
         
@@ -22341,9 +22344,9 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
     Returns: (success: bool, message: str)
     """
     try:
-        from datetime import date as date_class
-        today = date_class.today()
-        today_str = today.strftime('%Y-%m-%d')
+        from datetime import date as date_class, timedelta as td
+        yesterday = date_class.today() - td(days=1)
+        today_str = yesterday.strftime('%Y-%m-%d')
         
         app.logger.info(f"[CA-AUTO-ADJUST] Creating adjustment for user {user_id}, quiltt_id {quiltt_account_id}, mask {account_mask}: bank balance ${bank_balance}")
         
@@ -22783,7 +22786,8 @@ def quiltt_toggle_sync():
                                 
                                 # Create starting balance entry if starting_balance > 0
                                 if current_balance and float(current_balance) > 0.0:
-                                    today_str = date.today().strftime('%Y-%m-%d')
+                                    from datetime import timedelta as _td
+                                    today_str = (date.today() - _td(days=1)).strftime('%Y-%m-%d')
                                     
                                     # Add starting balance entry to Redis
                                     try:
