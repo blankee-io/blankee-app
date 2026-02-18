@@ -4612,7 +4612,7 @@ td:has(.bucket-progress-container) {
 
 /* Move the red exclamation circle up by the height of .dashboard-m-date */
 .dashboard-m-remainder.negative::before {
-    left: -3px;
+    right: -8px;
 
     /* Inherit the existing styles for the red circle */
     /* Move up by the height of .dashboard-m-date (assume 100% of parent for now) */
@@ -5013,7 +5013,7 @@ td:has(.bucket-progress-container) {
 @media (width <= 600px) {
     .below-threshold::before {
         top: -7px;
-        left: -2px;
+        right: -6px;
         width: 10px;
         height: 10px;
         font-size: 9px;
@@ -5086,7 +5086,7 @@ td:has(.bucket-progress-container) {
 
 /* Move the red exclamation circle up by the height of .dashboard-m-date */
 .dashboard-m-remainder.below-threshold::before {
-    left: -3px;
+    right: -8px;
 
     /* Inherit the existing styles for the red circle */
     /* Move up by the height of .dashboard-m-date (assume 100% of parent for now) */
