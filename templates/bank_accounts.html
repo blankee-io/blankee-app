@@ -1495,6 +1495,9 @@
                     return;
                 }
 
+                // Show loading modal while toggling and recalculating
+                $('#bank-fetching-modal').show();
+
                 $.ajax({
                     url: '/quiltt/toggle-sync',
                     method: 'POST',
@@ -1513,40 +1516,41 @@
                                 showToast('Account sync disabled', 'info');
                             }
                             
-                            if (accountType === 'checking') {
-                                $.ajax({
-                                    url: '/save_totals_remainders_d',
-                                    method: 'POST',
-                                    contentType: 'application/json',
-                                    data: JSON.stringify({})
-                                });
-                            } else if (accountType === 'savings') {
-                                $.ajax({
-                                    url: '/save_totals_remainders_d',
-                                    method: 'POST',
-                                    contentType: 'application/json',
-                                    data: JSON.stringify({})
-                                });
+                            // Determine recalculation endpoint
+                            let recalcUrl = null;
+                            if (accountType === 'checking' || accountType === 'savings') {
+                                recalcUrl = '/save_totals_remainders_d';
                             } else if (accountType === 'credit') {
-                                $.ajax({
-                                    url: '/save_ca_daily_balance',
-                                    method: 'POST',
-                                    contentType: 'application/json',
-                                    data: JSON.stringify({})
-                                });
+                                recalcUrl = '/save_ca_daily_balance';
                             }
                             
-                            if (syncEnabled) {
-                                setTimeout(function() {
+                            if (recalcUrl) {
+                                $.ajax({
+                                    url: recalcUrl,
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    complete: function() {
+                                        $('#bank-fetching-modal').hide();
+                                        if (syncEnabled) {
+                                            updateConnectionsUI();
+                                        }
+                                    }
+                                });
+                            } else {
+                                $('#bank-fetching-modal').hide();
+                                if (syncEnabled) {
                                     updateConnectionsUI();
-                                }, 1000);
+                                }
                             }
                         } else {
+                            $('#bank-fetching-modal').hide();
                             showToast('Failed to update sync setting', 'error');
                             $checkbox.prop('checked', !syncEnabled);
                         }
                     },
                     error: function() {
+                        $('#bank-fetching-modal').hide();
                         showToast('Error updating sync setting', 'error');
                         $checkbox.prop('checked', !syncEnabled);
                     }
