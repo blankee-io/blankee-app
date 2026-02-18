@@ -508,7 +508,7 @@
             $.ajax({
                 url: url,
                 method: "POST",
-                data: { category_id: categoryId },
+                data: { id: categoryId },
                 success: function(response) {
                     if (response.status === 'success') {
                         location.reload();
