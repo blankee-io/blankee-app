@@ -18,6 +18,8 @@
     --accent-hover:       #EF9F77;
     --accent-lighter:     #FDEEEE;
 
+    --warning:            #d89802;
+
     --text-dark:          #575757;
     --text-light:         #FFFFFF;
 
@@ -2269,13 +2271,13 @@ input#setup-profile-starting-savings {
 .setup-profile-submit-button:hover {
     box-shadow: 0 4px 16px var(--shadow-lg);
     background-color: var(--primary-hover);
-transform: scale(1.2);
+transform: scale(1.02);
 }
 
 .setup-profile-previous-button:hover {
     box-shadow: 0 4px 16px var(--shadow-lg);
     background-color: var(--accent-hover);
-    transform: scale(1.2);
+    transform: scale(1.02);
 }
 
 .setup-profile-previous-button:active,
@@ -2331,7 +2333,7 @@ transform: scale(1.2);
 
 .account-selection-item:hover {
     border-color: var(--primary-hover);
-    transform: scale(1.2);
+    transform: scale(1.02);
 }
 
 .account-selection-item.disabled {
@@ -2709,7 +2711,7 @@ transform: scale(1.2);
 }
 
 .below-threshold-indicator span {
-    background: var(--accent) !important;
+    background: var(--warning) !important;
     color: var(--text-dark) !important;
 }
 
@@ -4477,20 +4479,20 @@ td:has(.bucket-progress-container) {
 
 .negative::before {
     position: absolute;
-    top: -8px;
-    left: -3px;
+    top: -6px;
+    right: -8px;
     z-index: 10;
-    display: flex;
+    display: inline-flex;
     justify-content: center;
     align-items: center;
-    width: 12px;
-    height: 12px;
+    width: 11px;
+    height: 11px;
     background: var(--danger);
-    border: 2px solid  var(--text-dark);
+    border: 1.5px solid var(--text-dark);
     border-radius: 50%;
     box-shadow: 0 1px 4px var(--shadow-md);
     color: var(--text-light);
-    font-size: 11px;
+    font-size: 8.5px;
     font-weight: bold;
     pointer-events: none;
     content: '!';
@@ -4499,7 +4501,7 @@ td:has(.bucket-progress-container) {
 @media (width <= 600px) {
     .negative::before {
         top: -7px;
-        left: -2px;
+        right: -6px;
         width: 10px;
         height: 10px;
         font-size: 9px;
@@ -4989,20 +4991,20 @@ td:has(.bucket-progress-container) {
 
 .below-threshold::before {
     position: absolute;
-    top: -8px;
-    left: -3px;
+    top: -6px;
+    right: -8px;
     z-index: 2;
-    display: flex;
+    display: inline-flex;
     justify-content: center;
     align-items: center;
-    width: 12px;
-    height: 12px;;
-    background: var(--accent);
-    border: 2px solid  var(--text-dark);
+    width: 11px;
+    height: 11px;
+    background: var(--warning);
+    border: 1.5px solid var(--text-dark);
     border-radius: 50%;
     box-shadow: 0 1px 4px var(--shadow-md);
     color: var(--text-dark);
-    font-size: 11px;
+    font-size: 8.5px;
     font-weight: bold;
     pointer-events: none;
     content: '!';
@@ -5060,7 +5062,7 @@ td:has(.bucket-progress-container) {
 /* Only show the exclamation bubble for below-threshold cells in the yearly dashboard calendar */
 .dashboard-y-calendar-table .below-threshold {
     position: relative;
-    color: var(--accent) !important;
+    color: var(--warning) !important;
 }
 
 .dashboard-y-calendar-table .below-threshold::before {
@@ -5069,7 +5071,7 @@ td:has(.bucket-progress-container) {
     align-items: center;
     width: 6px;
     height: 6px;
-    background: var(--accent);
+    background: var(--warning);
     border: 2px solid  var(--text-dark);
     border-radius: 50%;
     box-shadow: 0 1px 4px var(--shadow-md);
@@ -11372,7 +11374,7 @@ transform: scale(1.2);
 .account-selection-item:hover {
     border-color: var(--primary);
     background: var(--primary-lighter);
-    transform: scale(1.2);
+    transform: scale(1.02);
 }
 
 .account-selection-check {
