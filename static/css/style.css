@@ -2995,26 +2995,6 @@ tr[data-category-id] td.before-member-since {
     justify-content: center;
 }
 
-.overdue-bill::after {
-    position: absolute;
-    top: -6px;
-    right: -8px;
-    width: 11px;
-    height: 11px;
-    font-size: 8.5px;
-    font-weight: 900;
-    pointer-events: none;
-    font-family: "Font Awesome 7 Pro";
-    content: '\f128';
-    color: var(--text-dark);
-    background-color: var(--secondary);
-    border: 1.5px solid var(--text-dark);
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
 /* Alternating background colors for income entries */
 .dashboard-d-income-entries .dashboard-d-row:nth-child(odd) {
     /* Green for odd income entries */
