@@ -907,6 +907,8 @@
                         iconHtml = '<i class="fa-solid fa-flag-checkered category-icon"></i>';
                     } else if (catObj) {
                         if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                        else if (catObj.name === 'Savings' && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
+                        else if (catObj.name === 'Savings') iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
                         else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
                         else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
                     }
@@ -980,6 +982,9 @@
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                     if (catObj) {
                         if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                        else if (catObj.is_credit_account && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
+                        else if (catObj.name === 'Savings' && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
+                        else if (catObj.name === 'Savings') iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
                         else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
                         else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
                         else if (catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
@@ -2170,6 +2175,9 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             
             if (catObj) {
                 if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                else if (entryType === 'expense' && catObj.is_credit_account && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
+                else if (catObj.name === 'Savings' && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
+                else if (catObj.name === 'Savings') iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
                 else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
                 else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
                 else if (entryType === 'expense' && catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
