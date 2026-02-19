@@ -2376,6 +2376,77 @@ transform: scale(1.02);
     font-weight: 600;
     font-size: 1em;
     color: var(--text-dark);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+}
+
+.account-alias-input {
+    border: 1px solid transparent;
+    background: transparent;
+    font-weight: 600;
+    font-size: 1em;
+    color: var(--text-dark);
+    padding: 2px 6px;
+    border-radius: 6px;
+    width: 100%;
+    max-width: 220px;
+    outline: none;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.account-alias-input:hover {
+    border-color: var(--secondary-hover);
+    background: var(--secondary-lighter);
+}
+
+.account-alias-input:focus {
+    border-color: var(--primary);
+    background: var(--white);
+    box-shadow: 0 0 0 2px var(--primary-lighter);
+}
+
+.account-alias-edit-icon {
+    font-size: 0.7em;
+    color: var(--secondary);
+    opacity: 0.5;
+    transition: opacity 0.2s;
+    pointer-events: none;
+}
+
+.account-selection-name:hover .account-alias-edit-icon {
+    opacity: 1;
+}
+
+/* Account rename button on bank_accounts page */
+.account-rename-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--secondary);
+    font-size: 0.7em;
+    padding: 2px 4px;
+    transition: color 0.2s, transform 0.2s;
+    margin-left: 4px;
+}
+
+.account-rename-btn:hover {
+    color: var(--secondary-dark);
+    transform: scale(1.2);
+}
+
+.account-rename-input {
+    border: 1px solid var(--primary);
+    background: var(--white);
+    font-weight: 600;
+    font-size: inherit;
+    color: var(--text-dark);
+    padding: 2px 6px;
+    border-radius: 4px;
+    outline: none;
+    width: 160px;
+    box-shadow: 0 0 0 2px var(--primary-lighter);
 }
 
 .account-mask {
@@ -11410,6 +11481,10 @@ transform: scale(1.2);
     font-size: 15px;
     font-weight: 500;
     color: var(--text-dark);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: relative;
 }
 
 .account-selection-details {

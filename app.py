@@ -11711,7 +11711,7 @@ def widget_pending_transactions():
             'description': txn.get('description'),
             'amount': float(txn.get('amount', 0)),
             'date': txn.get('date'),
-            'account_name': account_info.get('account_name', 'Unknown'),
+            'account_name': account_info.get('alias') or account_info.get('account_name', 'Unknown'),
             'entry_type': entry_type,
             'is_expense': entry_type in ('expense', 'c_expense'),
             'current_category_name': category_name,
@@ -12183,7 +12183,7 @@ def pending_transactions():
                 'amount': float(txn.get('amount', 0)),
                 'date': txn.get('date'),
                 'account_id': txn.get('account_id'),  # Quiltt account_id
-                'account_name': account_info.get('account_name', 'Unknown'),
+                'account_name': account_info.get('alias') or account_info.get('account_name', 'Unknown'),
                 'ntropy_labels': ntropy_labels,
                 'imported_to_entry_id': imported_entry_id,
                 'imported_entry_type': entry_type,
@@ -18016,11 +18016,11 @@ def add_credit_account():
     expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
     new_display_order = 1
     
-    # Shift all non-system, non-payment categories at or above this position up by 1
+    # Shift all non-system categories at or above this position up by 1
     if expense_categories:
         shifted = False
         for cat in expense_categories:
-            if cat.get('is_auto_adjustment') == 1 or cat.get('is_credit_account') == 1:
+            if cat.get('is_auto_adjustment') == 1:
                 continue
             if cat.get('display_order', 0) >= new_display_order:
                 cat['display_order'] = cat.get('display_order', 0) + 1
@@ -19271,7 +19271,7 @@ def quiltt_settings():
 def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
     """
     Refresh the Quiltt session token for a user.
-    This ensures the session token in Redis is up-to-date for API operations.
+    Reuses the cached token if it hasn't expired yet (with 5-minute buffer).
     
     Args:
         user_id: The user's ID
@@ -19282,22 +19282,43 @@ def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
     """
     try:
         from quiltt_redis import get_quiltt_profile, update_quiltt_profile
+        from dateutil import parser as dateutil_parser
         
         profile = get_quiltt_profile(user_id)
         
-        if profile and profile.get('profile_id'):
-            # Existing profile - refresh token
-            result = quiltt_client.refresh_session_token(
-                profile['profile_id'],
-                metadata={
-                    'username': username,
-                    'email': username
-                }
-            )
-        else:
+        if not profile or not profile.get('profile_id'):
             # No profile - nothing to refresh
             app.logger.debug(f"No Quiltt profile for user {user_id}, skipping session refresh")
             return True
+        
+        # Check if cached token is still valid (with 5-minute buffer)
+        if profile.get('session_token') and profile.get('session_expires_at'):
+            expires_at = profile['session_expires_at']
+            if isinstance(expires_at, str):
+                try:
+                    expires_at = dateutil_parser.isoparse(expires_at)
+                except Exception:
+                    try:
+                        expires_at = datetime.strptime(expires_at, '%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        expires_at = None
+            
+            if expires_at is not None:
+                now = datetime.utcnow()
+                if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
+                    expires_at = expires_at.replace(tzinfo=None)
+                if expires_at > now + timedelta(minutes=5):
+                    app.logger.debug(f"Reusing cached Quiltt session token for user {user_id} (expires {expires_at})")
+                    return True
+        
+        # Need a fresh token
+        result = quiltt_client.refresh_session_token(
+            profile['profile_id'],
+            metadata={
+                'username': username,
+                'email': username
+            }
+        )
         
         if not result or not result.get('token'):
             app.logger.warning(f"Failed to refresh Quiltt session token for user {user_id}")
@@ -19308,8 +19329,7 @@ def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
         # Parse and convert expiration time
         expires_at_str = result.get('expiresAt')
         if expires_at_str:
-            from dateutil import parser
-            expires_at = parser.isoparse(expires_at_str)
+            expires_at = dateutil_parser.isoparse(expires_at_str)
             expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
         else:
             expires_at_mysql = None
@@ -19333,21 +19353,47 @@ def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
 @app.route('/quiltt/get-session-token', methods=['POST'])
 @login_required
 def get_quiltt_session_token():
-    """Get a fresh Quiltt session token for the current user"""
+    """Get a Quiltt session token for the current user, reusing cached token if still valid"""
     try:
+        from dateutil import parser as dateutil_parser
+
         # Get existing profile from Redis or MySQL
         profile = get_quiltt_profile(current_user.id)
-        
-        # Always generate a fresh token for opening the Connector
-        # This ensures we never use an expired token
-        
+
+        # Check if we already have a valid (non-expired) session token
+        if profile and profile.get('session_token') and profile.get('session_expires_at'):
+            expires_at = profile['session_expires_at']
+            # Parse expiration - could be string or datetime
+            if isinstance(expires_at, str):
+                try:
+                    expires_at = dateutil_parser.isoparse(expires_at)
+                except Exception:
+                    try:
+                        expires_at = datetime.strptime(expires_at, '%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        expires_at = None
+
+            if expires_at is not None:
+                # Make both timezone-naive for comparison
+                now = datetime.utcnow()
+                if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
+                    expires_at = expires_at.replace(tzinfo=None)
+                # Reuse token if it has at least 5 minutes left
+                if expires_at > now + timedelta(minutes=5):
+                    app.logger.info(f"Reusing cached Quiltt session token for user {current_user.id} (expires {expires_at})")
+                    return jsonify({
+                        'status': 'success',
+                        'session_token': profile['session_token']
+                    })
+
+        # Need a fresh token
         if profile and profile.get('profile_id'):
             # Existing profile - refresh token
             result = quiltt_client.refresh_session_token(
                 profile['profile_id'],
                 metadata={
                     'username': current_user.username,
-                    'email': current_user.username  # Username is the email
+                    'email': current_user.username
                 }
             )
         else:
@@ -19356,7 +19402,7 @@ def get_quiltt_session_token():
                 current_user.id,
                 metadata={
                     'username': current_user.username,
-                    'email': current_user.username  # Username is the email
+                    'email': current_user.username
                 }
             )
         
@@ -19372,8 +19418,7 @@ def get_quiltt_session_token():
         # Parse and convert expiration time
         expires_at_str = result.get('expiresAt')
         if expires_at_str:
-            from dateutil import parser
-            expires_at = parser.isoparse(expires_at_str)
+            expires_at = dateutil_parser.isoparse(expires_at_str)
             expires_at_mysql = expires_at.strftime('%Y-%m-%d %H:%M:%S')
         else:
             expires_at_mysql = None
@@ -19387,12 +19432,7 @@ def get_quiltt_session_token():
         update_quiltt_profile(profile_data, current_user.id)
         
         # Update the profile with the user's email so Quiltt doesn't ask for it
-        email_updated = quiltt_client.update_profile_email(session_token, current_user.username)
-        if email_updated:
-            pass
-        else:
-            pass
-        
+        quiltt_client.update_profile_email(session_token, current_user.username)
         
         return jsonify({
             'status': 'success',
@@ -19562,7 +19602,8 @@ def quiltt_disconnect():
 @app.route('/quiltt/delete', methods=['POST'])
 @login_required
 def quiltt_delete():
-    """Delete a disconnected Quiltt connection and all associated data (Redis-first)"""
+    """Delete a Quiltt connection and all associated data (Redis-first).
+    Also disconnects on Quiltt API side to prevent it from returning on next sync."""
     data = request.get_json()
     connection_id = data.get('connection_id')
     
@@ -19572,9 +19613,6 @@ def quiltt_delete():
         return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
     
     try:
-        # Refresh session token to keep it current
-        _refresh_quiltt_session_token(current_user.id, current_user.username)
-        
         # Get connection from Redis first, then MySQL if not found
         from quiltt_redis import _get_from_redis
         connections = _get_from_redis('quiltt_connections', current_user.id)
@@ -19595,11 +19633,15 @@ def quiltt_delete():
             app.logger.warning(f"DELETE - Connection {connection_id} not found for user {current_user.id}, may already be deleted")
             return jsonify({'status': 'success', 'message': 'Connection already deleted'})
         
-        # Safety check - only allow deletion of disconnected/error connections
-        status = connection.get('status', '').upper()
-        if status not in ('DISCONNECTED', 'ERROR', 'DELETING', 'ERROR_REPAIRABLE', 'ERROR_INSTITUTION', 'ERROR_PROVIDER', 'ERROR_SERVICE'):
-            app.logger.error(f"DELETE FAILED - Connection status is '{status}', not a disconnected/error state")
-            return jsonify({'status': 'error', 'message': 'Can only delete disconnected connections'}), 400
+        # Disconnect from Quiltt API to prevent it from coming back on next sync
+        profile = get_quiltt_profile(current_user.id)
+        if profile and profile.get('session_token'):
+            try:
+                app.logger.info(f"[DELETE] Disconnecting connection {connection_id} from Quiltt API")
+                quiltt_client.disconnect_connection(profile['session_token'], connection_id)
+                app.logger.info(f"[DELETE] Successfully disconnected from Quiltt API")
+            except Exception as e:
+                app.logger.warning(f"[DELETE] Failed to disconnect from Quiltt API: {e}, continuing with local delete")
         
         # Before deleting, get all accounts for this connection to update credit accounts
         quiltt_accounts = get_quiltt_accounts(current_user.id)
@@ -19800,6 +19842,17 @@ def quiltt_sync_profile():
             connection_id = connection.get('id', '')
             connection_status = connection.get('status', 'ACTIVE')
             
+            # Skip DISCONNECTED connections that aren't already in our local database
+            # This prevents re-inserting connections the user previously deleted
+            if connection_status.upper() == 'DISCONNECTED':
+                already_exists = any(
+                    ea.get('connection_id') == connection_id
+                    for ea in (get_quiltt_connections(current_user.id) or [])
+                )
+                if not already_exists:
+                    app.logger.info(f"Skipping DISCONNECTED connection {connection_id} ({institution_name}) - not in local DB (user likely deleted it)")
+                    continue
+            
             
             # Upsert connection to Redis + MySQL
             connection_db_id = upsert_quiltt_connection({
@@ -19921,6 +19974,13 @@ def quiltt_sync_profile():
                         quiltt_account = qa
                         break
                 
+                # Debug logging for credit account matching
+                if account_type.upper() == 'CREDIT':
+                    if quiltt_account:
+                        app.logger.info(f"[SYNC-PROFILE] CREDIT account {account_id} ({account_name}): is_active={quiltt_account.get('is_active')}, sync_transactions={quiltt_account.get('sync_transactions')}, mask={account.get('mask', '')}")
+                    else:
+                        app.logger.warning(f"[SYNC-PROFILE] CREDIT account {account_id} ({account_name}) NOT FOUND in quiltt_accounts ({len(quiltt_accounts)} accounts in Redis)")
+                
                 # Only create credit account if it's active and sync is enabled
                 if (account_type.upper() == 'CREDIT' and 
                     quiltt_account and 
@@ -19943,10 +20003,15 @@ def quiltt_sync_profile():
                     # Check if credit account already exists for this Quiltt account
                     redis_key = f"credit_accounts:v1:{current_user.id}"
                     cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-                    credit_accounts = json.loads(cached) if cached else []
                     
-                    # If Redis is empty, also check MySQL for existing accounts
-                    if not credit_accounts:
+                    # Only fall back to MySQL when Redis key doesn't exist (cache miss).
+                    # If cached is not None (even if empty list), Redis is authoritative —
+                    # an empty list means user deleted all accounts and we must not
+                    # re-load stale MySQL data that hasn't been flushed yet.
+                    if cached is not None:
+                        credit_accounts = json.loads(cached)
+                    else:
+                        # True cache miss - load from MySQL
                         with get_db_pool().get_connection() as conn:
                             cursor = conn.cursor(pymysql.cursors.DictCursor)
                             cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order DESC", (current_user.id,))
@@ -19960,6 +20025,15 @@ def quiltt_sync_profile():
                                     json.dumps(credit_accounts, cls=DecimalEncoder)
                                 )
                     
+                    # Determine the display name the user wants for this credit account
+                    credit_account_display_name = (quiltt_account.get('alias') or account_name) if quiltt_account else account_name
+                    
+                    # Debug: Log credit accounts being searched and what we're looking for
+                    app.logger.info(f"[SYNC-PROFILE] Looking for credit account match: quiltt_account_id={account_id}, mask={account_mask}, display_name={credit_account_display_name}")
+                    app.logger.info(f"[SYNC-PROFILE] Credit accounts to search ({len(credit_accounts)}):")
+                    for ca in credit_accounts:
+                        app.logger.info(f"[SYNC-PROFILE]   - id={ca.get('id')}, name={ca.get('name')}, mask={ca.get('mask')}, quiltt_account_id={ca.get('quiltt_account_id')}, is_quiltt={ca.get('is_quiltt')}")
+                    
                     # Look for existing credit account with matching quiltt_account_id first, then mask
                     existing_account = None
                     for i, acc in enumerate(credit_accounts):
@@ -19967,6 +20041,29 @@ def quiltt_sync_profile():
                         if acc.get('quiltt_account_id') == account_id:
                             existing_account = acc
                             credit_accounts[i]['is_quiltt'] = 1
+                            
+                            # Rename the credit account to the user's chosen name if different
+                            old_name = acc.get('name', '')
+                            if old_name != credit_account_display_name:
+                                credit_accounts[i]['name'] = credit_account_display_name
+                                app.logger.info(f"[SYNC-PROFILE] Renamed credit account '{old_name}' -> '{credit_account_display_name}'")
+                                
+                                # Also rename the payment category ("OldName payment" -> "NewName payment")
+                                expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+                                if expense_categories:
+                                    old_payment_name = f"{old_name} payment"
+                                    credit_account_db_id = acc.get('id')
+                                    for ec in expense_categories:
+                                        if ec.get('credit_account_id') == credit_account_db_id and ec.get('name') == old_payment_name:
+                                            ec['name'] = f"{credit_account_display_name} payment"
+                                            app.logger.info(f"[SYNC-PROFILE] Renamed payment category '{old_payment_name}' -> '{ec['name']}'")
+                                            break
+                                    _redis_client.setex(
+                                        f"expense_categories:v1:{current_user.id}",
+                                        PERSISTENT_CACHE_TTL,
+                                        json.dumps(expense_categories, cls=DecimalEncoder)
+                                    )
+                                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
                             
                             # Save back to Redis
                             _redis_client.setex(
@@ -20005,6 +20102,29 @@ def quiltt_sync_profile():
                             credit_accounts[i]['is_quiltt'] = 1
                             credit_accounts[i]['quiltt_account_id'] = account_id
                             
+                            # Rename the credit account to the user's chosen name if different
+                            old_name = acc.get('name', '')
+                            if old_name != credit_account_display_name:
+                                credit_accounts[i]['name'] = credit_account_display_name
+                                app.logger.info(f"[SYNC-PROFILE] Renamed credit account '{old_name}' -> '{credit_account_display_name}' (mask match)")
+                                
+                                # Also rename the payment category
+                                expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+                                if expense_categories:
+                                    old_payment_name = f"{old_name} payment"
+                                    credit_account_db_id = acc.get('id')
+                                    for ec in expense_categories:
+                                        if ec.get('credit_account_id') == credit_account_db_id and ec.get('name') == old_payment_name:
+                                            ec['name'] = f"{credit_account_display_name} payment"
+                                            app.logger.info(f"[SYNC-PROFILE] Renamed payment category '{old_payment_name}' -> '{ec['name']}' (mask match)")
+                                            break
+                                    _redis_client.setex(
+                                        f"expense_categories:v1:{current_user.id}",
+                                        PERSISTENT_CACHE_TTL,
+                                        json.dumps(expense_categories, cls=DecimalEncoder)
+                                    )
+                                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+                            
                             # Save back to Redis
                             _redis_client.setex(
                                 redis_key,
@@ -20041,7 +20161,8 @@ def quiltt_sync_profile():
                     
                     # Only create if doesn't exist
                     if not existing_account:
-                        app.logger.info(f"Creating credit account for Quiltt account: {account_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${starting_balance}")
+                        # credit_account_display_name already set above (alias or bank name)
+                        app.logger.info(f"Creating credit account for Quiltt account: {credit_account_display_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${starting_balance}")
                         
                         # Determine if it's a card or line of credit based on name/type
                         is_card = 1 if 'card' in account_name.lower() else 0
@@ -20049,7 +20170,7 @@ def quiltt_sync_profile():
                         
                         # Add credit account to Redis (including quiltt_account_id for direct linking)
                         account_data = {
-                            'name': account_name,
+                            'name': credit_account_display_name,
                             'mask': account_mask,
                             'quiltt_account_id': account_id,  # Store quiltt account ID for direct linking
                             'interest_rate': interest_rate,
@@ -20109,17 +20230,17 @@ def quiltt_sync_profile():
                             _copy_expense_categories_to_new_credit_account(current_user.id, temp_account_id)
                             
                             # Create matching expense_categories record for payment
-                            payment_category_name = f"{account_name} payment"
+                            payment_category_name = f"{credit_account_display_name} payment"
                             
                             # Payment categories always get display_order 1 (top of list)
                             expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
                             new_display_order = 1
                             
-                            # Shift non-system, non-payment categories at or above this position up by 1
+                            # Shift all non-system categories at or above this position up by 1
                             if expense_categories:
                                 shifted = False
                                 for cat in expense_categories:
-                                    if cat.get('is_auto_adjustment') == 1 or cat.get('is_credit_account') == 1:
+                                    if cat.get('is_auto_adjustment') == 1:
                                         continue
                                     if cat.get('display_order', 0) >= new_display_order:
                                         cat['display_order'] = cat.get('display_order', 0) + 1
@@ -20400,6 +20521,91 @@ def quiltt_check_sync_status():
         
     except Exception as e:
         app.logger.error(f"Error checking sync status: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/quiltt/update-account-alias', methods=['POST'])
+@login_required
+def quiltt_update_account_alias():
+    """Update the display alias for a Quiltt account"""
+    try:
+        from quiltt_redis import get_quiltt_accounts, _get_from_redis, _set_to_redis
+
+        data = request.get_json()
+        account_id = data.get('account_id')  # Quiltt account_id string
+        alias = data.get('alias', '').strip()
+
+        if not account_id:
+            return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
+
+        if len(alias) > 255:
+            return jsonify({'status': 'error', 'message': 'Alias too long (max 255 characters)'}), 400
+
+        # Get current accounts from Redis
+        cached = _get_from_redis('quiltt_accounts', current_user.id)
+        if cached is None:
+            accounts = get_quiltt_accounts(current_user.id)
+        else:
+            accounts = cached
+
+        if not accounts:
+            return jsonify({'status': 'error', 'message': 'No accounts found'}), 404
+
+        # Find and update the account
+        found = False
+        for acc in accounts:
+            if acc.get('account_id') == account_id:
+                acc['alias'] = alias if alias else None
+                found = True
+                break
+
+        if not found:
+            return jsonify({'status': 'error', 'message': 'Account not found'}), 404
+
+        # Save back to Redis and mark dirty
+        _set_to_redis('quiltt_accounts', current_user.id, accounts)
+
+        # Also rename the linked credit account if one exists
+        if alias:
+            credit_accounts_list = _get_credit_accounts_from_redis(current_user.id)
+            if credit_accounts_list:
+                updated_credit = False
+                old_credit_name = None
+                credit_account_id = None
+                for ca in credit_accounts_list:
+                    if ca.get('quiltt_account_id') == account_id:
+                        old_credit_name = ca.get('name')
+                        credit_account_id = ca.get('id')
+                        ca['name'] = alias
+                        updated_credit = True
+                        break
+                
+                if updated_credit:
+                    redis_key = f"credit_accounts:v1:{current_user.id}"
+                    _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(credit_accounts_list, cls=DecimalEncoder))
+                    dirty_key = f"dirty_tables:{current_user.id}"
+                    _redis_client.sadd(dirty_key, 'credit_accounts')
+                    _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                    
+                    # Also rename the payment category (e.g. "Old Name payment" -> "New Name payment")
+                    if old_credit_name and credit_account_id:
+                        expense_categories = _get_categories_from_redis('expense_categories', current_user.id) or []
+                        for cat in expense_categories:
+                            if cat.get('is_credit_account') == 1 and cat.get('credit_account_id') is not None and int(cat.get('credit_account_id')) == credit_account_id:
+                                cat['name'] = f"{alias} payment"
+                                break
+                        cat_redis_key = f"expense_categories:v1:{current_user.id}"
+                        _redis_client.setex(cat_redis_key, PERSISTENT_CACHE_TTL, json.dumps(expense_categories, cls=DecimalEncoder))
+                        _redis_client.sadd(dirty_key, 'expense_categories')
+
+        return jsonify({
+            'status': 'success',
+            'alias': alias if alias else None,
+            'account_id': account_id
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error updating account alias: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -22803,10 +23009,15 @@ def quiltt_toggle_sync():
                         # Find and update the credit account
                         redis_key = f"credit_accounts:v1:{current_user.id}"
                         cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-                        credit_accounts = json.loads(cached) if cached else []
                         
-                        # If Redis is empty, also check MySQL for existing accounts
-                        if not credit_accounts:
+                        # Only fall back to MySQL when Redis key doesn't exist (cache miss).
+                        # If cached is not None (even if empty list), Redis is authoritative —
+                        # an empty list means user deleted all accounts and we must not
+                        # re-load stale MySQL data that hasn't been flushed yet.
+                        if cached is not None:
+                            credit_accounts = json.loads(cached)
+                        else:
+                            # True cache miss - load from MySQL
                             with get_db_pool().get_connection() as conn:
                                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                                 cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order DESC", (current_user.id,))
@@ -22820,6 +23031,9 @@ def quiltt_toggle_sync():
                                         json.dumps(credit_accounts, cls=DecimalEncoder)
                                     )
                         
+                        # Determine the display name the user wants for this credit account
+                        credit_account_display_name = target_account.get('alias') or account_name
+                        
                         # Look for existing credit account - first by quiltt_account_id, then by mask
                         existing_account = None
                         updated = False
@@ -22829,6 +23043,30 @@ def quiltt_toggle_sync():
                                 existing_account = ca
                                 credit_accounts[i]['is_quiltt'] = 1
                                 updated = True
+                                
+                                # Rename the credit account to the user's chosen name if different
+                                old_name = ca.get('name', '')
+                                if old_name != credit_account_display_name:
+                                    credit_accounts[i]['name'] = credit_account_display_name
+                                    app.logger.info(f"[TOGGLE-SYNC] Renamed credit account '{old_name}' -> '{credit_account_display_name}'")
+                                    
+                                    # Also rename the payment category
+                                    expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+                                    if expense_categories:
+                                        old_payment_name = f"{old_name} payment"
+                                        credit_account_db_id = ca.get('id')
+                                        for ec in expense_categories:
+                                            if ec.get('credit_account_id') == credit_account_db_id and ec.get('name') == old_payment_name:
+                                                ec['name'] = f"{credit_account_display_name} payment"
+                                                app.logger.info(f"[TOGGLE-SYNC] Renamed payment category '{old_payment_name}' -> '{ec['name']}'")
+                                                break
+                                        _redis_client.setex(
+                                            f"expense_categories:v1:{current_user.id}",
+                                            PERSISTENT_CACHE_TTL,
+                                            json.dumps(expense_categories, cls=DecimalEncoder)
+                                        )
+                                        _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+                                
                                 app.logger.info(f"Found credit account by quiltt_account_id {account_id} (toggle-sync enable)")
                                 break
                             # Fallback to mask matching (and set quiltt_account_id for future)
@@ -22837,6 +23075,30 @@ def quiltt_toggle_sync():
                                 credit_accounts[i]['is_quiltt'] = 1
                                 credit_accounts[i]['quiltt_account_id'] = account_id  # Link for future
                                 updated = True
+                                
+                                # Rename the credit account to the user's chosen name if different
+                                old_name = ca.get('name', '')
+                                if old_name != credit_account_display_name:
+                                    credit_accounts[i]['name'] = credit_account_display_name
+                                    app.logger.info(f"[TOGGLE-SYNC] Renamed credit account '{old_name}' -> '{credit_account_display_name}' (mask match)")
+                                    
+                                    # Also rename the payment category
+                                    expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
+                                    if expense_categories:
+                                        old_payment_name = f"{old_name} payment"
+                                        credit_account_db_id = ca.get('id')
+                                        for ec in expense_categories:
+                                            if ec.get('credit_account_id') == credit_account_db_id and ec.get('name') == old_payment_name:
+                                                ec['name'] = f"{credit_account_display_name} payment"
+                                                app.logger.info(f"[TOGGLE-SYNC] Renamed payment category '{old_payment_name}' -> '{ec['name']}' (mask match)")
+                                                break
+                                        _redis_client.setex(
+                                            f"expense_categories:v1:{current_user.id}",
+                                            PERSISTENT_CACHE_TTL,
+                                            json.dumps(expense_categories, cls=DecimalEncoder)
+                                        )
+                                        _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+                                
                                 app.logger.info(f"Found credit account by mask {account_mask}, linking quiltt_account_id {account_id}")
                                 break
                         
@@ -22857,7 +23119,8 @@ def quiltt_toggle_sync():
                         
                         elif not existing_account:
                             # Credit account doesn't exist - create it (mirror bank connection logic)
-                            app.logger.info(f"Creating credit account for Quiltt account: {account_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${current_balance}")
+                            # credit_account_display_name already set above
+                            app.logger.info(f"Creating credit account for Quiltt account: {credit_account_display_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${current_balance}")
                             
                             # Determine if it's a card or line of credit based on name/type
                             is_card = 1 if 'card' in account_name.lower() else 0
@@ -22865,7 +23128,7 @@ def quiltt_toggle_sync():
                             
                             # Add credit account to Redis (including quiltt_account_id)
                             account_data = {
-                                'name': account_name,
+                                'name': credit_account_display_name,
                                 'mask': account_mask,
                                 'quiltt_account_id': account_id,  # Store for direct linking
                                 'interest_rate': 0.0,
@@ -22925,17 +23188,17 @@ def quiltt_toggle_sync():
                                 _copy_expense_categories_to_new_credit_account(current_user.id, temp_account_id)
                                 
                                 # Create matching expense_categories record for payment
-                                payment_category_name = f"{account_name} payment"
+                                payment_category_name = f"{credit_account_display_name} payment"
                                 
                                 # Payment categories always get display_order 1 (top of list)
                                 expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
                                 new_display_order = 1
                                 
-                                # Shift non-system, non-payment categories at or above this position up by 1
+                                # Shift all non-system categories at or above this position up by 1
                                 if expense_categories:
                                     shifted = False
                                     for cat in expense_categories:
-                                        if cat.get('is_auto_adjustment') == 1 or cat.get('is_credit_account') == 1:
+                                        if cat.get('is_auto_adjustment') == 1:
                                             continue
                                         if cat.get('display_order', 0) >= new_display_order:
                                             cat['display_order'] = cat.get('display_order', 0) + 1
@@ -23229,7 +23492,7 @@ def quiltt_update_account():
         return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
     
     try:
-        pass
+        app.logger.info(f"[UPDATE-ACCOUNT] account_id={account_id}, is_active={is_active}, sync_transactions={sync_transactions}, user_id={current_user.id}")
         
         # Update both fields together to avoid race conditions
         from quiltt_redis import update_quiltt_account_fields
@@ -23243,7 +23506,7 @@ def quiltt_update_account():
         )
         
         if not success:
-            app.logger.error(f"Failed to update account {account_id}")
+            app.logger.error(f"[UPDATE-ACCOUNT] Failed to update account {account_id} - account not found in Redis or MySQL")
             return jsonify({'status': 'error', 'message': 'Failed to update account'}), 500
         
         # If account is being toggled off (is_active=0 or sync_transactions=0), update credit account is_quiltt to 0

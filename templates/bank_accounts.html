@@ -133,8 +133,11 @@
                                        data-account-type="credit"
                                        {% if account.sync_transactions %}checked{% endif %}>
                                 <label for="account-{{ account.id }}">
-                                    <strong>{{ account.account_name }}</strong>
+                                    <strong class="account-display-name" data-account-id="{{ account.account_id }}">{{ account.alias or account.account_name }}</strong>
                                 </label>
+                                <button class="account-rename-btn" data-account-id="{{ account.account_id }}" data-current-name="{{ account.alias or account.account_name }}" title="Rename account">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
                             </div>
                             <div class="account-mask">...{{ account.mask[-4:] if account.mask else '' }}</div>
                         </div>
@@ -326,21 +329,21 @@
                 if (checkingAccounts.length > 0) {
                     accountsHtml += '<div class="account-type-divider">Checking Accounts</div>';
                     checkingAccounts.forEach(account => {
-                        accountsHtml += renderAccountItem(account, currencySymbol);
+                        accountsHtml += renderAccountItem(account, currencySymbol, false);
                     });
                 }
                 
                 if (savingsAccounts.length > 0) {
                     accountsHtml += '<div class="account-type-divider">Savings Accounts</div>';
                     savingsAccounts.forEach(account => {
-                        accountsHtml += renderAccountItem(account, currencySymbol);
+                        accountsHtml += renderAccountItem(account, currencySymbol, false);
                     });
                 }
                 
                 if (creditAccounts.length > 0) {
                     accountsHtml += '<div class="account-type-divider">Credit Accounts</div>';
                     creditAccounts.forEach(account => {
-                        accountsHtml += renderAccountItem(account, currencySymbol);
+                        accountsHtml += renderAccountItem(account, currencySymbol, true);
                     });
                 }
                 
@@ -400,7 +403,12 @@
                 formatLastSyncedTimes();
             }
             
-            function renderAccountItem(account, currencySymbol) {
+            function renderAccountItem(account, currencySymbol, isCredit) {
+                const displayName = isCredit ? (account.alias || account.account_name) : account.account_name;
+                const renameBtn = isCredit ? `
+                            <button class="account-rename-btn" data-account-id="${account.account_id}" data-current-name="${displayName}" title="Rename account">
+                                <i class="fa-solid fa-pen-to-square"></i>
+                            </button>` : '';
                 return `
                     <div class="account-item">
                         <div class="account-info">
@@ -411,8 +419,8 @@
                                    ${account.sync_transactions ? 'checked' : ''}
                                    style="width: 18px; height: 18px; cursor: pointer;">
                             <label for="account-${account.id}">
-                                <strong>${account.account_name}</strong>
-                            </label>
+                                <strong${isCredit ? ` class="account-display-name" data-account-id="${account.account_id}"` : ''}>${displayName}</strong>
+                            </label>${renameBtn}
                         </div>
                         <div class="account-mask">...${(account.mask || '').slice(-4)}</div>
                     </div>
@@ -555,6 +563,23 @@
                                             isChecked = true;
                                         }
                                         
+                                        const displayName = isCredit ? (account.alias || account.account_name || 'Account') : (account.account_name || 'Account');
+                                        
+                                        let nameHtml;
+                                        if (isCredit) {
+                                            nameHtml = `
+                                                <div class="account-selection-name">
+                                                    <input type="text" class="account-alias-input" 
+                                                           data-account-id="${account.account_id}"
+                                                           value="${displayName}" 
+                                                           placeholder="${account.account_name || 'Account'}"
+                                                           maxlength="255">
+                                                    <i class="fa-solid fa-pen-to-square account-alias-edit-icon"></i>
+                                                </div>`;
+                                        } else {
+                                            nameHtml = `<div class="account-selection-name">${displayName}</div>`;
+                                        }
+                                        
                                         const accountItem = $(`
                                             <div class="account-selection-item${isDisabled ? ' disabled' : ''}">
                                                 <input type="checkbox" 
@@ -564,7 +589,7 @@
                                                        ${isChecked ? 'checked' : ''}
                                                        ${isDisabled ? 'disabled' : ''}>
                                                 <div class="account-selection-info">
-                                                    <div class="account-selection-name">${account.account_name || 'Account'}</div>
+                                                    ${nameHtml}
                                                     ${mask}
                                                 </div>
                                             </div>
@@ -621,13 +646,36 @@
                     return;
                 }
                 
+                // Save any aliases the user entered
+                const aliasPromises = [];
+                $('.account-alias-input').each(function() {
+                    const input = $(this);
+                    const accountId = input.data('account-id');
+                    const alias = input.val().trim();
+                    const placeholder = input.attr('placeholder');
+                    // Only save if the user changed the name from the original
+                    if (alias && alias !== placeholder) {
+                        aliasPromises.push(
+                            $.ajax({
+                                url: '/quiltt/update-account-alias',
+                                method: 'POST',
+                                contentType: 'application/json',
+                                data: JSON.stringify({ account_id: accountId, alias: alias })
+                            })
+                        );
+                    }
+                });
+                
                 pendingConnectionId = null;
                 
                 $('#account-selection-modal').css('display', 'none');
                 
                 $('#bank-fetching-modal').show();
                 
-                updateAccountsAndSyncProfile(selectedAccounts);
+                // Save aliases first, then proceed
+                Promise.all(aliasPromises).finally(function() {
+                    updateAccountsAndSyncProfile(selectedAccounts);
+                });
             });
 
             // Cancel account selection
@@ -1365,21 +1413,21 @@
                             if (checkingAccounts.length > 0) {
                                 accountsHtml += '<div class="account-type-divider">Checking Accounts</div>';
                                 checkingAccounts.forEach(account => {
-                                    accountsHtml += buildAccountHtml(account);
+                                    accountsHtml += buildAccountHtml(account, false);
                                 });
                             }
                             
                             if (savingsAccounts.length > 0) {
                                 accountsHtml += '<div class="account-type-divider">Savings Accounts</div>';
                                 savingsAccounts.forEach(account => {
-                                    accountsHtml += buildAccountHtml(account);
+                                    accountsHtml += buildAccountHtml(account, false);
                                 });
                             }
                             
                             if (creditAccounts.length > 0) {
                                 accountsHtml += '<div class="account-type-divider">Credit Accounts</div>';
                                 creditAccounts.forEach(account => {
-                                    accountsHtml += buildAccountHtml(account);
+                                    accountsHtml += buildAccountHtml(account, true);
                                 });
                             }
                             
@@ -1398,8 +1446,13 @@
                 });
             }
             
-            function buildAccountHtml(account) {
+            function buildAccountHtml(account, isCredit) {
                 const checked = account.sync_transactions ? 'checked' : '';
+                const displayName = isCredit ? (account.alias || account.account_name) : account.account_name;
+                const renameBtn = isCredit ? `
+                            <button class="account-rename-btn" data-account-id="${account.account_id}" data-current-name="${displayName}" title="Rename account">
+                                <i class="fa-solid fa-pen-to-square"></i>
+                            </button>` : '';
                 
                 return `
                     <div class="account-item">
@@ -1411,8 +1464,8 @@
                                    ${checked}
                                    style="width: 18px; height: 18px; cursor: pointer;">
                             <label for="account-${account.id}">
-                                <strong>${account.account_name}</strong>
-                            </label>
+                                <strong${isCredit ? ` class="account-display-name" data-account-id="${account.account_id}"` : ''}>${displayName}</strong>
+                            </label>${renameBtn}
                         </div>
                         <div class="account-mask">...${(account.mask || '').slice(-4)}</div>
                     </div>
@@ -1553,6 +1606,85 @@
                         $('#bank-fetching-modal').hide();
                         showToast('Error updating sync setting', 'error');
                         $checkbox.prop('checked', !syncEnabled);
+                    }
+                });
+            });
+
+            // Inline rename handler for account names on the main page
+            $(document).on('click', '.account-rename-btn', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const btn = $(this);
+                const accountId = btn.data('account-id');
+                const currentName = btn.data('current-name');
+                const nameEl = $(`.account-display-name[data-account-id="${accountId}"]`);
+                
+                // Replace the name with an inline input
+                const input = $(`<input type="text" class="account-rename-input" value="${currentName}" maxlength="255">`);
+                nameEl.replaceWith(input);
+                input.focus().select();
+                
+                // Hide the rename button
+                btn.hide();
+                
+                function saveAlias() {
+                    const newAlias = input.val().trim();
+                    if (!newAlias) {
+                        // Restore original
+                        const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
+                        input.replaceWith(newLabel);
+                        btn.show();
+                        return;
+                    }
+                    
+                    if (newAlias === currentName) {
+                        const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
+                        input.replaceWith(newLabel);
+                        btn.show();
+                        return;
+                    }
+                    
+                    $.ajax({
+                        url: '/quiltt/update-account-alias',
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ account_id: accountId, alias: newAlias }),
+                        success: function(response) {
+                            if (response.status === 'success') {
+                                const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${newAlias}</strong>`);
+                                input.replaceWith(newLabel);
+                                btn.data('current-name', newAlias);
+                                btn.show();
+                                showToast('Account renamed', 'success');
+                            } else {
+                                const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
+                                input.replaceWith(newLabel);
+                                btn.show();
+                                showToast('Failed to rename', 'error');
+                            }
+                        },
+                        error: function() {
+                            const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
+                            input.replaceWith(newLabel);
+                            btn.show();
+                            showToast('Failed to rename', 'error');
+                        }
+                    });
+                }
+                
+                input.on('blur', saveAlias);
+                input.on('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        input.off('blur');
+                        saveAlias();
+                    } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        input.off('blur');
+                        const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
+                        input.replaceWith(newLabel);
+                        btn.show();
                     }
                 });
             });
