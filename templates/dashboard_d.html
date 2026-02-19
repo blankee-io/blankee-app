@@ -572,6 +572,13 @@
             const entryType = document.getElementById('dashboard-d-entryType').value;
             
             if (!categoryName || categoryName.trim().length === 0) return;
+
+            // Duplicate check safety net
+            let dupCats;
+            if (entryType === 'income') dupCats = incomeCategories;
+            else if (entryType === 'expense') dupCats = expenseCategories;
+            else dupCats = expense_categories;
+            if (checkCategoryDuplicate(dashboardDCategoryInput, dupCats)) return;
             
             let url, categoriesArray;
             if (entryType === 'income') {
@@ -627,11 +634,12 @@
                             dashboardDCategoryHidden.value = cExpenseCategoryId;
                             dashboardDDropdown.style.display = 'none';
                         } else {
-                            showToast('Failed to create category', 'error');
+                            showToast(response.message || 'Failed to create category', 'error');
                         }
                     },
-                    error: function() {
-                        showToast('Error creating category', 'error');
+                    error: function(xhr) {
+                        const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Error creating category';
+                        showToast(msg, 'error');
                     }
                 });
                 return;
@@ -664,11 +672,12 @@
                         dashboardDCategoryHidden.value = response.new_category_id;
                         dashboardDDropdown.style.display = 'none';
                     } else {
-                        showToast('Failed to create category', 'error');
+                        showToast(response.message || 'Failed to create category', 'error');
                     }
                 },
-                error: function() {
-                    showToast('Error creating category', 'error');
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Error creating category';
+                    showToast(msg, 'error');
                 }
             });
         }

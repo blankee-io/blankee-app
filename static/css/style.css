@@ -7632,7 +7632,8 @@ transform: scale(1.2);
 
 /* Mobile-only merge labels (Type into Category, End Date into Start Date) */
 .mobile-type-label,
-.mobile-end-date {
+.mobile-end-date,
+.th-mobile {
     display: none;
 }
 
@@ -7852,12 +7853,12 @@ transform: scale(1.2);
 
 .status-paid {
     color: var(--success);
-    font-weight: 600;
+    font-size: 1.2em;
 }
 
 .status-unpaid {
     color: var(--danger);
-    font-weight: 600;
+    font-size: 1.2em;
 }
 
 .add-income-btn {
@@ -7931,13 +7932,28 @@ transform: scale(1.2);
 }
 
 @media (max-width: 600px) {
+    .cadence-legend {
+        gap: 8px;
+        font-size: 11px;
+        padding: 4px 0;
+        flex-wrap: wrap;
+    }
+
+    .cadence-legend-item {
+        gap: 3px;
+    }
+
+    .cadence-legend-item i {
+        font-size: 12px;
+    }
+
     .recurring-income-container {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
     }
 
     .income-recurring-table {
-        min-width: 380px;
+        min-width: 350px;
     }
 
     .income-recurring-table th,
@@ -7958,7 +7974,7 @@ transform: scale(1.2);
     .income-recurring-table .mobile-end-date {
         display: block;
         font-size: 0.8em;
-        color: var(--secondary);
+        color: var(--secondary-dark);
         margin-top: 1px;
     }
 
@@ -7969,20 +7985,12 @@ transform: scale(1.2);
         white-space: normal;
     }
 
-    /* Abbreviate headers: "Current Status" → "Status", "Start Date" → "Dates" */
-    .income-recurring-table th.income-bucket-col {
-        font-size: 0;
+    /* Abbreviate headers: "Start Date" → "Dates" */
+    .income-recurring-table th.income-start-date-col .th-full {
+        display: none;
     }
-    .income-recurring-table th.income-bucket-col::after {
-        content: "Status";
-        font-size: calc(var(--base-font-size) + var(--scaling-factor));
-    }
-    .income-recurring-table th.income-start-date-col {
-        font-size: 0;
-    }
-    .income-recurring-table th.income-start-date-col::after {
-        content: "Dates";
-        font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    .income-recurring-table th.income-start-date-col .th-mobile {
+        display: inline;
     }
 
     /* Column widths for 6 visible columns */
@@ -9134,7 +9142,7 @@ form button[type="submit"] {
     }
 
     .expense-recurring-table {
-        min-width: 380px;
+        min-width: 350px;
     }
 
     .expense-recurring-table th,
@@ -9155,7 +9163,7 @@ form button[type="submit"] {
     .expense-recurring-table .mobile-end-date {
         display: block;
         font-size: 0.8em;
-        color: var(--secondary);
+        color: var(--secondary-dark);
         margin-top: 1px;
     }
 
@@ -9166,20 +9174,12 @@ form button[type="submit"] {
         white-space: normal;
     }
 
-    /* Abbreviate headers: "Current Status" → "Status", "Start Date" → "Dates" */
-    .expense-recurring-table th.expense-bucket-col {
-        font-size: 0;
+    /* Abbreviate headers: "Start Date" → "Dates" */
+    .expense-recurring-table th.expense-start-date-col .th-full {
+        display: none;
     }
-    .expense-recurring-table th.expense-bucket-col::after {
-        content: "Status";
-        font-size: calc(var(--base-font-size) + var(--scaling-factor));
-    }
-    .expense-recurring-table th.expense-start-date-col {
-        font-size: 0;
-    }
-    .expense-recurring-table th.expense-start-date-col::after {
-        content: "Dates";
-        font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    .expense-recurring-table th.expense-start-date-col .th-mobile {
+        display: inline;
     }
 
     /* Column widths for 6 visible columns */
@@ -9664,7 +9664,7 @@ form button[type="submit"] {
     }
 
     .ca-recurring-table {
-        min-width: 380px;
+        min-width: 350px;
     }
 
     .ca-recurring-table th,
@@ -9685,7 +9685,7 @@ form button[type="submit"] {
     .ca-recurring-table .mobile-end-date {
         display: block;
         font-size: 0.8em;
-        color: var(--secondary);
+        color: var(--secondary-dark);
         margin-top: 1px;
     }
 
@@ -9696,20 +9696,12 @@ form button[type="submit"] {
         white-space: normal;
     }
 
-    /* Abbreviate headers: "Current Status" → "Status", "Start Date" → "Dates" */
-    .ca-recurring-table th.ca-bucket-col {
-        font-size: 0;
+    /* Abbreviate headers: "Start Date" → "Dates" */
+    .ca-recurring-table th.ca-start-date-col .th-full {
+        display: none;
     }
-    .ca-recurring-table th.ca-bucket-col::after {
-        content: "Status";
-        font-size: calc(var(--base-font-size) + var(--scaling-factor));
-    }
-    .ca-recurring-table th.ca-start-date-col {
-        font-size: 0;
-    }
-    .ca-recurring-table th.ca-start-date-col::after {
-        content: "Dates";
-        font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    .ca-recurring-table th.ca-start-date-col .th-mobile {
+        display: inline;
     }
 
     /* Column widths for 6 visible columns */
@@ -13527,6 +13519,43 @@ transform: scale(1.2);
     .feedback-left, .feedback-right {
         min-height: auto;
     }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INLINE DUPLICATE CATEGORY WARNING
+   ═══════════════════════════════════════════════════════════════ */
+.duplicate-name-warning {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    z-index: 99999;
+    font-size: 12px;
+    color: var(--danger);
+    padding: 4px 10px;
+    margin-bottom: 4px;
+    border-radius: 6px;
+    background-color: var(--accent-lighter);
+    border: 1px solid var(--danger-hover);
+    animation: duplicateWarnIn 0.2s ease;
+    text-align: left;
+    white-space: nowrap;
+    width: fit-content;
+    pointer-events: none;
+}
+
+.duplicate-name-warning i {
+    margin-right: 4px;
+}
+
+.duplicate-name-warning.visible {
+    display: block;
+}
+
+@keyframes duplicateWarnIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ═══════════════════════════════════════════════════════════════

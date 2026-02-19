@@ -198,8 +198,8 @@
                     <i class="fa-solid fa-arrows-spin fa-spin loading-arrows"></i>
                 </div>
             </div>
-            <h2 class="setup-loading-title">Fetching Your Bank Information</h2>
-            <p class="setup-loading-subtitle">Hang tight, we're syncing your balances...</p>
+            <h2 class="setup-loading-title">Syncing Your Bank Account</h2>
+            <p class="setup-loading-subtitle">Hang tight, this may take a few minutes...</p>
             <div class="loading-dots">
                 <span class="dot"></span>
                 <span class="dot"></span>
@@ -253,6 +253,91 @@
             }
             
             formatLastSyncedTimes();
+
+            // On page load: if any connection is syncing, show modal and poll until done
+            (function checkSyncingOnLoad() {
+                const syncingStatuses = ['SYNCING', 'INITIALIZING', 'PENDING'];
+                const hasSyncingConnection = $('.connection-status.syncing').length > 0;
+                
+                if (hasSyncingConnection) {
+                    $('#bank-fetching-modal').show();
+                    pollUntilSynced();
+                }
+            })();
+
+            // Poll /quiltt/connections until all connections are SYNCED, then sync-profile + auto-adjust + reload
+            let syncPollCount = 0;
+            const maxSyncPolls = 360; // 3 minutes at 500ms intervals
+            
+            function pollUntilSynced() {
+                syncPollCount++;
+                
+                $.ajax({
+                    url: '/quiltt/connections',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.status === 'success' && response.connections && response.connections.length > 0) {
+                            const allSynced = response.connections.every(conn => conn.status === 'SYNCED');
+                            
+                            if (allSynced) {
+                                // All synced - do sync-profile + auto-adjust then reload
+                                $.ajax({
+                                    url: '/quiltt/sync-profile',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({}),
+                                    timeout: 30000,
+                                    complete: function() {
+                                        $.ajax({
+                                            url: '/quiltt/auto-adjust-checking',
+                                            method: 'POST',
+                                            contentType: 'application/json',
+                                            complete: function() {
+                                                $('#bank-fetching-modal').hide();
+                                                window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                                            }
+                                        });
+                                    }
+                                });
+                            } else if (syncPollCount < maxSyncPolls) {
+                                // Update the UI cards while waiting
+                                try {
+                                    const currentConnectionIds = $('.connection-card').map(function() {
+                                        return $(this).data('connection-id');
+                                    }).get();
+                                    
+                                    response.connections.forEach(function(connection) {
+                                        if (currentConnectionIds.includes(connection.connection_id)) {
+                                            updateConnectionCard(connection);
+                                        }
+                                    });
+                                } catch (e) {}
+                                
+                                setTimeout(function() {
+                                    pollUntilSynced();
+                                }, 500);
+                            } else {
+                                // Timed out - reload anyway
+                                $('#bank-fetching-modal').hide();
+                                window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                            }
+                        } else {
+                            $('#bank-fetching-modal').hide();
+                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                        }
+                    },
+                    error: function() {
+                        if (syncPollCount < maxSyncPolls) {
+                            setTimeout(function() {
+                                pollUntilSynced();
+                            }, 1000);
+                        } else {
+                            $('#bank-fetching-modal').hide();
+                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                        }
+                    }
+                });
+            }
 
             // Poll for balance updates while syncing
             let balancePollingInterval = null;
@@ -753,7 +838,7 @@
 
             // Poll for non-zero balances
             let balancePollCount = 0;
-            const maxBalancePolls = 60;
+            const maxBalancePolls = 360;
             
             function pollForBalances(selectedAccountIds) {
                 balancePollCount++;
@@ -786,30 +871,15 @@
                                     pollForBalances(selectedAccountIds);
                                 }, 500);
                             } else {
-                                $.ajax({
-                                    url: '/quiltt/sync-profile',
-                                    method: 'POST',
-                                    contentType: 'application/json',
-                                    data: JSON.stringify({}),
-                                    timeout: 30000,
-                                    success: function(syncResponse) {
-                                        $('#bank-fetching-modal').hide();
-                                        window.location.reload();
-                                    },
-                                    error: function() {
-                                        $('#bank-fetching-modal').hide();
-                                        window.location.reload();
-                                    }
-                                });
+                                // Timed out waiting for SYNCED - reload and let page-load check continue
+                                window.location.href = window.location.pathname + '?nocache=' + Date.now();
                             }
                         } else {
-                            $('#bank-fetching-modal').hide();
-                            window.location.reload();
+                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
                         }
                     },
                     error: function() {
-                        $('#bank-fetching-modal').hide();
-                        window.location.reload();
+                        window.location.href = window.location.pathname + '?nocache=' + Date.now();
                     }
                 });
             }
@@ -838,13 +908,9 @@
                                     url: '/quiltt/auto-adjust-checking',
                                     method: 'POST',
                                     contentType: 'application/json',
-                                    success: function(autoAdjustResponse) {
+                                    complete: function() {
                                         $('#bank-fetching-modal').hide();
-                                        window.location.reload();
-                                    },
-                                    error: function(err) {
-                                        $('#bank-fetching-modal').hide();
-                                        window.location.reload();
+                                        window.location.href = window.location.pathname + '?nocache=' + Date.now();
                                     }
                                 });
                             } else {
@@ -866,18 +932,16 @@
                                         });
                                     }, 1000);
                                 } else {
-                                    $('#bank-fetching-modal').hide();
-                                    window.location.reload();
+                                    // Timed out - reload, page-load check will continue if still syncing
+                                    window.location.href = window.location.pathname + '?nocache=' + Date.now();
                                 }
                             }
                         } else {
-                            $('#bank-fetching-modal').hide();
-                            window.location.reload();
+                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
                         }
                     },
                     error: function() {
-                        $('#bank-fetching-modal').hide();
-                        window.location.reload();
+                        window.location.href = window.location.pathname + '?nocache=' + Date.now();
                     }
                 });
             }
@@ -973,6 +1037,9 @@
                         onLoad: function(metadata) {
                         },
                         onExitSuccess: function(metadata) {
+                            // Show sync modal immediately
+                            $('#bank-fetching-modal').show();
+                            
                             const returnedConnectionId = metadata && metadata.connectionId ? metadata.connectionId : null;
                             const oldConnectionId = window.reconnectingConnectionId;
                             const oldStatus = window.reconnectingStatus;
@@ -1113,6 +1180,9 @@
                             
                             if (window.reconnectingConnectionId) {
                                 const oldConnectionId = window.reconnectingConnectionId;
+                                
+                                // Show sync modal for reconnect-via-new-connection
+                                $('#bank-fetching-modal').show();
                                 
                                 $.ajax({
                                     url: '/quiltt/delete',

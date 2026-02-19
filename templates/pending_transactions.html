@@ -295,6 +295,10 @@
             const entryType = input.dataset.entryType;
             const creditAccountId = input.dataset.creditAccountId;
             
+            // Duplicate check safety net
+            let dupCats = entryType === 'income' ? incomeCategories : expenseCategories;
+            if (checkCategoryDuplicate(input, dupCats)) return;
+
             let url, categoriesArray;
             
             if (entryType === 'c_expense') {
@@ -344,11 +348,12 @@
                         hiddenInput.value = categoryIdToUse;
                         dropdown.style.display = 'none';
                     } else {
-                        showToast('Failed to create category', 'error');
+                        showToast(response.message || 'Failed to create category', 'error');
                     }
                 },
-                error: function() {
-                    showToast('Failed to create category', 'error');
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Failed to create category';
+                    showToast(msg, 'error');
                 }
             });
         }

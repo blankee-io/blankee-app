@@ -1,6 +1,91 @@
 // General Functions
 
 // ═══════════════════════════════════════════════════════════════
+// INLINE DUPLICATE CATEGORY NAME CHECK
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Check if a category name already exists and show/hide an inline warning.
+ * Works with both <input> elements and contenteditable elements.
+ *
+ * The warning div is placed ABOVE the input field:
+ * - Inside modal content containers: prepended as first child
+ * - Outside flex-row containers: inserted before them
+ * - Default: inserted before the input itself
+ *
+ * @param {HTMLElement} inputEl       - The input or contenteditable element
+ * @param {Array}       categories    - Array of { id, name, is_auto_adjustment, ... }
+ * @param {Object}      [opts]        - Options
+ * @param {string|number} [opts.excludeId] - Category ID to exclude (for renames)
+ * @returns {boolean} true if a duplicate exists
+ */
+function checkCategoryDuplicate(inputEl, categories, opts) {
+    opts = opts || {};
+    var name = (inputEl.value !== undefined ? inputEl.value : inputEl.textContent || '').trim().toLowerCase();
+
+    // Get or create the warning element
+    var warningEl = inputEl._dupWarning;
+    if (!warningEl) {
+        warningEl = document.createElement('div');
+        warningEl.className = 'duplicate-name-warning';
+        warningEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> <span>A category with this name already exists.</span>';
+
+        // Place warning floating ABOVE the input using absolute positioning.
+        // Ensure the input's offset parent can anchor the warning.
+        var posParent = inputEl.closest(
+            '.category-edit-modal-content, .manage-cat-input-container, ' +
+            '.floating-input-container, .category-input-wrapper'
+        ) || inputEl.parentNode;
+        if (posParent && getComputedStyle(posParent).position === 'static') {
+            posParent.style.position = 'relative';
+        }
+        // Insert inside the positioned parent
+        posParent.appendChild(warningEl);
+        inputEl._dupWarning = warningEl;
+    }
+
+    if (!name) {
+        warningEl.classList.remove('visible');
+        return false;
+    }
+
+    var isDuplicate = false;
+    for (var i = 0; i < categories.length; i++) {
+        var cat = categories[i];
+        if (opts.excludeId && String(cat.id) === String(opts.excludeId)) continue;
+        if ((cat.name || '').trim().toLowerCase() === name) {
+            isDuplicate = true;
+            break;
+        }
+    }
+
+    if (isDuplicate) {
+        warningEl.classList.add('visible');
+    } else {
+        warningEl.classList.remove('visible');
+    }
+    return isDuplicate;
+}
+
+/**
+ * Attach a live duplicate-check listener to an input element.
+ * Returns an object with a .check() method for manual re-checks.
+ *
+ * @param {HTMLElement} inputEl    - The input or contenteditable element
+ * @param {Function}    getCats    - Function returning the current categories array
+ * @param {Object}      [opts]     - Options passed to checkCategoryDuplicate
+ * @returns {{ check: Function }}
+ */
+function setupCategoryDuplicateCheck(inputEl, getCats, opts) {
+    opts = opts || {};
+    function doCheck() {
+        return checkCategoryDuplicate(inputEl, getCats(), opts);
+    }
+    inputEl.addEventListener('input', doCheck);
+    return { check: doCheck };
+}
+
+// ═══════════════════════════════════════════════════════════════
 // TOAST NOTIFICATIONS
 // ═══════════════════════════════════════════════════════════════
 
