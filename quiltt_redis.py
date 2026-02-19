@@ -45,6 +45,36 @@ def _get_from_redis(table: str, user_id: int) -> Optional[List[Dict[str, Any]]]:
     return None
 
 
+def _get_all_quiltt_accounts_raw(user_id: int) -> List[Dict[str, Any]]:
+    """
+    Get ALL quiltt accounts for a user, bypassing hydration check and is_active filter.
+    
+    Used internally by upsert/update/delete operations that need the complete account list.
+    Unlike get_quiltt_accounts(), this:
+    1. Reads directly from the Redis key (no hydration check)
+    2. Falls back to MySQL WITHOUT is_active=1 filter
+    """
+    redis_client = _get_redis_client()
+    
+    # Try Redis key directly (bypasses hydration check)
+    if redis_client:
+        redis_key = _get_redis_key('quiltt_accounts', user_id)
+        cached = redis_client.get(redis_key)
+        if cached:
+            return json.loads(cached)
+    
+    # Fall back to MySQL - get ALL accounts without is_active filter
+    try:
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
+            cursor.execute("SELECT * FROM quiltt_accounts WHERE user_id = %s", (user_id,))
+            result = list(cursor.fetchall())
+            logger.info(f"_get_all_quiltt_accounts_raw: loaded {len(result)} accounts from MySQL for user {user_id}")
+            return result
+    except Exception as e:
+        logger.error(f"Error getting all quiltt accounts from MySQL: {e}")
+        return []
+
+
 def _set_to_redis(table: str, user_id: int, data: List[Dict[str, Any]]) -> bool:
     """Set Quiltt data to Redis and mark as dirty"""
     redis_client = _get_redis_client()
@@ -387,14 +417,11 @@ def upsert_quiltt_account(account_data: Dict[str, Any], user_id: Optional[int] =
         return None
     
     try:
-        # Get current data from Redis or MySQL
-        cached_data = _get_from_redis('quiltt_accounts', user_id)
-        
-        if cached_data is None:
-            # Load from MySQL if not in Redis
-            cached_data = get_quiltt_accounts(user_id)
-            if cached_data is None:
-                cached_data = []
+        # Get ALL quiltt accounts (bypasses hydration check and is_active filter)
+        # This is critical: update-account may have written is_active=1 to Redis,
+        # but if user isn't hydrated, _get_from_redis would return None and
+        # get_quiltt_accounts filters by is_active=1 in MySQL (stale data).
+        cached_data = _get_all_quiltt_accounts_raw(user_id)
         
         # Ensure cached_data is a list, not a tuple
         if not isinstance(cached_data, list):
@@ -412,8 +439,11 @@ def upsert_quiltt_account(account_data: Dict[str, Any], user_id: Optional[int] =
                     'minimum_payment_amount', 'next_payment_minimum_amount', 'payment_frequency', 'account_state'
                 }
                 for key, value in account_data.items():
-                    # Don't overwrite user settings or liability data with None
-                    if value is None and key in ('is_active', 'sync_transactions', *liability_fields):
+                    # Don't overwrite user settings, alias, or liability data with None
+                    if value is None and key in ('is_active', 'sync_transactions', 'alias', *liability_fields):
+                        continue
+                    # Never overwrite user-set alias from sync data
+                    if key == 'alias' and cached_data[i].get('alias') and value is None:
                         continue
                     cached_data[i][key] = value
                 db_id = cached_data[i].get('id')
@@ -461,14 +491,8 @@ def update_quiltt_account_field(account_id: str, field: str, value: Any, user_id
         user_id = current_user.id
     
     try:
-        # Update in Redis only
-        cached_data = _get_from_redis('quiltt_accounts', user_id)
-        
-        if cached_data is None:
-            # Load from MySQL if not in Redis
-            cached_data = get_quiltt_accounts(user_id)
-            if cached_data is None:
-                return False
+        # Get ALL quiltt accounts (bypasses hydration check and is_active filter)
+        cached_data = _get_all_quiltt_accounts_raw(user_id)
         
         # Ensure cached_data is a list, not a tuple
         if not isinstance(cached_data, list):
@@ -534,14 +558,8 @@ def update_quiltt_account_fields(account_id: str, fields: dict, user_id: Optiona
             return False
         
         try:
-            # Update in Redis only
-            cached_data = _get_from_redis('quiltt_accounts', user_id)
-            
-            if cached_data is None:
-                # Load from MySQL if not in Redis
-                cached_data = get_quiltt_accounts(user_id)
-                if cached_data is None:
-                    return False
+            # Get ALL quiltt accounts (bypasses hydration check and is_active filter)
+            cached_data = _get_all_quiltt_accounts_raw(user_id)
             
             # Ensure cached_data is a list, not a tuple
             if not isinstance(cached_data, list):
@@ -558,7 +576,7 @@ def update_quiltt_account_fields(account_id: str, fields: dict, user_id: Optiona
                     break
             
             if not found:
-                logger.warning(f"Account {account_id} not found in cached data for user {user_id}")
+                logger.warning(f"Account {account_id} not found in cached data for user {user_id} ({len(cached_data)} accounts checked)")
                 return False
             
             # Save to Redis and mark as dirty
@@ -659,9 +677,8 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
         # Get account_ids to delete their transactions
         account_ids_to_delete = []
         if conn_db_id:
-            cached_accounts = _get_from_redis('quiltt_accounts', user_id)
-            if cached_accounts is None:
-                cached_accounts = get_quiltt_accounts(user_id)
+            # Use _get_all_quiltt_accounts_raw to bypass hydration check
+            cached_accounts = _get_all_quiltt_accounts_raw(user_id)
             
             if cached_accounts:
                 # Collect account_ids before removing accounts

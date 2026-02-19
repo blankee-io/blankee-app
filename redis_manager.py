@@ -2992,6 +2992,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         mysql_conn_id,
                         row.get('account_id'),
                         row.get('account_name', 'Account'),
+                        row.get('alias'),
                         row.get('account_type', ''),
                         row.get('account_subtype', ''),
                         row.get('mask', ''),
@@ -3032,14 +3033,15 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 cursor.executemany("""
                     INSERT INTO quiltt_accounts
-                    (user_id, connection_id, account_id, account_name, account_type, account_subtype,
+                    (user_id, connection_id, account_id, account_name, alias, account_type, account_subtype,
                      mask, current_balance, available_balance, is_active, sync_transactions,
                      interest_rate, origination_principal, origination_date, maturity_date, loan_term,
                      last_payment_date, last_payment_amount, next_payment_due_date, minimum_payment_amount,
                      next_payment_minimum_amount, payment_frequency, account_state)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         account_name = VALUES(account_name),
+                        alias = VALUES(alias),
                         current_balance = VALUES(current_balance),
                         available_balance = VALUES(available_balance),
                         is_active = VALUES(is_active),
