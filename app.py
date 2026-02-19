@@ -12240,13 +12240,17 @@ def confirm_transaction():
     entry_type = data.get('entry_type')
     category_id = data.get('category_id')
     
+    app.logger.info(f"[CONFIRM TXN] === START === txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}, user_id={current_user.id}")
+    
     if not all([transaction_id, entry_id, entry_type, category_id]):
+        app.logger.warning(f"[CONFIRM TXN] Missing required fields: txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}")
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
     
     try:
         entry_id = int(entry_id)
         category_id = int(category_id)
     except ValueError:
+        app.logger.warning(f"[CONFIRM TXN] Invalid ID format: entry_id={entry_id}, category_id={category_id}")
         return jsonify({'status': 'error', 'message': 'Invalid ID format'}), 400
     
     # Determine the Redis key based on entry type
@@ -12278,9 +12282,18 @@ def confirm_transaction():
         # Get entries from Redis
         cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
         if not cached:
+            app.logger.warning(f"[CONFIRM TXN] No cached data for key {redis_key}")
             return jsonify({'status': 'error', 'message': 'No entries found'}), 404
         
         entries = json.loads(cached)
+        
+        # Log all pending entries before we modify anything
+        pending_entries = [e for e in entries if e.get('pending') == 1]
+        app.logger.info(f"[CONFIRM TXN] Total entries in Redis: {len(entries)}, pending entries: {len(pending_entries)}")
+        for pe in pending_entries:
+            app.logger.info(f"[CONFIRM TXN]   Pending entry: id={pe.get('id')} (type={type(pe.get('id')).__name__}), cat={pe.get('category_id')}, amount={pe.get('amount')}, date={pe.get('date')}, auto_confirmed={pe.get('auto_confirmed')}")
+        
+        app.logger.info(f"[CONFIRM TXN] Looking for entry_id={entry_id} (type={type(entry_id).__name__})")
         
         # Find and update the entry
         found = False
@@ -12289,23 +12302,37 @@ def confirm_transaction():
         old_category_id = None
         was_auto_confirmed = False
         
+        match_count = 0
         for entry in entries:
             if entry.get('id') == entry_id:
+                match_count += 1
+                app.logger.info(f"[CONFIRM TXN] MATCH #{match_count}: entry id={entry.get('id')}, cat={entry.get('category_id')}, amount={entry.get('amount')}, pending={entry.get('pending')}")
                 old_category_id = entry.get('category_id')
                 was_auto_confirmed = entry.get('auto_confirmed', 0) == 1
                 entry['category_id'] = category_id
                 entry['pending'] = 0  # Mark as confirmed
                 entry['auto_confirmed'] = 0  # Clear auto-confirmed flag
+                entry['processed'] = 1  # Mark as processed (user reviewed and categorized)
                 entry_date = entry.get('date')
                 entry_amount = float(entry.get('amount', 0))
                 found = True
                 break
         
+        app.logger.info(f"[CONFIRM TXN] Match result: found={found}, match_count={match_count}, old_cat={old_category_id}, new_cat={category_id}")
+        
         if not found:
+            app.logger.warning(f"[CONFIRM TXN] Entry {entry_id} NOT FOUND in {len(entries)} entries")
             return jsonify({'status': 'error', 'message': 'Entry not found'}), 404
+        
+        # Log pending entries AFTER the update
+        pending_after = [e for e in entries if e.get('pending') == 1]
+        app.logger.info(f"[CONFIRM TXN] After update: pending entries remaining: {len(pending_after)}")
+        for pe in pending_after:
+            app.logger.info(f"[CONFIRM TXN]   Still pending: id={pe.get('id')}, cat={pe.get('category_id')}, amount={pe.get('amount')}")
         
         # Save back to Redis
         _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+        app.logger.info(f"[CONFIRM TXN] Saved {len(entries)} entries back to Redis key {redis_key}")
         
         # Mark as dirty
         dirty_key = f"dirty_tables:{current_user.id}"
@@ -12345,10 +12372,11 @@ def confirm_transaction():
         # Check if all pending transactions are now confirmed and clear notification
         _clear_pending_transactions_notification_if_none(current_user.id)
         
+        app.logger.info(f"[CONFIRM TXN] === DONE === txn_id={transaction_id}, entry_id={entry_id}, category_id={category_id}")
         return jsonify({'status': 'success'})
         
     except Exception as e:
-        app.logger.error(f"Error confirming transaction: {e}", exc_info=True)
+        app.logger.error(f"[CONFIRM TXN] Error confirming transaction: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Internal error'}), 500
 
 
@@ -12413,6 +12441,8 @@ def confirm_all_transactions():
                     new_category_id = updates[entry_id]
                     entry['category_id'] = new_category_id
                     entry['pending'] = 0
+                    entry['auto_confirmed'] = 0  # Clear auto-confirmed flag
+                    entry['processed'] = 1  # Mark as processed (user reviewed and categorized)
                     # Track for bucket reduction
                     bucket_reductions.append({
                         'category_id': new_category_id,
