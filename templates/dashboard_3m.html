@@ -153,6 +153,10 @@
                                     <span class="category-name">
                                         {% if category.is_bud %}
                                             <i class="fa-regular fa-seedling category-icon"></i>
+                                        {% elif category.name == 'Savings' and category.is_recurring %}
+                                            <i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>
+                                        {% elif category.name == 'Savings' %}
+                                            <i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>
                                         {% elif category.is_recurring %}
                                             <i class="fa-regular fa-arrows-repeat category-icon"></i>
                                         {% elif category.is_auto_adjustment %}
@@ -198,6 +202,12 @@
                                     <span class="category-name">
                                         {% if category.is_bud %}
                                             <i class="fa-regular fa-seedling category-icon"></i>
+                                        {% elif category.is_credit_account == 1 and category.is_recurring %}
+                                            <i class="fa-kit fa-regular-credit-card-sync category-icon"></i>
+                                        {% elif category.name == 'Savings' and category.is_recurring %}
+                                            <i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>
+                                        {% elif category.name == 'Savings' %}
+                                            <i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>
                                         {% elif category.is_recurring %}
                                             <i class="fa-regular fa-arrows-repeat category-icon"></i>
                                         {% elif category.is_credit_account == 1 %}
@@ -3666,6 +3676,12 @@
                                 if (catObj) {
                                     if (catObj.is_bud == 1) {
                                         iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                                    } else if ((type === 'expense') && catObj.is_credit_account == 1 && catObj.is_recurring == 1) {
+                                        iconHtml = '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
+                                    } else if (catObj.name === 'Savings' && catObj.is_recurring == 1) {
+                                        iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
+                                    } else if (catObj.name === 'Savings') {
+                                        iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
                                     } else if (catObj.is_recurring == 1) {
                                         iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
                                     } else if (

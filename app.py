@@ -2339,48 +2339,37 @@ def dashboard_d_add_entry():
     # If this is an expense category and is_credit_account=1, add payment entry and trigger CA balance update
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        # Find the credit account by matching category name
-        category_name = cat_data.get('name', '')
-        if category_name.endswith(' payment'):
-            account_name = category_name[:-8]  # Remove ' payment' suffix
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
-                """, (current_user.id, account_name))
-                account_row = cursor.fetchone()
-                if account_row:
-                    account_id = account_row['id']
-                    # Add or update payment entry in Redis
-                    payment_entries = _get_entries_from_redis('c_payment_entries', current_user.id)
-                    if payment_entries is None:
-                        # Load from MySQL first
-                        cursor.execute("""
-                            SELECT cpe.* FROM c_payment_entries cpe
-                            JOIN credit_accounts ca ON cpe.account_id = ca.id
-                            WHERE ca.user_id = %s
-                        """, (current_user.id,))
-                        payment_entries = list(cursor.fetchall())
-                        payment_entries = _filter_pending_deletions('c_payment_entries', current_user.id, payment_entries)
-                    
-                    # Check if payment entry already exists for this date/account
-                    existing_payment = None
-                    for pe in payment_entries:
-                        if str(pe.get('account_id')) == str(account_id) and str(pe.get('date')) == str(entry_date):
-                            existing_payment = pe
-                            break
-                    
-                    if existing_payment:
-                        new_payment_amount = Decimal(existing_payment.get('amount', 0)) + Decimal(amount)
-                        _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(new_payment_amount))
-                    else:
-                        pass
-                        _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
-                else:
-                    pass
-                cursor.close()
-        else:
-            pass
+        # Find the credit account using credit_account_id FK
+        account_id = cat_data.get('credit_account_id')
+        if account_id:
+            account_id = int(account_id)
+            # Add or update payment entry in Redis
+            payment_entries = _get_entries_from_redis('c_payment_entries', current_user.id)
+            if payment_entries is None:
+                # Load from MySQL first
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("""
+                        SELECT cpe.* FROM c_payment_entries cpe
+                        JOIN credit_accounts ca ON cpe.account_id = ca.id
+                        WHERE ca.user_id = %s
+                    """, (current_user.id,))
+                    payment_entries = list(cursor.fetchall())
+                    payment_entries = _filter_pending_deletions('c_payment_entries', current_user.id, payment_entries)
+                    cursor.close()
+            
+            # Check if payment entry already exists for this date/account
+            existing_payment = None
+            for pe in payment_entries:
+                if str(pe.get('account_id')) == str(account_id) and str(pe.get('date')) == str(entry_date):
+                    existing_payment = pe
+                    break
+            
+            if existing_payment:
+                new_payment_amount = Decimal(existing_payment.get('amount', 0)) + Decimal(amount)
+                _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(new_payment_amount))
+            else:
+                _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
     else:
         pass
 
@@ -8508,14 +8497,10 @@ def update_credit_account_order():
                 for cat in expense_categories:
                     if cat.get('is_credit_account') != 1:
                         continue
-                    cat_name = cat.get('name', '')
-                    # Match "Account Name payment" to the account
-                    for acct_id, acct_name in account_name_map.items():
-                        if cat_name.lower() == f"{acct_name} payment".lower():
-                            if acct_id in order_map:
-                                cat['display_order'] = order_map[acct_id]
-                                payment_updated = True
-                            break
+                    ca_id = cat.get('credit_account_id')
+                    if ca_id is not None and int(ca_id) in order_map:
+                        cat['display_order'] = order_map[int(ca_id)]
+                        payment_updated = True
                 if payment_updated:
                     _redis_client.setex(
                         f"expense_categories:v1:{user_id}",
@@ -9004,30 +8989,17 @@ def update_entry():
     # If this is an expense category and is_credit_account=1, update payment entry and trigger CA balance update
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        # Find the credit account by matching category name
-        category_name = cat_data.get('name', '')
-        if category_name.endswith(' payment'):
-            account_name = category_name[:-8]  # Remove ' payment' suffix
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
-                """, (current_user.id, account_name))
-                account_row = cursor.fetchone()
-                if account_row:
-                    account_id = account_row['id']
-                    # Update or delete payment entry in Redis based on amount
-                    if float(amount) == 0:
-                        pass
-                        _delete_payment_entry_in_redis(current_user.id, account_id, date, date)
-                    else:
-                        pass
-                        _update_payment_entry_in_redis(current_user.id, account_id, date, float(amount))
-                else:
-                    pass
-                cursor.close()
-        else:
-            pass
+        # Find the credit account using credit_account_id FK
+        account_id = cat_data.get('credit_account_id')
+        if account_id:
+            account_id = int(account_id)
+            # Update or delete payment entry in Redis based on amount
+            if float(amount) == 0:
+                pass
+                _delete_payment_entry_in_redis(current_user.id, account_id, date, date)
+            else:
+                pass
+                _update_payment_entry_in_redis(current_user.id, account_id, date, float(amount))
     else:
         pass
 
@@ -9118,21 +9090,12 @@ def delete_entry():
     # If this is an expense category and is_credit_account=1, delete payment entry and trigger CA balance update
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        # Find the credit account by matching category name
-        category_name = cat_data.get('name', '')
-        if category_name.endswith(' payment'):
-            account_name = category_name[:-8]  # Remove ' payment' suffix
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
-                """, (current_user.id, account_name))
-                account_row = cursor.fetchone()
-                if account_row:
-                    account_id = account_row['id']
-                    # Delete payment entries for this account and date range
-                    _delete_payment_entry_in_redis(current_user.id, account_id, start_date, end_date)
-                cursor.close()
+        # Find the credit account using credit_account_id FK
+        account_id = cat_data.get('credit_account_id')
+        if account_id:
+            account_id = int(account_id)
+            # Delete payment entries for this account and date range
+            _delete_payment_entry_in_redis(current_user.id, account_id, start_date, end_date)
 
     if entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()
@@ -9368,21 +9331,12 @@ def delete_week_entry():
     # If this is an expense category and is_credit_account=1, delete payment entry and trigger CA balance update
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        # Find the credit account by matching category name
-        category_name = cat_data.get('name', '')
-        if category_name.endswith(' payment'):
-            account_name = category_name[:-8]  # Remove ' payment' suffix
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
-                """, (current_user.id, account_name))
-                account_row = cursor.fetchone()
-                if account_row:
-                    account_id = account_row['id']
-                    # Delete payment entries for this account and date range
-                    _delete_payment_entry_in_redis(current_user.id, account_id, start_date, end_date)
-                cursor.close()
+        # Find the credit account using credit_account_id FK
+        account_id = cat_data.get('credit_account_id')
+        if account_id:
+            account_id = int(account_id)
+            # Delete payment entries for this account and date range
+            _delete_payment_entry_in_redis(current_user.id, account_id, start_date, end_date)
 
     # If a CA payment was updated, trigger CA balance recalculation
     if ca_triggered or entry_type == 'ca':
@@ -9681,30 +9635,17 @@ def update_week_entry():
     ca_triggered = False
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        # Find the credit account by matching category name
-        category_name = cat_data.get('name', '')
-        if category_name.endswith(' payment'):
-            account_name = category_name[:-8]  # Remove ' payment' suffix
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
-                """, (current_user.id, account_name))
-                account_row = cursor.fetchone()
-                if account_row:
-                    account_id = account_row['id']
-                    # Update or delete payment entry in Redis based on amount
-                    if float(amount) == 0:
-                        pass
-                        _delete_payment_entry_in_redis(current_user.id, account_id, friday_date, friday_date)
-                    else:
-                        pass
-                        _update_payment_entry_in_redis(current_user.id, account_id, friday_date, float(amount))
-                else:
-                    pass
-                cursor.close()
-        else:
-            pass
+        # Find the credit account using credit_account_id FK
+        account_id = cat_data.get('credit_account_id')
+        if account_id:
+            account_id = int(account_id)
+            # Update or delete payment entry in Redis based on amount
+            if float(amount) == 0:
+                pass
+                _delete_payment_entry_in_redis(current_user.id, account_id, friday_date, friday_date)
+            else:
+                pass
+                _update_payment_entry_in_redis(current_user.id, account_id, friday_date, float(amount))
 
     if entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()
@@ -14331,7 +14272,7 @@ def recurring_expense():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
-            # Fetch recurring expense records, excluding credit account categories
+            # Fetch recurring expense records (including credit account payment categories)
             cursor.execute("""
                 SELECT ri.id, ri.user_id, ri.category_id, ic.name as category_name, ri.amount, 
                        ri.cadence_interval, ri.cadence_unit, ri.weekdays, ri.monthly_days, 
@@ -14339,7 +14280,7 @@ def recurring_expense():
                        ic.no_end_date, ri.wage_bill
                 FROM recurring_expense ri
                 JOIN expense_categories ic ON ri.category_id = ic.id
-                WHERE ri.user_id = %s AND ic.is_credit_account = 0
+                WHERE ri.user_id = %s
             """, (current_user.id,))
 
             recurring_expense_records = cursor.fetchall()
@@ -14348,12 +14289,6 @@ def recurring_expense():
             # Cache to Redis (note: Redis stores ALL recurring expenses, we filter on display)
             # Don't cache the filtered results - get fresh from Redis if needed
     else:
-        # Filter out credit account recurring expenses from Redis data
-        recurring_expense_records = [
-            rec for rec in recurring_expense_records 
-            if int(rec.get('category_id', 0)) not in credit_account_category_ids
-        ]
-        
         # Ensure all records have category_name
         needs_enrichment = any('category_name' not in rec or not rec.get('category_name') for rec in recurring_expense_records)
         
@@ -14398,6 +14333,12 @@ def recurring_expense():
 
     # Format cadence for display and check for 'No end date'
     for record in recurring_expense_records:
+        # Ensure dates are strings (MySQL returns datetime.date objects)
+        if isinstance(record.get('start_date'), date):
+            record['start_date'] = record['start_date'].strftime('%Y-%m-%d')
+        if isinstance(record.get('end_date'), date):
+            record['end_date'] = record['end_date'].strftime('%Y-%m-%d')
+        
         record['cadence_description'] = get_cadence_description(
             record['cadence_interval'], 
             record['cadence_unit'], 
@@ -14559,6 +14500,12 @@ def add_recurring_expense():
                 start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month, current_user.id
             )
         
+        # Recalculate credit account balances if this is a payment category
+        if categories:
+            cat = next((c for c in categories if str(c.get('id')) == str(category_id)), None)
+            if cat and cat.get('is_credit_account') == 1:
+                save_ca_daily_balance()
+        
         # Sync updated categories to Ntropy (non-blocking)
         _trigger_ntropy_sync(current_user.id)
         
@@ -14580,9 +14527,20 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                 return
             user_id = result['user_id']
 
+    # Check if this is a payment category (is_credit_account=1) to also create c_payment_entries
+    payment_account_id = None
+    categories = _get_categories_from_redis('expense_categories', user_id)
+    if categories:
+        cat = next((c for c in categories if int(c.get('id', 0)) == int(category_id)), None)
+        if cat and cat.get('is_credit_account') == 1 and cat.get('credit_account_id'):
+            payment_account_id = int(cat['credit_account_id'])
+
     start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
     current_date = start_date
     end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+
+    app.logger.info(f"[GEN_EXPENSE_ENTRIES] START: recurring_id={recurring_id}, cat_id={category_id}, amount={amount}, cadence={cadence_interval}/{cadence_unit}, start={start_date}, end={end_date}, monthly_days={monthly_days}, payment_account_id={payment_account_id}")
+    _gen_entries_count = 0
 
     while current_date <= end_date:
         delta = None
@@ -14590,6 +14548,9 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
         if cadence_unit == 'days':
             # Create bucket entry and record
             _create_bucket_entry_and_record('expense_entries', user_id, category_id, current_date, amount, recurring_id)
+            # Also create payment entry if this is a payment category
+            if payment_account_id:
+                _update_payment_entry_in_redis(user_id, payment_account_id, current_date, float(amount))
             delta = timedelta(days=int(cadence_interval))
 
         elif cadence_unit == 'weeks':
@@ -14599,6 +14560,9 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                 if start_date <= weekday_date <= end_date:
                     # Create bucket entry and record
                     _create_bucket_entry_and_record('expense_entries', user_id, category_id, weekday_date, amount, recurring_id)
+                    # Also create payment entry if this is a payment category
+                    if payment_account_id:
+                        _update_payment_entry_in_redis(user_id, payment_account_id, weekday_date, float(amount))
             delta = timedelta(weeks=int(cadence_interval))
 
         elif cadence_unit == 'months':
@@ -14617,6 +14581,7 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                     # Loop through each month from start_date to end_date
                     year = current_date.year
                     month = current_date.month
+                    app.logger.info(f"[GEN_EXPENSE_ENTRIES] Months loop start: year={year}, month={month}, monthly_days_cleaned={monthly_days_cleaned}")
                     while True:
                         for day in monthly_days_cleaned:
                             try:
@@ -14628,7 +14593,8 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                                     if day_num > last_day_of_month:
                                         continue  # Skip invalid days
                                 entry_date = date(year=year, month=month, day=day_num)
-                            except Exception:
+                            except Exception as _ex:
+                                app.logger.error(f"[GEN_EXPENSE_ENTRIES] Exception in date creation: {_ex}")
                                 continue
                             if entry_date < start_date:
                                 continue
@@ -14636,6 +14602,10 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                                 continue
                             # Create bucket entry and record
                             _create_bucket_entry_and_record('expense_entries', user_id, category_id, entry_date, amount, recurring_id)
+                            _gen_entries_count += 1
+                            # Also create payment entry if this is a payment category
+                            if payment_account_id:
+                                _update_payment_entry_in_redis(user_id, payment_account_id, entry_date, float(amount))
                         # Move to next month by cadence_interval
                         month += int(cadence_interval)
                         while month > 12:
@@ -14644,6 +14614,7 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                         # Stop if we've passed the end date's year and month
                         if (year > end_date.year) or (year == end_date.year and month > end_date.month):
                             break
+                    app.logger.info(f"[GEN_EXPENSE_ENTRIES] Months loop done: entries_created={_gen_entries_count}")
                 else:
                     # Default to the first day of each month
                     year = current_date.year
@@ -14657,6 +14628,9 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                         else:
                             # Create bucket entry and record
                             _create_bucket_entry_and_record('expense_entries', user_id, category_id, entry_date, amount, recurring_id)
+                            # Also create payment entry if this is a payment category
+                            if payment_account_id:
+                                _update_payment_entry_in_redis(user_id, payment_account_id, entry_date, float(amount))
                         # Move to next month by cadence_interval
                         month += int(cadence_interval)
                         while month > 12:
@@ -14683,6 +14657,9 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                         break
                     # Create bucket entry and record
                     _create_bucket_entry_and_record('expense_entries', user_id, category_id, yearly_entry_date, amount, recurring_id)
+                    # Also create payment entry if this is a payment category
+                    if payment_account_id:
+                        _update_payment_entry_in_redis(user_id, payment_account_id, yearly_entry_date, float(amount))
                     year += interval
             else:
                 interval = int(cadence_interval)
@@ -14696,6 +14673,9 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                         break
                     # Create bucket entry and record
                     _create_bucket_entry_and_record('expense_entries', user_id, category_id, yearly_entry_date, amount, recurring_id)
+                    # Also create payment entry if this is a payment category
+                    if payment_account_id:
+                        _update_payment_entry_in_redis(user_id, payment_account_id, yearly_entry_date, float(amount))
                     year += interval
 
         # Increment current_date
@@ -14743,6 +14723,14 @@ def delete_recurring_expense():
         today = date.today()
         category_id_int = int(category_id)
         
+        # Check if this is a payment category (is_credit_account=1) to also remove c_payment_entries
+        payment_account_id = None
+        categories = _get_categories_from_redis('expense_categories', current_user.id)
+        if categories:
+            cat = next((c for c in categories if int(c.get('id', 0)) == category_id_int), None)
+            if cat and cat.get('is_credit_account') == 1 and cat.get('credit_account_id'):
+                payment_account_id = int(cat['credit_account_id'])
+        
         # 1. Remove future entries (today and onward), keep past entries
         entries = _get_entries_from_redis('expense_entries', current_user.id)
         if entries:
@@ -14772,6 +14760,10 @@ def delete_recurring_expense():
                     _redis_client.expire(pending_key, 604800)
                     _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_entries')
         
+        # 1b. If this is a payment category, also remove future c_payment_entries
+        if payment_account_id:
+            _delete_payment_entry_in_redis(current_user.id, payment_account_id, today, date(9999, 12, 31))
+        
         # 2. Delete all buckets for this category from Redis
         _delete_buckets_in_redis('recurring_expense_buckets', current_user.id, category_id)
         
@@ -14786,6 +14778,10 @@ def delete_recurring_expense():
         
         # Sync updated categories to Ntropy (non-blocking)
         _trigger_ntropy_sync(current_user.id)
+        
+        # Recalculate credit account balances if payment entries were modified
+        if payment_account_id:
+            save_ca_daily_balance()
         
         return jsonify({'status': 'success', 'message': 'Recurring expense converted to regular category.'})
 
@@ -14875,6 +14871,12 @@ def convert_to_recurring_expense():
                 recurring_id, int(category_id), amount, cadence_interval, cadence_unit,
                 start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month, current_user.id
             )
+
+        # Recalculate credit account balances if this is a payment category
+        if categories:
+            cat = next((c for c in categories if int(c.get('id', 0)) == int(category_id)), None)
+            if cat and cat.get('is_credit_account') == 1:
+                save_ca_daily_balance()
 
         _trigger_ntropy_sync(current_user.id)
 
@@ -14995,6 +14997,16 @@ def update_recurring_expense_inner(data, user_id):
         # Step 3: Delete old expense entries for today and the future from Redis
         _delete_entry_in_redis('expense_entries', user_id, category_id, today, date(9999, 12, 31))
         
+        # Step 3a: If this is a payment category, also delete future c_payment_entries (will be recreated below)
+        payment_account_id = None
+        categories_for_payment = _get_categories_from_redis('expense_categories', user_id)
+        if categories_for_payment:
+            cat = next((c for c in categories_for_payment if int(c.get('id', 0)) == int(category_id)), None)
+            if cat and cat.get('is_credit_account') == 1 and cat.get('credit_account_id'):
+                payment_account_id = int(cat['credit_account_id'])
+        if payment_account_id:
+            _delete_payment_entry_in_redis(user_id, payment_account_id, today, date(9999, 12, 31))
+        
         # Step 3b: Delete future bucket records for this category
         _delete_future_buckets_in_redis('recurring_expense_buckets', user_id, category_id, today)
 
@@ -15010,6 +15022,10 @@ def update_recurring_expense_inner(data, user_id):
         
         # Sync updated categories to Ntropy (non-blocking) - category name may have changed
         _trigger_ntropy_sync(user_id)
+        
+        # Recalculate credit account balances if payment entries were modified
+        if payment_account_id:
+            save_ca_daily_balance()
         
         return jsonify({'status': 'success', 'message': 'Recurring expense updated successfully!'})
 
@@ -15930,48 +15946,37 @@ def footer_add_entry():
     # If this is an expense category and is_credit_account=1, add payment entry and trigger CA balance update
     if entry_type == 'expense' and cat_data.get('is_credit_account', 0) == 1:
         ca_triggered = True
-        # Find the credit account by matching category name
-        category_name = cat_data.get('name', '')
-        if category_name.endswith(' payment'):
-            account_name = category_name[:-8]  # Remove ' payment' suffix
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s
-                """, (current_user.id, account_name))
-                account_row = cursor.fetchone()
-                if account_row:
-                    account_id = account_row['id']
-                    # Add or update payment entry in Redis
-                    payment_entries = _get_entries_from_redis('c_payment_entries', current_user.id)
-                    if payment_entries is None:
-                        # Load from MySQL first
-                        cursor.execute("""
-                            SELECT cpe.* FROM c_payment_entries cpe
-                            JOIN credit_accounts ca ON cpe.account_id = ca.id
-                            WHERE ca.user_id = %s
-                        """, (current_user.id,))
-                        payment_entries = list(cursor.fetchall())
-                        payment_entries = _filter_pending_deletions('c_payment_entries', current_user.id, payment_entries)
-                    
-                    # Check if payment entry already exists for this date/account
-                    existing_payment = None
-                    for pe in payment_entries:
-                        if str(pe.get('account_id')) == str(account_id) and str(pe.get('date')) == str(entry_date):
-                            existing_payment = pe
-                            break
-                    
-                    if existing_payment:
-                        new_payment_amount = Decimal(existing_payment.get('amount', 0)) + Decimal(amount)
-                        _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(new_payment_amount))
-                    else:
-                        pass
-                        _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
-                else:
-                    pass
-                cursor.close()
-        else:
-            pass
+        # Find the credit account using credit_account_id FK
+        account_id = cat_data.get('credit_account_id')
+        if account_id:
+            account_id = int(account_id)
+            # Add or update payment entry in Redis
+            payment_entries = _get_entries_from_redis('c_payment_entries', current_user.id)
+            if payment_entries is None:
+                # Load from MySQL first
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("""
+                        SELECT cpe.* FROM c_payment_entries cpe
+                        JOIN credit_accounts ca ON cpe.account_id = ca.id
+                        WHERE ca.user_id = %s
+                    """, (current_user.id,))
+                    payment_entries = list(cursor.fetchall())
+                    payment_entries = _filter_pending_deletions('c_payment_entries', current_user.id, payment_entries)
+                    cursor.close()
+            
+            # Check if payment entry already exists for this date/account
+            existing_payment = None
+            for pe in payment_entries:
+                if str(pe.get('account_id')) == str(account_id) and str(pe.get('date')) == str(entry_date):
+                    existing_payment = pe
+                    break
+            
+            if existing_payment:
+                new_payment_amount = Decimal(existing_payment.get('amount', 0)) + Decimal(amount)
+                _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(new_payment_amount))
+            else:
+                _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
     else:
         pass
 
@@ -17882,10 +17887,9 @@ def credit_accounts():
     ca_recurring_info = {}
     if expense_categories and credit_accounts:
         for account in credit_accounts:
-            payment_cat_name = f"{account['name']} payment"
-            # Find the payment category
+            # Find the payment category by credit_account_id
             payment_cat = next((cat for cat in expense_categories 
-                               if cat.get('name') == payment_cat_name and cat.get('is_credit_account') == 1), None)
+                               if cat.get('is_credit_account') == 1 and cat.get('credit_account_id') is not None and int(cat.get('credit_account_id')) == account['id']), None)
             if payment_cat:
                 # Find the recurring expense for this category
                 recurring = next((r for r in (recurring_expenses or []) 
@@ -18060,7 +18064,8 @@ def add_credit_account():
         'no_end_date': no_end_date,
         'hidden': 0,
         'is_bud': 0,
-        'is_credit_account': 1
+        'is_credit_account': 1,
+        'credit_account_id': temp_account_id
     })
     
     # Create recurring expense entry if recurring payment is enabled
@@ -18340,16 +18345,14 @@ def update_credit_account():
         
         # Handle payment category and recurring expense
         expense_categories = _get_categories_from_redis('expense_categories', current_user.id) or []
-        old_payment_cat_name = f"{old_account_name} payment" if old_account_name else None
         new_payment_cat_name = f"{name} payment"
         
-        # Find existing payment category
+        # Find existing payment category by credit_account_id
         payment_category = None
         for cat in expense_categories:
-            if cat.get('is_credit_account') == 1:
-                if cat.get('name') == old_payment_cat_name or cat.get('name') == new_payment_cat_name:
-                    payment_category = cat
-                    break
+            if cat.get('is_credit_account') == 1 and cat.get('credit_account_id') is not None and int(cat.get('credit_account_id')) == account_id:
+                payment_category = cat
+                break
         
         # Get existing recurring expense for this category
         recurring_expenses = _get_recurring_from_redis('recurring_expense', current_user.id) or []
@@ -18375,7 +18378,8 @@ def update_credit_account():
                     'no_end_date': 1,
                     'hidden': 0,
                     'is_bud': 0,
-                    'is_credit_account': 1
+                    'is_credit_account': 1,
+                    'credit_account_id': account_id
                 })
             else:
                 payment_category_id = payment_category['id']
@@ -18438,21 +18442,26 @@ def update_credit_account():
             _update_recurring_in_redis('recurring_expense', current_user.id, recurring_data)
             
             recurring_id = recurring_data.get('id')
+            app.logger.info(f"[UPDATE_CREDIT_ACCT] recurring_id={recurring_id}, payment_category_id={payment_category_id}, account_id={account_id}, start_date={start_date}, end_date={end_date}, monthly_days={monthly_days}, payment_amount={payment_amount}")
             if recurring_id:
-                generate_expense_entries(
-                    recurring_id=recurring_id,
-                    category_id=payment_category_id,
-                    amount=payment_amount,
-                    cadence_interval=1,
-                    cadence_unit='months',
-                    start_date_str=start_date.strftime('%Y-%m-%d'),
-                    end_date_str=end_date.strftime('%Y-%m-%d'),
-                    weekdays=None,
-                    monthly_days=monthly_days,
-                    yearly_day=None,
-                    yearly_month=None,
-                    user_id=current_user.id
-                )
+                try:
+                    generate_expense_entries(
+                        recurring_id=recurring_id,
+                        category_id=payment_category_id,
+                        amount=payment_amount,
+                        cadence_interval=1,
+                        cadence_unit='months',
+                        start_date_str=start_date.strftime('%Y-%m-%d'),
+                        end_date_str=end_date.strftime('%Y-%m-%d'),
+                        weekdays=None,
+                        monthly_days=monthly_days,
+                        yearly_day=None,
+                        yearly_month=None,
+                        user_id=current_user.id
+                    )
+                    app.logger.info(f"[UPDATE_CREDIT_ACCT] generate_expense_entries completed successfully")
+                except Exception as gen_err:
+                    app.logger.error(f"[UPDATE_CREDIT_ACCT] generate_expense_entries FAILED: {gen_err}", exc_info=True)
                 
                 # Also generate c_payment_entries for the same dates
                 try:
@@ -18485,9 +18494,11 @@ def update_credit_account():
                             break
                     
                     if payment_dates:
+                        app.logger.info(f"[UPDATE_CREDIT_ACCT] Creating {len(payment_dates)} c_payment_entries for account_id={account_id}, first_date={payment_dates[0]}, last_date={payment_dates[-1]}")
                         payment_redis_key = f"c_payment_entries:v1:{current_user.id}"
                         cached = _redis_client.get(payment_redis_key)
                         payments = json.loads(cached) if cached else []
+                        app.logger.info(f"[UPDATE_CREDIT_ACCT] Existing c_payment_entries in Redis: {len(payments)}")
                         
                         existing_ids = [int(p.get('id', 0)) for p in payments]
                         min_id = min(existing_ids) if existing_ids else 0
@@ -18513,10 +18524,13 @@ def update_credit_account():
                         dirty_key = f"dirty_tables:{current_user.id}"
                         _redis_client.sadd(dirty_key, 'c_payment_entries')
                         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+                        app.logger.info(f"[UPDATE_CREDIT_ACCT] Saved {len(payments)} total c_payment_entries to Redis")
                         
+                    else:
+                        app.logger.warning(f"[UPDATE_CREDIT_ACCT] payment_dates is EMPTY, no c_payment_entries created")
                         
                 except Exception as payment_err:
-                    app.logger.error(f"[UPDATE CREDIT ACCOUNT] Error generating c_payment_entries: {payment_err}")
+                    app.logger.error(f"[UPDATE CREDIT ACCOUNT] Error generating c_payment_entries: {payment_err}", exc_info=True)
             
             save_totals_remainders_d()
             
@@ -18952,9 +18966,9 @@ def delete_credit_account():
                 cursor.close()
 
         # After deleting the credit account, delete the associated expense category
-        if account_name:
-            payment_category_name = f"{account_name} payment"
-            
+        # Use actual_id_to_delete (the real positive ID) to match credit_account_id
+        delete_acct_id = actual_id_to_delete if actual_id_to_delete else account_id
+        if delete_acct_id:
             # Delete payment category from Redis
             if app.config.get('REDIS_OK'):
                 exp_redis_key = f"expense_categories:v1:{current_user.id}"
@@ -18964,10 +18978,10 @@ def delete_credit_account():
                     exp_categories = json.loads(exp_cached)
                     category_id_to_delete = None
                     
-                    # Find and remove the payment category
+                    # Find and remove the payment category by credit_account_id
                     filtered_exp_categories = []
                     for cat in exp_categories:
-                        if cat.get('name') == payment_category_name and cat.get('is_credit_account') == 1:
+                        if cat.get('is_credit_account') == 1 and cat.get('credit_account_id') is not None and int(cat.get('credit_account_id')) == delete_acct_id:
                             category_id_to_delete = cat.get('id')
                         else:
                             filtered_exp_categories.append(cat)
@@ -20146,7 +20160,8 @@ def quiltt_sync_profile():
                                 'no_end_date': 0,
                                 'hidden': 0,
                                 'is_bud': 0,
-                                'is_credit_account': 1
+                                'is_credit_account': 1,
+                                'credit_account_id': temp_account_id
                             })
                             
                             # Create starting balance entry if starting_balance > 0
@@ -22961,7 +22976,8 @@ def quiltt_toggle_sync():
                                     'no_end_date': 0,
                                     'hidden': 0,
                                     'is_bud': 0,
-                                    'is_credit_account': 1
+                                    'is_credit_account': 1,
+                                    'credit_account_id': temp_account_id
                                 })
                                 
                                 app.logger.info(f"Created payment category '{payment_category_name}' for credit account (toggle-sync)")
