@@ -3313,6 +3313,8 @@
             const input = document.getElementById('new-income-category');
             const categoryName = input.value.trim();
 
+            if (checkCategoryDuplicate(input, incomeCategories)) return;
+
             if (categoryName) {
                 $("#income-categories-table tbody").sortable("disable");
 
@@ -3367,10 +3369,14 @@
                                 inputContainer.style.display = 'none';
                             }, 0);
                         } else {
+                            const msg = response.message || 'Failed to add category';
+                            showToast(msg, 'error');
                         }
                     },
-                    error: function() {
+                    error: function(xhr) {
                         $("#income-categories-table tbody").sortable("enable");
+                        const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Error adding category';
+                        showToast(msg, 'error');
                     }
                 });
             } else {
@@ -3380,6 +3386,8 @@
         function addExpenseCategory() {
             const input = document.getElementById('new-expense-category');
             const categoryName = input.value.trim();
+
+            if (checkCategoryDuplicate(input, expenseCategories)) return;
 
             if (categoryName) {
                 $("#expense-categories-table tbody").sortable("disable");
@@ -3435,10 +3443,14 @@
                                 inputContainer.style.display = 'none';
                             }, 0);
                         } else {
+                            const msg = response.message || 'Failed to add category';
+                            showToast(msg, 'error');
                         }
                     },
-                    error: function() {
+                    error: function(xhr) {
                         $("#expense-categories-table tbody").sortable("enable");
+                        const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Error adding category';
+                        showToast(msg, 'error');
                     }
                 });
             } else {
@@ -3451,6 +3463,8 @@
             const input = document.getElementById('new-ca-category');
             const accountId = inputContainer.dataset.accountId; // Always use the stored accountId
             const categoryName = input.value.trim();
+
+            if (checkCategoryDuplicate(input, expenseCategories)) return;
 
             if (!categoryName || !accountId) {
                 return;
@@ -3509,9 +3523,13 @@
                             inputContainer.style.display = 'none';
                         }, 0);
                     } else {
+                        const msg = response.message || 'Failed to add category';
+                        showToast(msg, 'error');
                     }
                 },
-                error: function() {
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Error adding category';
+                    showToast(msg, 'error');
                 }
             });
         }
@@ -3626,6 +3644,7 @@
 
         function saveCategoryName(categorySpan, categoryId, type) {
             const newCategoryName = categorySpan ? categorySpan.textContent.trim() : editCategoryInput.value.trim();
+
             // Capture old name before rename for syncing to CA categories
             let oldCategoryName = null;
             if (type === 'expense') {
@@ -3652,9 +3671,7 @@
                         if (response.status === 'success') {
                             if (categorySpan) {
                                 categorySpan.parentElement.setAttribute('data-original-name', newCategoryName);
-                                // Since the input is blurred, display formatted value with currency
-                                const rounded = formatNumberWithCommas(amount);
-                                input.value = currencySymbol + rounded;
+
                                 // --- Update the icon immediately ---
                                 let catObj;
                                 if (type === 'income') {
@@ -3700,6 +3717,13 @@
                                 }
                                 // Insert icon and a space after it before the name
                                 categorySpan.innerHTML = iconHtml + ' ' + newCategoryName;
+
+                                // Update rename button data-category-name
+                                const row = categorySpan.closest('tr');
+                                if (row) {
+                                    const renameBtn = row.querySelector('.rename-category-btn');
+                                    if (renameBtn) renameBtn.setAttribute('data-category-name', newCategoryName);
+                                }
                             }
 
                             // Sync rename to CA categories in the UI (expense → c_expense)
@@ -3730,6 +3754,17 @@
                         }
                     },
                     error: function (xhr, status, error) {
+                        const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Failed to rename category.';
+                        showToast(msg, 'error');
+                        // Revert the name in the span
+                        if (categorySpan) {
+                            const originalName = categorySpan.parentElement.getAttribute('data-original-name');
+                            if (originalName) {
+                                const existingIcon = categorySpan.querySelector('.category-icon');
+                                const iconHtml = existingIcon ? existingIcon.outerHTML : '';
+                                categorySpan.innerHTML = iconHtml + ' ' + originalName;
+                            }
+                        }
                     }
                 });
             }
@@ -4521,6 +4556,11 @@
                 addCaCategory(); // Call the function to add the category
             }
         });
+
+        // Live duplicate-name checks for add-category inputs
+        setupCategoryDuplicateCheck(document.getElementById('new-income-category'), function() { return incomeCategories; });
+        setupCategoryDuplicateCheck(document.getElementById('new-expense-category'), function() { return expenseCategories; });
+        setupCategoryDuplicateCheck(document.getElementById('new-ca-category'), function() { return expenseCategories; });
 
         // Sortable Table Functions
         $(document).ready(function() {
@@ -5416,6 +5456,9 @@
                     editCategoryInput.select();
                     isModalOpen = true;
 
+                    // Clear any previous duplicate warning
+                    if (editCategoryInput._dupWarning) editCategoryInput._dupWarning.classList.remove('visible');
+
                     // Set hide button icon and title
                     let catArr, catObj;
                     if (editingCategoryType === 'income') {
@@ -5457,6 +5500,12 @@
             // Rename on button click or Enter
             confirmEditCategoryBtn.onclick = function() {
                 if (editingCategoryId && editCategoryInput.value.trim()) {
+                    // Block rename if duplicate
+                    let catsToCheck = editingCategoryType === 'income' ? incomeCategories :
+                                      editingCategoryType === 'expense' ? expenseCategories :
+                                      (typeof c_expense_categories !== 'undefined' ? c_expense_categories : []);
+                    if (checkCategoryDuplicate(editCategoryInput, catsToCheck, { excludeId: editingCategoryId })) return;
+
                     let categorySpan = null;
                     if (editingCategoryType === 'income') {
                         const row = document.querySelector(`#income-categories-table tr[data-category-id='${editingCategoryId}']`);
@@ -5480,7 +5529,14 @@
                 }
             });
 
-
+            // Live duplicate check in rename modal
+            editCategoryInput.addEventListener('input', function() {
+                if (!editingCategoryId || !editingCategoryType) return;
+                let catsToCheck = editingCategoryType === 'income' ? incomeCategories :
+                                  editingCategoryType === 'expense' ? expenseCategories :
+                                  (typeof c_expense_categories !== 'undefined' ? c_expense_categories : []);
+                checkCategoryDuplicate(editCategoryInput, catsToCheck, { excludeId: editingCategoryId });
+            });
 
             // Delete button opens delete modal
             deleteFromEditCategoryBtn.onclick = function() {

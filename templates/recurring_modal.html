@@ -417,6 +417,8 @@
                 incomeInput.addEventListener('input', function() {
                     document.getElementById('income-category-id-hidden').value = '';
                     showRecurringModalDropdown(this, this.value, getFilteredIncomeCategories(), 'income-category-id-hidden');
+                    // Live duplicate check
+                    checkCategoryDuplicate(this, typeof incomeCategories !== 'undefined' ? incomeCategories : []);
                 });
                 incomeInput.addEventListener('focus', function() {
                     showRecurringModalDropdown(this, '', getFilteredIncomeCategories(), 'income-category-id-hidden');
@@ -429,6 +431,8 @@
                 expenseInput.addEventListener('input', function() {
                     document.getElementById('expense-category-id-hidden').value = '';
                     showRecurringModalDropdown(this, this.value, getFilteredExpenseCategories(), 'expense-category-id-hidden');
+                    // Live duplicate check
+                    checkCategoryDuplicate(this, typeof expenseCategories !== 'undefined' ? expenseCategories : []);
                 });
                 expenseInput.addEventListener('focus', function() {
                     showRecurringModalDropdown(this, '', getFilteredExpenseCategories(), 'expense-category-id-hidden');
@@ -698,6 +702,8 @@
                 formData.category_id = incomeSelectedCategoryId;
             } else {
                 formData.category_name = $('#category_name').val();
+                // Duplicate check before creating new category
+                if (checkCategoryDuplicate(document.getElementById('category_name'), typeof incomeCategories !== 'undefined' ? incomeCategories : [])) return false;
             }
             formData.no_end_date = $('#no-end-date-checkbox').is(':checked') ? 1 : 0;
             if ($('#cadence-unit').val() === 'years') {
@@ -746,11 +752,14 @@
                         location.reload();
                         document.getElementById('loading-screen').style.display = 'none';
                     } else {
-                        showToast('Failed to add recurring income: ' + response.message, 'error');
+                        showToast(response.message || 'Failed to add recurring income.', 'error');
+                        document.getElementById('loading-screen').style.display = 'none';
                     }
                 },
                 error: function(xhr, status, error) {
-                    showToast('An error occurred: ' + xhr.responseText, 'error');
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'An error occurred while adding recurring income.';
+                    showToast(msg, 'error');
+                    document.getElementById('loading-screen').style.display = 'none';
                 }
             });
         });
@@ -936,6 +945,8 @@
             formData.category_id = expenseSelectedCategoryId;
         } else {
             formData.category_name = $form.find('#expense-category_name').val();
+            // Duplicate check before creating new category
+            if (checkCategoryDuplicate(document.getElementById('expense-category_name'), typeof expenseCategories !== 'undefined' ? expenseCategories : [])) return false;
         }
         formData.no_end_date = $form.find('#expense-no-end-date-checkbox').is(':checked') ? 1 : 0;
         if ($form.find('#expense-cadence-unit').val() === 'years') {
@@ -984,11 +995,14 @@
                     location.reload();
                     document.getElementById('loading-screen').style.display = 'none';
                 } else {
-                    showToast('Failed to add recurring expense: ' + response.message, 'error');
+                    showToast(response.message || 'Failed to add recurring expense.', 'error');
+                    document.getElementById('loading-screen').style.display = 'none';
                 }
             },
             error: function(xhr, status, error) {
-                showToast('An error occurred: ' + xhr.responseText, 'error');
+                const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'An error occurred while adding recurring expense.';
+                showToast(msg, 'error');
+                document.getElementById('loading-screen').style.display = 'none';
             }
         });
     });
@@ -1295,11 +1309,14 @@
                     location.reload();
                     document.getElementById('loading-screen').style.display = 'none';
                 } else {
-                    showToast('Failed to add recurring CA expense: ' + response.message, 'error');
+                    showToast(response.message || 'Failed to add recurring CA expense.', 'error');
+                    document.getElementById('loading-screen').style.display = 'none';
                 }
             },
             error: function(xhr, status, error) {
-                showToast('An error occurred: ' + xhr.responseText, 'error');
+                const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'An error occurred while adding recurring CA expense.';
+                showToast(msg, 'error');
+                document.getElementById('loading-screen').style.display = 'none';
             }
         });
     });

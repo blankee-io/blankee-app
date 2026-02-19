@@ -45,6 +45,8 @@
                 <span class="cadence-legend-item"><i class="fa-solid fa-calendar-week"></i> Week</span>
                 <span class="cadence-legend-item"><i class="fa-solid fa-calendar-days"></i> Month</span>
                 <span class="cadence-legend-item"><i class="fa-solid fa-calendars"></i> Year</span>
+                <span class="cadence-legend-item"><i class="fa-solid fa-hand-holding-dollar" style="color: var(--success)"></i> Paid</span>
+                <span class="cadence-legend-item"><i class="fa-kit fa-solid-hand-holding-dollar-slash" style="color: var(--danger)"></i> Unpaid</span>
             </div>
             {% if credit_accounts and credit_accounts|length > 0 %}
                 {% for account in credit_accounts %}
@@ -61,9 +63,9 @@
                             <th class="ca-type-col">Type</th>
                             <th class="ca-amount-col">Amount</th>
                             <th class="ca-cadence-col">Every...</th>
-                            <th class="ca-bucket-col">Current Status</th>
-                            <th class="ca-start-date-col">Start Date</th>
-                            <th class="ca-end-date-col">End Date</th>
+                            <th class="ca-bucket-col">Current<br>Status</th>
+                            <th class="ca-start-date-col"><span class="th-full">Start<br>Date</span><span class="th-mobile">Dates</span></th>
+                            <th class="ca-end-date-col">End<br>Date</th>
                             <th class="ca-action-col">
                             </th>
                         </tr>
@@ -74,14 +76,14 @@
                             <td class="editable ca-category" data-column="category_name">{{ record.category_name }}<span class="mobile-type-label">{{ 'Bill' if record.wage_bill == 1 else 'Allowance' }}</span></td>
                             <td class="ca-type" data-column="type">{{ 'Bill' if record.wage_bill == 1 else 'Allowance' }}</td>
                             <td class="editable ca-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
-                            <td class="editable ca-cadence" data-column="cadence" title="{{ record.cadence_description }}"><span class="cadence-top">{{ record.cadence_interval }} {% if record.cadence_unit == 'years' %}<i class="fa-solid fa-calendars"></i>{% elif record.cadence_unit == 'months' %}<i class="fa-solid fa-calendar-days"></i>{% elif record.cadence_unit == 'weeks' %}<i class="fa-solid fa-calendar-week"></i>{% else %}<i class="fa-solid fa-calendar-day"></i>{% endif %}</span>{% if record.cadence_unit == 'years' and record.yearly_month and record.yearly_day %}<span class="cadence-detail">{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][record.yearly_month | int] }} {{ record.yearly_day }}</span>{% elif record.cadence_unit == 'months' and record.monthly_days %}<span class="cadence-detail">{{ record.monthly_days }}</span>{% elif record.cadence_unit == 'weeks' and record.weekdays %}<span class="cadence-detail">{{ record.weekdays | replace('monday','Mo') | replace('tuesday','Tu') | replace('wednesday','We') | replace('thursday','Th') | replace('friday','Fr') | replace('saturday','Sa') | replace('sunday','Su') }}</span>{% endif %}</td>
+                            <td class="editable ca-cadence" data-column="cadence" title="{{ record.cadence_description }}"><span class="cadence-top">{{ record.cadence_interval }} {% if record.cadence_unit == 'years' %}<i class="fa-solid fa-calendars"></i>{% elif record.cadence_unit == 'months' %}<i class="fa-solid fa-calendar-days"></i>{% elif record.cadence_unit == 'weeks' %}<i class="fa-solid fa-calendar-week"></i>{% else %}<i class="fa-solid fa-calendar-day"></i>{% endif %}</span>{% if record.cadence_unit == 'years' and record.yearly_month and record.yearly_day %}<span class="cadence-detail">{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][record.yearly_month | int] }} {{ record.yearly_day | ordinal }}</span>{% elif record.cadence_unit == 'months' and record.monthly_days %}<span class="cadence-detail">{{ record.monthly_days | ordinal }}</span>{% elif record.cadence_unit == 'weeks' and record.weekdays %}<span class="cadence-detail">{{ record.weekdays | replace('monday','Mo') | replace('tuesday','Tu') | replace('wednesday','We') | replace('thursday','Th') | replace('friday','Fr') | replace('saturday','Sa') | replace('sunday','Su') }}</span>{% endif %}</td>
                             <td class="ca-bucket" data-column="bucket">
                                 {% if record.wage_bill == 1 %}
                                     {% if record.bucket_original is not none %}
                                         {% if record.bucket_spent >= record.bucket_original %}
-                                            <span class="status-paid">Paid</span>
+                                            <span class="status-paid" title="Paid"><i class="fa-solid fa-hand-holding-dollar"></i></span>
                                         {% else %}
-                                            <span class="status-unpaid">Unpaid</span>
+                                            <span class="status-unpaid" title="Unpaid"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i></span>
                                         {% endif %}
                                     {% else %}
                                         <span class="bucket-none">—</span>

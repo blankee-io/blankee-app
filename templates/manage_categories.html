@@ -243,6 +243,9 @@
             const categoryName = input.value.trim();
             if (!categoryName) return;
 
+            const catsToCheck = type === 'income' ? incomeCategories : expenseCategories;
+            if (checkCategoryDuplicate(input, catsToCheck)) return;
+
             const url = type === 'income' ? "{{ url_for('add_income_category') }}" : "{{ url_for('add_expense_category') }}";
 
             $.ajax({
@@ -252,10 +255,13 @@
                 success: function(response) {
                     if (response.status === 'success') {
                         location.reload();
+                    } else {
+                        showToast(response.message || 'Failed to add category.', 'error');
                     }
                 },
-                error: function() {
-                    showToast('Failed to add category.', 'error');
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Failed to add category.';
+                    showToast(msg, 'error');
                 }
             });
         }
@@ -273,6 +279,10 @@
         document.getElementById('new-expense-category-input').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') addCategory('expense');
         });
+
+        // Live duplicate-name checks for add-category inputs
+        setupCategoryDuplicateCheck(document.getElementById('new-income-category-input'), function() { return incomeCategories; });
+        setupCategoryDuplicateCheck(document.getElementById('new-expense-category-input'), function() { return expenseCategories; });
 
         // ===================== SAVE NEW ORDER =====================
         function saveNewOrder(type) {
@@ -347,6 +357,9 @@
                 editCategoryInput.select();
                 isModalOpen = true;
 
+                // Clear any previous duplicate warning
+                if (editCategoryInput._dupWarning) editCategoryInput._dupWarning.classList.remove('visible');
+
                 // Set hide button icon
                 let catArr = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
                 let catObj = catArr.find(cat => String(cat.id) === String(editingCategoryId));
@@ -377,9 +390,20 @@
                 }
             });
 
+            // Live duplicate check in rename modal input
+            editCategoryInput.addEventListener('input', function() {
+                if (!editingCategoryId || !editingCategoryType) return;
+                const catsToCheck = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
+                checkCategoryDuplicate(editCategoryInput, catsToCheck, { excludeId: editingCategoryId });
+            });
+
             // Rename
             confirmEditCategoryBtn.onclick = function() {
                 if (editingCategoryId && editCategoryInput.value.trim()) {
+                    // Block rename if duplicate
+                    const catsToCheck = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
+                    if (checkCategoryDuplicate(editCategoryInput, catsToCheck, { excludeId: editingCategoryId })) return;
+
                     const tableId = editingCategoryType === 'income' ? 'income-manage-table' : 'expense-manage-table';
                     const row = document.querySelector(`#${tableId} tr[data-category-id='${editingCategoryId}']`);
                     const categorySpan = row ? row.querySelector('.category-name') : null;
@@ -468,18 +492,9 @@
                         const catObj = catArr.find(cat => String(cat.id) === String(categoryId));
                         if (catObj) catObj.name = newCategoryName;
 
-                        // Rebuild the span with icon
+                        // Update the span text (no icons on manage categories page)
                         if (categorySpan) {
-                            const icon = categorySpan.querySelector('.category-icon');
-                            if (icon) icon.remove();
-                            let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
-                            if (catObj) {
-                                if (catObj.is_recurring == 1) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
-                                else if (type === 'expense' && catObj.is_credit_account == 1) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
-                                else if (catObj.is_auto_adjustment == 1) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
-                                else if (catObj.is_bud == 1) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
-                            }
-                            categorySpan.innerHTML = iconHtml + ' ' + newCategoryName;
+                            categorySpan.textContent = newCategoryName;
                         }
 
                         // Update rename button data
@@ -488,6 +503,18 @@
                         if (row) {
                             const renameBtn = row.querySelector('.rename-category-btn');
                             if (renameBtn) renameBtn.setAttribute('data-category-name', newCategoryName);
+                        }
+                    }
+                },
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Failed to rename category.';
+                    showToast(msg, 'error');
+                    // Revert the name in the span
+                    if (categorySpan) {
+                        let catArr = type === 'income' ? incomeCategories : expenseCategories;
+                        const catObj = catArr.find(cat => String(cat.id) === String(categoryId));
+                        if (catObj) {
+                            categorySpan.textContent = catObj.name;
                         }
                     }
                 }
