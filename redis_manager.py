@@ -357,8 +357,8 @@ def _hydrate_table(table: str, user_id: int):
                     WHERE ca.user_id = %s
                 """
             elif table == 'credit_accounts':
-                # Credit accounts ordered by display_order
-                query = "SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order ASC"
+                # Credit accounts ordered by display_order DESC (highest at top, like categories)
+                query = "SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order DESC"
             else:
                 # Default: table has direct user_id column
                 query = f"SELECT * FROM {table} WHERE user_id = %s"
