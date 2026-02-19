@@ -13559,6 +13559,70 @@ transform: scale(1.2);
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   DATA CHANGED TOAST (cross-tab sync)
+   ═══════════════════════════════════════════════════════════════ */
+.data-changed-toast {
+    position: fixed;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background-color: var(--primary);
+    color: var(--text-light);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px var(--shadow-lg);
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.data-changed-toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    pointer-events: auto;
+}
+
+.data-changed-toast i {
+    font-size: 14px;
+}
+
+.data-changed-toast button {
+    background-color: var(--text-light);
+    color: var(--primary);
+    border: none;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.data-changed-toast button:hover {
+    background-color: var(--primary-lighter);
+}
+
+.data-changed-toast .data-changed-dismiss {
+    background: none;
+    color: var(--text-light);
+    font-size: 18px;
+    padding: 0 4px;
+    opacity: 0.7;
+    line-height: 1;
+}
+
+.data-changed-toast .data-changed-dismiss:hover {
+    opacity: 1;
+    background: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    TOAST NOTIFICATIONS
    ═══════════════════════════════════════════════════════════════ */
 #toast-container {
