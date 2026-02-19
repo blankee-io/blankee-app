@@ -197,6 +197,42 @@ class User(UserMixin):
             return User(id=user[0], username=user[1], password=user[2])
         return None
 
+
+#################################################################################
+#################### DATA VERSION (CROSS-TAB SYNC) ##############################
+#################################################################################
+
+DATA_VERSION_TTL = 604800  # 7 days, same as other Redis keys
+
+def _bump_data_version(user_id):
+    """Bump the data version for a user (called after any mutation)."""
+    if not _redis_client or not app.config.get('REDIS_OK'):
+        return
+    try:
+        import time
+        version = str(int(time.time() * 1000))  # millisecond timestamp
+        _redis_client.setex(f"data_version:{user_id}", DATA_VERSION_TTL, version)
+    except Exception:
+        pass
+
+def _get_data_version(user_id):
+    """Get the current data version for a user."""
+    if not _redis_client or not app.config.get('REDIS_OK'):
+        return '0'
+    try:
+        v = _redis_client.get(f"data_version:{user_id}")
+        return v or '0'
+    except Exception:
+        return '0'
+
+@app.route('/api/data-version', methods=['GET'])
+@login_required
+def api_data_version():
+    """Return the current data version for the logged-in user."""
+    version = _get_data_version(current_user.id)
+    return jsonify({'version': version})
+
+
 @app.context_processor
 def inject_unread_notifications():
     """Inject unread notification count and user info into all templates for the nav"""
@@ -335,13 +371,19 @@ def inject_unread_notifications():
         except Exception:
             pass
 
+    # Get data version for cross-tab sync
+    data_version = '0'
+    if current_user.is_authenticated:
+        data_version = _get_data_version(current_user.id)
+
     return dict(
         unread_notifications_count=unread_count,
         nav_first_name=first_name,
         nav_last_name=last_name,
         has_quiltt_accounts=has_quiltt_accounts,
         has_quiltt_connections=has_quiltt_connections,
-        pending_transactions_count=pending_transactions_count
+        pending_transactions_count=pending_transactions_count,
+        data_version=data_version
     )
 
 #################################################################################

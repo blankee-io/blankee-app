@@ -76,6 +76,30 @@ def init_redis_middleware(app):
         else:
             g.redis_hydrated = False
     
+    @app.after_request
+    def bump_data_version_on_mutation(response):
+        """
+        Auto-bump data_version after any successful POST/PUT/DELETE mutation.
+        This enables cross-tab/cross-browser stale-data detection.
+        Skips read-only endpoints and non-2xx responses.
+        """
+        if not current_user.is_authenticated:
+            return response
+        if request.method not in ('POST', 'PUT', 'DELETE'):
+            return response
+        if response.status_code < 200 or response.status_code >= 300:
+            return response
+        # Skip polling/read endpoints that happen to use POST
+        skip_paths = ('/api/data-version', '/health/', '/api/feedback/')
+        if any(request.path.startswith(p) for p in skip_paths):
+            return response
+        try:
+            from app import _bump_data_version
+            _bump_data_version(current_user.id)
+        except Exception:
+            pass
+        return response
+
     logger.info("Redis middleware initialized")
 
 

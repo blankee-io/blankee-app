@@ -750,3 +750,98 @@ document.addEventListener('DOMContentLoaded', function() {
         container.addEventListener('change', function() { setTimeout(checkSubmitVisible, 30); });
     });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// CROSS-TAB DATA SYNC (poll for changes made in other tabs/browsers)
+// ═══════════════════════════════════════════════════════════════
+
+(function() {
+    var DATA_POLL_INTERVAL = 3000; // 3 seconds
+    var _knownVersion = null;
+    var _pollTimer = null;
+    var _toastShowing = false;
+
+    function pollDataVersion() {
+        fetch('/api/data-version', { credentials: 'same-origin' })
+            .then(function(r) {
+                if (r.status === 401 || r.status === 302) {
+                    // Not logged in; stop polling
+                    clearInterval(_pollTimer);
+                    return null;
+                }
+                return r.json();
+            })
+            .then(function(data) {
+                if (!data) return;
+                var v = data.version;
+                if (_knownVersion === null) {
+                    // First fetch — just record the baseline
+                    _knownVersion = v;
+                    return;
+                }
+                if (v !== _knownVersion && v !== '0') {
+                    location.reload();
+                }
+            })
+            .catch(function() {
+                // Silently ignore network errors
+            });
+    }
+
+    function showDataChangedToast() {
+        // Create a persistent toast with a refresh button
+        var toast = document.createElement('div');
+        toast.className = 'data-changed-toast';
+        toast.innerHTML =
+            '<i class="fa-solid fa-arrows-rotate"></i> ' +
+            '<span>Data updated in another session.</span> ' +
+            '<button onclick="location.reload()">Refresh</button>' +
+            '<button class="data-changed-dismiss" title="Dismiss">&times;</button>';
+        document.body.appendChild(toast);
+
+        // Animate in
+        requestAnimationFrame(function() {
+            toast.classList.add('visible');
+        });
+
+        // Dismiss button
+        toast.querySelector('.data-changed-dismiss').addEventListener('click', function() {
+            toast.classList.remove('visible');
+            setTimeout(function() { toast.remove(); }, 300);
+            _toastShowing = false;
+            // Update known version so we don't show again until next change
+            fetch('/api/data-version', { credentials: 'same-origin' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) { if (data) _knownVersion = data.version; })
+                .catch(function() {});
+        });
+    }
+
+    // Reset known version on every successful AJAX mutation (same tab)
+    // so polling doesn't trigger for your own changes
+    if (typeof $ !== 'undefined') {
+        $(document).ajaxSuccess(function(event, xhr, settings) {
+            if (settings.type && settings.type !== 'GET') {
+                // Bump known version after a short delay to let the server set it
+                setTimeout(function() {
+                    fetch('/api/data-version', { credentials: 'same-origin' })
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) { if (data) _knownVersion = data.version; })
+                        .catch(function() {});
+                }, 500);
+            }
+        });
+    }
+
+    // Start polling after page loads
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            _pollTimer = setInterval(pollDataVersion, DATA_POLL_INTERVAL);
+            // Initial baseline fetch
+            pollDataVersion();
+        });
+    } else {
+        _pollTimer = setInterval(pollDataVersion, DATA_POLL_INTERVAL);
+        pollDataVersion();
+    }
+})();
