@@ -85,12 +85,12 @@ class DecimalEncoder(json.JSONEncoder):
 
 
 def get_db_connection():
-    """Get a direct MySQL connection with buffered cursor support"""
+    """Get a direct MySQL connection using .env config"""
     return mysql.connector.connect(
-        host='localhost',
-        user='ms_admin',
-        password='dune6MEANTIME.ching_reek',
-        database='budget',
+        host=os.getenv('DB_HOST', 'localhost'),
+        user=os.getenv('DB_USER', 'ms_admin'),
+        password=os.getenv('DB_PASSWORD', ''),
+        database=os.getenv('DB_NAME', 'budget'),
         buffered=True  # Prevent unread result errors
     )
 

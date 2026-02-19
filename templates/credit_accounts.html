@@ -435,11 +435,12 @@
 
         function saveCreditAccountOrder() {
             let order = [];
-            const rows = $(".credit-accounts-table tbody tr").get();
-            rows.forEach(function(element, index) {
+            const rows = $(".credit-accounts-table tbody tr").get().reverse();
+            let orderNum = 1;
+            rows.forEach(function(element) {
                 order.push({
                     id: $(element).data('account-id'),
-                    order: index + 1
+                    order: orderNum++
                 });
             });
             $.ajax({
