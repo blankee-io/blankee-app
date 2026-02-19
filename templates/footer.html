@@ -994,6 +994,10 @@
         const entryType = document.getElementById('footer-entryType').value;
         
         if (!categoryName || categoryName.trim().length === 0) return;
+
+        // Duplicate check safety net
+        const catsToCheck = entryType === 'income' ? incomeCategories : expenseCategories;
+        if (checkCategoryDuplicate(footerCategoryInput, catsToCheck)) return;
         
         let url, categoriesArray;
         if (entryType === 'income') {
@@ -1031,11 +1035,12 @@
                     footerCategoryHidden.value = response.new_category_id;
                     footerDropdown.style.display = 'none';
                 } else {
-                    showToast('Failed to create category', 'error');
+                    showToast(response.message || 'Failed to create category', 'error');
                 }
             },
-            error: function() {
-                showToast('Error creating category', 'error');
+            error: function(xhr) {
+                const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Error creating category';
+                showToast(msg, 'error');
             }
         });
     }
@@ -1148,6 +1153,9 @@
         const accountId = document.getElementById('footer-ca-account').value;
         
         if (!categoryName || categoryName.trim().length === 0 || !accountId) return;
+
+        // Duplicate check safety net
+        if (checkCategoryDuplicate(footerCaCategoryInput, expense_categories)) return;
         
         $.ajax({
             url: "{{ url_for('add_expense_category') }}",
@@ -1195,8 +1203,9 @@
                     showToast('Failed to create category', 'error');
                 }
             },
-            error: function() {
-                showToast('Error creating category', 'error');
+            error: function(xhr) {
+                const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Error creating category';
+                showToast(msg, 'error');
             }
         });
     }

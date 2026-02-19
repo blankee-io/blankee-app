@@ -17,6 +17,7 @@ from flask import jsonify
 from datetime import date, datetime, timedelta
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.utils import secure_filename
+from markupsafe import Markup
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
 from email_utils import send_verification_email, generate_verification_token, get_verification_token_expiry, send_password_reset_email, generate_password_reset_token, get_password_reset_token_expiry
@@ -42,6 +43,28 @@ bcrypt = Bcrypt(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
+
+# Custom Jinja2 filter: ordinal day suffix (1st, 2nd, 3rd, 4th, 11th, 21st, etc.)
+# Renders suffix as superscript (<sup>) for display. Handles comma-separated lists.
+def ordinal_filter(value):
+    def _ordinal(n):
+        try:
+            n = int(n)
+        except (ValueError, TypeError):
+            return str(n)
+        if 11 <= (n % 100) <= 13:
+            suffix = 'th'
+        else:
+            suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+        return f"{n}<sup>{suffix}</sup>"
+    
+    s = str(value).strip()
+    if ',' in s:
+        parts = [_ordinal(p.strip()) for p in s.split(',') if p.strip()]
+        return Markup(', '.join(parts))
+    return Markup(_ordinal(s))
+
+app.jinja_env.filters['ordinal'] = ordinal_filter
 
 # Define the upload folder and allowed file extensions
 UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')  # Relative to application root
@@ -4785,6 +4808,49 @@ def _sync_delete_to_credit_accounts(user_id, category_name):
         app.logger.info(f"[CATEGORY SYNC] Deleted '{category_name}' from {deleted_count} c_expense categories for user {user_id}")
 
 
+def _category_name_exists(table_name, user_id, name, exclude_id=None):
+    """
+    Check if a category name already exists for a user (case-insensitive).
+    
+    Args:
+        table_name: 'income_categories' or 'expense_categories'
+        user_id: User ID
+        name: Category name to check
+        exclude_id: Category ID to exclude (for renames - don't match itself)
+    
+    Returns:
+        True if a category with this name already exists
+    """
+    name_lower = name.strip().lower()
+    
+    # Try Redis first
+    categories = _get_categories_from_redis(table_name, user_id)
+    if categories is not None:
+        for cat in categories:
+            if cat.get('name', '').strip().lower() == name_lower:
+                if exclude_id and int(cat.get('id')) == int(exclude_id):
+                    continue
+                return True
+        return False
+    
+    # Fallback to MySQL
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        if exclude_id:
+            cursor.execute(
+                f"SELECT COUNT(*) FROM {table_name} WHERE user_id = %s AND LOWER(TRIM(name)) = %s AND id != %s",
+                (user_id, name_lower, exclude_id)
+            )
+        else:
+            cursor.execute(
+                f"SELECT COUNT(*) FROM {table_name} WHERE user_id = %s AND LOWER(TRIM(name)) = %s",
+                (user_id, name_lower)
+            )
+        count = cursor.fetchone()[0]
+        cursor.close()
+        return count > 0
+
+
 def _add_category_to_redis(table_name, user_id, category_data):
     """
     Add a new category to Redis cache.
@@ -7274,6 +7340,10 @@ def delete_ca_category():
 def add_income_category():
     category_name = request.form['name']
     
+    # Check for duplicate name
+    if _category_name_exists('income_categories', current_user.id, category_name):
+        return jsonify({'status': 'error', 'message': f'An income category named "{category_name.strip()}" already exists.'}), 400
+    
     # Get max display_order - try Redis first, fallback to MySQL
     categories = _get_categories_from_redis('income_categories', current_user.id)
     if categories is not None:
@@ -7319,6 +7389,10 @@ def add_income_category():
 @login_required
 def add_expense_category():
     category_name = request.form['name']
+    
+    # Check for duplicate name
+    if _category_name_exists('expense_categories', current_user.id, category_name):
+        return jsonify({'status': 'error', 'message': f'An expense category named "{category_name.strip()}" already exists.'}), 400
     
     # Get max display_order - try Redis first, fallback to MySQL
     categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -7389,6 +7463,10 @@ def update_income_category():
     category_id = request.form['category_id']  # Use the category_id
     new_name = request.form['new_name']
 
+    # Check for duplicate name (exclude self)
+    if _category_name_exists('income_categories', current_user.id, new_name, exclude_id=category_id):
+        return jsonify({'status': 'error', 'message': f'An income category named "{new_name.strip()}" already exists.'}), 400
+
     # Update in Redis first
     if app.config.get('REDIS_OK'):
         try:
@@ -7427,6 +7505,10 @@ def update_income_category():
 def update_expense_category():
     category_id = request.form['category_id']  # Use the category_id
     new_name = request.form['new_name']
+
+    # Check for duplicate name (exclude self)
+    if _category_name_exists('expense_categories', current_user.id, new_name, exclude_id=category_id):
+        return jsonify({'status': 'error', 'message': f'An expense category named "{new_name.strip()}" already exists.'}), 400
 
     # Get the OLD name before updating (needed for syncing to c_expense_categories)
     old_name = None
@@ -13713,6 +13795,10 @@ def add_recurring_income():
             else:
                 return jsonify({'status': 'error', 'message': 'Could not load categories'}), 500
         else:
+            # Check for duplicate name before creating
+            if _category_name_exists('income_categories', current_user.id, category_name):
+                return jsonify({'status': 'error', 'message': f'An income category named "{category_name.strip()}" already exists.'}), 400
+
             # Step 1: Get max display_order - try Redis first, fallback to MySQL
             categories = _get_categories_from_redis('income_categories', current_user.id)
             if categories is not None:
@@ -14463,6 +14549,10 @@ def add_recurring_expense():
             else:
                 return jsonify({'status': 'error', 'message': 'Could not load categories'}), 500
         else:
+            # Check for duplicate name before creating
+            if _category_name_exists('expense_categories', current_user.id, category_name):
+                return jsonify({'status': 'error', 'message': f'An expense category named \"{category_name.strip()}\" already exists.'}), 400
+
             # Step 1: Get max display_order - try Redis first, fallback to MySQL
             categories = _get_categories_from_redis('expense_categories', current_user.id)
             if categories is not None:
