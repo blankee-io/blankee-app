@@ -761,6 +761,15 @@ document.addEventListener('DOMContentLoaded', function() {
     var _pollTimer = null;
     var _toastShowing = false;
 
+    // Restore scroll position after auto-refresh
+    var savedScroll = sessionStorage.getItem('_scrollY');
+    if (savedScroll !== null) {
+        sessionStorage.removeItem('_scrollY');
+        window.addEventListener('load', function() {
+            window.scrollTo(0, parseInt(savedScroll, 10));
+        });
+    }
+
     function pollDataVersion() {
         fetch('/api/data-version', { credentials: 'same-origin' })
             .then(function(r) {
@@ -780,6 +789,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
                 if (v !== _knownVersion && v !== '0') {
+                    // Save scroll position before reload
+                    sessionStorage.setItem('_scrollY', window.scrollY);
                     location.reload();
                 }
             })
@@ -832,6 +843,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // Re-check immediately when user focuses this tab
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && _knownVersion !== null) {
+            pollDataVersion();
+        }
+    });
 
     // Start polling after page loads
     if (document.readyState === 'loading') {

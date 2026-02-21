@@ -494,6 +494,13 @@ class QuilttClient:
                                     }}
                                 }}
                             }}
+                            finicity {{
+                                transaction {{
+                                    response {{
+                                        createdDate
+                                    }}
+                                }}
+                            }}
                         }}
                     }}
                 }}

@@ -3122,7 +3122,9 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         row.get('custom_category_id'),
                         row.get('custom_category_type'),
                         row.get('custom_category_confidence'),
-                        row.get('custom_suggestion_at')
+                        row.get('custom_suggestion_at'),
+                        # Finicity metadata
+                        row.get('finicity_created_date')
                     ))
                 
                 cursor.executemany("""
@@ -3134,8 +3136,9 @@ def _flush_table_to_mysql(table: str, user_id: int):
                      ntropy_recurrence, ntropy_recurrence_group_id, ntropy_periodicity, ntropy_periodicity_days,
                      ntropy_avg_amount, ntropy_first_payment_date, ntropy_latest_payment_date,
                      ntropy_person, ntropy_transaction_type, ntropy_enriched_at,
-                     custom_category_suggestion, custom_category_id, custom_category_type, custom_category_confidence, custom_suggestion_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     custom_category_suggestion, custom_category_id, custom_category_type, custom_category_confidence, custom_suggestion_at,
+                     finicity_created_date)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         description = VALUES(description),
                         amount = VALUES(amount),
@@ -3169,7 +3172,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         custom_category_id = VALUES(custom_category_id),
                         custom_category_type = VALUES(custom_category_type),
                         custom_category_confidence = VALUES(custom_category_confidence),
-                        custom_suggestion_at = VALUES(custom_suggestion_at)
+                        custom_suggestion_at = VALUES(custom_suggestion_at),
+                        finicity_created_date = VALUES(finicity_created_date)
                 """, batch_data)
                 
                 conn.commit()
