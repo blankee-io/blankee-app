@@ -21303,6 +21303,22 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                             # Mark as enriched
                             ntropy_data['ntropy_enriched_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
+            # Extract Finicity createdDate (Unix epoch seconds → datetime)
+            finicity_created_date = None
+            if remote_data:
+                finicity = remote_data.get('finicity', {})
+                if finicity:
+                    fin_txn = finicity.get('transaction', {})
+                    if fin_txn:
+                        fin_response = fin_txn.get('response', {})
+                        if fin_response:
+                            epoch = fin_response.get('createdDate')
+                            if epoch:
+                                try:
+                                    finicity_created_date = datetime.utcfromtimestamp(int(epoch)).strftime('%Y-%m-%d %H:%M:%S')
+                                except (ValueError, TypeError, OSError):
+                                    finicity_created_date = None
+            
             # Store transaction in Redis with Ntropy enrichment data
             transaction_data = {
                 'transaction_id': txn_id,
@@ -21318,6 +21334,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 'imported_entry_type': None,
                 'expense_category_id': default_expense_category_id,
                 'imported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'finicity_created_date': finicity_created_date,
                 **ntropy_data  # Include all Ntropy fields
             }
             

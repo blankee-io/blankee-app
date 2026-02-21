@@ -544,6 +544,7 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
             
             # Extract Ntropy data if present
             ntropy_data = {}
+            finicity_created_date = None
             remote_data = txn.get('remoteData', {})
             if remote_data:
                 ntropy = remote_data.get('ntropy', {})
@@ -563,6 +564,20 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                 ntropy_data['ntropy_recurrence'] = response.get('recurrence')
                 if ntropy_data.get('ntropy_recurrence'):
                     ntropy_data['ntropy_enriched_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Extract Finicity createdDate (Unix epoch seconds → datetime)
+                finicity = remote_data.get('finicity', {})
+                if finicity:
+                    fin_txn = finicity.get('transaction', {})
+                    if fin_txn:
+                        fin_response = fin_txn.get('response', {})
+                        if fin_response:
+                            epoch = fin_response.get('createdDate')
+                            if epoch:
+                                try:
+                                    finicity_created_date = datetime.utcfromtimestamp(int(epoch)).strftime('%Y-%m-%d %H:%M:%S')
+                                except (ValueError, TypeError, OSError):
+                                    finicity_created_date = None
             
             # Build transaction object
             new_quiltt_txn = {
@@ -584,7 +599,8 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                 'ntropy_logo': ntropy_data.get('ntropy_logo'),
                 'ntropy_website': ntropy_data.get('ntropy_website'),
                 'ntropy_recurrence': ntropy_data.get('ntropy_recurrence'),
-                'ntropy_enriched_at': ntropy_data.get('ntropy_enriched_at')
+                'ntropy_enriched_at': ntropy_data.get('ntropy_enriched_at'),
+                'finicity_created_date': finicity_created_date
             }
             
             # --- CUSTOM CATEGORY SUGGESTION (Ntropy) ---
@@ -645,12 +661,13 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                      category, transaction_type, pending, ntropy_labels, ntropy_merchant_id, 
                      ntropy_logo, ntropy_website, ntropy_recurrence, ntropy_enriched_at,
                      custom_category_suggestion, custom_category_id, custom_category_type,
-                     custom_category_confidence, custom_suggestion_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     custom_category_confidence, custom_suggestion_at, finicity_created_date)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         description = VALUES(description),
                         amount = VALUES(amount),
-                        pending = VALUES(pending)
+                        pending = VALUES(pending),
+                        finicity_created_date = VALUES(finicity_created_date)
                 """, (
                     user_id, account_id, txn_id, amount, txn_date, description, merchant_name,
                     category, txn_type, pending,
@@ -664,7 +681,8 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                     new_quiltt_txn.get('custom_category_id'),
                     new_quiltt_txn.get('custom_category_type'),
                     new_quiltt_txn.get('custom_category_confidence'),
-                    new_quiltt_txn.get('custom_suggestion_at')
+                    new_quiltt_txn.get('custom_suggestion_at'),
+                    finicity_created_date
                 ))
             
             new_count += 1
