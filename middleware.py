@@ -42,6 +42,13 @@ def init_redis_middleware(app):
             try:
                 user_id = current_user.id
                 
+                # Skip hydration/activity tracking for lightweight poll endpoints
+                # These should NOT keep the user hydrated — they just read a Redis key
+                skip_activity_paths = ('/api/data-version',)
+                if request.path in skip_activity_paths:
+                    g.redis_hydrated = is_user_hydrated(user_id)
+                    return
+                
                 # Track activity (triggers hydration if needed)
                 track_user_activity(user_id)
                 
