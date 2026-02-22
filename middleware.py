@@ -3,13 +3,15 @@ Flask Middleware and Decorators for Redis Integration
 
 This module provides Flask-specific utilities for automatic Redis hydration:
 1. Before-request handler to track user activity
-2. Route decorator for views that require cached data
-3. API endpoint to check hydration status
+2. Before-request guard to force incomplete profiles to setup_profile
+3. Route decorator for views that require cached data
+4. API endpoint to check hydration status
 """
 
+import json
 import logging
 from functools import wraps
-from flask import request, session, jsonify, g, current_app
+from flask import request, session, jsonify, g, current_app, redirect, url_for
 from flask_login import current_user
 from redis_manager import (
     track_user_activity,
@@ -83,6 +85,82 @@ def init_redis_middleware(app):
         else:
             g.redis_hydrated = False
     
+    @app.before_request
+    def force_setup_profile():
+        """
+        Force users who haven't completed profile setup to /setup_profile.
+        A user is considered incomplete if member_since is NULL.
+        Whitelists setup-related endpoints so the setup flow works.
+        """
+        if not current_user.is_authenticated:
+            return
+        
+        # Paths that are always allowed (setup flow, auth, static, API)
+        allowed_prefixes = (
+            '/setup_profile',
+            '/complete_profile_setup',
+            '/verify_mfa_setup',
+            '/enable_mfa',
+            '/cancel_mfa',
+            '/check_has_categories',
+            '/save_setup_name',
+            '/quiltt/',
+            '/static/',
+            '/api/data-version',
+            '/logout',
+            '/login',
+            '/register',
+            '/login_mfa',
+            '/verify_email',
+            '/forgot_password',
+            '/reset_password',
+        )
+        
+        if any(request.path.startswith(p) for p in allowed_prefixes):
+            return
+        
+        # Check member_since — if NULL, setup isn't complete
+        try:
+            from app import init_redis
+            r = init_redis()
+            user_id = current_user.id
+            redis_key = f"users:v1:{user_id}"
+            
+            member_since = None
+            
+            # Try Redis first
+            if r and current_app.config.get('REDIS_OK'):
+                try:
+                    cached = r.get(redis_key)
+                    if cached:
+                        user_data = json.loads(cached)
+                        member_since = user_data.get('member_since')
+                except Exception:
+                    pass
+            
+            # Fallback to MySQL if Redis didn't have it
+            if member_since is None:
+                try:
+                    from db_connections import get_db_pool
+                    with get_db_pool().get_cursor(dictionary=True) as cursor:
+                        cursor.execute(
+                            "SELECT member_since FROM users WHERE id = %s",
+                            (user_id,)
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            member_since = row.get('member_since')
+                except Exception as db_err:
+                    logger.error(f"[force_setup_profile] MySQL fallback error: {db_err}")
+            
+            if not member_since:
+                logger.info(f"[force_setup_profile] User {user_id} has no member_since (value={member_since!r}), path={request.path}, redirecting to /setup_profile")
+                return redirect('/setup_profile')
+        
+        except Exception as e:
+            logger.error(f"[force_setup_profile] Error checking member_since: {e}")
+            # Don't block on errors — let the request through
+    
     @app.after_request
     def bump_data_version_on_mutation(response):
         """
@@ -97,7 +175,11 @@ def init_redis_middleware(app):
         if response.status_code < 200 or response.status_code >= 300:
             return response
         # Skip polling/read endpoints that happen to use POST
-        skip_paths = ('/api/data-version', '/health/', '/api/feedback/')
+        # Also skip setup-flow Quiltt endpoints that don't represent user data mutations
+        skip_paths = (
+            '/api/data-version', '/health/', '/api/feedback/',
+            '/quiltt/sync-profile', '/quiltt/analyze-transactions-for-categories',
+        )
         if any(request.path.startswith(p) for p in skip_paths):
             return response
         try:

@@ -789,6 +789,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
                 if (v !== _knownVersion && v !== '0') {
+                    if (window._disableDataVersionReload) {
+                        // Page opted out of auto-reload (e.g. setup_profile)
+                        _knownVersion = v;
+                        return;
+                    }
                     // Save scroll position before reload
                     sessionStorage.setItem('_scrollY', window.scrollY);
                     location.reload();
