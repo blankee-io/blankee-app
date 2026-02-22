@@ -3,7 +3,7 @@
     <div class="income-form-container">
         <h2>Add Recurring Income</h2>
         <form id="add-recurring-income-form">
-            <label for="category_name">Category</label>
+            <label>Category</label>
             <div class="category-input-wrapper">
                 <input type="text" class="category-input" id="category_name" name="category_name" placeholder="Search or create category..." autocomplete="off" required>
                 <input type="hidden" class="category-hidden" id="income-category-id-hidden" name="category_id" value="">
@@ -105,7 +105,7 @@
     <div class="expense-form-container">
         <h2>Add Recurring Expense</h2>
         <form id="add-recurring-expense-form">
-            <label for="category_name">Category</label>
+            <label>Category</label>
             <div class="category-input-wrapper">
                 <input type="text" class="category-input" id="expense-category_name" name="category_name" placeholder="Search or create category..." autocomplete="off" required>
                 <input type="hidden" class="category-hidden" id="expense-category-id-hidden" name="category_id" value="">
@@ -214,7 +214,7 @@
                 {% endfor %}
             </select>
 
-            <label for="ca-category-input">Category</label>
+            <label>Category</label>
             <div class="category-input-wrapper">
                 <input type="text" class="category-input" id="ca-category-input" name="ca_category_name" placeholder="Search categories..." autocomplete="off" required>
                 <input type="hidden" class="category-hidden" id="ca-category-id-hidden" name="category_id" value="">
@@ -306,7 +306,7 @@
 <script>
 
         // Searchable category dropdown for Add Recurring modals
-        function showRecurringModalDropdown(input, searchText, categories, hiddenInputId) {
+        function showRecurringModalDropdown(input, searchText, categories, hiddenInputId, allCategories) {
             const wrapper = input.closest('.category-input-wrapper');
             const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
             const hiddenInput = document.getElementById(hiddenInputId);
@@ -362,7 +362,10 @@
             }
 
             // Create new option (income and expense only, not CA)
-            if (hiddenInputId !== 'ca-category-id-hidden' && searchLower.length > 0 && !exactMatch) {
+            // Check against ALL categories (including recurring) to prevent duplicates
+            const allCats = allCategories || categories;
+            const allCatsExactMatch = allCats.find(cat => cat.name.toLowerCase() === searchLower);
+            if (hiddenInputId !== 'ca-category-id-hidden' && searchLower.length > 0 && !allCatsExactMatch) {
                 dropdown.style.display = 'block';
                 const sep = document.createElement('div');
                 sep.className = 'dropdown-separator';
@@ -371,8 +374,15 @@
                 createDiv.className = 'pending-transactions-category-dropdown-item create-new-category';
                 createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
                 createDiv.addEventListener('click', function() {
+                    // Safety check against all categories
+                    const dupCheck = allCats.find(c => c.name.toLowerCase() === searchText.toLowerCase().trim());
+                    if (dupCheck) {
+                        showToast('A category with this name already exists.', 'warning');
+                        return;
+                    }
                     input.value = searchText;
                     hiddenInput.value = '';
+                    input.dataset.createNew = 'true';
                     dropdown.style.display = 'none';
                 });
                 dropdown.appendChild(createDiv);
@@ -416,12 +426,24 @@
             if (incomeInput) {
                 incomeInput.addEventListener('input', function() {
                     document.getElementById('income-category-id-hidden').value = '';
-                    showRecurringModalDropdown(this, this.value, getFilteredIncomeCategories(), 'income-category-id-hidden');
-                    // Live duplicate check
-                    checkCategoryDuplicate(this, typeof incomeCategories !== 'undefined' ? incomeCategories : []);
+                    this.dataset.createNew = '';
+                    const allIncome = typeof incomeCategories !== 'undefined' ? incomeCategories : [];
+                    showRecurringModalDropdown(this, this.value, getFilteredIncomeCategories(), 'income-category-id-hidden', allIncome);
                 });
                 incomeInput.addEventListener('focus', function() {
-                    showRecurringModalDropdown(this, '', getFilteredIncomeCategories(), 'income-category-id-hidden');
+                    if (this._dropdownJustClosed && Date.now() - this._dropdownJustClosed < 200) return;
+                    const allIncome = typeof incomeCategories !== 'undefined' ? incomeCategories : [];
+                    showRecurringModalDropdown(this, '', getFilteredIncomeCategories(), 'income-category-id-hidden', allIncome);
+                });
+                // On blur: clear input if user typed something but didn't select or create
+                incomeInput.addEventListener('blur', function() {
+                    const input = this;
+                    setTimeout(function() {
+                        const hiddenInput = document.getElementById('income-category-id-hidden');
+                        if (!hiddenInput.value && input.value && input.dataset.createNew !== 'true') {
+                            input.value = '';
+                        }
+                    }, 200);
                 });
             }
 
@@ -430,12 +452,24 @@
             if (expenseInput) {
                 expenseInput.addEventListener('input', function() {
                     document.getElementById('expense-category-id-hidden').value = '';
-                    showRecurringModalDropdown(this, this.value, getFilteredExpenseCategories(), 'expense-category-id-hidden');
-                    // Live duplicate check
-                    checkCategoryDuplicate(this, typeof expenseCategories !== 'undefined' ? expenseCategories : []);
+                    this.dataset.createNew = '';
+                    const allExpense = typeof expenseCategories !== 'undefined' ? expenseCategories : [];
+                    showRecurringModalDropdown(this, this.value, getFilteredExpenseCategories(), 'expense-category-id-hidden', allExpense);
                 });
                 expenseInput.addEventListener('focus', function() {
-                    showRecurringModalDropdown(this, '', getFilteredExpenseCategories(), 'expense-category-id-hidden');
+                    if (this._dropdownJustClosed && Date.now() - this._dropdownJustClosed < 200) return;
+                    const allExpense = typeof expenseCategories !== 'undefined' ? expenseCategories : [];
+                    showRecurringModalDropdown(this, '', getFilteredExpenseCategories(), 'expense-category-id-hidden', allExpense);
+                });
+                // On blur: clear input if user typed something but didn't select or create
+                expenseInput.addEventListener('blur', function() {
+                    const input = this;
+                    setTimeout(function() {
+                        const hiddenInput = document.getElementById('expense-category-id-hidden');
+                        if (!hiddenInput.value && input.value && input.dataset.createNew !== 'true') {
+                            input.value = '';
+                        }
+                    }, 200);
                 });
             }
 
@@ -448,6 +482,7 @@
                     showRecurringModalDropdown(this, this.value, getFilteredCACategories(accountId), 'ca-category-id-hidden');
                 });
                 caInput.addEventListener('focus', function() {
+                    if (this._dropdownJustClosed && Date.now() - this._dropdownJustClosed < 200) return;
                     const accountId = document.getElementById('ca-account-id').value;
                     showRecurringModalDropdown(this, '', getFilteredCACategories(accountId), 'ca-category-id-hidden');
                 });
@@ -456,7 +491,13 @@
             // Close dropdowns on outside click
             document.addEventListener('click', function(e) {
                 if (!e.target.closest('.category-input-wrapper')) {
-                    document.querySelectorAll('.pending-transactions-category-dropdown').forEach(d => d.style.display = 'none');
+                    document.querySelectorAll('.pending-transactions-category-dropdown').forEach(function(d) {
+                        if (d.style.display !== 'none') {
+                            d.style.display = 'none';
+                            const input = d.closest('.category-input-wrapper')?.querySelector('.category-input');
+                            if (input) input._dropdownJustClosed = Date.now();
+                        }
+                    });
                 }
             });
         })();
