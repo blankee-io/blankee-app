@@ -75,11 +75,15 @@
             <div class="date-row">
                 <div class="date-label-row">
                     <label for="start_date">Start Date</label>
-                    <label for="end_date">End Date</label>
+                    <div class="end-date-container" id="end-date-label-container">
+                        <label for="end_date">End Date</label>
+                    </div>
                 </div>
                 <div class="date-input-row">
                     <input type="date" id="start_date" name="start_date" required>
-                    <input type="date" id="end_date" name="end_date" required>
+                    <div class="end-date-container" id="end-date-input-container">
+                        <input type="date" id="end_date" name="end_date" required>
+                    </div>
                 </div>
                 <div class="date-checkbox-row">
                     <span class="date-checkbox-label">Or</span>
@@ -177,11 +181,15 @@
             <div class="date-row">
                 <div class="date-label-row">
                     <label for="start_date">Start Date</label>
-                    <label for="end_date">End Date</label>
+                    <div class="end-date-container" id="expense-end-date-label-container">
+                        <label for="expense-end_date">End Date</label>
+                    </div>
                 </div>
                 <div class="date-input-row">
                     <input type="date" id="expense-start_date" name="start_date" required>
-                    <input type="date" id="expense-end_date" name="end_date" required>
+                    <div class="end-date-container" id="expense-end-date-input-container">
+                        <input type="date" id="expense-end_date" name="end_date" required>
+                    </div>
                 </div>
                 <div class="date-checkbox-row">
                     <span class="date-checkbox-label">Or</span>
@@ -278,11 +286,15 @@
             <div class="date-row">
                 <div class="date-label-row">
                     <label for="ca-start-date">Start Date</label>
-                    <label for="ca-end-date">End Date</label>
+                    <div class="end-date-container" id="ca-end-date-label-container">
+                        <label for="ca-end-date">End Date</label>
+                    </div>
                 </div>
                 <div class="date-input-row">
                     <input type="date" id="ca-start-date" name="start_date" required>
-                    <input type="date" id="ca-end-date" name="end_date" required>
+                    <div class="end-date-container" id="ca-end-date-input-container">
+                        <input type="date" id="ca-end-date" name="end_date" required>
+                    </div>
                 </div>
                 <div class="date-checkbox-row">
                     <span class="date-checkbox-label">Or</span>
@@ -611,33 +623,50 @@
             }
         });
 
-        // Mutually exclusive date options logic
+        // Three-way toggle: End Date / No End Date / Use Occurrences
         function setGreyedOut(selector, greyed) {
-            $(selector).css({
-                'opacity': greyed ? 0.5 : 1,
-                'pointer-events': greyed ? 'none' : 'auto'
-            });
+            $(selector).css('opacity', greyed ? 0.5 : 1);
         }
-        $('#no-end-date-checkbox').on('change', function() {
-            if (this.checked) {
+
+        function updateIncomeEndDateState() {
+            var noEnd = $('#no-end-date-checkbox').is(':checked');
+            var useOcc = $('#use-occurrences-checkbox').is(':checked');
+            if (noEnd) {
+                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', false);
                 setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', true);
-                $('#use-occurrences-checkbox').prop('checked', false).trigger('change');
-                $('#end_date').css('opacity', 0.5).prop('disabled', true);
-            } else {
+                $('#end-date-label-container, #end-date-input-container').css('opacity', 0.5);
+                $('#end_date').prop('disabled', true);
+                $('#occurrences-count').prop('disabled', true).val('');
+            } else if (useOcc) {
+                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', true);
                 setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', false);
-                $('#end_date').css('opacity', 1).prop('disabled', false);
+                $('#end-date-label-container, #end-date-input-container').css('opacity', 0.5);
+                $('#end_date').prop('disabled', true);
+                $('#occurrences-count').prop('disabled', false);
+            } else {
+                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', true);
+                setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', true);
+                $('#end-date-label-container, #end-date-input-container').css('opacity', 1);
+                $('#end_date').prop('disabled', false);
+                $('#occurrences-count').prop('disabled', true).val('');
             }
+        }
+
+        $('#no-end-date-checkbox').on('change', function() {
+            if (this.checked) $('#use-occurrences-checkbox').prop('checked', false);
+            updateIncomeEndDateState();
         });
         $('#use-occurrences-checkbox').on('change', function() {
-            if (this.checked) {
-                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', true);
-                $('#no-end-date-checkbox').prop('checked', false).trigger('change');
-                $('#occurrences-count').prop('disabled', false);
-                $('#end_date').css('opacity', 0.5).prop('disabled', true);
-            } else {
-                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', false);
-                $('#occurrences-count').prop('disabled', true).val('');
-                $('#end_date').css('opacity', 1).prop('disabled', false);
+            if (this.checked) $('#no-end-date-checkbox').prop('checked', false);
+            updateIncomeEndDateState();
+        });
+        // Click on end date to activate it (Income modal)
+        $('#end-date-label-container, #end-date-input-container').on('click', function() {
+            if ($('#end_date').prop('disabled')) {
+                $('#no-end-date-checkbox').prop('checked', false);
+                $('#use-occurrences-checkbox').prop('checked', false);
+                updateIncomeEndDateState();
+                $('#end_date').focus();
             }
         });
 
@@ -853,33 +882,45 @@
         }
     });
 
-    // Mutually exclusive date options logic
-    function setGreyedOut(selector, greyed) {
-        $(selector).css({
-            'opacity': greyed ? 0.5 : 1,
-            'pointer-events': greyed ? 'none' : 'auto'
-        });
+    // Three-way toggle: End Date / No End Date / Use Occurrences (Expense)
+    function updateExpenseEndDateState() {
+        var noEnd = $('#expense-no-end-date-checkbox').is(':checked');
+        var useOcc = $('#expense-use-occurrences-checkbox').is(':checked');
+        if (noEnd) {
+            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', false);
+            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', true);
+            $('#expense-end-date-label-container, #expense-end-date-input-container').css('opacity', 0.5);
+            $('#expense-end_date').prop('disabled', true);
+            $('#expense-occurrences-count').prop('disabled', true).val('');
+        } else if (useOcc) {
+            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', true);
+            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', false);
+            $('#expense-end-date-label-container, #expense-end-date-input-container').css('opacity', 0.5);
+            $('#expense-end_date').prop('disabled', true);
+            $('#expense-occurrences-count').prop('disabled', false);
+        } else {
+            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', true);
+            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', true);
+            $('#expense-end-date-label-container, #expense-end-date-input-container').css('opacity', 1);
+            $('#expense-end_date').prop('disabled', false);
+            $('#expense-occurrences-count').prop('disabled', true).val('');
+        }
     }
     $('#expense-no-end-date-checkbox').on('change', function() {
-        if (this.checked) {
-            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', true);
-            $('#expense-use-occurrences-checkbox').prop('checked', false).trigger('change');
-            $('#expense-end_date').css('opacity', 0.5).prop('disabled', true);
-        } else {
-            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', false);
-            $('#expense-end_date').css('opacity', 1).prop('disabled', false);
-        }
+        if (this.checked) $('#expense-use-occurrences-checkbox').prop('checked', false);
+        updateExpenseEndDateState();
     });
     $('#expense-use-occurrences-checkbox').on('change', function() {
-        if (this.checked) {
-            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', true);
-            $('#expense-no-end-date-checkbox').prop('checked', false).trigger('change');
-            $('#expense-occurrences-count').prop('disabled', false);
-            $('#expense-end_date').css('opacity', 0.5).prop('disabled', true);
-        } else {
-            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', false);
-            $('#expense-occurrences-count').prop('disabled', true).val('');
-            $('#expense-end_date').css('opacity', 1).prop('disabled', false);
+        if (this.checked) $('#expense-no-end-date-checkbox').prop('checked', false);
+        updateExpenseEndDateState();
+    });
+    // Click on end date to activate it (Expense modal)
+    $('#expense-end-date-label-container, #expense-end-date-input-container').on('click', function() {
+        if ($('#expense-end_date').prop('disabled')) {
+            $('#expense-no-end-date-checkbox').prop('checked', false);
+            $('#expense-use-occurrences-checkbox').prop('checked', false);
+            updateExpenseEndDateState();
+            $('#expense-end_date').focus();
         }
     });
 
@@ -1245,23 +1286,45 @@
         $('#ca-monthly-day-container').append(newSelect);
     });
 
-    // Mutually exclusive date options for CA modal
-    $('#ca-no-end-date-checkbox').on('change', function() {
-        if (this.checked) {
-            $('#ca-use-occurrences-checkbox').prop('checked', false).trigger('change');
-            $('#ca-end-date').css('opacity', 0.5).prop('disabled', true);
+    // Three-way toggle: End Date / No End Date / Use Occurrences (CA)
+    function updateCaEndDateState() {
+        var noEnd = $('#ca-no-end-date-checkbox').is(':checked');
+        var useOcc = $('#ca-use-occurrences-checkbox').is(':checked');
+        if (noEnd) {
+            setGreyedOut('.date-checkbox-row:has(#ca-no-end-date-checkbox)', false);
+            setGreyedOut('.date-checkbox-row:has(#ca-use-occurrences-checkbox)', true);
+            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 0.5);
+            $('#ca-end-date').prop('disabled', true);
+            $('#ca-occurrences-count').prop('disabled', true).val('');
+        } else if (useOcc) {
+            setGreyedOut('.date-checkbox-row:has(#ca-no-end-date-checkbox)', true);
+            setGreyedOut('.date-checkbox-row:has(#ca-use-occurrences-checkbox)', false);
+            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 0.5);
+            $('#ca-end-date').prop('disabled', true);
+            $('#ca-occurrences-count').prop('disabled', false);
         } else {
-            $('#ca-end-date').css('opacity', 1).prop('disabled', false);
+            setGreyedOut('.date-checkbox-row:has(#ca-no-end-date-checkbox)', true);
+            setGreyedOut('.date-checkbox-row:has(#ca-use-occurrences-checkbox)', true);
+            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 1);
+            $('#ca-end-date').prop('disabled', false);
+            $('#ca-occurrences-count').prop('disabled', true).val('');
         }
+    }
+    $('#ca-no-end-date-checkbox').on('change', function() {
+        if (this.checked) $('#ca-use-occurrences-checkbox').prop('checked', false);
+        updateCaEndDateState();
     });
     $('#ca-use-occurrences-checkbox').on('change', function() {
-        if (this.checked) {
-            $('#ca-no-end-date-checkbox').prop('checked', false).trigger('change');
-            $('#ca-occurrences-count').prop('disabled', false);
-            $('#ca-end-date').css('opacity', 0.5).prop('disabled', true);
-        } else {
-            $('#ca-occurrences-count').prop('disabled', true).val('');
-            $('#ca-end-date').css('opacity', 1).prop('disabled', false);
+        if (this.checked) $('#ca-no-end-date-checkbox').prop('checked', false);
+        updateCaEndDateState();
+    });
+    // Click on end date to activate it (CA modal)
+    $('#ca-end-date-label-container, #ca-end-date-input-container').on('click', function() {
+        if ($('#ca-end-date').prop('disabled')) {
+            $('#ca-no-end-date-checkbox').prop('checked', false);
+            $('#ca-use-occurrences-checkbox').prop('checked', false);
+            updateCaEndDateState();
+            $('#ca-end-date').focus();
         }
     });
 

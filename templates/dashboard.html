@@ -526,11 +526,15 @@
                 <div class="date-row">
                     <div class="date-label-row">
                         <label for="convert-start-date">Start Date</label>
-                        <label for="convert-end-date">End Date</label>
+                        <div class="end-date-container" id="convert-end-date-label-container">
+                            <label for="convert-end-date">End Date</label>
+                        </div>
                     </div>
                     <div class="date-input-row">
                         <input type="date" id="convert-start-date" name="start_date" required>
-                        <input type="date" id="convert-end-date" name="end_date" required>
+                        <div class="end-date-container" id="convert-end-date-input-container">
+                            <input type="date" id="convert-end-date" name="end_date" required>
+                        </div>
                     </div>
                     <div class="date-checkbox-row">
                         <span class="date-checkbox-label">Or</span>
@@ -5679,6 +5683,7 @@
             document.getElementById('convert-monthly-options').style.display = 'none';
             document.getElementById('convert-yearly-options').style.display = 'none';
             document.getElementById('convert-monthly-day-container').innerHTML = '';
+            if (typeof updateConvertEndDateState === 'function') updateConvertEndDateState();
 
             // Uncheck all weekday checkboxes
             document.querySelectorAll('input[name="convert_weekdays"]').forEach(cb => cb.checked = false);
@@ -5726,23 +5731,45 @@
             );
         });
 
-        // Mutually exclusive date options for convert modal
-        $('#convert-no-end-date-checkbox').on('change', function() {
-            if (this.checked) {
-                $('#convert-use-occurrences-checkbox').prop('checked', false).trigger('change');
-                $('#convert-end-date').css('opacity', 0.5).prop('disabled', true);
+        // Three-way toggle: End Date / No End Date / Use Occurrences (Convert modal)
+        function updateConvertEndDateState() {
+            var noEnd = $('#convert-no-end-date-checkbox').is(':checked');
+            var useOcc = $('#convert-use-occurrences-checkbox').is(':checked');
+            if (noEnd) {
+                setGreyedOut('.date-checkbox-row:has(#convert-no-end-date-checkbox)', false);
+                setGreyedOut('.date-checkbox-row:has(#convert-use-occurrences-checkbox)', true);
+                $('#convert-end-date-label-container, #convert-end-date-input-container').css('opacity', 0.5);
+                $('#convert-end-date').prop('disabled', true);
+                $('#convert-occurrences-count').prop('disabled', true).val('');
+            } else if (useOcc) {
+                setGreyedOut('.date-checkbox-row:has(#convert-no-end-date-checkbox)', true);
+                setGreyedOut('.date-checkbox-row:has(#convert-use-occurrences-checkbox)', false);
+                $('#convert-end-date-label-container, #convert-end-date-input-container').css('opacity', 0.5);
+                $('#convert-end-date').prop('disabled', true);
+                $('#convert-occurrences-count').prop('disabled', false);
             } else {
-                $('#convert-end-date').css('opacity', 1).prop('disabled', false);
+                setGreyedOut('.date-checkbox-row:has(#convert-no-end-date-checkbox)', true);
+                setGreyedOut('.date-checkbox-row:has(#convert-use-occurrences-checkbox)', true);
+                $('#convert-end-date-label-container, #convert-end-date-input-container').css('opacity', 1);
+                $('#convert-end-date').prop('disabled', false);
+                $('#convert-occurrences-count').prop('disabled', true).val('');
             }
+        }
+        $('#convert-no-end-date-checkbox').on('change', function() {
+            if (this.checked) $('#convert-use-occurrences-checkbox').prop('checked', false);
+            updateConvertEndDateState();
         });
         $('#convert-use-occurrences-checkbox').on('change', function() {
-            if (this.checked) {
-                $('#convert-no-end-date-checkbox').prop('checked', false).trigger('change');
-                $('#convert-occurrences-count').prop('disabled', false);
-                $('#convert-end-date').css('opacity', 0.5).prop('disabled', true);
-            } else {
-                $('#convert-occurrences-count').prop('disabled', true).val('');
-                $('#convert-end-date').css('opacity', 1).prop('disabled', false);
+            if (this.checked) $('#convert-no-end-date-checkbox').prop('checked', false);
+            updateConvertEndDateState();
+        });
+        // Click on end date to activate it (Convert modal)
+        $('#convert-end-date-label-container, #convert-end-date-input-container').on('click', function() {
+            if ($('#convert-end-date').prop('disabled')) {
+                $('#convert-no-end-date-checkbox').prop('checked', false);
+                $('#convert-use-occurrences-checkbox').prop('checked', false);
+                updateConvertEndDateState();
+                $('#convert-end-date').focus();
             }
         });
 
@@ -6633,6 +6660,7 @@
                                 document.getElementById('no-end-date-checkbox').checked = false;
                                 document.getElementById('end_date').value = '';
                                 document.getElementById('income-category-id-hidden').value = '';
+                                if (typeof updateIncomeEndDateState === 'function') updateIncomeEndDateState();
                             }
                         } else if (type === 'expense') {
                             const addExpenseModal = document.getElementById('add-expense-modal');
@@ -6643,6 +6671,7 @@
                                 document.getElementById('expense-no-end-date-checkbox').checked = false;
                                 document.getElementById('expense-end_date').value = '';
                                 document.getElementById('expense-category-id-hidden').value = '';
+                                if (typeof updateExpenseEndDateState === 'function') updateExpenseEndDateState();
                             }
                         } else if (type === 'ca') {
                             const accountId = this.getAttribute('data-account-id');
@@ -6660,6 +6689,7 @@
                                 }
                                 document.getElementById('ca-category-id-hidden').value = '';
                                 document.getElementById('ca-category-input').value = '';
+                                if (typeof updateCaEndDateState === 'function') updateCaEndDateState();
                                 const accountSelect = document.getElementById('ca-account-id');
                                 if (accountSelect && accountId) {
                                     accountSelect.value = accountId;

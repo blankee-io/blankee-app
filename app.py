@@ -769,6 +769,53 @@ def resend_verification():
 @app.route('/setup_profile', methods=['GET'])
 @login_required
 def setup_profile():
+    # If user already completed setup (has member_since), redirect to dashboard
+    try:
+        r = init_redis()
+        user_id = current_user.id
+        redis_key = f"users:v1:{user_id}"
+        member_since = None
+        
+        if r and app.config.get('REDIS_OK'):
+            try:
+                cached = r.get(redis_key)
+                if cached:
+                    user_data = json.loads(cached)
+                    member_since = user_data.get('member_since')
+            except Exception:
+                pass
+        
+        if member_since is None:
+            try:
+                with get_db_pool().get_cursor(dictionary=True) as cursor:
+                    cursor.execute("SELECT member_since FROM users WHERE id = %s", (user_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        member_since = row.get('member_since')
+            except Exception:
+                pass
+        
+        if member_since:
+            print(f"[setup_profile] User {user_id} already completed setup (member_since={member_since}), redirecting to dashboard")
+            return redirect(url_for('dashboard_3m'))
+    except Exception as e:
+        print(f"[setup_profile] Error checking member_since: {e}")
+    
+    # Clean up any abandoned bank connections from a previous incomplete setup.
+    try:
+        from quiltt_redis import get_quiltt_connections, delete_quiltt_connection
+        user_id = current_user.id
+        connections = get_quiltt_connections(user_id)
+        if connections:
+            print(f"[setup_profile] Cleaning up {len(connections)} abandoned connection(s) for user {user_id}")
+            for conn in connections:
+                conn_id = conn.get('connection_id')
+                if conn_id:
+                    delete_quiltt_connection(conn_id, user_id)
+            print(f"[setup_profile] Cleanup complete for user {user_id}")
+    except Exception as e:
+        print(f"[setup_profile] Cleanup error (non-fatal): {e}")
+
     # Get Quiltt connector ID from environment
     connector_id = os.getenv('QUILTT_CONNECTOR_ID', '')
     
@@ -881,6 +928,29 @@ def save_setup_name():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/verify_mfa_setup', methods=['POST'])
+@login_required
+def verify_mfa_setup():
+    """Verify MFA code during setup WITHOUT saving to user record.
+    The secret stays in session and is applied at final submit."""
+    code = request.form.get('code')
+    
+    # Get pending secret from session
+    secret = session.get('pending_mfa_secret')
+        
+    if not secret:
+        return jsonify({'status': 'error', 'message': 'No pending MFA setup'}), 400
+    
+    totp = pyotp.TOTP(secret)
+    if totp.verify(code):
+        # Mark as verified in session but do NOT save to user record yet
+        session['setup_verified_mfa_secret'] = secret
+        # Clear the pending key (it's now verified)
+        session.pop('pending_mfa_secret', None)
+        return jsonify({'status': 'success'})
+    else:
+        return jsonify({'status': 'error', 'message': 'Invalid code'}), 400
+
 @app.route('/complete_profile_setup', methods=['POST'])
 @login_required
 def complete_profile_setup():
@@ -888,16 +958,21 @@ def complete_profile_setup():
     
     if request.method == 'POST':
         starting_balance = request.json.get('starting_balance')
-        starting_savings = request.json.get('starting_savings')  # <-- get the savings value
+        starting_savings = request.json.get('starting_savings')
         balance_threshold = request.json.get('balance_threshold')
         income_entry_date = request.json.get('income_entry_date')
-        currency_type = request.json.get('currency_type', 'USD')  # <-- get the currency type
+        currency_type = request.json.get('currency_type', 'USD')
+        first_name = request.json.get('first_name', '').strip()
+        last_name = request.json.get('last_name', '').strip()
+        selected_account_ids = request.json.get('selected_account_ids', [])
 
         print(f"[complete_profile_setup] starting_balance: {starting_balance}")
         print(f"[complete_profile_setup] starting_savings: {starting_savings}")
         print(f"[complete_profile_setup] balance_threshold: {balance_threshold}")
         print(f"[complete_profile_setup] income_entry_date: {income_entry_date}")
         print(f"[complete_profile_setup] currency_type: {currency_type}")
+        print(f"[complete_profile_setup] first_name: '{first_name}', last_name: '{last_name}'")
+        print(f"[complete_profile_setup] selected_account_ids: {selected_account_ids}")
 
         try:
             starting_savings = float(starting_savings)
@@ -907,38 +982,43 @@ def complete_profile_setup():
         if not all([starting_balance, balance_threshold, income_entry_date]):
             return jsonify({'status': 'error', 'message': 'All fields are required'}), 400
 
-        # Initialize Redis connection and retrieve name from Redis
-        r = init_redis()
-        redis_key = f"setup_name:v1:{current_user.id}"
-        name_data = r.hgetall(redis_key)
-        first_name = name_data.get('first_name', b'').decode('utf-8') if isinstance(name_data.get('first_name'), bytes) else name_data.get('first_name', '')
-        last_name = name_data.get('last_name', b'').decode('utf-8') if isinstance(name_data.get('last_name'), bytes) else name_data.get('last_name', '')
-        
-        print(f"[complete_profile_setup] Retrieved from Redis - first_name: '{first_name}', last_name: '{last_name}'")
+        if not first_name or not last_name:
+            return jsonify({'status': 'error', 'message': 'First and last name are required'}), 400
+
+        # Apply deferred MFA secret if verified during setup
+        verified_mfa_secret = session.pop('setup_verified_mfa_secret', None)
+        if verified_mfa_secret:
+            print(f"[complete_profile_setup] Applying deferred MFA secret")
+            _update_user_setting_in_redis(current_user.id, 'mfa_secret', verified_mfa_secret)
+
+        # Apply deferred account activation if accounts were selected during setup
+        if selected_account_ids:
+            print(f"[complete_profile_setup] Activating {len(selected_account_ids)} selected accounts")
+            from quiltt_redis import update_quiltt_account_fields
+            # Get all quiltt accounts to deactivate unselected ones
+            all_quiltt_accounts = get_quiltt_accounts(current_user.id) or []
+            for qa in all_quiltt_accounts:
+                account_id = qa.get('account_id')
+                if account_id in selected_account_ids:
+                    update_quiltt_account_fields(account_id, {'is_active': 1, 'sync_transactions': 1}, current_user.id)
+                    print(f"[complete_profile_setup] Activated account: {account_id}")
+                else:
+                    update_quiltt_account_fields(account_id, {'is_active': 0, 'sync_transactions': 0}, current_user.id)
 
         # Update user settings in Redis (flush worker will persist to MySQL)
         _update_user_setting_in_redis(current_user.id, 'balance_threshold', balance_threshold)
-        # Save starting_savings to user record (for reference/display)
-        # Note: The actual calculation uses savings_adjustments, not this field
         _update_user_setting_in_redis(current_user.id, 'starting_savings', starting_savings)
         _update_user_setting_in_redis(current_user.id, 'currency_type', currency_type)
         
         # Set member_since to TODAY (when user completed setup)
-        # Note: income_entry_date is yesterday (for starting balance), but member_since is today
         member_since_date = date.today().strftime('%Y-%m-%d')
         print(f"[complete_profile_setup] Setting member_since to: {member_since_date}")
         _update_user_setting_in_redis(current_user.id, 'member_since', member_since_date)
         
-        # Update name fields if they exist
-        if first_name and last_name:
-            print(f"[complete_profile_setup] Updating names in Redis via _update_user_setting_in_redis")
-            _update_user_setting_in_redis(current_user.id, 'first_name', first_name)
-            _update_user_setting_in_redis(current_user.id, 'last_name', last_name)
-        else:
-            print(f"[complete_profile_setup] WARNING: Names are empty, not updating")
-        
-        # Delete the temporary Redis key after transferring to main user Redis
-        r.delete(redis_key)
+        # Update name fields
+        print(f"[complete_profile_setup] Updating names in Redis via _update_user_setting_in_redis")
+        _update_user_setting_in_redis(current_user.id, 'first_name', first_name)
+        _update_user_setting_in_redis(current_user.id, 'last_name', last_name)
 
         # Get or create the 'Starting Balance' income category
         with get_db_pool().get_connection() as conn:
@@ -1105,6 +1185,10 @@ def complete_profile_setup():
         print(f"[complete_profile_setup] Recalculating all totals...")
         save_totals_remainders_d()
         print(f"[complete_profile_setup] Completed all totals_remainders population")
+
+        # Clear setup session flags
+        session.pop('setup_verified_mfa_secret', None)
+        session.pop('pending_mfa_secret', None)
 
         # Return success response
         return jsonify({'status': 'success'})
