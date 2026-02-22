@@ -886,6 +886,85 @@ def upsert_quiltt_transaction(transaction_data: Dict[str, Any], user_id: Optiona
         return None
 
 
+def delete_quiltt_accounts_by_ids(account_ids: List[str], user_id: Optional[int] = None) -> bool:
+    """
+    Delete specific Quiltt accounts by their account_id strings from Redis and MySQL.
+    Used when canceling account selection for an existing connection - only removes
+    the newly-added accounts, not the entire connection.
+    
+    Args:
+        account_ids: List of Quiltt account_id strings to delete
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return False
+        user_id = current_user.id
+    
+    if not account_ids:
+        return True
+    
+    account_ids_set = set(account_ids)
+    
+    try:
+        # Remove accounts from Redis
+        cached_accounts = _get_all_quiltt_accounts_raw(user_id)
+        if cached_accounts:
+            if not isinstance(cached_accounts, list):
+                cached_accounts = list(cached_accounts)
+            
+            original_count = len(cached_accounts)
+            cached_accounts = [a for a in cached_accounts if a.get('account_id') not in account_ids_set]
+            removed_count = original_count - len(cached_accounts)
+            
+            if removed_count > 0:
+                _set_to_redis('quiltt_accounts', user_id, cached_accounts)
+                logger.info(f"Removed {removed_count} accounts from Redis for user {user_id}")
+        
+        # Remove transactions for these accounts from Redis
+        cached_transactions = _get_from_redis('quiltt_transactions', user_id)
+        if cached_transactions is None:
+            cached_transactions = get_quiltt_transactions(user_id)
+        if cached_transactions:
+            if not isinstance(cached_transactions, list):
+                cached_transactions = list(cached_transactions)
+            cached_transactions = [t for t in cached_transactions if t.get('account_id') not in account_ids_set]
+            _set_to_redis('quiltt_transactions', user_id, cached_transactions)
+        
+        # Also delete from MySQL directly (they may have been flushed already)
+        try:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ', '.join(['%s'] * len(account_ids))
+                
+                # Delete transactions first
+                cursor.execute(f"""
+                    DELETE FROM quiltt_transactions 
+                    WHERE user_id = %s AND account_id IN ({placeholders})
+                """, [user_id] + list(account_ids))
+                
+                # Delete accounts
+                cursor.execute(f"""
+                    DELETE FROM quiltt_accounts 
+                    WHERE user_id = %s AND account_id IN ({placeholders})
+                """, [user_id] + list(account_ids))
+                
+                conn.commit()
+                cursor.close()
+                logger.info(f"Deleted accounts {account_ids} from MySQL for user {user_id}")
+        except Exception as db_error:
+            logger.error(f"Error deleting accounts from MySQL: {db_error}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error deleting accounts by IDs: {e}", exc_info=True)
+        return False
+
+
 def delete_quiltt_transactions_for_account(account_id: str, user_id: Optional[int] = None) -> bool:
     """
     Delete all transactions for a specific account from Redis and MySQL.
