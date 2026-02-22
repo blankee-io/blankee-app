@@ -2047,7 +2047,6 @@ button.login-button:active {
     width: 100%;
     height: calc(100% - 50px); /* Subtract nav-bar height */
     overflow: auto;
-
 }
 /* ----- modal content ----- */
 
@@ -2056,7 +2055,7 @@ button.login-button:active {
     position: relative;
     width: 90%;
     max-width: 400px;
-    margin: 30% auto;
+    margin: auto;
     padding: 30px 24px;
     background-color: var(--secondary-lighter);
     border: none;
@@ -2298,6 +2297,21 @@ transform: scale(1.02);
     max-width: 400px;
 }
 
+.mfa-setup-benefits {
+    text-align: left;
+    margin: 20px auto;
+    max-width: 400px;
+}
+
+#mfa-setup-qr-image {
+    text-align: center;
+    margin-bottom: 1em;
+}
+
+#copy-mfa-setup-secret {
+    margin-left: 5px;
+}
+
 .bank-connection-benefits-list {
     list-style: none;
     padding: 0;
@@ -2534,7 +2548,6 @@ transform: scale(1.02);
 
 .recommended-categories-table tbody tr:hover {
     background-color: var(--secondary-lighter);
-    transform: scale(1.2);
 }
 
 .edit-category-recommendation-btn,
@@ -7248,8 +7261,8 @@ transform: scale(1.2);
     transform: scale(1.2);
 }
 
-#mfa-qr-modal #mfa-qr-image img {
-    max-width: 350px;
+#mfa-qr-modal #mfa-qr-image img,
+#mfa-setup-qr-image img {
     max-width: 350px;
     width: 80%;
     height: 80%;
@@ -7452,6 +7465,7 @@ transform: scale(1.2);
     font-size: 12px;
     color: var(--secondary-dark);
     margin-bottom: 5px;
+    text-align: center !important;
 }
 
 .mfa-secret-box {
@@ -8697,6 +8711,7 @@ transform: scale(1.2);
 .end-date-container {
     flex: 1 1 0;
     min-width: 0;
+    cursor: pointer;
 }
 
 .end-date-container label {
@@ -8705,6 +8720,10 @@ transform: scale(1.2);
 
 .end-date-container input[type="date"] {
     width: 100%;
+}
+
+.end-date-container input:disabled {
+    pointer-events: none;
 }
 
 .date-input-row input[type="date"] {
@@ -8732,6 +8751,7 @@ transform: scale(1.2);
     gap: 6px;
     width: 100%;
     font-size: 10px;
+    cursor: pointer;
 }
 
 .date-checkbox-row input{

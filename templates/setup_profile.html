@@ -40,6 +40,53 @@
         </div>
     </div>
 
+    <!-- MFA Setup Modal -->
+    <div id="mfa-setup-modal-setup" class="modal-setup-profile" style="display: none;">
+        <div class="modal-content-setup-profile">
+            <h2>Secure Your Account</h2>
+            <p>Add an extra layer of security with Multi-Factor Authentication (MFA). You'll use an authenticator app to generate a code each time you log in.</p>
+
+            <div id="mfa-setup-loading" style="text-align: center; padding: 20px;">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; color: var(--primary);"></i>
+            </div>
+
+            <div id="mfa-setup-content" style="display: none;">
+                <ol class="mfa-instructions">
+                    <li>Install an authenticator app (like Google Authenticator or Authy) on your phone.</li>
+                    <li>Open the app and choose "Add Account" or "Scan QR Code".</li>
+                    <li>Scan the QR code below with your app.</li>
+                    <li>Enter the 6-digit code from your app to verify.</li>
+                </ol>
+                <div id="mfa-setup-qr-image"></div>
+                <div class="mfa-secret-container">
+                    <p class="mfa-secret-label">Can't scan? Enter this key manually:</p>
+                    <div class="mfa-secret-box">
+                        <code id="mfa-setup-secret-key"></code>
+                        <button type="button" id="copy-mfa-setup-secret" class="mfa-copy-button" title="Copy to clipboard">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                <form id="mfa-setup-verify-form" class="mfa-verify-form">
+                    <div class="mfa-code-inputs">
+                        <div id="mfa-setup-verify-message" class="mfa-speech-bubble" style="display: none;"></div>
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    </div>
+                    <input type="hidden" id="mfa-setup-code" name="mfa-code">
+                    <div class="setup-profile-button-container" style="margin-top: 0.5em;">
+                        <button type="button" class="setup-profile-previous-button" id="mfa-setup-skip-btn">Skip for Now</button>
+                        <button type="submit" class="setup-profile-next-button">Verify & Continue</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Bank Connection Modal -->
     <div id="bank-connection-modal-setup" class="modal-setup-profile">
         <div class="modal-content-setup-profile">
@@ -55,8 +102,8 @@
             </div>
             <p class="bank-connection-security-note">Your data is secure and encrypted. You can manage or disconnect at any time.</p>
             <div class="setup-profile-button-container">
-                <button type="button" class="setup-profile-next-button" id="connect-bank-button">Connect</button>
                 <button type="button" class="setup-profile-previous-button" id="skip-bank-connection">Skip for Now</button>
+                <button type="button" class="setup-profile-next-button" id="connect-bank-button">Connect</button>
             </div>
         </div>
     </div>
@@ -86,7 +133,7 @@
                 <div class="category-section">
                     <div class="recurring-header income" style="margin-bottom: 15px;">
                         <span><i class="fa-solid fa-arrows-repeat"></i> Income Categories</span>
-                        <button id="add-recommended-income-btn" class="add-income-btn" type="button"><strong><i class="fa-solid fa-plus"></i> Add Category</strong></button>
+                        <button id="add-recommended-income-btn" class="add-income-btn" type="button" title="Add Category"><i class="fa-kit fa-solid-folder-plus-circle-plus"></i></button>
                     </div>
                     <table class="income-recurring-table recommended-categories-table">
                         <thead>
@@ -111,7 +158,7 @@
                 <div class="category-section">
                     <div class="recurring-header expenses" style="margin-bottom: 15px;">
                         <span><i class="fa-solid fa-arrows-repeat"></i> Expense Categories</span>
-                        <button id="add-recommended-expense-btn" class="add-expense-btn" type="button"><strong><i class="fa-solid fa-plus"></i> Add Category</strong></button>
+                        <button id="add-recommended-expense-btn" class="add-expense-btn" type="button" title="Add Category"><i class="fa-kit fa-solid-folder-minus-circle-plus"></i></button>
                     </div>
                     <table class="expense-recurring-table recommended-categories-table">
                         <thead>
@@ -151,7 +198,9 @@
                 <div class="category-name-recurring-row">
                     <div class="category-name-field">
                         <label for="edit-category-name-input">Category Name</label>
-                        <input type="text" id="edit-category-name-input" name="category_name" placeholder="Category" required>
+                        <div class="category-input-wrapper">
+                            <input type="text" id="edit-category-name-input" name="category_name" placeholder="Category" required>
+                        </div>
                     </div>
                     <div class="recurring-toggle-field">
                         <label for="edit-is-recurring-checkbox">Recurring?</label>
@@ -383,6 +432,11 @@
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 
     <script>
+        // Disable data-version auto-reload on setup page — the POST calls during
+        // setup (sync-profile, analyze-transactions) bump data_version, and the
+        // 500 ms race window in script.js causes location.reload() mid-flow.
+        window._disableDataVersionReload = true;
+
         // Track if bank was connected
         let bankConnected = false;
         let bankBalances = {
@@ -424,6 +478,17 @@
         }
         
         $(document).ready(function () {
+            // Override .show() for setup modals to use flexbox centering
+            (function() {
+                const origShow = $.fn.show;
+                $.fn.show = function() {
+                    if (this.hasClass('modal-setup-profile')) {
+                        return this.css('display', 'flex');
+                    }
+                    return origShow.apply(this, arguments);
+                };
+            })();
+
             document.getElementById('loading-screen').style.display = 'none';
 
             // Remove readonly from name fields after a short delay to prevent 1Password detection
@@ -431,158 +496,167 @@
                 $('#setup-profile-first-name, #setup-profile-last-name').removeAttr('readonly');
             }, 100);
 
-            // Check if user already has a bank connection to determine starting page
-            $.ajax({
-                url: '/quiltt/connections?exclude_liability=true',
-                method: 'GET',
-                success: function(response) {
-                    if (response.status === 'success' && response.connections && response.connections.length > 0) {
-                        // Check if any accounts have is_active or sync_transactions explicitly set to 1
-                        let hasActiveAccounts = false;
-                        let hasAnyAccounts = false;
-                        let activeAccountIds = [];
-                        
-                        response.connections.forEach(function(conn) {
-                            if (conn.accounts && conn.accounts.length > 0) {
-                                hasAnyAccounts = true;
-                                conn.accounts.forEach(function(account) {
-                                    // Only consider it active if explicitly set to 1
-                                    if (account.is_active === 1 && account.sync_transactions === 1) {
-                                        hasActiveAccounts = true;
-                                        activeAccountIds.push(account.account_id);
-                                    }
-                                });
-                            }
-                        });
-                        
-                        if (hasActiveAccounts) {
-                            // User has connection with explicitly activated accounts
-                            // Check if they have completed name step - if not, show category recommendations
-                            console.log('[SETUP] User has active accounts, checking setup progress...');
-                            $.ajax({
-                                url: '/check_has_categories',
-                                method: 'GET',
-                                success: function(catResponse) {
-                                    console.log('[SETUP] Setup progress check response:', catResponse);
-                                    if (catResponse.has_categories) {
-                                        console.log('[SETUP] User has completed name step, going to name page');
-                                        // Has completed category step (name exists) - go to name page
-                                        $('#welcome-modal-setup').hide();
-                                        $('#bank-connection-modal-setup').hide();
-                                        $('#account-selection-modal-setup').hide();
-                                        $('#category-recommendations-modal-setup').hide();
-                                        $('#name-modal-setup').show();
-                                        $('#currency-modal-setup').hide();
-                                        $('#starting-balance-modal-setup').hide();
-                                        $('#balance-threshold-modal-setup').hide();
-                                        $('#setup-profile-first-name').focus();
-                                    } else {
-                                        console.log('[SETUP] User has NOT completed name step, showing category recommendations');
-                                        // Haven't completed name step yet - show category recommendations
-                                        $('#welcome-modal-setup').hide();
-                                        $('#bank-connection-modal-setup').hide();
-                                        $('#account-selection-modal-setup').hide();
-                                        $('#name-modal-setup').hide();
-                                        $('#currency-modal-setup').hide();
-                                        $('#starting-balance-modal-setup').hide();
-                                        $('#balance-threshold-modal-setup').hide();
-                                        
-                                        // Trigger category analysis
-                                        selectedAccountIdsForCategories = activeAccountIds;
-                                        $('#category-analysis-loading-modal').show();
-                                        
-                                        // Call backend to analyze transactions
-                                        $.ajax({
-                                            url: '/quiltt/analyze-transactions-for-categories',
-                                            method: 'POST',
-                                            contentType: 'application/json',
-                                            data: JSON.stringify({
-                                                account_ids: activeAccountIds
-                                            }),
-                                            success: function(analysisResponse) {
-                                                $('#category-analysis-loading-modal').hide();
-                                                
-                                                if (analysisResponse.status === 'success') {
-                                                    recommendedCategories = analysisResponse.recommendations;
-                                                    displayCategoryRecommendations(analysisResponse.recommendations, analysisResponse.fallback || false);
-                                                } else {
-                                                    // Error - show fallback generic categories
-                                                    showFallbackCategories();
-                                                }
-                                            },
-                                            error: function() {
-                                                $('#category-analysis-loading-modal').hide();
-                                                // Error - show fallback generic categories
-                                                showFallbackCategories();
-                                            }
-                                        });
-                                    }
-                                },
-                                error: function() {
-                                    // Error checking categories - default to name page
-                                    $('#welcome-modal-setup').hide();
-                                    $('#bank-connection-modal-setup').hide();
-                                    $('#account-selection-modal-setup').hide();
-                                    $('#name-modal-setup').show();
-                                    $('#currency-modal-setup').hide();
-                                    $('#starting-balance-modal-setup').hide();
-                                    $('#balance-threshold-modal-setup').hide();
-                                    $('#setup-profile-first-name').focus();
-                                }
-                            });
-                        } else if (hasAnyAccounts) {
-                            // User has connection but no accounts have been explicitly activated - show account selection
-                            $('#welcome-modal-setup').hide();
-                            $('#bank-connection-modal-setup').hide();
-                            $('#name-modal-setup').hide();
-                            $('#currency-modal-setup').hide();
-                            $('#starting-balance-modal-setup').hide();
-                            $('#balance-threshold-modal-setup').hide();
-                            loadAccountSelection();
-                        } else {
-                            // No accounts found - show welcome
-                            $('#welcome-modal-setup').show();
-                            $('#bank-connection-modal-setup').hide();
-                            $('#account-selection-modal-setup').hide();
-                            $('#name-modal-setup').hide();
-                            $('#currency-modal-setup').hide();
-                            $('#starting-balance-modal-setup').hide();
-                            $('#balance-threshold-modal-setup').hide();
-                        }
-                    } else {
-                        // No connection - show welcome page
-                        $('#welcome-modal-setup').show();
-                        $('#bank-connection-modal-setup').hide();
-                        $('#account-selection-modal-setup').hide();
-                        $('#name-modal-setup').hide();
-                        $('#currency-modal-setup').hide();
-                        $('#starting-balance-modal-setup').hide();
-                        $('#balance-threshold-modal-setup').hide();
-                    }
-                },
-                error: function() {
-                    // On error, default to welcome page
-                    $('#welcome-modal-setup').show();
-                    $('#bank-connection-modal-setup').hide();
-                    $('#account-selection-modal-setup').hide();
-                    $('#name-modal-setup').hide();
-                    $('#currency-modal-setup').hide();
-                    $('#starting-balance-modal-setup').hide();
-                    $('#balance-threshold-modal-setup').hide();
-                }
-            });
+            // Always start fresh — show Welcome
+            $('#welcome-modal-setup').show();
 
-            // Handle welcome next button - show loading briefly, then bank connection modal
+            // Handle welcome next button - show MFA setup step
             $('#welcome-next-button').on('click', function () {
                 $('#welcome-modal-setup').hide();
+                $('#mfa-setup-modal-setup').show();
+
+                // Auto-load QR code immediately
+                $.post('/enable_mfa', function(data) {
+                    $('#mfa-setup-loading').hide();
+                    if (data.status === 'success' && data.qr_url) {
+                        $('#mfa-setup-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code">');
+                        $('#mfa-setup-secret-key').text(data.secret);
+                        $('#mfa-setup-content').show();
+                        $('.mfa-setup-digit').first().focus();
+                    } else {
+                        showToast('Failed to set up MFA. You can enable it later in your profile.', 'error');
+                        // Skip to bank connection
+                        $('#mfa-setup-modal-setup').hide();
+                        $('#loading-screen').show();
+                        setTimeout(function() {
+                            $('#loading-screen').hide();
+                            $('#bank-connection-modal-setup').show();
+                        }, 800);
+                    }
+                }).fail(function() {
+                    $('#mfa-setup-loading').hide();
+                    showToast('Failed to set up MFA. You can enable it later in your profile.', 'error');
+                    $('#mfa-setup-modal-setup').hide();
+                    $('#loading-screen').show();
+                    setTimeout(function() {
+                        $('#loading-screen').hide();
+                        $('#bank-connection-modal-setup').show();
+                    }, 800);
+                });
+            });
+
+            // ==================== MFA SETUP STEP ====================
+
+            // "Skip for Now" button - cancel pending MFA and proceed to bank connection
+            $('#mfa-setup-skip-btn').on('click', function() {
+                $.post('/cancel_mfa');
+                $('#mfa-setup-modal-setup').hide();
                 $('#loading-screen').show();
-                
-                // Brief loading delay, then show bank connection
                 setTimeout(function() {
                     $('#loading-screen').hide();
                     $('#bank-connection-modal-setup').show();
                 }, 800);
             });
+
+            // Copy MFA secret to clipboard (setup version)
+            $(document).on('click', '#copy-mfa-setup-secret', function() {
+                const secret = $('#mfa-setup-secret-key').text();
+                navigator.clipboard.writeText(secret).then(function() {
+                    const btn = $('#copy-mfa-setup-secret');
+                    const originalHtml = btn.html();
+                    btn.html('<i class="fas fa-check"></i>');
+                    setTimeout(function() { btn.html(originalHtml); }, 2000);
+                }).catch(function(err) {
+                    showToast('Failed to copy: ' + err, 'error');
+                });
+            });
+
+            // MFA 6-digit input handling (setup version)
+            const mfaSetupDigits = document.querySelectorAll('.mfa-setup-digit');
+            const mfaSetupCodeHidden = document.getElementById('mfa-setup-code');
+
+            function updateMfaSetupCode() {
+                let code = '';
+                mfaSetupDigits.forEach(input => { code += input.value; });
+                mfaSetupCodeHidden.value = code;
+            }
+
+            mfaSetupDigits.forEach((input, index) => {
+                input.addEventListener('input', function(e) {
+                    this.value = this.value.replace(/[^0-9]/g, '');
+                    if (this.value.length === 1 && index < mfaSetupDigits.length - 1) {
+                        mfaSetupDigits[index + 1].focus();
+                    }
+                    updateMfaSetupCode();
+                });
+
+                input.addEventListener('keydown', function(e) {
+                    if (e.key === 'Backspace' && this.value === '' && index > 0) {
+                        mfaSetupDigits[index - 1].focus();
+                    }
+                    if (e.key === 'ArrowLeft' && index > 0) mfaSetupDigits[index - 1].focus();
+                    if (e.key === 'ArrowRight' && index < mfaSetupDigits.length - 1) mfaSetupDigits[index + 1].focus();
+                    if (e.key === 'Enter') {
+                        updateMfaSetupCode();
+                        if (mfaSetupCodeHidden.value.length === 6) {
+                            e.preventDefault();
+                            document.getElementById('mfa-setup-verify-form').dispatchEvent(new Event('submit'));
+                        }
+                    }
+                });
+
+                input.addEventListener('paste', function(e) {
+                    e.preventDefault();
+                    const pastedData = (e.clipboardData || window.clipboardData).getData('text');
+                    const digits = pastedData.replace(/[^0-9]/g, '').slice(0, 6);
+                    digits.split('').forEach((digit, i) => {
+                        if (mfaSetupDigits[i]) mfaSetupDigits[i].value = digit;
+                    });
+                    const nextEmptyIndex = Math.min(digits.length, mfaSetupDigits.length - 1);
+                    mfaSetupDigits[nextEmptyIndex].focus();
+                    updateMfaSetupCode();
+                });
+
+                input.addEventListener('focus', function() { this.select(); });
+            });
+
+            // Show speech bubble message for MFA setup
+            function showMfaSetupMessage(message, type) {
+                const msgEl = $('#mfa-setup-verify-message');
+                msgEl.stop(true, true)
+                    .removeClass('error success')
+                    .addClass(type)
+                    .text(message)
+                    .css({display: 'block', opacity: 1});
+                
+                if (type === 'error') {
+                    setTimeout(function() {
+                        msgEl.fadeOut(300, function() { $(this).css('display', 'none'); });
+                    }, 3000);
+                }
+            }
+
+            // Verify MFA code (setup version)
+            $('#mfa-setup-verify-form').on('submit', function(e) {
+                e.preventDefault();
+                const code = $('#mfa-setup-code').val();
+                if (code.length !== 6) {
+                    showMfaSetupMessage('Please enter all 6 digits', 'error');
+                    return;
+                }
+                $.post('/verify_mfa_setup', {code: code}, function(data) {
+                    if (data.status === 'success') {
+                        showMfaSetupMessage('MFA enabled!', 'success');
+                        setTimeout(function() {
+                            $('#mfa-setup-modal-setup').hide();
+                            // Proceed to bank connection
+                            $('#loading-screen').show();
+                            setTimeout(function() {
+                                $('#loading-screen').hide();
+                                $('#bank-connection-modal-setup').show();
+                            }, 800);
+                        }, 1200);
+                    } else {
+                        showMfaSetupMessage('Incorrect code', 'error');
+                        mfaSetupDigits.forEach(input => input.value = '');
+                        mfaSetupDigits[0].focus();
+                        mfaSetupCodeHidden.value = '';
+                    }
+                }).fail(function() {
+                    showMfaSetupMessage('Error verifying code', 'error');
+                });
+            });
+
+            // ==================== END MFA SETUP STEP ====================
 
             // Handle skip bank connection - show category recommendations
             $('#skip-bank-connection').on('click', function () {
@@ -913,53 +987,12 @@
             });
 
             function updateAccountsAndSync(selectedAccountIds) {
-                // Build update requests for all accounts with retry logic
-                const updatePromises = [];
-                
-                $('.account-checkbox').each(function() {
-                    const accountId = $(this).data('account-id');
-                    const isActive = $(this).is(':checked') ? 1 : 0;
-                    
-                    // Retry function for failed updates
-                    const updateWithRetry = function(retries = 3) {
-                        return $.ajax({
-                            url: '/quiltt/update-account',
-                            method: 'POST',
-                            contentType: 'application/json',
-                            data: JSON.stringify({
-                                account_id: accountId,
-                                is_active: isActive,
-                                sync_transactions: isActive
-                            })
-                        }).fail(function(xhr) {
-                            if (retries > 0) {
-                                // Retry after a short delay
-                                return new Promise(function(resolve) {
-                                    setTimeout(function() {
-                                        resolve(updateWithRetry(retries - 1));
-                                    }, 200);
-                                });
-                            }
-                            throw new Error('Failed to update account ' + accountId);
-                        });
-                    };
-                    
-                    updatePromises.push(updateWithRetry());
-                });
-                
-                // Wait for all account updates to complete
-                Promise.all(updatePromises)
-                    .then(function() {
-                        // Skip transaction sync here - nightly sync handles it
-                        // This makes the connection flow much faster for the user
-                        // Go directly to category recommendations
-                        analyzeCategoriesForSetup(selectedAccountIds);
-                    })
-                    .catch(function(error) {
-                        showToast('Error updating accounts. Continuing with manual setup.', 'error');
-                        $('#account-selection-modal-setup').hide();
-                        $('#name-modal-setup').show();
-                    });
+                // Store selected account IDs in JS (deferred to final submit)
+                // Do NOT call /quiltt/update-account here — activation happens at final submit
+                window.setupSelectedAccountIds = selectedAccountIds;
+
+                // Go directly to category recommendations
+                analyzeCategoriesForSetup(selectedAccountIds);
             }
 
             function fetchBankBalancesForSelectedAccounts(selectedAccountIds) {
@@ -1204,6 +1237,10 @@
             window.editCategoryRecommendation = function(type, index) {
                 const modal = document.getElementById('edit-category-recommendation-modal');
                 
+                // Clear any stale duplicate warning
+                var nameInput = document.getElementById('edit-category-name-input');
+                if (nameInput._dupWarning) nameInput._dupWarning.classList.remove('visible');
+                
                 // Show the modal first (in case of errors below)
                 modal.style.display = 'flex';
                 
@@ -1280,19 +1317,12 @@
                 const noEndDate = category.no_end_date !== undefined ? category.no_end_date : !category.end_date;
                 $('#edit-category-no-end-date-checkbox').prop('checked', noEndDate);
                 
-                // Update end date field visibility based on no-end-date checkbox
-                if (noEndDate) {
-                    $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 0.5);
-                    $('#edit-category-end-date').prop('disabled', true);
-                } else {
-                    $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 1);
-                    $('#edit-category-end-date').prop('disabled', false);
-                }
-                
                 // Reset occurrences (not used for editing existing categories)
                 $('#edit-category-use-occurrences-checkbox').prop('checked', false);
                 $('#edit-category-occurrences-count').val('');
-                $('#edit-category-occurrences-count').prop('disabled', true);
+                
+                // Update three-way toggle state
+                updateEditCategoryEndDateState();
             }
             
             // Handle cadence unit change in edit modal
@@ -1368,6 +1398,16 @@
                         }
                     });
                 });
+
+                // Live duplicate check on category name input
+                var editNameInput = document.getElementById('edit-category-name-input');
+                setupCategoryDuplicateCheck(editNameInput, function() {
+                    var type = $('#edit-category-type').val();
+                    var cats = type === 'income' ? recommendedCategories.income : recommendedCategories.expense;
+                    var idx = parseInt($('#edit-category-index').val());
+                    var isNew = (idx === -1);
+                    return cats.map(function(c, i) { return { name: c.name, id: i }; });
+                }, { get excludeId() { var idx = parseInt($('#edit-category-index').val()); return idx === -1 ? null : idx; } });
                 
                 // Handle recurring checkbox toggle
                 $('#edit-is-recurring-checkbox').on('change', function() {
@@ -1407,39 +1447,51 @@
                 
                 // Helper function to grey out elements
                 function setGreyedOut(selector, greyed) {
-                    $(selector).css({
-                        'opacity': greyed ? 0.5 : 1,
-                        'pointer-events': greyed ? 'none' : 'auto'
-                    });
+                    $(selector).css('opacity', greyed ? 0.5 : 1);
                 }
                 
-                // Handle no-end-date checkbox
-                $('#edit-category-no-end-date-checkbox').on('change', function() {
-                    if (this.checked) {
+                // Three-way toggle: End Date / No End Date / Use Occurrences
+                function updateEditCategoryEndDateState() {
+                    var noEnd = $('#edit-category-no-end-date-checkbox').is(':checked');
+                    var useOcc = $('#edit-category-use-occurrences-checkbox').is(':checked');
+                    if (noEnd) {
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', false);
                         setGreyedOut('.date-checkbox-row:has(#edit-category-use-occurrences-checkbox)', true);
-                        $('#edit-category-use-occurrences-checkbox').prop('checked', false).trigger('change');
                         $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 0.5);
                         $('#edit-category-end-date').prop('disabled', true);
-                    } else {
+                        $('#edit-category-occurrences-count').prop('disabled', true).val('');
+                    } else if (useOcc) {
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', true);
                         setGreyedOut('.date-checkbox-row:has(#edit-category-use-occurrences-checkbox)', false);
+                        $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 0.5);
+                        $('#edit-category-end-date').prop('disabled', true);
+                        $('#edit-category-occurrences-count').prop('disabled', false);
+                    } else {
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', true);
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-use-occurrences-checkbox)', true);
                         $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 1);
                         $('#edit-category-end-date').prop('disabled', false);
+                        $('#edit-category-occurrences-count').prop('disabled', true).val('');
                     }
+                }
+                
+                $('#edit-category-no-end-date-checkbox').on('change', function() {
+                    if (this.checked) $('#edit-category-use-occurrences-checkbox').prop('checked', false);
+                    updateEditCategoryEndDateState();
                 });
                 
-                // Handle occurrences checkbox
                 $('#edit-category-use-occurrences-checkbox').on('change', function() {
-                    if (this.checked) {
-                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', true);
-                        $('#edit-category-no-end-date-checkbox').prop('checked', false).trigger('change');
-                        $('#edit-category-occurrences-count').prop('disabled', false);
-                        $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 0.5);
-                        $('#edit-category-end-date').prop('disabled', true);
-                    } else {
-                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', false);
-                        $('#edit-category-occurrences-count').prop('disabled', true).val('');
-                        $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 1);
-                        $('#edit-category-end-date').prop('disabled', false);
+                    if (this.checked) $('#edit-category-no-end-date-checkbox').prop('checked', false);
+                    updateEditCategoryEndDateState();
+                });
+
+                // Click on end date to activate it
+                $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').on('click', function() {
+                    if ($('#edit-category-end-date').prop('disabled')) {
+                        $('#edit-category-no-end-date-checkbox').prop('checked', false);
+                        $('#edit-category-use-occurrences-checkbox').prop('checked', false);
+                        updateEditCategoryEndDateState();
+                        $('#edit-category-end-date').focus();
                     }
                 });
                 
@@ -1464,6 +1516,16 @@
                     const categoryName = $('#edit-category-name-input').val().trim();
                     if (!categoryName) {
                         showToast('Please enter a category name.', 'warning');
+                        return;
+                    }
+
+                    // Check for duplicate name in the current list
+                    const catsToCheck = type === 'income' ? recommendedCategories.income : recommendedCategories.expense;
+                    const excludeOpts = isNewCategory ? {} : { excludeId: index };
+                    // Build a compatible array with .id for excludeId matching
+                    const catsWithIds = catsToCheck.map(function(c, i) { return { name: c.name, id: i }; });
+                    if (checkCategoryDuplicate(document.getElementById('edit-category-name-input'), catsWithIds, excludeOpts)) {
+                        showToast('A category with this name already exists.', 'warning');
                         return;
                     }
                     
@@ -1604,6 +1666,10 @@
                 $('#edit-category-use-occurrences-checkbox').prop('checked', false);
                 $('#edit-category-occurrences-count').val('');
                 $('#edit-category-occurrences-count').prop('disabled', true);
+                
+                // Clear any stale duplicate warning
+                var nameInput = document.getElementById('edit-category-name-input');
+                if (nameInput._dupWarning) nameInput._dupWarning.classList.remove('visible');
                 
                 // Open the modal
                 modal.style.display = 'flex';
@@ -1798,41 +1864,28 @@
             // Handle name form submission
             $('#setup-profile-name-form').on('submit', function (event) {
                 event.preventDefault();
-                const firstName = $('#setup-profile-first-name').val();
-                const lastName = $('#setup-profile-last-name').val();
-                
-                // Store name in Redis
-                $.ajax({
-                    url: "{{ url_for('save_setup_name') }}",
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({
-                        first_name: firstName,
-                        last_name: lastName
-                    }),
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            $('#name-modal-setup').hide();
-                            
-                            if (bankConnected) {
-                                // Show loading modal while we wait for Quiltt to finish syncing balances
-                                document.getElementById('category-analysis-loading-modal').style.display = 'flex';
-                                
-                                // Poll for synced balances, then show balance page
-                                pollForSyncedBalances();
-                            } else {
-                                // Normal flow - go to currency selection
-                                $('#currency-modal-setup').show();
-                                $('#setup-profile-currency-type').focus();
-                            }
-                        } else {
-                            showToast('Failed to save name: ' + response.message, 'error');
-                        }
-                    },
-                    error: function() {
-                        showToast('An error occurred while saving your name.', 'error');
-                    }
-                });
+                // Store name in JS variables (deferred to final submit)
+                window.setupFirstName = $('#setup-profile-first-name').val().trim();
+                window.setupLastName = $('#setup-profile-last-name').val().trim();
+
+                if (!window.setupFirstName || !window.setupLastName) {
+                    showToast('Please enter your first and last name.', 'warning');
+                    return;
+                }
+
+                $('#name-modal-setup').hide();
+
+                if (bankConnected) {
+                    // Show loading modal while we wait for Quiltt to finish syncing balances
+                    document.getElementById('category-analysis-loading-modal').style.display = 'flex';
+
+                    // Poll for synced balances, then show balance page
+                    pollForSyncedBalances();
+                } else {
+                    // Normal flow - go to currency selection
+                    $('#currency-modal-setup').show();
+                    $('#setup-profile-currency-type').focus();
+                }
             });
 
             function pollForSyncedBalances(attempt = 0, maxAttempts = 60) {
@@ -2057,7 +2110,7 @@
                     const day = String(startingBalanceDate.getDate()).padStart(2, '0');
                     const incomeEntryDate = `${year}-${month}-${day}`;
 
-                    // Submit the data via AJAX to the backend (name already saved in Redis)
+                    // Submit the data via AJAX to the backend
                     $.ajax({
                         url: "{{ url_for('complete_profile_setup') }}",  // Backend route
                         method: 'POST',
@@ -2067,7 +2120,10 @@
                             starting_balance: startingBalance,
                             starting_savings: startingSavings,
                             balance_threshold: balanceThreshold,
-                            income_entry_date: incomeEntryDate  // Pass the calculated date
+                            income_entry_date: incomeEntryDate,
+                            first_name: window.setupFirstName || '',
+                            last_name: window.setupLastName || '',
+                            selected_account_ids: window.setupSelectedAccountIds || []
                         }),
                         async: false,  // Set async to false for synchronous request
                         success: function (response) {
