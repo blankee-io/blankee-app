@@ -317,9 +317,8 @@
                                     pollUntilSynced();
                                 }, 500);
                             } else {
-                                // Timed out - reload anyway
-                                $('#bank-fetching-modal').hide();
-                                window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                                // Timed out — clean up stuck connections
+                                cleanupStuckConnections();
                             }
                         } else {
                             $('#bank-fetching-modal').hide();
@@ -332,8 +331,8 @@
                                 pollUntilSynced();
                             }, 1000);
                         } else {
-                            $('#bank-fetching-modal').hide();
-                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                            // Timed out — clean up stuck connections
+                            cleanupStuckConnections();
                         }
                     }
                 });
@@ -560,12 +559,64 @@
                 }
             }
 
+            // Clean up stuck connections after polling timeout
+            function cleanupStuckConnections() {
+                $('#bank-fetching-modal').hide();
+                showToast('There was an issue with the bank connector. Please try again later.', 'error', 6000);
+
+                $.ajax({
+                    url: '/quiltt/connections',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.status === 'success' && response.connections) {
+                            const stuck = response.connections.filter(function(conn) {
+                                return ['SYNCING', 'INITIALIZING', 'PENDING'].includes(conn.status);
+                            });
+                            if (stuck.length === 0) {
+                                setTimeout(function() {
+                                    window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                                }, 1500);
+                                return;
+                            }
+                            const deletePromises = stuck.map(function(conn) {
+                                return $.ajax({
+                                    url: '/quiltt/delete',
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({ connection_id: conn.connection_id })
+                                });
+                            });
+                            Promise.all(deletePromises).finally(function() {
+                                setTimeout(function() {
+                                    window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                                }, 1500);
+                            });
+                        } else {
+                            setTimeout(function() {
+                                window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                            }, 1500);
+                        }
+                    },
+                    error: function() {
+                        setTimeout(function() {
+                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                        }, 1500);
+                    }
+                });
+            }
+
             // Track pending connection that hasn't been confirmed
             let pendingConnectionId = null;
+            // Track whether the pending connection already existed before the connector was opened
+            let isExistingConnectionPending = false;
+            // Track pre-existing connections and their account IDs before connector opens
+            let preExistingConnections = new Set();
+            let preExistingAccountIds = new Set();
             
             // Account selection for new bank connections
             function loadAccountSelectionProfile(newConnectionId) {
                 pendingConnectionId = newConnectionId;
+                isExistingConnectionPending = preExistingConnections.has(newConnectionId);
                 
                 $.ajax({
                     url: '/quiltt/connections',
@@ -621,8 +672,17 @@
                                         let isChecked = false;
                                         let isDisabled = false;
                                         let disabledReason = '';
+                                        // Check if this account was already synced before the connector was opened
+                                        const isAlreadySynced = preExistingAccountIds.has(account.account_id) && account.sync_transactions;
                                         
-                                        if (isChecking) {
+                                        if (isAlreadySynced) {
+                                            isChecked = true;
+                                            isDisabled = true;
+                                            disabledReason = 'Already synced';
+                                            // Also mark the type as synced so new duplicates on same connection are blocked
+                                            if (isChecking) hasSyncedChecking = true;
+                                            if (isSavings) hasSyncedSavings = true;
+                                        } else if (isChecking) {
                                             checkingCount++;
                                             if (hasSyncedChecking) {
                                                 isDisabled = true;
@@ -666,7 +726,7 @@
                                         }
                                         
                                         const accountItem = $(`
-                                            <div class="account-selection-item${isDisabled ? ' disabled' : ''}">
+                                            <div class="account-selection-item${isDisabled ? ' disabled' : ''}${isAlreadySynced ? ' already-synced' : ''}">
                                                 <input type="checkbox" 
                                                        class="account-checkbox" 
                                                        data-account-id="${account.account_id}"
@@ -677,6 +737,7 @@
                                                     ${nameHtml}
                                                     ${mask}
                                                 </div>
+                                                ${disabledReason ? `<div class="account-disabled-note">${disabledReason}</div>` : ''}
                                             </div>
                                         `);
                                         accountList.append(accountItem);
@@ -722,12 +783,24 @@
             // Handle account selection confirmation
             $('#confirm-account-selection').on('click', function() {
                 const selectedAccounts = [];
+                let hasNewSelection = false;
                 $('.account-checkbox:checked').each(function() {
-                    selectedAccounts.push($(this).data('account-id'));
+                    const accountId = $(this).data('account-id');
+                    selectedAccounts.push(accountId);
+                    // Track if any NEW (non-pre-existing) accounts are selected
+                    if (!preExistingAccountIds.has(accountId)) {
+                        hasNewSelection = true;
+                    }
                 });
                 
                 if (selectedAccounts.length === 0) {
                     showToast('Please select at least one account to continue.', 'warning');
+                    return;
+                }
+                
+                // If existing connection and no new accounts selected, nothing to do
+                if (isExistingConnectionPending && !hasNewSelection) {
+                    showToast('No new accounts selected. Please select at least one new account or cancel.', 'warning');
                     return;
                 }
                 
@@ -752,6 +825,7 @@
                 });
                 
                 pendingConnectionId = null;
+                isExistingConnectionPending = false;
                 
                 $('#account-selection-modal').css('display', 'none');
                 
@@ -772,7 +846,29 @@
                 document.body.classList.remove('modal-open');
                 
                 if (pendingConnectionId) {
-                    deleteUnconfirmedConnection(pendingConnectionId);
+                    if (isExistingConnectionPending) {
+                        // Existing connection - don't delete the connection
+                        // Only delete newly-added accounts that weren't there before
+                        const newAccountIds = [];
+                        $('.account-checkbox').each(function() {
+                            const accountId = $(this).data('account-id');
+                            if (!preExistingAccountIds.has(accountId)) {
+                                newAccountIds.push(accountId);
+                            }
+                        });
+                        
+                        pendingConnectionId = null;
+                        isExistingConnectionPending = false;
+                        
+                        if (newAccountIds.length > 0) {
+                            deleteNewAccountsOnly(newAccountIds);
+                        } else {
+                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                        }
+                    } else {
+                        // Brand new connection - delete the entire connection
+                        deleteUnconfirmedConnection(pendingConnectionId);
+                    }
                 } else {
                     window.location.href = window.location.pathname + '?nocache=' + Date.now();
                 }
@@ -797,11 +893,38 @@
                 });
             }
             
+            function deleteNewAccountsOnly(accountIds) {
+                $.ajax({
+                    url: '/quiltt/delete-new-accounts',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ account_ids: accountIds }),
+                    complete: function() {
+                        setTimeout(function() {
+                            window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                        }, 1000);
+                    }
+                });
+            }
+            
             // Handle page unload/refresh - delete pending connection
             window.addEventListener('beforeunload', function(e) {
-                if (pendingConnectionId) {
+                if (pendingConnectionId && !isExistingConnectionPending) {
+                    // Only delete if it's a brand new connection
                     const data = JSON.stringify({ connection_id: pendingConnectionId });
                     navigator.sendBeacon('/quiltt/delete-unconfirmed', data);
+                } else if (pendingConnectionId && isExistingConnectionPending) {
+                    // For existing connections, only delete new accounts
+                    const newAccountIds = [];
+                    $('.account-checkbox').each(function() {
+                        const accountId = $(this).data('account-id');
+                        if (!preExistingAccountIds.has(accountId)) {
+                            newAccountIds.push(accountId);
+                        }
+                    });
+                    if (newAccountIds.length > 0) {
+                        navigator.sendBeacon('/quiltt/delete-new-accounts', JSON.stringify({ account_ids: newAccountIds }));
+                    }
                 }
             });
 
@@ -809,8 +932,15 @@
                 const updatePromises = [];
                 
                 $('.account-checkbox').each(function() {
-                    const accountId = $(this).data('account-id');
-                    const isActive = $(this).is(':checked') ? 1 : 0;
+                    const checkbox = $(this);
+                    const accountId = checkbox.data('account-id');
+                    
+                    // Skip already-synced accounts (they're disabled+checked) - no update needed
+                    if (checkbox.prop('disabled') && checkbox.is(':checked') && preExistingAccountIds.has(accountId)) {
+                        return;
+                    }
+                    
+                    const isActive = checkbox.is(':checked') ? 1 : 0;
                     
                     updatePromises.push(
                         $.ajax({
@@ -871,15 +1001,15 @@
                                     pollForBalances(selectedAccountIds);
                                 }, 500);
                             } else {
-                                // Timed out waiting for SYNCED - reload and let page-load check continue
-                                window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                                // Timed out — clean up stuck connections
+                                cleanupStuckConnections();
                             }
                         } else {
                             window.location.href = window.location.pathname + '?nocache=' + Date.now();
                         }
                     },
                     error: function() {
-                        window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                        cleanupStuckConnections();
                     }
                 });
             }
@@ -932,8 +1062,8 @@
                                         });
                                     }, 1000);
                                 } else {
-                                    // Timed out - reload, page-load check will continue if still syncing
-                                    window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                                    // Timed out — clean up stuck connections
+                                    cleanupStuckConnections();
                                 }
                             }
                         } else {
@@ -941,7 +1071,7 @@
                         }
                     },
                     error: function() {
-                        window.location.href = window.location.pathname + '?nocache=' + Date.now();
+                        cleanupStuckConnections();
                     }
                 });
             }
@@ -975,23 +1105,60 @@
                     return;
                 }
 
+                // Capture existing connections and accounts BEFORE opening connector
                 $.ajax({
-                    url: '/quiltt/get-session-token',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    success: function(response) {
-                        if (response.status === 'success' && response.session_token) {
-                            loadQuilttConnector(response.session_token, connectorId);
-                        } else {
-                            showToast('Unable to connect bank. Please check server logs for details.', 'warning');
+                    url: '/quiltt/connections',
+                    method: 'GET',
+                    success: function(connResponse) {
+                        preExistingConnections.clear();
+                        preExistingAccountIds.clear();
+                        if (connResponse.status === 'success' && connResponse.connections) {
+                            connResponse.connections.forEach(function(conn) {
+                                preExistingConnections.add(conn.connection_id);
+                                (conn.accounts || []).forEach(function(acc) {
+                                    preExistingAccountIds.add(acc.account_id);
+                                });
+                            });
                         }
+                        
+                        // Now get session token and open connector
+                        $.ajax({
+                            url: '/quiltt/get-session-token',
+                            method: 'POST',
+                            contentType: 'application/json',
+                            success: function(response) {
+                                if (response.status === 'success' && response.session_token) {
+                                    loadQuilttConnector(response.session_token, connectorId);
+                                } else {
+                                    showToast('Unable to connect bank. Please check server logs for details.', 'warning');
+                                }
+                            },
+                            error: function(xhr, status, error) {
+                                if (xhr.status === 500) {
+                                    showToast('Unable to connect bank. Quiltt API credentials may not be configured.\n\nPlease add QUILTT_API_KEY and QUILTT_ENVIRONMENT_ID to your server environment.\n\nSee QUILTT_QUICK_START.md for setup instructions.', 'warning');
+                                } else {
+                                    showToast('Error connecting to bank service. Please try again.', 'warning');
+                                }
+                            }
+                        });
                     },
-                    error: function(xhr, status, error) {
-                        if (xhr.status === 500) {
-                            showToast('Unable to connect bank. Quiltt API credentials may not be configured.\n\nPlease add QUILTT_API_KEY and QUILTT_ENVIRONMENT_ID to your server environment.\n\nSee QUILTT_QUICK_START.md for setup instructions.', 'warning');
-                        } else {
-                            showToast('Error connecting to bank service. Please try again.', 'warning');
-                        }
+                    error: function() {
+                        // If we can't fetch existing connections, proceed anyway with empty sets
+                        $.ajax({
+                            url: '/quiltt/get-session-token',
+                            method: 'POST',
+                            contentType: 'application/json',
+                            success: function(response) {
+                                if (response.status === 'success' && response.session_token) {
+                                    loadQuilttConnector(response.session_token, connectorId);
+                                } else {
+                                    showToast('Unable to connect bank. Please check server logs for details.', 'warning');
+                                }
+                            },
+                            error: function(xhr, status, error) {
+                                showToast('Error connecting to bank service. Please try again.', 'warning');
+                            }
+                        });
                     }
                 });
             });
