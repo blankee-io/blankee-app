@@ -2348,6 +2348,7 @@ transform: scale(1.02);
     border-radius: 8px;
     border: 2px solid var(--secondary-hover);
     transition: border-color 0.2s;
+    position: relative;
 }
 
 .account-selection-item:hover {
@@ -2363,13 +2364,38 @@ transform: scale(1.02);
 
 .account-selection-item.disabled:hover {
     border-color: var(--secondary-hover);
+    transform: none;
+}
+
+.account-selection-item.already-synced {
+    background-color: var(--primary-lighter);
+    border-color: var(--primary-hover);
+    opacity: 0.7;
+    cursor: default;
+}
+
+.account-selection-item.already-synced:hover {
+    border-color: var(--primary-hover);
+    transform: none;
+}
+
+.account-selection-item.already-synced .account-disabled-note {
+    color: var(--primary);
+}
+
+.account-selection-item.already-synced input[type="checkbox"] {
+    accent-color: var(--primary);
+    cursor: default;
 }
 
 .account-disabled-note {
-    font-size: 0.8em;
+    position: absolute;
+    bottom: 2px;
+    left: 15px;
+    font-size: 0.7em;
     color: var(--secondary);
     font-style: italic;
-    margin-top: 2px;
+    white-space: nowrap;
 }
 
 .account-selection-item input[type="checkbox"] {

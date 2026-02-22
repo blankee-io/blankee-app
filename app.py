@@ -20027,6 +20027,43 @@ def quiltt_delete_unconfirmed():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/quiltt/delete-new-accounts', methods=['POST'])
+@login_required
+def quiltt_delete_new_accounts():
+    """Delete specific newly-added accounts from an existing connection.
+    Used when a user reconnects an existing connection, sees new accounts in the
+    account selection modal, but cancels - only the new accounts are removed."""
+    try:
+        if request.is_json:
+            data = request.get_json()
+        else:
+            try:
+                data = json.loads(request.data.decode('utf-8'))
+            except:
+                data = {}
+        
+        account_ids = data.get('account_ids', [])
+        
+        if not account_ids:
+            return jsonify({'status': 'success', 'message': 'No accounts to delete'})
+        
+        app.logger.info(f"[DELETE_NEW_ACCOUNTS] Deleting {len(account_ids)} new accounts for user {current_user.id}: {account_ids}")
+        
+        from quiltt_redis import delete_quiltt_accounts_by_ids
+        success = delete_quiltt_accounts_by_ids(account_ids, current_user.id)
+        
+        if success:
+            app.logger.info(f"[DELETE_NEW_ACCOUNTS] Successfully deleted new accounts")
+            return jsonify({'status': 'success'})
+        else:
+            app.logger.error(f"[DELETE_NEW_ACCOUNTS] Failed to delete new accounts")
+            return jsonify({'status': 'error', 'message': 'Failed to delete accounts'}), 500
+            
+    except Exception as e:
+        app.logger.error(f"[DELETE_NEW_ACCOUNTS] Error: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def _is_compatible_account_type(account_type):
     """Check if account type is compatible (depository or credit only)"""
     if not account_type:
