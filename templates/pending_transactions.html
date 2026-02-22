@@ -360,13 +360,48 @@
 
         // Initialize event listeners for all category inputs
         document.querySelectorAll('.category-input').forEach(input => {
+            // Store the original/suggested value so we can restore it
+            input.dataset.originalValue = input.value;
+            input.dataset.originalCategoryId = input.closest('.category-input-wrapper').querySelector('.category-hidden').value;
+            // Track whether user has started typing since focus
+            input.dataset.clearedOnType = 'false';
+
             input.addEventListener('input', function() {
                 const wrapper = this.closest('.category-input-wrapper');
                 const hiddenInput = wrapper.querySelector('.category-hidden');
+                
+                // First keystroke after focus: clear was already handled by keydown
+                // If input is now empty, restore the original suggestion
                 if (this.value.length === 0) {
-                    hiddenInput.value = '';
+                    hiddenInput.value = this.dataset.originalCategoryId || '';
+                    this.value = this.dataset.originalValue || '';
+                    this.dataset.clearedOnType = 'false';
+                    showCategoryDropdown(this, '');
+                    return;
                 }
+                
+                hiddenInput.value = '';
                 showCategoryDropdown(this, this.value);
+            });
+
+            input.addEventListener('keydown', function(e) {
+                // While showing the default suggestion, block Backspace/Delete
+                // so the user can't erase it character by character
+                if (this.dataset.clearedOnType === 'false' &&
+                    (e.key === 'Backspace' || e.key === 'Delete')) {
+                    e.preventDefault();
+                    return;
+                }
+                // On first real character keystroke, clear the input so user starts fresh
+                // Ignore control keys (Tab, arrows, etc.)
+                if (this.dataset.clearedOnType === 'false' && 
+                    !e.ctrlKey && !e.metaKey && !e.altKey &&
+                    e.key.length === 1) {
+                    this.dataset.clearedOnType = 'true';
+                    this.value = '';
+                    const wrapper = this.closest('.category-input-wrapper');
+                    wrapper.querySelector('.category-hidden').value = '';
+                }
             });
 
             input.addEventListener('focus', function() {
@@ -383,6 +418,8 @@
                 if (parentItem) {
                     parentItem.style.zIndex = '100';
                 }
+                // Reset the typing flag so next keystroke clears
+                this.dataset.clearedOnType = 'false';
                 // On focus, show all categories (don't treat pre-filled value as search)
                 showCategoryDropdown(this, '');
             });
