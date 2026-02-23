@@ -6507,12 +6507,24 @@ def save_totals_remainders_d():
         start_date_str = data.get('start_date')
         user_id = current_user.id
 
-        # Fetch goofy_week_mode for the current user
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-            goofy_week_mode = bool(cursor.fetchone()[0])
-            cursor.close()
+        # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
+        goofy_week_mode = None
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(f"users:v1:{user_id}")
+                if cached:
+                    user_data = json.loads(cached)
+                    if 'goofy_week_mode' in user_data:
+                        goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+            except Exception:
+                pass
+        if goofy_week_mode is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+                row = cursor.fetchone()
+                goofy_week_mode = bool(row[0]) if row else False
+                cursor.close()
 
         # Determine the starting date for incremental update
         if start_date_str:
@@ -6701,12 +6713,24 @@ def save_ca_daily_balance():
         start_date_str = data.get('start_date')
         user_id = current_user.id
 
-        # Fetch goofy_week_mode for the current user
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-            goofy_week_mode = bool(cursor.fetchone()[0])
-            cursor.close()
+        # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
+        goofy_week_mode = None
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(f"users:v1:{user_id}")
+                if cached:
+                    user_data = json.loads(cached)
+                    if 'goofy_week_mode' in user_data:
+                        goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+            except Exception:
+                pass
+        if goofy_week_mode is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+                row = cursor.fetchone()
+                goofy_week_mode = bool(row[0]) if row else False
+                cursor.close()
 
         # Determine the starting date for incremental update
         if start_date_str:
@@ -8411,6 +8435,24 @@ def get_week_totals_batch():
         return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
     
     dates = [d.strip() for d in dates_param.split(',') if d.strip()]
+    goofy = request.args.get('goofy', '0') == '1'
+    
+    # In goofy mode, frontend sends Thursday (end-of-week) dates.
+    # Translate to Friday (storage key) for lookup, but return results keyed by original date.
+    lookup_map = {}  # lookup_date -> original_date
+    if goofy:
+        for d in dates:
+            try:
+                dt = datetime.strptime(d, '%Y-%m-%d').date()
+                friday = dt - timedelta(days=6)
+                lookup_map[friday.strftime('%Y-%m-%d')] = d
+            except Exception:
+                lookup_map[d] = d
+    else:
+        for d in dates:
+            lookup_map[d] = d
+    
+    lookup_dates = list(lookup_map.keys())
     
     try:
         result_data = {}
@@ -8422,17 +8464,18 @@ def get_week_totals_batch():
             # Build a lookup dict for O(1) access
             cached_lookup = {row.get('date'): row for row in cached_data}
             
-            for date in dates:
-                if date in cached_lookup:
-                    row = cached_lookup[date]
-                    result_data[date] = {
+            for ldate in lookup_dates:
+                original_date = lookup_map[ldate]
+                if ldate in cached_lookup:
+                    row = cached_lookup[ldate]
+                    result_data[original_date] = {
                         'total_income': float(row.get('total_income', 0) or 0),
                         'total_expenses': float(row.get('total_expenses', 0) or 0),
                         'remainder': float(row.get('remainder', 0) or 0),
                         'last_week_remainder': float(row.get('last_week_remainder', 0) or 0)
                     }
                 else:
-                    result_data[date] = {
+                    result_data[original_date] = {
                         'total_income': 0,
                         'total_expenses': 0,
                         'remainder': 0,
@@ -8442,29 +8485,30 @@ def get_week_totals_batch():
             # Fallback to MySQL
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
-                placeholders = ','.join(['%s'] * len(dates))
+                placeholders = ','.join(['%s'] * len(lookup_dates))
                 cursor.execute(f"""
                     SELECT date, total_income, total_expenses, remainder, last_week_remainder
                     FROM totals_remainders
                     WHERE user_id = %s AND date IN ({placeholders})
-                """, [current_user.id] + dates)
+                """, [current_user.id] + lookup_dates)
                 
                 rows = cursor.fetchall()
                 cursor.close()
                 
                 # Build result from MySQL data
                 mysql_lookup = {str(row['date']): row for row in rows}
-                for date in dates:
-                    if date in mysql_lookup:
-                        row = mysql_lookup[date]
-                        result_data[date] = {
+                for ldate in lookup_dates:
+                    original_date = lookup_map[ldate]
+                    if ldate in mysql_lookup:
+                        row = mysql_lookup[ldate]
+                        result_data[original_date] = {
                             'total_income': float(row.get('total_income', 0) or 0),
                             'total_expenses': float(row.get('total_expenses', 0) or 0),
                             'remainder': float(row.get('remainder', 0) or 0),
                             'last_week_remainder': float(row.get('last_week_remainder', 0) or 0)
                         }
                     else:
-                        result_data[date] = {
+                        result_data[original_date] = {
                             'total_income': 0,
                             'total_expenses': 0,
                             'remainder': 0,
@@ -8507,6 +8551,24 @@ def get_ca_balances_batch():
         return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
     
     dates = [d.strip() for d in dates_param.split(',') if d.strip()]
+    goofy = request.args.get('goofy', '0') == '1'
+    
+    # In goofy mode, frontend sends Thursday (end-of-week) dates.
+    # Translate to Friday (storage key) for lookup, return results keyed by original date.
+    lookup_map = {}  # lookup_date -> original_date
+    if goofy:
+        for d in dates:
+            try:
+                dt = datetime.strptime(d, '%Y-%m-%d').date()
+                friday = dt - timedelta(days=6)
+                lookup_map[friday.strftime('%Y-%m-%d')] = d
+            except Exception:
+                lookup_map[d] = d
+    else:
+        for d in dates:
+            lookup_map[d] = d
+    
+    lookup_dates = list(lookup_map.keys())
     
     try:
         result_data = {}
@@ -8518,42 +8580,45 @@ def get_ca_balances_batch():
             # Group by account_id
             for row in cached_data:
                 account_id = str(row.get('account_id'))
-                date = row.get('date')
+                row_date = row.get('date')
                 
                 if account_id not in result_data:
                     result_data[account_id] = {}
                 
-                if date in dates:
-                    result_data[account_id][date] = float(row.get('balance', 0) or 0)
+                if row_date in lookup_dates:
+                    original_date = lookup_map[row_date]
+                    result_data[account_id][original_date] = float(row.get('balance', 0) or 0)
             
             # Fill in missing dates with 0
             for account_id in result_data:
-                for date in dates:
-                    if date not in result_data[account_id]:
-                        result_data[account_id][date] = 0
+                for ldate in lookup_dates:
+                    original_date = lookup_map[ldate]
+                    if original_date not in result_data[account_id]:
+                        result_data[account_id][original_date] = 0
         else:
             # Fallback to MySQL
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
-                placeholders = ','.join(['%s'] * len(dates))
+                placeholders = ','.join(['%s'] * len(lookup_dates))
                 cursor.execute(f"""
                     SELECT cab.account_id, cab.date, cab.balance
                     FROM c_a_balances cab
                     JOIN credit_accounts ca ON cab.account_id = ca.id
                     WHERE ca.user_id = %s AND cab.date IN ({placeholders})
-                """, [current_user.id] + dates)
+                """, [current_user.id] + lookup_dates)
                 
                 rows = cursor.fetchall()
                 cursor.close()
                 
                 for row in rows:
                     account_id = str(row['account_id'])
-                    date = str(row['date'])
+                    row_date = str(row['date'])
+                    original_date = lookup_map.get(row_date, row_date)
                     
                     if account_id not in result_data:
                         result_data[account_id] = {}
                     
-                    result_data[account_id][date] = float(row.get('balance', 0) or 0)
+                    result_data[account_id][original_date] = float(row.get('balance', 0) or 0)
         
         return jsonify({'status': 'success', 'data': result_data})
         
@@ -9580,6 +9645,7 @@ def update_week_entry():
     end_date = data.get('end_date')
     quiltt_partial = data.get('quiltt_partial', False)
     today_date = data.get('today_date')
+    entry_date = data.get('entry_date', friday_date)
 
 
     if category_id is None or not friday_date or amount is None or not entry_type or not start_date or not end_date:
@@ -9667,13 +9733,12 @@ def update_week_entry():
     if entry_type == 'ca':
         old_entries = _get_entries_from_redis(table_name, current_user.id)
         if old_entries:
-            # Convert friday_date to string for comparison
-            friday_date_str = friday_date.isoformat() if isinstance(friday_date, date) else friday_date
+            # Sum all entries in the week range for this category
             for entry in old_entries:
+                entry_date_val = entry.get('date', '')
                 if (int(entry.get('category_id', 0)) == int(category_id) and 
-                    entry.get('date') == friday_date_str):
-                    old_ca_amount = float(entry.get('amount', 0))
-                    break
+                    start_date <= entry_date_val <= end_date):
+                    old_ca_amount += float(entry.get('amount', 0))
 
     # Quiltt partial edit: calculate past_sum and narrow delete range
     past_sum = 0
@@ -9702,12 +9767,12 @@ def update_week_entry():
     
     # Check if this is a future-dated entry (should become a bucket)
     from datetime import date as date_type
-    if isinstance(friday_date, str):
-        friday_date_parsed = date_type.fromisoformat(friday_date)
+    if isinstance(entry_date, str):
+        entry_date_parsed = date_type.fromisoformat(entry_date)
     else:
-        friday_date_parsed = friday_date
+        entry_date_parsed = entry_date
     today = date_type.today()
-    entry_is_bucket = friday_date_parsed >= today
+    entry_is_bucket = entry_date_parsed >= today
     
     # Check for bucket entries and deplete them if this is a recurring category OR has manual buckets
     if delta_amount != 0 and not entry_is_bucket:
@@ -9796,16 +9861,16 @@ def update_week_entry():
             
             
             # Update all three balance tables in Redis
-            _update_ca_balances_in_redis('c_a_balances_d', current_user.id, account_id_for_balance, friday_date, amount_delta, is_payment=False)
-            _update_ca_balances_in_redis('c_a_balances', current_user.id, account_id_for_balance, friday_date, amount_delta, is_payment=False)
-            _update_ca_balances_in_redis('c_a_balances_m', current_user.id, account_id_for_balance, friday_date, amount_delta, is_payment=False)
+            _update_ca_balances_in_redis('c_a_balances_d', current_user.id, account_id_for_balance, entry_date, amount_delta, is_payment=False)
+            _update_ca_balances_in_redis('c_a_balances', current_user.id, account_id_for_balance, entry_date, amount_delta, is_payment=False)
+            _update_ca_balances_in_redis('c_a_balances_m', current_user.id, account_id_for_balance, entry_date, amount_delta, is_payment=False)
         else:
             pass
     
     # If delta is 0 (or amount is 0), don't create a new entry (just delete old ones)
     if delta_amount != 0:
         pass
-        _update_entry_in_redis(table_name, current_user.id, category_id, friday_date, delta_amount,
+        _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, delta_amount,
                               is_bucket=entry_is_bucket, original_amount=delta_amount if entry_is_bucket else None)
         
         # Create bucket record for future-dated entries
@@ -9831,8 +9896,8 @@ def update_week_entry():
                             account_id_for_bucket = result['account_id'] if result else None
                             cursor.close()
                 
-                create_bucket_record(table_name, current_user.id, category_id, friday_date, float(amount), account_id=account_id_for_bucket)
-                app.logger.info(f"[BUCKET] /update-week-entry: Created bucket record for future entry: category={category_id}, date={friday_date}, amount={amount}")
+                create_bucket_record(table_name, current_user.id, category_id, entry_date, float(amount), account_id=account_id_for_bucket)
+                app.logger.info(f"[BUCKET] /update-week-entry: Created bucket record for future entry: category={category_id}, date={entry_date}, amount={amount}")
             except Exception as e:
                 app.logger.error(f"[BUCKET] Error creating bucket record: {e}")
                 app.logger.exception(e)
@@ -9850,10 +9915,10 @@ def update_week_entry():
             # Update or delete payment entry in Redis based on amount
             if float(amount) == 0:
                 pass
-                _delete_payment_entry_in_redis(current_user.id, account_id, friday_date, friday_date)
+                _delete_payment_entry_in_redis(current_user.id, account_id, entry_date, entry_date)
             else:
                 pass
-                _update_payment_entry_in_redis(current_user.id, account_id, friday_date, float(amount))
+                _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
 
     if entry_type == 'ca' or ca_triggered:
         save_ca_daily_balance()

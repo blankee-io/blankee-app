@@ -133,7 +133,7 @@ def get_fider_client() -> FiderClient:
     if _client:
         return _client
 
-    base_url = os.environ.get("FIDER_BASE_URL", "https://blankee.fider.io")
+    base_url = os.environ.get("FIDER_BASE_URL", "https://blankeeio.fider.io")
     api_key = os.environ.get("FIDER_ADMIN_KEY")
     if not api_key:
         raise RuntimeError("FIDER_ADMIN_KEY is required for Fider integration")

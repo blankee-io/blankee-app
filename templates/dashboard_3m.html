@@ -574,11 +574,6 @@
         </ul>
     </div>
 
-    <!-- Guided Tour Overlay Elements -->
-    <div id="guided-tour-overlay" style="display:none;"></div>
-    <div id="guided-tour-highlight" style="display:none;"></div>
-    <div id="guided-tour-modal" style="display:none;"></div>
-
     <!-- Include the recurring modal template -->
     {% include 'recurring_modal.html' %}
 
@@ -587,6 +582,7 @@
 
     <!------------------------------ Javascript -------------------------->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
 
     <script type="text/javascript">
         /////////////////////////// Global Definitions /////////////////////
@@ -4789,8 +4785,20 @@
             // This triggers the existing resize listener that recalculates the current-week outline
             setTimeout(() => { window.dispatchEvent(new Event('resize')); }, 0);
 
-            // Start the guided tour overlay after updateView completes
-            setTimeout(startGuidedTourOverlay, 0);
+            // Start page tutorial after view is fully rendered
+            setTimeout(function() {
+                startTutorial('tutorial_dashboard_3m', [
+                    { selector: '#nav-inline-buttons', text: 'Switch between Day, Week, Month, Month Overview, and Year views using these icons.' },
+                    { selector: '#calendarnavbuttons', text: 'Navigate between months. The calendar icon returns you to the current month.' },
+                    { selector: '#month-table-container', text: 'Each cell shows one day. Tap a day to see its entries.' },
+                    { selector: '#income-table, #income-categories-table', text: 'This row shows your total income for the selected day.' },
+                    { selector: '#expenses-table, #expense-categories-table', text: 'This row shows your total expenses for the selected day.' },
+                    { selector: '.cas-table', text: 'If you have credit accounts, their expenses appear here.' },
+                    { selector: '#remainder-row-right, #remainder-row', text: 'The remainder shows income minus expenses. Green = positive, red = negative.' },
+                    { selector: '#unified-add-btn', text: 'Tap this icon to add a new income or expense entry for the selected day.' },
+                    { selector: '.nav-dash-container > a.nav-button:first-child', text: 'View and manage all your recurring entries from here.' }
+                ]);
+            }, 600);
 
             // Attach the touch event listeners to the month table container
             document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
@@ -6007,205 +6015,6 @@
         }
 
         // ==================== End Convert/Stop Recurring ====================
-
-        // Guided Tour Overlay
-        function startGuidedTourOverlay() {
-            var incomeRows = document.querySelectorAll('#income-categories-table tbody tr[data-category-id]');
-            var expenseRows = document.querySelectorAll('#expense-categories-table tbody tr[data-category-id]');
-            if (
-                localStorage.getItem('guidedTourCompleted') ||
-                incomeRows.length > 2 ||
-                expenseRows.length > 2
-            ) return;
-            const overlay = document.getElementById('guided-tour-overlay');
-            const highlight = document.getElementById('guided-tour-highlight');
-            const modal = document.getElementById('guided-tour-modal');
-            let step = 0;
-            const steps = [
-                {
-                    targets: [
-                        document.getElementById('income-table'),
-                        document.getElementById('income-categories-table')
-                    ],
-                    modalText: 'This is the income table. Here you can see and manage your income categories and entries.'
-                },
-                {
-                    targets: [
-                        document.getElementById('expenses-table'),
-                        document.getElementById('expense-categories-table')
-                    ],
-                    modalText: 'This is the expenses table. Here you can see and manage your expense categories and entries.'
-                },
-                {
-                    targets: [
-                        document.getElementById('remainder-row-right'),
-                        document.getElementById('remainder-row')
-                    ],
-                    modalText: 'This is the remainder row. You can see how much remains for each week.'
-                },
-                {
-                    targets: [
-                        document.getElementById('unified-recurring-btn')
-                    ],
-                    modalText: 'Start by creating recurring income or expenses. These are entries that happen on a consistent basis.'
-                },
-                {
-                    targets: [
-                        document.getElementById('unified-add-btn')
-                    ],
-                    modalText: 'You can also create manual categories that can be used to enter either income or expenses that are random.'
-                },
-                {
-                    targets: [
-                        document.getElementById('unified-edit-btn')
-                    ],
-                    modalText: 'Once you create categories, you can sort them, rename, hide them, or delete them with this button.'
-                },
-                {
-                    targets: [
-                        document.getElementById('toggle-all-hidden-btn')
-                    ],
-                    modalText: 'This is the toggle hidden category visibility button. The number is how many hidden categories you have.'
-                },
-                {
-                    targets: [
-                        document.getElementById('nav-dash-container')
-                    ],
-                    modalText: 'You are now in the week view. Use these buttons to navigate between Day, Week, Month, and Year Overviews.'
-                },
-                {
-                    targets: [
-                        document.getElementById('calendarnavbuttons')
-                    ],
-                    modalText: 'And lastly, in every view, you can navigate different weeks, months, or years using these buttons. Click Today to come back to the current one.'
-                }
-            ];
-            function getBoundingRectOfElements(elements) {
-                let rect = null;
-                let found = false;
-                elements.forEach(el => {
-                    if (!el) return;
-                    const r = el.getBoundingClientRect();
-                    if (r.width < 2 || r.height < 2) return;
-                    found = true;
-                    if (!rect) rect = {left: r.left, top: r.top, right: r.right, bottom: r.bottom};
-                    else {
-                        rect.left = Math.min(rect.left, r.left);
-                        rect.top = Math.min(rect.top, r.top);
-                        rect.right = Math.max(rect.right, r.right);
-                        rect.bottom = Math.max(rect.bottom, r.bottom);
-                    }
-                });
-                return found ? rect : null;
-            }
-            function showStep(idx) {
-                const s = steps[idx];
-                if (!s) {
-                    // No more steps, end tour
-                    hideAll();
-                    localStorage.setItem('guidedTourCompleted', '1');
-                    window.removeEventListener('click', onClick, true);
-                    return;
-                }
-                // Highlight
-                const rect = getBoundingRectOfElements(s.targets);
-                if (!rect || rect.left === undefined || rect.top === undefined || rect.right === undefined || rect.bottom === undefined || rect.right - rect.left < 2 || rect.bottom - rect.top < 2) {
-                    // If no valid rect, skip to next step
-                    showStep(idx + 1);
-                    return;
-                }
-                highlight.style.display = 'block';
-                if (idx === 0 || idx === 1) {
-                    // Logic when idx is 0 or 1
-                    highlight.style.left = rect.left + window.scrollX - 8 + 'px';
-                    highlight.style.top = rect.top + window.scrollY - 33 + 'px';
-                    highlight.style.width = (rect.right - rect.left + 16) + 'px';
-                    highlight.style.height = (rect.bottom - rect.top + 30) + 'px';
-                } else if (idx === 2) {
-                    // Logic specifically for idx === 2
-                    highlight.style.left = rect.left + window.scrollX - 8 + 'px';
-                    highlight.style.top = rect.top + window.scrollY - 7 + 'px';
-                    highlight.style.width = (rect.right - rect.left + 16) + 'px';
-                    highlight.style.height = (rect.bottom - rect.top + 15) + 'px';
-                } else if (idx === 3 || idx === 4 || idx === 5 || idx === 6) {
-                    // Logic for any other value of idx
-                    highlight.style.left = rect.left + window.scrollX - 8 + 'px';
-                    highlight.style.top = rect.top + window.scrollY - 8 + 'px';
-                    highlight.style.width = (rect.right - rect.left + 16) + 'px';
-                    highlight.style.height = (rect.bottom - rect.top + 16) + 'px';
-                } else if (idx === 7 || idx === 8) {
-                    // Logic for any other value of idx
-                    highlight.style.left = rect.left + window.scrollX - 8 + 'px';
-                    highlight.style.top = rect.top + window.scrollY - 8 + 'px';
-                    highlight.style.width = (rect.right - rect.left + 16) + 'px';
-                    highlight.style.height = (rect.bottom - rect.top + 16) + 'px';
-                }
-
-                // Overlay
-                overlay.style.display = 'block';
-                // Modal
-                modal.textContent = s.modalText;
-                modal.style.display = 'block';
-                if ([0, 1, 2].includes(idx)) {
-                    // Center the modal horizontally relative to the highlighted area
-                    modal.style.left = (rect.left + window.scrollX + (rect.right - rect.left) / 2 - modal.offsetWidth / 2) + 'px';
-                } else if ([3, 4, 5, 6, 7].includes(idx)) {
-                    // Align the modal's left edge to the highlight's left edge
-                    modal.style.left = (rect.left + window.scrollX) + 'px';
-                } else if (idx === 8) {
-                    // Align the modal's right edge to the highlight's right edge
-                    modal.style.left = (rect.right + window.scrollX - modal.offsetWidth) + 'px';
-                }
-                // Place modal above highlight for step 2, below for step 1
-                if (idx === 0) {
-                    modal.style.top = (rect.bottom + window.scrollY + 5) + 'px';
-                } else if (idx === 1) {
-                    modal.style.top = (rect.top + window.scrollY - modal.offsetHeight - 40) + 'px';
-                } else if (idx === 2) {
-                    modal.style.top = (rect.top + window.scrollY - modal.offsetHeight - 10) + 'px';
-                } else if (idx === 3 || idx === 4 || idx === 5 || idx === 6) {
-                    modal.style.top = (rect.bottom + window.scrollY + 15) + 'px';
-                } else if (idx === 7 || idx === 8) {
-                    modal.style.top = (rect.bottom + window.scrollY + 15) + 'px';
-                }
-
-                // Ensure modal stays within screen horizontally
-                const modalLeft = parseInt(modal.style.left);
-                if (modalLeft < 0) modal.style.left = '8px';
-                if (modalLeft + modal.offsetWidth > window.innerWidth) {
-                    modal.style.left = (window.innerWidth - modal.offsetWidth - 8) + 'px';
-                }
-
-                // If modal would be offscreen, adjust
-                if (parseInt(modal.style.top) < 0) modal.style.top = (rect.bottom + window.scrollY + 18) + 'px';
-                if (parseInt(modal.style.left) + modal.offsetWidth > window.innerWidth) modal.style.left = (window.innerWidth - modal.offsetWidth - 24) + 'px';
-            }
-            function hideAll() {
-                overlay.style.display = 'none';
-                highlight.style.display = 'none';
-                modal.style.display = 'none';
-            }
-            function nextStep() {
-                step++;
-                if (step >= steps.length) {
-                    hideAll();
-                    localStorage.setItem('guidedTourCompleted', '1');
-                    window.removeEventListener('click', onClick, true);
-                } else {
-                    showStep(step);
-                }
-            }
-            function onClick(e) {
-                // Prevent click from interacting with page
-                e.stopPropagation();
-                e.preventDefault();
-                nextStep();
-            }
-            setTimeout(function() {
-                showStep(0);
-                window.addEventListener('click', onClick, true);
-            }, 400);
-        }
 
         document.addEventListener('DOMContentLoaded', function() {
             // Restore toggle state from localStorage

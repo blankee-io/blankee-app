@@ -110,7 +110,7 @@
                             </form>
                             <form id="goofy-week-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="goofy_week_mode">Goofy Week Mode:</label>
+                                    <label for="goofy_week_mode">Friday Start Week:</label>
                                     <input type="text" disabled class="hidden-spacer">
                                     <input type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %} class="hidden-checkbox">
                                     <button type="button" class="toggle-switch" data-checkbox="goofy_week_mode">
@@ -118,6 +118,7 @@
                                     </button>
                                 </div>
                             </form>
+                            <p class="setting-description">Shifts your budget week to Friday–Thursday instead of the default Saturday–Friday.</p>
                         </div>
                     </div>
                     <div class="notification-section">
@@ -400,15 +401,15 @@
                         data: { goofy_week_mode: goofyWeekMode },
                         success: function(response) {
                             if (response.status === 'success') {
-                                showSuccessMessage('Goofy Week Mode ' + (goofyWeekMode ? 'enabled' : 'disabled'));
+                                showSuccessMessage('Friday Start Week ' + (goofyWeekMode ? 'enabled' : 'disabled'));
                                 saveDailyTotalsAndRemainders();
                                 saveCaDailyBalance();
                             } else {
-                                showToast('Error updating Goofy Week Mode: ' + response.message, 'error');
+                                showToast('Error updating Friday Start Week: ' + response.message, 'error');
                             }
                         },
                         error: function() {
-                            showToast('An error occurred while updating Goofy Week Mode.', 'error');
+                            showToast('An error occurred while updating Friday Start Week.', 'error');
                         }
                     });
                 });

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 _apns_client = None
 _apns_topic = None
-_apns_sandbox = True
+_apns_sandbox = False
 # change the above line to 'False' if you want to default to production environment for APNs #
 
 def _get_client():
