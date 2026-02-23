@@ -1866,6 +1866,9 @@ def recalculate_weekly_totals(cursor, conn, user_id, start_date, date_to_remaind
         for week_date in all_week_dates:
             week_start, week_end = get_week_range(week_date)
 
+            # In goofy mode, store on Thursday (week_end) instead of Friday (week_start)
+            store_date = week_end if goofy_week_mode else week_date
+
             total_income = 0
             current_date = week_start
             while current_date <= week_end:
@@ -1878,22 +1881,22 @@ def recalculate_weekly_totals(cursor, conn, user_id, start_date, date_to_remaind
                 total_expenses += expense_by_date.get(current_date, 0)
                 current_date += timedelta(days=1)
 
-            prev_week_date = week_date - timedelta(days=7)
+            prev_store_date = store_date - timedelta(days=7)
             # Try to get from date_to_remainder first (already calculated this run)
-            if prev_week_date in date_to_remainder:
-                last_week_remainder = date_to_remainder[prev_week_date]
+            if prev_store_date in date_to_remainder:
+                last_week_remainder = date_to_remainder[prev_store_date]
             else:
                 # REDIS-FIRST: Check Redis before MySQL
                 last_week_remainder = None
                 if is_user_hydrated(user_id):
-                    last_week_remainder = get_remainder_from_redis('totals_remainders', user_id, prev_week_date)
+                    last_week_remainder = get_remainder_from_redis('totals_remainders', user_id, prev_store_date)
                 
                 # Fallback to MySQL if not in Redis
                 if last_week_remainder is None:
                     cursor.execute("""
                         SELECT remainder FROM totals_remainders
                         WHERE user_id = %s AND date = %s
-                    """, (user_id, prev_week_date))
+                    """, (user_id, prev_store_date))
                     row = cursor.fetchone()
                     last_week_remainder = float(row[0]) if row and row[0] is not None else 0.0
 
@@ -1901,14 +1904,14 @@ def recalculate_weekly_totals(cursor, conn, user_id, start_date, date_to_remaind
             week_remainder = total_income_with_remainder - total_expenses
 
             updates.append({
-                'date': week_date,
+                'date': store_date,
                 'total_income': float(total_income_with_remainder),
                 'total_expenses': float(total_expenses),
                 'remainder': float(week_remainder),
                 'last_week_remainder': float(last_week_remainder)
             })
 
-            date_to_remainder[week_date] = week_remainder
+            date_to_remainder[store_date] = week_remainder
 
         # REDIS-FIRST: If hydrated, update Redis only (flush worker syncs to MySQL)
         if is_user_hydrated(user_id):
@@ -2396,24 +2399,29 @@ def recalculate_ca_weekly_balances(cursor, conn, user_id, start_date, goofy_week
                         payments_by_date[entry_date] = payments_by_date.get(entry_date, 0) + float(entry.get('amount', 0))
 
             # Get previous week balance (REDIS-FIRST)
-            prev_week = earliest_week - timedelta(days=7)
+            # In goofy mode, stored data is on Thursday (week_end), so look up previous Thursday
+            earliest_ws, earliest_we = get_week_range(earliest_week)
+            prev_store_date = (earliest_we if goofy_week_mode else earliest_week) - timedelta(days=7)
             last_week_balance = None
             
             if is_user_hydrated(user_id):
-                last_week_balance = get_ca_balance_from_redis('c_a_balances', user_id, account_id, prev_week)
+                last_week_balance = get_ca_balance_from_redis('c_a_balances', user_id, account_id, prev_store_date)
             
             # Fallback to MySQL if not in Redis
             if last_week_balance is None:
                 cursor.execute("""
                     SELECT balance FROM c_a_balances
                     WHERE account_id = %s AND date = %s
-                """, (account_id, prev_week))
+                """, (account_id, prev_store_date))
                 prev_row = cursor.fetchone()
                 last_week_balance = float(prev_row[0]) if prev_row and prev_row[0] is not None else 0.0
 
             updates = []
             for week_date in all_week_dates:
                 week_start, week_end = get_week_range(week_date)
+
+                # In goofy mode, store on Thursday (week_end) instead of Friday (week_start)
+                store_date = week_end if goofy_week_mode else week_date
                 
                 total_expenses = 0
                 total_payments = 0
@@ -2427,7 +2435,7 @@ def recalculate_ca_weekly_balances(cursor, conn, user_id, start_date, goofy_week
                 
                 updates.append({
                     'account_id': account_id,
-                    'date': week_date,
+                    'date': store_date,
                     'total_expenses': float(total_expenses),
                     'total_payments': float(total_payments),
                     'balance': float(balance)
@@ -3153,7 +3161,20 @@ def process_user(cursor, conn, user_row):
     profile_id = user_row[3]
     session_token = user_row[4]
     session_expires = user_row[5]
-    goofy_week_mode = bool(user_row[6]) if len(user_row) > 6 else False
+
+    # Fetch goofy_week_mode: Redis first if hydrated, then MySQL fallback
+    goofy_week_mode = None
+    if is_user_hydrated(user_id):
+        try:
+            cached = redis_client.get(f"users:{REDIS_KEY_VERSION}:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+                if 'goofy_week_mode' in user_data:
+                    goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+        except Exception:
+            pass
+    if goofy_week_mode is None:
+        goofy_week_mode = bool(user_row[6]) if len(user_row) > 6 else False
     
     logger.info(f"Processing user {user_id} ({first_name or email})")
     

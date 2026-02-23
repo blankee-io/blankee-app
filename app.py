@@ -5616,6 +5616,9 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
         for week_date in all_week_dates:
             week_start, week_end = get_week_range(week_date)
 
+            # In goofy mode, store on Thursday (week_end) instead of Friday (week_start)
+            store_date = week_end if goofy_week_mode else week_date
+
             # Calculate total income for this week
             total_income = 0
             current_date = week_start
@@ -5630,24 +5633,24 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
                 total_expenses += expense_by_date.get(current_date, 0)
                 current_date += timedelta(days=1)
 
-            # Get last week's remainder
-            prev_week_date = week_date - timedelta(days=7)
-            last_week_remainder = date_to_remainder.get(prev_week_date, 0)
+            # Get last week's remainder (use store_date for consistent keying)
+            prev_store_date = store_date - timedelta(days=7)
+            last_week_remainder = date_to_remainder.get(prev_store_date, 0)
 
             # Add last week's remainder to income
             total_income_with_remainder = total_income + float(last_week_remainder)
             week_remainder = total_income_with_remainder - total_expenses
 
             redis_updates.append({
-                'date': week_date,
+                'date': store_date,
                 'total_income': float(total_income_with_remainder),
                 'total_expenses': float(total_expenses),
                 'remainder': float(week_remainder),
                 'last_week_remainder': float(last_week_remainder)
             })
 
-            # Update date_to_remainder for next week
-            date_to_remainder[week_date] = week_remainder
+            # Update date_to_remainder for next week (keyed by store_date)
+            date_to_remainder[store_date] = week_remainder
         
         cursor.close()
         
@@ -6222,8 +6225,11 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
             
             prev_balances = {}
             for week_date in all_week_dates:
-                prev_week = week_date - timedelta(days=7)
-                if prev_week < start_date:
+                week_start, week_end = week_ranges[week_date]
+                # In goofy mode, stored on Thursday (week_end); in normal mode, stored on Friday (week_date)
+                store_date = week_end if goofy_week_mode else week_date
+                prev_store_date = store_date - timedelta(days=7)
+                if prev_store_date < start_date:
                     balance_found = False
                     
                     # Check Redis cache first
@@ -6232,8 +6238,8 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
                             bal_date = bal.get('date')
                             if isinstance(bal_date, str):
                                 bal_date = datetime.strptime(bal_date, '%Y-%m-%d').date()
-                            if bal_date == prev_week:
-                                prev_balances[week_date] = float(bal.get('balance', 0))
+                            if bal_date == prev_store_date:
+                                prev_balances[store_date] = float(bal.get('balance', 0))
                                 balance_found = True
                                 break
                     
@@ -6242,14 +6248,17 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
                         cursor.execute("""
                             SELECT balance FROM c_a_balances
                             WHERE account_id = %s AND date = %s
-                        """, (account_id, prev_week))
+                        """, (account_id, prev_store_date))
                         prev_row = cursor.fetchone()
-                        prev_balances[week_date] = float(prev_row['balance']) if prev_row and prev_row['balance'] is not None else 0.0
+                        prev_balances[store_date] = float(prev_row['balance']) if prev_row and prev_row['balance'] is not None else 0.0
             
             # Prepare data for Redis
             redis_updates = []
             for week_date in sorted(all_week_dates):
                 week_start, week_end = week_ranges[week_date]
+
+                # In goofy mode, store on Thursday (week_end) instead of Friday (week_start)
+                store_date = week_end if goofy_week_mode else week_date
                 
                 # Sum expenses for this week
                 total_expenses = 0.0
@@ -6266,24 +6275,24 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
                     current_date += timedelta(days=1)
                 
                 # Get previous week's balance
-                prev_week_date = week_date - timedelta(days=7)
+                prev_store_date = store_date - timedelta(days=7)
                 # Use precalculated value if available, otherwise use calculated value
-                last_week_balance = prev_balances.get(week_date, prev_balances.get(prev_week_date, 0.0))
+                last_week_balance = prev_balances.get(store_date, prev_balances.get(prev_store_date, 0.0))
                 
                 # Calculate new balance
                 balance = last_week_balance + total_expenses - total_payments
                 
-                # Store for Redis
+                # Store for Redis (keyed by store_date)
                 redis_updates.append({
                     'account_id': account_id,
-                    'date': week_date,
+                    'date': store_date,
                     'total_expenses': float(total_expenses),
                     'total_payments': float(total_payments),
                     'balance': float(balance)
                 })
                 
-                # Save for subsequent weeks
-                prev_balances[week_date] = balance
+                # Save for subsequent weeks (keyed by store_date)
+                prev_balances[store_date] = balance
             
             # Add to aggregated updates
             if redis_updates:
@@ -6564,14 +6573,16 @@ def save_totals_remainders_d():
             for daily_row in cached_daily:
                 current_date = datetime.strptime(daily_row['date'], '%Y-%m-%d').date() if isinstance(daily_row['date'], str) else daily_row['date']
                 
-                # Find the most recent previous Friday
+                # Find the most recent previous week-end date
+                # In goofy mode, weekly data is stored on Thursday (weekday 3)
+                # In normal mode, weekly data is stored on Friday (weekday 4)
                 if goofy_week_mode:
-                    prev_friday = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
                 else:
-                    prev_friday = current_date - timedelta(days=7)
+                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
                 
-                prev_friday_str = prev_friday.isoformat()
-                last_week_remainder = float(weekly_by_date.get(prev_friday_str, {}).get('remainder', 0.0))
+                prev_week_end_str = prev_week_end.isoformat()
+                last_week_remainder = float(weekly_by_date.get(prev_week_end_str, {}).get('remainder', 0.0))
                 
                 result = {
                     'date': current_date if isinstance(current_date, date) else datetime.strptime(current_date, '%Y-%m-%d').date(),
@@ -6628,16 +6639,18 @@ def save_totals_remainders_d():
 
             results = []
             for current_date in all_dates:
-                # Find the most recent previous Friday
+                # Find the most recent previous week-end date
+                # In goofy mode, weekly data is stored on Thursday (weekday 3)
+                # In normal mode, weekly data is stored on Friday (weekday 4)
                 if goofy_week_mode:
-                    prev_friday = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
                 else:
-                    prev_friday = current_date - timedelta(days=7)
+                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
 
                 cursor.execute("""
                     SELECT remainder FROM totals_remainders
                     WHERE user_id = %s AND date = %s
-                """, (user_id, prev_friday))
+                """, (user_id, prev_week_end))
                 last_week_remainder_row = cursor.fetchone()
                 last_week_remainder = float(last_week_remainder_row[0]) if last_week_remainder_row else 0.0
 
@@ -8435,22 +8448,10 @@ def get_week_totals_batch():
         return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
     
     dates = [d.strip() for d in dates_param.split(',') if d.strip()]
-    goofy = request.args.get('goofy', '0') == '1'
     
-    # In goofy mode, frontend sends Thursday (end-of-week) dates.
-    # Translate to Friday (storage key) for lookup, but return results keyed by original date.
-    lookup_map = {}  # lookup_date -> original_date
-    if goofy:
-        for d in dates:
-            try:
-                dt = datetime.strptime(d, '%Y-%m-%d').date()
-                friday = dt - timedelta(days=6)
-                lookup_map[friday.strftime('%Y-%m-%d')] = d
-            except Exception:
-                lookup_map[d] = d
-    else:
-        for d in dates:
-            lookup_map[d] = d
+    # Dates come in as-is (Thursday in goofy mode, Friday in normal mode)
+    # since weekly data is now stored on the correct day in both modes
+    lookup_map = {d: d for d in dates}
     
     lookup_dates = list(lookup_map.keys())
     
@@ -8551,22 +8552,10 @@ def get_ca_balances_batch():
         return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
     
     dates = [d.strip() for d in dates_param.split(',') if d.strip()]
-    goofy = request.args.get('goofy', '0') == '1'
     
-    # In goofy mode, frontend sends Thursday (end-of-week) dates.
-    # Translate to Friday (storage key) for lookup, return results keyed by original date.
-    lookup_map = {}  # lookup_date -> original_date
-    if goofy:
-        for d in dates:
-            try:
-                dt = datetime.strptime(d, '%Y-%m-%d').date()
-                friday = dt - timedelta(days=6)
-                lookup_map[friday.strftime('%Y-%m-%d')] = d
-            except Exception:
-                lookup_map[d] = d
-    else:
-        for d in dates:
-            lookup_map[d] = d
+    # Dates come in as-is (Thursday in goofy mode, Friday in normal mode)
+    # since weekly CA data is now stored on the correct day in both modes
+    lookup_map = {d: d for d in dates}
     
     lookup_dates = list(lookup_map.keys())
     
@@ -8810,13 +8799,24 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
             
         entries = json.loads(redis_data)
         
-        # Get user's goofy_week_mode setting
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-            user_row = cursor.fetchone()
-            goofy_week_mode = bool(user_row['goofy_week_mode']) if user_row else False
-            cursor.close()
+        # Get user's goofy_week_mode setting (Redis first, then MySQL)
+        goofy_week_mode = None
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(f"users:v1:{user_id}")
+                if cached:
+                    user_data = json.loads(cached)
+                    if 'goofy_week_mode' in user_data:
+                        goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+            except Exception:
+                pass
+        if goofy_week_mode is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+                user_row = cursor.fetchone()
+                goofy_week_mode = bool(user_row['goofy_week_mode']) if user_row else False
+                cursor.close()
         
         # Helper to get period key based on aggregation type
         def get_period_key(date_val):
@@ -8831,12 +8831,14 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                 month_end = dt.replace(day=last_day)
                 return month_end.strftime('%Y-%m-%d')
             elif aggregation == 'week':
-                # Return week end (Friday or Saturday based on goofy mode)
                 if goofy_week_mode:
+                    # Goofy mode: week is Fri→Thu, period key is Thursday (week end)
                     days_since_friday = (dt.weekday() - 4) % 7
                     week_start = dt - timedelta(days=days_since_friday)
-                    return week_start.strftime('%Y-%m-%d')
+                    week_end = week_start + timedelta(days=6)  # Thursday
+                    return week_end.strftime('%Y-%m-%d')
                 else:
+                    # Normal mode: week is Sat→Fri, period key is Friday (week end)
                     days_until_friday = (4 - dt.weekday()) % 7
                     week_end = dt + timedelta(days=days_until_friday)
                     return week_end.strftime('%Y-%m-%d')
@@ -15840,13 +15842,24 @@ def generate_ca_expense_entries(recurring_id, category_id, amount, cadence_inter
             break
     
     # After generating all entries, update credit account balances
-    # Get goofy_week_mode for the user
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-        result = cursor.fetchone()
-        goofy_week_mode = bool(result[0]) if result else False
-        cursor.close()
+    # Get goofy_week_mode for the user (Redis first, then MySQL)
+    goofy_week_mode = None
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(f"users:v1:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+                if 'goofy_week_mode' in user_data:
+                    goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+        except Exception:
+            pass
+    if goofy_week_mode is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+            result = cursor.fetchone()
+            goofy_week_mode = bool(result[0]) if result else False
+            cursor.close()
     
     # Update CA balances (daily, weekly, monthly) - these now update Redis automatically
     update_daily_ca_totals(user_id, start_date)
