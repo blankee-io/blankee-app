@@ -1980,11 +1980,22 @@ button.login-button#register-button {
     margin-top: 10px;
 }
 
+.login-button.register-button-disabled {
+    background-color: var(--secondary-hover) !important;
+    cursor: not-allowed;
+}
+
+.recaptcha-row {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+}
+
 .logincontainer .login-button:hover,
 button.login-button:hover {
     box-shadow: 0 4px 16px var(--shadow-lg);
     transform: translateY(-1px);
-    background-color: var(--accent-hover);
+    background-color: var(--primary-hover);
 }
 
 .logincontainer .login-button:active,
@@ -2144,6 +2155,60 @@ button.login-button:active {
     font-weight: 600;
     letter-spacing: -0.5px;
     text-align: center;
+}
+
+/* Setup Profile Step Counter */
+.setup-step-counter {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 18px;
+}
+
+.setup-step-counter .step-circle {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.setup-step-counter .step-circle.completed {
+    background-color: var(--primary);
+    color: var(--text-light);
+    opacity: 0.45;
+}
+
+.setup-step-counter .step-circle.active {
+    background-color: var(--primary);
+    color: var(--text-light);
+    box-shadow: 0 0 0 3px var(--primary-lighter), 0 2px 8px var(--shadow-md);
+    transform: scale(1.15);
+}
+
+.setup-step-counter .step-circle.upcoming {
+    background-color: transparent;
+    color: var(--secondary);
+    border: 2px solid var(--secondary-hover);
+}
+
+.setup-step-counter .step-separator {
+    width: 14px;
+    height: 2px;
+    background-color: var(--secondary-hover);
+    margin: 0 3px;
+    flex-shrink: 0;
+    transition: background-color 0.3s ease;
+}
+
+.setup-step-counter .step-separator.completed {
+    background-color: var(--primary);
+    opacity: 0.45;
 }
 
 /* Target only elements within the setup profile form */
@@ -2352,6 +2417,25 @@ transform: scale(1.02);
 .setup-profile-next-button:active,
 .setup-profile-submit-button:active {
     transform: translateY(0);
+}
+
+/* Setup skip link (text link below buttons) */
+.setup-skip-link-container {
+    text-align: center;
+    margin-top: 10px;
+}
+
+.setup-skip-link {
+    color: var(--secondary-dark);
+    font-size: 13px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.setup-skip-link:hover {
+    color: var(--primary);
+    text-decoration: underline;
 }
 
 /* Bank Connection Modal */
@@ -6914,7 +6998,7 @@ transform: scale(1.2);
 }
 
 .requirement-icon.valid {
-    color: green;
+    color: var(--success);
 }
 
 .password-requirements p {
@@ -10871,7 +10955,7 @@ html.modal-open {
 }
 
 .action-buttons .btn-primary:hover {
-    background-color: var(--primary);
+    background-color: var(--primary-hover);
     transform: translateY(-2px);
     box-shadow: 0 4px 16px var(--shadow-lg);
 }
