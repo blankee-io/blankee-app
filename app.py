@@ -775,6 +775,9 @@ def setup_profile():
         user_id = current_user.id
         redis_key = f"users:v1:{user_id}"
         member_since = None
+        setup_step = 0
+        mfa_enabled = False
+        user_data = None
         
         if r and app.config.get('REDIS_OK'):
             try:
@@ -782,16 +785,29 @@ def setup_profile():
                 if cached:
                     user_data = json.loads(cached)
                     member_since = user_data.get('member_since')
+                    setup_step = int(user_data.get('setup_step', 0))
+                    mfa_enabled = bool(user_data.get('mfa_secret'))
             except Exception:
                 pass
         
-        if member_since is None:
+        if member_since is None or user_data is None:
             try:
                 with get_db_pool().get_cursor(dictionary=True) as cursor:
-                    cursor.execute("SELECT member_since FROM users WHERE id = %s", (user_id,))
+                    cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
                     row = cursor.fetchone()
                     if row:
-                        member_since = row.get('member_since')
+                        if user_data is None:
+                            user_data = dict(row)
+                            # Convert non-serializable types
+                            for k, v in user_data.items():
+                                if isinstance(v, (date, datetime)):
+                                    user_data[k] = v.isoformat() if v else None
+                                elif isinstance(v, Decimal):
+                                    user_data[k] = float(v)
+                        if member_since is None:
+                            member_since = row.get('member_since')
+                        setup_step = int(row.get('setup_step', 0) or 0)
+                        mfa_enabled = bool(row.get('mfa_secret'))
             except Exception:
                 pass
         
@@ -800,27 +816,69 @@ def setup_profile():
             return redirect(url_for('dashboard_3m'))
     except Exception as e:
         print(f"[setup_profile] Error checking member_since: {e}")
+        setup_step = 0
+        mfa_enabled = False
+        user_data = {}
     
-    # Clean up any abandoned bank connections from a previous incomplete setup.
-    try:
-        from quiltt_redis import get_quiltt_connections, delete_quiltt_connection
-        user_id = current_user.id
-        connections = get_quiltt_connections(user_id)
-        if connections:
-            print(f"[setup_profile] Cleaning up {len(connections)} abandoned connection(s) for user {user_id}")
-            for conn in connections:
-                conn_id = conn.get('connection_id')
-                if conn_id:
-                    delete_quiltt_connection(conn_id, user_id)
-            print(f"[setup_profile] Cleanup complete for user {user_id}")
-    except Exception as e:
-        print(f"[setup_profile] Cleanup error (non-fatal): {e}")
+    if user_data is None:
+        user_data = {}
+
+    # Check if user has existing bank connections (for resuming)
+    bank_connected = False
+    if setup_step >= 3:  # Past bank connection step
+        try:
+            from quiltt_redis import get_quiltt_connections
+            connections = get_quiltt_connections(user_id)
+            if connections:
+                bank_connected = True
+        except Exception:
+            pass
+
+    # Only clean up connections if starting fresh (step 0)
+    if setup_step < 3:
+        try:
+            from quiltt_redis import get_quiltt_connections, delete_quiltt_connection
+            user_id = current_user.id
+            connections = get_quiltt_connections(user_id)
+            if connections:
+                print(f"[setup_profile] Cleaning up {len(connections)} abandoned connection(s) for user {user_id}")
+                for conn in connections:
+                    conn_id = conn.get('connection_id')
+                    if conn_id:
+                        delete_quiltt_connection(conn_id, user_id)
+                print(f"[setup_profile] Cleanup complete for user {user_id}")
+        except Exception as e:
+            print(f"[setup_profile] Cleanup error (non-fatal): {e}")
 
     # Get Quiltt connector ID from environment
     connector_id = os.getenv('QUILTT_CONNECTOR_ID', '')
     
-    # Render the setup profile page with connector ID
-    return render_template('setup_profile.html', connector_id=connector_id)
+    # Extract saved form data for prefilling
+    saved_first_name = user_data.get('first_name', '') or ''
+    saved_last_name = user_data.get('last_name', '') or ''
+    saved_currency_type = user_data.get('currency_type', 'USD') or 'USD'
+    saved_starting_savings = user_data.get('starting_savings', '') or ''
+    saved_balance_threshold = user_data.get('balance_threshold', '') or ''
+    saved_starting_balance = user_data.get('setup_starting_balance', '') or ''
+    saved_bank_flow = bool(user_data.get('setup_bank_flow', False))
+    saved_selected_account_ids = user_data.get('setup_selected_account_ids', []) or []
+    saved_categories = user_data.get('setup_categories', None)
+    
+    # Render the setup profile page with connector ID and resume state
+    return render_template('setup_profile.html',
+                           connector_id=connector_id,
+                           setup_step=setup_step,
+                           mfa_enabled=mfa_enabled,
+                           bank_connected=bank_connected,
+                           saved_first_name=saved_first_name,
+                           saved_last_name=saved_last_name,
+                           saved_currency_type=saved_currency_type,
+                           saved_starting_savings=saved_starting_savings,
+                           saved_balance_threshold=saved_balance_threshold,
+                           saved_starting_balance=saved_starting_balance,
+                           saved_bank_flow=saved_bank_flow,
+                           saved_selected_account_ids=saved_selected_account_ids,
+                           saved_categories=saved_categories)
 
 
 @app.route('/check_has_categories', methods=['GET'])
@@ -943,13 +1001,94 @@ def verify_mfa_setup():
     
     totp = pyotp.TOTP(secret)
     if totp.verify(code):
-        # Mark as verified in session but do NOT save to user record yet
-        session['setup_verified_mfa_secret'] = secret
-        # Clear the pending key (it's now verified)
+        # Save MFA secret immediately so it persists across page reloads
+        _update_user_setting_in_redis(current_user.id, 'mfa_secret', secret)
+        # Clear the pending key (it's now verified and saved)
         session.pop('pending_mfa_secret', None)
         return jsonify({'status': 'success'})
     else:
         return jsonify({'status': 'error', 'message': 'Invalid code'}), 400
+
+@app.route('/save_setup_step', methods=['POST'])
+@login_required
+def save_setup_step():
+    """Save which setup step the user has completed, plus any form data for that step."""
+    step = request.json.get('step', 0)
+    data = request.json.get('data', {})
+    print(f"[save_setup_step] Called with step={step}, data keys={list(data.keys()) if data else []}, user={current_user.id}")
+    try:
+        step = int(step)
+    except (ValueError, TypeError):
+        return jsonify({'status': 'error', 'message': 'Invalid step'}), 400
+
+    user_id = current_user.id
+    r = init_redis()
+    redis_key = f"users:v1:{user_id}"
+
+    if r and app.config.get('REDIS_OK'):
+        try:
+            cached = r.get(redis_key)
+            if cached:
+                user_data = json.loads(cached)
+            else:
+                # User not hydrated in Redis — load from MySQL first
+                with get_db_pool().get_cursor(dictionary=True) as cursor:
+                    cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+                    row = cursor.fetchone()
+                if row:
+                    user_data = dict(row)
+                    # Convert non-serializable types
+                    for k, v in user_data.items():
+                        if isinstance(v, (date, datetime)):
+                            user_data[k] = v.isoformat() if v else None
+                        elif isinstance(v, Decimal):
+                            user_data[k] = float(v)
+                else:
+                    user_data = None
+
+            if user_data:
+                user_data['setup_step'] = step
+
+                # Save permanent user fields directly (flush worker handles these)
+                DIRECT_FIELDS = ['first_name', 'last_name', 'currency_type', 'balance_threshold', 'starting_savings']
+                for field in DIRECT_FIELDS:
+                    if field in data and data[field] is not None:
+                        user_data[field] = data[field]
+
+                # Save temporary setup fields (persist in Redis only, not flushed to MySQL)
+                SETUP_FIELDS = ['setup_bank_flow', 'setup_starting_balance', 'setup_selected_account_ids', 'setup_categories']
+                for field in SETUP_FIELDS:
+                    if field in data:
+                        user_data[field] = data[field]
+
+                r.setex(redis_key, 604800, json.dumps(user_data, cls=DecimalEncoder))
+                # Mark users table as dirty so flush worker syncs to MySQL
+                r.sadd(f"dirty_tables:{user_id}", 'users')
+                return jsonify({'status': 'success'})
+        except Exception as e:
+            print(f"[save_setup_step] Redis error: {e}")
+
+    # Fallback: write directly to MySQL (only permanent fields)
+    try:
+        with get_db_pool().get_cursor() as cursor:
+            updates = ["setup_step = %s"]
+            params = [step]
+            DIRECT_FIELDS_SQL = {
+                'first_name': 'first_name', 'last_name': 'last_name',
+                'currency_type': 'currency_type', 'balance_threshold': 'balance_threshold',
+                'starting_savings': 'starting_savings'
+            }
+            for js_field, sql_col in DIRECT_FIELDS_SQL.items():
+                if js_field in data and data[js_field] is not None:
+                    updates.append(f"{sql_col} = %s")
+                    params.append(data[js_field])
+            params.append(user_id)
+            cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = %s", tuple(params))
+    except Exception as e:
+        print(f"[save_setup_step] MySQL error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    return jsonify({'status': 'success'})
 
 @app.route('/complete_profile_setup', methods=['POST'])
 @login_required
@@ -965,6 +1104,23 @@ def complete_profile_setup():
         first_name = request.json.get('first_name', '').strip()
         last_name = request.json.get('last_name', '').strip()
         selected_account_ids = request.json.get('selected_account_ids', [])
+
+        # If name or account IDs are empty (cross-browser resume), read from Redis
+        if not first_name or not last_name or not selected_account_ids:
+            r = init_redis()
+            if r and app.config.get('REDIS_OK'):
+                try:
+                    cached = r.get(f"users:v1:{current_user.id}")
+                    if cached:
+                        user_data = json.loads(cached)
+                        if not first_name:
+                            first_name = (user_data.get('first_name') or '').strip()
+                        if not last_name:
+                            last_name = (user_data.get('last_name') or '').strip()
+                        if not selected_account_ids:
+                            selected_account_ids = user_data.get('setup_selected_account_ids', [])
+                except Exception:
+                    pass
 
         print(f"[complete_profile_setup] starting_balance: {starting_balance}")
         print(f"[complete_profile_setup] starting_savings: {starting_savings}")
@@ -985,11 +1141,8 @@ def complete_profile_setup():
         if not first_name or not last_name:
             return jsonify({'status': 'error', 'message': 'First and last name are required'}), 400
 
-        # Apply deferred MFA secret if verified during setup
-        verified_mfa_secret = session.pop('setup_verified_mfa_secret', None)
-        if verified_mfa_secret:
-            print(f"[complete_profile_setup] Applying deferred MFA secret")
-            _update_user_setting_in_redis(current_user.id, 'mfa_secret', verified_mfa_secret)
+        # Clean up legacy deferred MFA session key (MFA is now saved immediately on verify)
+        session.pop('setup_verified_mfa_secret', None)
 
         # Apply deferred account activation if accounts were selected during setup
         if selected_account_ids:
@@ -1189,6 +1342,9 @@ def complete_profile_setup():
         # Clear setup session flags
         session.pop('setup_verified_mfa_secret', None)
         session.pop('pending_mfa_secret', None)
+
+        # Clear setup progress (setup is complete)
+        _update_user_setting_in_redis(current_user.id, 'setup_step', 0)
 
         # Return success response
         return jsonify({'status': 'success'})
@@ -5616,6 +5772,9 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
         for week_date in all_week_dates:
             week_start, week_end = get_week_range(week_date)
 
+            # In goofy mode, store on Thursday (week_end) instead of Friday (week_start)
+            store_date = week_end if goofy_week_mode else week_date
+
             # Calculate total income for this week
             total_income = 0
             current_date = week_start
@@ -5630,24 +5789,24 @@ def update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder
                 total_expenses += expense_by_date.get(current_date, 0)
                 current_date += timedelta(days=1)
 
-            # Get last week's remainder
-            prev_week_date = week_date - timedelta(days=7)
-            last_week_remainder = date_to_remainder.get(prev_week_date, 0)
+            # Get last week's remainder (use store_date for consistent keying)
+            prev_store_date = store_date - timedelta(days=7)
+            last_week_remainder = date_to_remainder.get(prev_store_date, 0)
 
             # Add last week's remainder to income
             total_income_with_remainder = total_income + float(last_week_remainder)
             week_remainder = total_income_with_remainder - total_expenses
 
             redis_updates.append({
-                'date': week_date,
+                'date': store_date,
                 'total_income': float(total_income_with_remainder),
                 'total_expenses': float(total_expenses),
                 'remainder': float(week_remainder),
                 'last_week_remainder': float(last_week_remainder)
             })
 
-            # Update date_to_remainder for next week
-            date_to_remainder[week_date] = week_remainder
+            # Update date_to_remainder for next week (keyed by store_date)
+            date_to_remainder[store_date] = week_remainder
         
         cursor.close()
         
@@ -6222,8 +6381,11 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
             
             prev_balances = {}
             for week_date in all_week_dates:
-                prev_week = week_date - timedelta(days=7)
-                if prev_week < start_date:
+                week_start, week_end = week_ranges[week_date]
+                # In goofy mode, stored on Thursday (week_end); in normal mode, stored on Friday (week_date)
+                store_date = week_end if goofy_week_mode else week_date
+                prev_store_date = store_date - timedelta(days=7)
+                if prev_store_date < start_date:
                     balance_found = False
                     
                     # Check Redis cache first
@@ -6232,8 +6394,8 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
                             bal_date = bal.get('date')
                             if isinstance(bal_date, str):
                                 bal_date = datetime.strptime(bal_date, '%Y-%m-%d').date()
-                            if bal_date == prev_week:
-                                prev_balances[week_date] = float(bal.get('balance', 0))
+                            if bal_date == prev_store_date:
+                                prev_balances[store_date] = float(bal.get('balance', 0))
                                 balance_found = True
                                 break
                     
@@ -6242,14 +6404,17 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
                         cursor.execute("""
                             SELECT balance FROM c_a_balances
                             WHERE account_id = %s AND date = %s
-                        """, (account_id, prev_week))
+                        """, (account_id, prev_store_date))
                         prev_row = cursor.fetchone()
-                        prev_balances[week_date] = float(prev_row['balance']) if prev_row and prev_row['balance'] is not None else 0.0
+                        prev_balances[store_date] = float(prev_row['balance']) if prev_row and prev_row['balance'] is not None else 0.0
             
             # Prepare data for Redis
             redis_updates = []
             for week_date in sorted(all_week_dates):
                 week_start, week_end = week_ranges[week_date]
+
+                # In goofy mode, store on Thursday (week_end) instead of Friday (week_start)
+                store_date = week_end if goofy_week_mode else week_date
                 
                 # Sum expenses for this week
                 total_expenses = 0.0
@@ -6266,24 +6431,24 @@ def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
                     current_date += timedelta(days=1)
                 
                 # Get previous week's balance
-                prev_week_date = week_date - timedelta(days=7)
+                prev_store_date = store_date - timedelta(days=7)
                 # Use precalculated value if available, otherwise use calculated value
-                last_week_balance = prev_balances.get(week_date, prev_balances.get(prev_week_date, 0.0))
+                last_week_balance = prev_balances.get(store_date, prev_balances.get(prev_store_date, 0.0))
                 
                 # Calculate new balance
                 balance = last_week_balance + total_expenses - total_payments
                 
-                # Store for Redis
+                # Store for Redis (keyed by store_date)
                 redis_updates.append({
                     'account_id': account_id,
-                    'date': week_date,
+                    'date': store_date,
                     'total_expenses': float(total_expenses),
                     'total_payments': float(total_payments),
                     'balance': float(balance)
                 })
                 
-                # Save for subsequent weeks
-                prev_balances[week_date] = balance
+                # Save for subsequent weeks (keyed by store_date)
+                prev_balances[store_date] = balance
             
             # Add to aggregated updates
             if redis_updates:
@@ -6564,14 +6729,16 @@ def save_totals_remainders_d():
             for daily_row in cached_daily:
                 current_date = datetime.strptime(daily_row['date'], '%Y-%m-%d').date() if isinstance(daily_row['date'], str) else daily_row['date']
                 
-                # Find the most recent previous Friday
+                # Find the most recent previous week-end date
+                # In goofy mode, weekly data is stored on Thursday (weekday 3)
+                # In normal mode, weekly data is stored on Friday (weekday 4)
                 if goofy_week_mode:
-                    prev_friday = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
                 else:
-                    prev_friday = current_date - timedelta(days=7)
+                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
                 
-                prev_friday_str = prev_friday.isoformat()
-                last_week_remainder = float(weekly_by_date.get(prev_friday_str, {}).get('remainder', 0.0))
+                prev_week_end_str = prev_week_end.isoformat()
+                last_week_remainder = float(weekly_by_date.get(prev_week_end_str, {}).get('remainder', 0.0))
                 
                 result = {
                     'date': current_date if isinstance(current_date, date) else datetime.strptime(current_date, '%Y-%m-%d').date(),
@@ -6628,16 +6795,18 @@ def save_totals_remainders_d():
 
             results = []
             for current_date in all_dates:
-                # Find the most recent previous Friday
+                # Find the most recent previous week-end date
+                # In goofy mode, weekly data is stored on Thursday (weekday 3)
+                # In normal mode, weekly data is stored on Friday (weekday 4)
                 if goofy_week_mode:
-                    prev_friday = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
                 else:
-                    prev_friday = current_date - timedelta(days=7)
+                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
 
                 cursor.execute("""
                     SELECT remainder FROM totals_remainders
                     WHERE user_id = %s AND date = %s
-                """, (user_id, prev_friday))
+                """, (user_id, prev_week_end))
                 last_week_remainder_row = cursor.fetchone()
                 last_week_remainder = float(last_week_remainder_row[0]) if last_week_remainder_row else 0.0
 
@@ -8435,22 +8604,10 @@ def get_week_totals_batch():
         return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
     
     dates = [d.strip() for d in dates_param.split(',') if d.strip()]
-    goofy = request.args.get('goofy', '0') == '1'
     
-    # In goofy mode, frontend sends Thursday (end-of-week) dates.
-    # Translate to Friday (storage key) for lookup, but return results keyed by original date.
-    lookup_map = {}  # lookup_date -> original_date
-    if goofy:
-        for d in dates:
-            try:
-                dt = datetime.strptime(d, '%Y-%m-%d').date()
-                friday = dt - timedelta(days=6)
-                lookup_map[friday.strftime('%Y-%m-%d')] = d
-            except Exception:
-                lookup_map[d] = d
-    else:
-        for d in dates:
-            lookup_map[d] = d
+    # Dates come in as-is (Thursday in goofy mode, Friday in normal mode)
+    # since weekly data is now stored on the correct day in both modes
+    lookup_map = {d: d for d in dates}
     
     lookup_dates = list(lookup_map.keys())
     
@@ -8551,22 +8708,10 @@ def get_ca_balances_batch():
         return jsonify({'status': 'error', 'message': 'Missing dates parameter'}), 400
     
     dates = [d.strip() for d in dates_param.split(',') if d.strip()]
-    goofy = request.args.get('goofy', '0') == '1'
     
-    # In goofy mode, frontend sends Thursday (end-of-week) dates.
-    # Translate to Friday (storage key) for lookup, return results keyed by original date.
-    lookup_map = {}  # lookup_date -> original_date
-    if goofy:
-        for d in dates:
-            try:
-                dt = datetime.strptime(d, '%Y-%m-%d').date()
-                friday = dt - timedelta(days=6)
-                lookup_map[friday.strftime('%Y-%m-%d')] = d
-            except Exception:
-                lookup_map[d] = d
-    else:
-        for d in dates:
-            lookup_map[d] = d
+    # Dates come in as-is (Thursday in goofy mode, Friday in normal mode)
+    # since weekly CA data is now stored on the correct day in both modes
+    lookup_map = {d: d for d in dates}
     
     lookup_dates = list(lookup_map.keys())
     
@@ -8810,13 +8955,24 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
             
         entries = json.loads(redis_data)
         
-        # Get user's goofy_week_mode setting
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-            user_row = cursor.fetchone()
-            goofy_week_mode = bool(user_row['goofy_week_mode']) if user_row else False
-            cursor.close()
+        # Get user's goofy_week_mode setting (Redis first, then MySQL)
+        goofy_week_mode = None
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(f"users:v1:{user_id}")
+                if cached:
+                    user_data = json.loads(cached)
+                    if 'goofy_week_mode' in user_data:
+                        goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+            except Exception:
+                pass
+        if goofy_week_mode is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+                user_row = cursor.fetchone()
+                goofy_week_mode = bool(user_row['goofy_week_mode']) if user_row else False
+                cursor.close()
         
         # Helper to get period key based on aggregation type
         def get_period_key(date_val):
@@ -8831,12 +8987,14 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
                 month_end = dt.replace(day=last_day)
                 return month_end.strftime('%Y-%m-%d')
             elif aggregation == 'week':
-                # Return week end (Friday or Saturday based on goofy mode)
                 if goofy_week_mode:
+                    # Goofy mode: week is Fri→Thu, period key is Thursday (week end)
                     days_since_friday = (dt.weekday() - 4) % 7
                     week_start = dt - timedelta(days=days_since_friday)
-                    return week_start.strftime('%Y-%m-%d')
+                    week_end = week_start + timedelta(days=6)  # Thursday
+                    return week_end.strftime('%Y-%m-%d')
                 else:
+                    # Normal mode: week is Sat→Fri, period key is Friday (week end)
                     days_until_friday = (4 - dt.weekday()) % 7
                     week_end = dt + timedelta(days=days_until_friday)
                     return week_end.strftime('%Y-%m-%d')
@@ -15840,13 +15998,24 @@ def generate_ca_expense_entries(recurring_id, category_id, amount, cadence_inter
             break
     
     # After generating all entries, update credit account balances
-    # Get goofy_week_mode for the user
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-        result = cursor.fetchone()
-        goofy_week_mode = bool(result[0]) if result else False
-        cursor.close()
+    # Get goofy_week_mode for the user (Redis first, then MySQL)
+    goofy_week_mode = None
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(f"users:v1:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+                if 'goofy_week_mode' in user_data:
+                    goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+        except Exception:
+            pass
+    if goofy_week_mode is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+            result = cursor.fetchone()
+            goofy_week_mode = bool(result[0]) if result else False
+            cursor.close()
     
     # Update CA balances (daily, weekly, monthly) - these now update Redis automatically
     update_daily_ca_totals(user_id, start_date)
@@ -20016,6 +20185,43 @@ def quiltt_delete():
     except Exception as e:
         app.logger.error(f"DELETE ERROR - Exception deleting Quiltt connection: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
+
+
+@app.route('/quiltt/delete-all-setup-connections', methods=['POST'])
+@login_required
+def quiltt_delete_all_setup_connections():
+    """Delete ALL Quiltt connections and accounts for the current user during setup.
+    Called when user navigates back to the bank connection step."""
+    try:
+        from quiltt_redis import get_quiltt_connections, delete_quiltt_connection
+        user_id = current_user.id
+        connections = get_quiltt_connections(user_id)
+        
+        if not connections:
+            return jsonify({'status': 'success', 'message': 'No connections to delete'})
+        
+        deleted = 0
+        profile = get_quiltt_profile(user_id)
+        session_token = profile.get('session_token') if profile else None
+        
+        for conn in connections:
+            conn_id = conn.get('connection_id')
+            if conn_id:
+                # Disconnect from Quiltt API first
+                if session_token:
+                    try:
+                        quiltt_client.disconnect_connection(session_token, conn_id)
+                    except Exception as e:
+                        app.logger.warning(f"[DELETE_ALL_SETUP] API disconnect failed for {conn_id}: {e}")
+                # Delete from our database (Redis + MySQL)
+                delete_quiltt_connection(conn_id, user_id)
+                deleted += 1
+        
+        app.logger.info(f"[DELETE_ALL_SETUP] Deleted {deleted} connections for user {user_id}")
+        return jsonify({'status': 'success', 'deleted': deleted})
+    except Exception as e:
+        app.logger.error(f"[DELETE_ALL_SETUP] Error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/quiltt/delete-unconfirmed', methods=['POST'])
@@ -24524,6 +24730,8 @@ def feedback_create_post():
                 except Exception as tag_err:
                     app.logger.warning(f"[FIDER] tag post failed: {tag_err}")
         return jsonify({'status': 'success', 'post': post})
+    except ValueError as ve:
+        return jsonify({'status': 'error', 'message': str(ve)}), 400
     except Exception as e:
         app.logger.error(f"[FIDER] create post error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500

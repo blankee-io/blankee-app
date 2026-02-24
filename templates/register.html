@@ -78,7 +78,7 @@
             </div>
             
             <!-- Google reCAPTCHA -->
-            <div class="login-row" style="margin-top: 20px; display: flex; justify-content: center;">
+            <div class="login-row recaptcha-row">
                 <div class="g-recaptcha" data-sitekey="6LdmCgAsAAAAALGB6JYlus0Rr9hepw1fbK70Bx9v" data-callback="recaptchaCallback"></div>
             </div>
             
@@ -128,8 +128,8 @@
             let isEmailValid = false;  // Track email validity
             let isCaptchaValid = false;  // Track CAPTCHA validity
             
-            // Set initial button color to grey
-            registerButton.css('background-color', '#ccc');
+            // Set initial button state to disabled styling
+            registerButton.addClass('register-button-disabled');
             
             // reCAPTCHA callback function
             window.recaptchaCallback = function() {
@@ -145,10 +145,10 @@
             function checkFormValidity() {
                 if (isEmailValid && isPasswordValid && isPasswordMatchValid && isCaptchaValid) {
                     registerButton.prop('disabled', false);  // Enable the register button
-                    registerButton.css('background-color', '#F15025');  // Set the button background color
+                    registerButton.removeClass('register-button-disabled');  // Enable styling
                 } else {
                     registerButton.prop('disabled', true);  // Disable the register button
-                    registerButton.css('background-color', '#ccc');  // Set the button background color
+                    registerButton.addClass('register-button-disabled');  // Disable styling
                 }
             }
 

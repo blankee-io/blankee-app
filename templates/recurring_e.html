@@ -1418,6 +1418,8 @@
             };
             editCatInput.addEventListener('input', editCatInput._dupInputHandler);
         }
+
+        $('#edit-recurring-expense-form').on('submit', function(event) {
             event.preventDefault();  // Prevent default form submission
 
             const recurringId = $('#edit-recurring-id').val();
