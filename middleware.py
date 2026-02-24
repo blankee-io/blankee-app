@@ -99,6 +99,7 @@ def init_redis_middleware(app):
         allowed_prefixes = (
             '/setup_profile',
             '/complete_profile_setup',
+            '/save_setup_step',
             '/verify_mfa_setup',
             '/enable_mfa',
             '/cancel_mfa',

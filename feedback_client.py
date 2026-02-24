@@ -24,6 +24,13 @@ class FiderClient:
         url = f"{self.base_url}{path}"
         try:
             response = self.session.request(method, url, timeout=_DEFAULT_TIMEOUT, **kwargs)
+            if not response.ok:
+                body = ''
+                try:
+                    body = response.text
+                except Exception:
+                    pass
+                logger.error(f"[FIDER] {method} {path} returned {response.status_code}: {body}")
             return response
         except Exception as exc:
             logger.error(f"[FIDER] Request error {method} {url}: {exc}")
@@ -73,6 +80,17 @@ class FiderClient:
     def create_post(self, user_id: int, title: str, description: str = "") -> Dict[str, Any]:
         headers = {"X-Fider-UserID": str(user_id)}
         resp = self._request("POST", "/api/v1/posts", json={"title": title, "description": description}, headers=headers)
+        if resp.status_code == 400:
+            try:
+                body = resp.json()
+                errors = body.get('errors', [])
+                if errors:
+                    messages = [e.get('message', '') for e in errors if e.get('message')]
+                    raise ValueError('; '.join(messages) if messages else 'Invalid request')
+            except ValueError:
+                raise
+            except Exception:
+                pass
         resp.raise_for_status()
         return resp.json()
 
