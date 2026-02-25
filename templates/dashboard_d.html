@@ -148,7 +148,6 @@
     </div>    
 
     <!-- Include the navigation bar -->
-    {% include 'footer.html' %}
 
     <!-- Link to the external JavaScript file -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
@@ -431,20 +430,20 @@
             if (entryType === 'income') {
                 incomeCategories.forEach(category => {
                     if (!category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
-                        dashboardDCategories.push({ id: category.id, name: category.name });
+                        dashboardDCategories.push({ id: category.id, name: category.name, is_recurring: category.is_recurring, is_auto_adjustment: category.is_auto_adjustment });
                     }
                 });
             } else if (entryType === 'expense') {
                 expenseCategories.forEach(category => {
                     if (!category.hidden && !category.is_bud) {
-                        dashboardDCategories.push({ id: category.id, name: category.name });
+                        dashboardDCategories.push({ id: category.id, name: category.name, is_recurring: category.is_recurring, is_credit_account: category.is_credit_account, is_auto_adjustment: category.is_auto_adjustment });
                     }
                 });
             } else if (entryType.startsWith('ca_')) {
                 const accountId = parseInt(entryType.split('_')[1]);
                 c_expense_categories.forEach(category => {
                     if (category.account_id === accountId && !category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
-                        dashboardDCategories.push({ id: category.id, name: category.name });
+                        dashboardDCategories.push({ id: category.id, name: category.name, is_recurring: category.is_recurring, is_interest: category.is_interest, is_auto_adjustment: category.is_auto_adjustment });
                     }
                 });
             }
@@ -486,7 +485,7 @@
                 dashboardDDropdown.style.display = 'block';
                 matchingCategories.forEach(cat => {
                     const div = document.createElement('div');
-                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${getCategoryIcon(cat)} ${cat.name}`;
                     div.className = 'category-dropdown-item search-result';
                     div.addEventListener('click', function() {
                         dashboardDCategoryInput.value = cat.name;
@@ -510,7 +509,7 @@
                 dashboardDDropdown.style.display = 'block';
                 catsToShow.forEach(cat => {
                     const div = document.createElement('div');
-                    div.textContent = cat.name;
+                    div.innerHTML = getCategoryIcon(cat) + ' ' + cat.name;
                     div.className = 'category-dropdown-item';
                     div.addEventListener('click', function() {
                         dashboardDCategoryInput.value = cat.name;
@@ -2940,7 +2939,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                 dashboardDEntryTypeDropdown.style.display = 'block';
                 matchingTypes.forEach(type => {
                     const div = document.createElement('div');
-                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${type.name}`;
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${getEntryTypeIcon(type)} ${type.name}`;
                     div.className = 'category-dropdown-item search-result';
                     div.addEventListener('click', function() {
                         dashboardDEntryTypeInput.value = type.name;
@@ -2965,7 +2964,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                 dashboardDEntryTypeDropdown.style.display = 'block';
                 typesToShow.forEach(type => {
                     const div = document.createElement('div');
-                    div.textContent = type.name;
+                    div.innerHTML = getEntryTypeIcon(type) + ' ' + type.name;
                     div.className = 'category-dropdown-item';
                     div.addEventListener('click', function() {
                         dashboardDEntryTypeInput.value = type.name;
