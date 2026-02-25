@@ -957,244 +957,7 @@ body {
     box-shadow: 0 4px 16px var(--shadow-lg);
 }
 
-
-/* /////////////////////////////////  Footer Bar /////////////////////////// */
-
-/* Footer bar container */
-.footer-bar {
-    position: fixed;
-    bottom: 0;
-    left: 50%;
-    z-index: 100;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 80px;
-    transform: translateX(-50%);
-}
-
-/* Main Add button */
-.footer-add-button {
-    position: relative;
-    z-index: 103;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 60px;
-    height: 60px;
-    background: linear-gradient(135deg, var(--secondary-dark) 0%, var(--text-dark) 100%);
-    border: none;
-    border-radius: 50%;
-    box-shadow: 0 2px 12px var(--shadow-lg);
-    color: var(--text-light);
-    font-size: 24px;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    outline: none;
-}
-
-.footer-add-button:hover {
-    box-shadow: 0 4px 16px var(--shadow-lg);
-    transform: scale(1.08);
-}
-
-.footer-add-button:active {
-    transform: scale(0.95);
-}
-
-/* Sub-buttons for Income and Expense */
-.footer-sub-button {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    z-index: 102;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 50px;
-    height: 50px;
-    border: none;
-    border-radius: 50%;
-    box-shadow: 0 2px 12px var(--shadow-lg);
-    color: white;
-    font-size: 20px;
-    transition: transform 0.3s cubic-bezier(.4,2,.6,1), opacity 0.2s, box-shadow 0.2s;
-    transform: translate(-50%, -50%);
-    cursor: pointer;
-    background-color: var(--accent);
-    outline: none;
-    opacity: 0;
-    pointer-events: none;
-}
-
-#footer-income-button {
-    z-index: 102;
-    background-color: var(--primary);
-}
-
-#footer-expense-button {
-    z-index: 102;
-    background-color: var(--accent);
-}
-
-#footer-ca-button {
-    z-index: 102;
-    background-color: var(--accent);
-}
-
-#footer-autobalance-button {
-    z-index: 102;
-    background-color: var(--secondary-dark);
-}
-
-/* When active, show the sub-buttons and move them */
-.footer-bar.active #footer-income-button {
-    transform: translate(-50%, calc(-50% - 185px));
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.footer-bar.active #footer-expense-button {
-    transform: translate(-50%, calc(-50% - 125px));
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.footer-bar.active #footer-ca-button {
-    transform: translate(-50%, calc(-50% - 65px));
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.footer-bar.active #footer-autobalance-button {
-    transform: translate(-50%, calc(-50% - 245px));
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.footer-sub-button i {
-    position: relative;
-    z-index: 3;
-}
-
-/* Label Styling */
-.footer-button-label {
-    position: absolute;
-    top: 50%;
-    z-index: 101;
-    width: 0;
-    height: 50px;
-    padding: 0 12px 0 55px;
-    overflow: hidden;
-    border: none;
-    border-radius: 25px;
-    box-shadow: 0 0 6px var(--shadow-xxl);
-    color: var(--text-dark);
-    font-size: 12px;
-    font-weight: 700;
-    transform: translate(0, -50%) scaleX(0.7);
-    cursor: pointer;
-    transform-origin: left center;
-    min-width: 0;
-    outline: none;
-    opacity: 0;
-    line-height: 50px;
-    white-space: nowrap;
-    pointer-events: none;
-    box-sizing: border-box;
-}
-
-.footer-button-label:hover {
-    background-color: var(--primary-lighter);
-    transform: scale(1.2);
-}
-
-.footer-bar.active #footer-income-label {
-    left: calc(50% - 24.5px);
-    width: 190px;
-    /* width is longest now */ 
-    /* width starts after transform */
-    transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
-    transform: translate(0, calc(-50% - 185px)) scaleX(1);
-    background-color: var(--primary-lighter);
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.footer-income-label:hover {
-    background-color: var(--primary-lighter);
-    transform: scale(1.2);
-}
-
-.footer-bar.active #footer-expense-label {
-    left: calc(50% - 24.5px);
-    width: 199px;
-    /* width is longest now */ 
-
-    /* width starts after transform */
-    transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
-    transform: translate(0, calc(-50% - 125px)) scaleX(1);
-    background-color: var(--accent-lighter);
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.footer-expense-label:hover {
-    background-color: var(--primary-lighter);
-    transform: scale(1.2);
-}
-
-.footer-bar.active #footer-ca-label {
-    left: calc(50% - 24.5px);
-    width: 190px;
-    /* width is longest now */
-
-    /* width starts after transform */
-    transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
-    transform: translate(0, calc(-50% - 65px)) scaleX(1);
-    background-color: var(--primary-lighter);
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.footer-ca-label:hover {
-    background-color: var(--primary-lighter);
-    transform: scale(1.2);
-}
-
-.footer-bar.active #footer-autobalance-label {
-    left: calc(50% - 24.5px);
-    width: 199px;
-    /* width is longest now */
-
-    /* width starts after transform */
-    transition: width 0.3s cubic-bezier(.4,2,.6,1) 0.22s, opacity 0.1s ease 0.22s, transform 0.3s cubic-bezier(.4,2,.6,1) 0s; 
-    transform: translate(0, calc(-50% - 245px)) scaleX(1);
-    background-color: var(--secondary);
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.footer-autobalance-label:hover {
-    background-color: var(--primary-lighter);
-    transform: scale(1.2);
-}
-
-#footer-income-label span,
-#footer-expense-label span,
-#footer-autobalance-label span {
-    opacity: 0;
-}
-
-#footer-income-button:hover ~ #footer-income-label span,
-#footer-income-button:focus ~ #footer-income-label span,
-#footer-expense-button:hover ~ #footer-expense-label span,
-#footer-expense-button:focus ~ #footer-expense-label span, 
-#footer-autobalance-button:hover ~ #footer-autobalance-label span,
-#footer-autobalance-button:focus ~ #footer-autobalance-label span {
-    opacity: 1;
-transform: scale(1.2);
-}
+/* ── Shared Modal & Form Styles (used by buds, credit accounts, dashboard-d) ── */
 
 /* Modal container */
 .footer-modal {
@@ -1239,7 +1002,7 @@ transform: scale(1.2);
     color: var(--text-dark);
     text-decoration: none;
     cursor: pointer;
-transform: scale(1.2);
+    transform: scale(1.2);
 }
 
 /* Modal header */
@@ -1250,10 +1013,7 @@ transform: scale(1.2);
 }
 
 #dashboard-d-entryType-input,
-#dashboard-d-category-input,
-#footer-category-input,
-#footer-ca-account-input,
-#footer-ca-category-input {
+#dashboard-d-category-input {
     width: 100%;
     height: 38px;
     padding: 8px 12px;
@@ -1263,10 +1023,7 @@ transform: scale(1.2);
 }
 
 #dashboard-d-entryType-input:focus,
-#dashboard-d-category-input:focus,
-#footer-category-input:focus,
-#footer-ca-account-input:focus,
-#footer-ca-category-input:focus {
+#dashboard-d-category-input:focus {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 2px var(--primary-lighter);
@@ -1301,8 +1058,6 @@ transform: scale(1.2);
     border-radius: 8px;
     font-size: 14px;
     transition: all 0.2s ease;
-    appearance: none;
-    appearance: none;
     appearance: none;
     box-sizing: border-box;
 }
@@ -1363,62 +1118,10 @@ transform: scale(1.2);
     user-select: none;
 }
 
-/* Submit button */
-button#autobalance-submit {
-    width: 100%;
-    padding: 12px 24px;
-    border: none;
-    border-radius: 10px;
-    box-shadow: 0 2px 12px var(--shadow-lg);
-    color: white;
-    font-size: 1rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    background-color: var(--accent);
-}
-
-button#autobalance-submit:hover {
-    box-shadow: 0 4px 16px var(--shadow-lg);
-    transform: translateY(-1px);
-    background-color: var(--accent-hover);
-}
-
-button#autobalance-submit:active {
-    box-shadow: 0 1px 8px var(--shadow-lg);
-    transform: translateY(0);
-}
-
-/* Confirm starting balance change button */
-#confirm-starting-balance-change {
-    width: 100%;
-    padding: 12px 24px;
-    border: none;
-    border-radius: 10px;
-    box-shadow: 0 2px 12px var(--shadow-lg);
-    color: white;
-    font-size: 1rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    background-color: var(--primary);
-}
-
-#confirm-starting-balance-change:hover {
-    box-shadow: 0 4px 16px var(--shadow-lg);
-    transform: translateY(-1px);
-}
-
-#confirm-starting-balance-change:active {
-    box-shadow: 0 1px 8px var(--shadow-lg);
-    transform: translateY(0);
-}
-
 /* Mobile responsiveness */
 @media screen and (width <= 600px) {
     .footer-modal-content {
-        /* Make the modal slightly narrower on small screens */
-        width: 350px; 
+        width: 350px;
     }
 }
 
@@ -1452,86 +1155,6 @@ transform: scale(1.2);
 .add-credit-account-modal-content h3 {
     margin-top: 0;
     color: var(--text-dark);
-}
-
-/* Auto Balance Modal Styles */
-#autobalance-modal {
-    position: fixed; inset: 0;
-    z-index: 9999;
-    display: none;
-    justify-content: center;
-    align-items: center;
-    width: 100vw; height: 100vh;
-    background: var(--shadow-xxl);
-    backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-}
-
-#autobalance-modal .autobalance-modal-content {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    width: 90vw;
-    max-width: 400px;
-    margin: auto;
-    padding: 2rem 1.5rem 1.5rem;
-    background: var(--text-light);
-    border-radius: 16px;
-    box-shadow: 0 10px 40px var(--shadow-lg);
-    box-sizing: border-box;
-}
-
-#autobalance-modal .footer-close-modal {
-    position: absolute;
-    top: 12px;
-    right: 18px;
-    color: var(--secondary);
-    font-size: 1.5rem;
-    cursor: pointer;
-}
-
-#autobalance-modal h3 {
-    margin-top: 0;
-    margin-bottom: 0.5rem;
-    text-align: center;
-}
-
-#autobalance-modal p {
-    margin-bottom: 1.2rem;
-    font-size: 1rem;
-    text-align: center;
-}
-
-#autobalance-modal .footer-form-group {
-    margin-bottom: 1rem;
-}
-
-#autobalance-modal input[type="\"number\""] {
-    width: 100%;
-    height: 38px;
-    padding: 8px 12px;
-    border: 1px solid var(--secondary-hover);
-    border-radius: 6px;
-    font-size: 14px;
-    box-sizing: border-box;
-}
-
-#autobalance-modal button[type="\"button\""] {
-    width: 100%;
-    padding: 0.7rem;
-    background: var(--success);
-    border: none;
-    border-radius: 6px;
-    color: var(--text-light);
-    font-size: 1.1rem;
-    font-weight: bold;
-    cursor: pointer;
-}
-
-#autobalance-modal button[type="\"button\""]:hover {
-    background: var(--success);
-    transform: scale(1.2);
 }
 
 /* /////////////////////////////////  Calendar Nav /////////////////////////// */
@@ -13036,6 +12659,22 @@ transform: scale(1.2);
 .category-dropdown-item.search-result .search-icon {
     color: var(--secondary);
     font-size: 0.85em;
+}
+
+/* Category icons inside dropdown items */
+.category-dropdown-item .category-icon,
+.pending-transactions-category-dropdown-item .category-icon {
+    font-size: 10px;
+    margin-right: 6px;
+    color: var(--secondary-dark);
+    width: 14px;
+    text-align: center;
+    display: inline-block;
+}
+
+.category-dropdown-item .category-icon-flip,
+.pending-transactions-category-dropdown-item .category-icon-flip {
+    transform: scaleX(-1);
 }
 
 .dropdown-separator {

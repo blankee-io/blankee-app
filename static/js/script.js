@@ -147,6 +147,38 @@ function _removeToast(el) {
 }
 
 /**
+ * Return the icon HTML for a category based on its properties.
+ * Works for income, expense, and credit account categories.
+ * @param {object} cat  Category object with name, is_bud, is_recurring, is_credit_account, is_auto_adjustment, is_interest
+ * @returns {string} HTML string for the icon <i> element
+ */
+function getCategoryIcon(cat) {
+    if (!cat) return '<i class="fa-regular fa-folder category-icon"></i>';
+    if (cat.is_bud) return '<i class="fa-regular fa-seedling category-icon"></i>';
+    if (cat.is_credit_account && cat.is_recurring) return '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
+    if (cat.name === 'Savings' && cat.is_recurring) return '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
+    if (cat.name === 'Savings') return '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
+    if (cat.is_recurring) return '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
+    if (cat.is_credit_account) return '<i class="fa-regular fa-credit-card category-icon"></i>';
+    if (cat.is_interest) return '<i class="fa-regular fa-percent category-icon"></i>';
+    if (cat.is_auto_adjustment) return '<i class="fa-regular fa-lock category-icon"></i>';
+    return '<i class="fa-regular fa-folder category-icon"></i>';
+}
+
+/**
+ * Return the icon HTML for an entry type in the dashboard_d add-entry dropdown.
+ * @param {object} type  Entry type object with id and name
+ * @returns {string} HTML string for the icon <i> element
+ */
+function getEntryTypeIcon(type) {
+    if (!type) return '';
+    if (type.id === 'income') return '<i class="fa-solid fa-plus category-icon"></i>';
+    if (type.id === 'expense') return '<i class="fa-solid fa-minus category-icon"></i>';
+    if (type.id && type.id.startsWith('ca_')) return '<i class="fa-kit fa-solid-credit-card-circle-minus category-icon"></i>';
+    return '';
+}
+
+/**
  * Show an inline warning right above the end-date options inside a .date-row,
  * with an orange highlight border around the options area.
  * @param {string} endDateSelector  jQuery selector for the end-date <input>
