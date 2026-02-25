@@ -421,7 +421,7 @@
                 dropdown.style.display = 'block';
                 matchingCategories.forEach(cat => {
                     const div = document.createElement('div');
-                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${cat.name}`;
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${getCategoryIcon(cat)} ${cat.name}`;
                     div.className = 'pending-transactions-category-dropdown-item search-result';
                     div.addEventListener('click', function() {
                         input.value = cat.name;
@@ -437,13 +437,12 @@
                 }
             }
 
-            // All other categories
             const catsToShow = searchLower.length > 0 ? nonMatchingCategories : categories;
             if (catsToShow.length > 0) {
                 dropdown.style.display = 'block';
                 catsToShow.forEach(cat => {
                     const div = document.createElement('div');
-                    div.textContent = cat.name;
+                    div.innerHTML = getCategoryIcon(cat) + ' ' + cat.name;
                     div.className = 'pending-transactions-category-dropdown-item';
                     div.addEventListener('click', function() {
                         input.value = cat.name;
