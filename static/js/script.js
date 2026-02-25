@@ -146,6 +146,42 @@ function _removeToast(el) {
     el.addEventListener('animationend', function() { el.remove(); });
 }
 
+/**
+ * Show an inline warning right above the end-date options inside a .date-row,
+ * with an orange highlight border around the options area.
+ * @param {string} endDateSelector  jQuery selector for the end-date <input>
+ */
+function showEndDateWarning(endDateSelector) {
+    var $endDate = $(endDateSelector);
+    var $dateRow = $endDate.closest('.date-row');
+    if (!$dateRow.length) return;
+
+    // Remove any existing warning first
+    $dateRow.find('.end-date-inline-toast').remove();
+    $dateRow.removeClass('end-date-warning-highlight');
+
+    // Add highlight
+    $dateRow.addClass('end-date-warning-highlight');
+
+    // Create floating toast (absolute positioned, no layout shift)
+    var $toast = $('<div class="end-date-inline-toast">' +
+        '<i class="fa-solid fa-triangle-exclamation"></i>' +
+        '<span>Please select an end date option.</span>' +
+        '</div>');
+
+    $dateRow.append($toast);
+
+    // Scroll into view
+    $toast[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    // Auto remove after 4 seconds
+    setTimeout(function() {
+        $dateRow.removeClass('end-date-warning-highlight');
+        $toast.addClass('end-date-inline-toast-removing');
+        $toast.on('animationend', function() { $toast.remove(); });
+    }, 4000);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // GENERIC CONFIRM MODAL
 // ═══════════════════════════════════════════════════════════════

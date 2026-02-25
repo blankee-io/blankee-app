@@ -42,7 +42,6 @@
                 <div class="profile-actions">                
                     <div class="data-section">
                         <div class="section-liner">
-                            <!-- Starting Balance Form -->
                             <form id="currency-type-form" class="profile-form">
                                 <div class="input-group">
                                     <label for="currency_type">Currency:</label>
@@ -55,33 +54,6 @@
                                     </button>
                                 </div>
                             </form>
-                            <form id="starting-balance-form" class="profile-form">
-                                <div class="input-group">
-                                    <label for="starting_balance">Start Balance:</label>
-                                    <div class="currency-input-container">
-                                        <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                                        <input type="number" name="starting_balance" id="starting_balance" class="login-input" value="{{ starting_balance }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
-                                    </div>
-                                    <button type="submit" class="submit-button">
-                                        <i id="starting-balance-submit-icon" class="fas fa-check"></i>
-                                    </button>
-                                </div>
-                            </form>
-
-                            <!-- Starting Savings Form -->
-                            <form id="starting-savings-form" class="profile-form">
-                                <div class="input-group">
-                                    <label for="starting_savings">Start Savings:</label>
-                                    <div class="currency-input-container">
-                                        <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                                        <input type="number" name="starting_savings" id="starting_savings" class="login-input" value="{{ starting_savings }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
-                                    </div>
-                                    <button type="submit" class="submit-button">
-                                        <i id="starting-savings-submit-icon" class="fas fa-check"></i>
-                                    </button>
-                                </div>
-                            </form>
-            
                             <!-- Balance Threshold Form -->
                             <form id="balance-threshold-form" class="profile-form">
                                 <div class="input-group">
@@ -140,28 +112,6 @@
         </div>
     </div>
 
-    <div id="starting-balance-modal" class="modal" style="display:none;">
-        <div id="starting-balance-modal-content" class="modal-content">
-            <span class="close-modal" id="close-starting-balance-modal">&times;</span>
-            <h2>Change Starting Balance</h2>
-            <p>
-                Changing the starting balance will update <strong>all totals</strong> because it is the balance that you start with.
-            </p>
-            <button id="confirm-starting-balance-change" class="submit-button">Continue</button>
-        </div>
-    </div>
-
-    <div id="starting-savings-modal" class="modal" style="display:none;">
-        <div id="starting-savings-modal-content" class="modal-content">
-            <span class="close-modal" id="close-starting-savings-modal">&times;</span>
-            <h2>Change Starting Savings</h2>
-            <p>
-                Changing the starting savings will update <strong>all savings calculations</strong> because it is the savings balance that you started with.
-            </p>
-            <button id="confirm-starting-savings-change" class="submit-button">Continue</button>
-        </div>
-    </div>
-
     <!-- Include the recurring modal template -->
     {% include 'loading_modals.html' %}
 
@@ -184,73 +134,11 @@
             // For example, you can add similar logic to enable/disable buttons for balance fields
 
             // Format existing values to show .00 on page load
-            const startingBalance = $('#starting_balance');
             const balanceThreshold = $('#balance_threshold');
-            
-            if (startingBalance.val() && !isNaN(startingBalance.val())) {
-                startingBalance.val(parseFloat(startingBalance.val()).toFixed(2));
-            }
             
             if (balanceThreshold.val() && !isNaN(balanceThreshold.val())) {
                 balanceThreshold.val(parseFloat(balanceThreshold.val()).toFixed(2));
             }
-
-            // Enable submit button on form input and validate decimals
-            $('#starting_balance').on('input', function() {
-                $('#starting-balance-submit-icon').removeClass('fa-times').addClass('fa-check');
-                let value = this.value;
-                // Allow only one decimal point
-                const parts = value.split('.');
-                if (parts.length > 2) {
-                    this.value = parts[0] + '.' + parts.slice(1).join('');
-                    value = this.value;
-                }
-                // Limit to 2 decimal places
-                if (value.includes('.')) {
-                    const decimals = value.split('.');
-                    if (decimals[1] && decimals[1].length > 2) {
-                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
-                    }
-                }
-            });
-
-            // Format to show .00 on blur
-            $('#starting_balance').on('blur', function() {
-                if (this.value && !isNaN(this.value)) {
-                    this.value = parseFloat(this.value).toFixed(2);
-                }
-            });
-
-            // Starting Savings input handling
-            const startingSavings = $('#starting_savings');
-            if (startingSavings.val() && !isNaN(startingSavings.val())) {
-                startingSavings.val(parseFloat(startingSavings.val()).toFixed(2));
-            }
-
-            $('#starting_savings').on('input', function() {
-                $('#starting-savings-submit-icon').removeClass('fa-times').addClass('fa-check');
-                let value = this.value;
-                // Allow only one decimal point
-                const parts = value.split('.');
-                if (parts.length > 2) {
-                    this.value = parts[0] + '.' + parts.slice(1).join('');
-                    value = this.value;
-                }
-                // Limit to 2 decimal places
-                if (value.includes('.')) {
-                    const decimals = value.split('.');
-                    if (decimals[1] && decimals[1].length > 2) {
-                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
-                    }
-                }
-            });
-
-            // Format to show .00 on blur
-            $('#starting_savings').on('blur', function() {
-                if (this.value && !isNaN(this.value)) {
-                    this.value = parseFloat(this.value).toFixed(2);
-                }
-            });
 
             $('#balance_threshold').on('input', function() {
                 $('#balance-threshold-submit-icon').removeClass('fa-times').addClass('fa-check');
@@ -320,24 +208,6 @@
                 });
             });
         });
-
-        function saveTotalsAndRemainders() {
-            $.ajax({
-                url: '/save_totals_remainders_d',
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({}),
-                success: function(response) {
-                    if (response.status === 'success') {
-                        // Update the local totals and remainders here or refresh the view
-                        // Optionally: update the totals and remainders in the UI without reloading the page
-                    } else {
-                    }
-                },
-                error: function(error) {
-                }
-            });
-        }        
 
         $(document).ready(function() {
             $('#currency-type-form').on('submit', function(event) {
@@ -446,113 +316,6 @@
                 });
             }
 
-            let originalStartingBalance = $('#starting_balance').val();
-            let pendingStartingBalance = null;
-
-            // Always keep track of the original value on focus
-            $('#starting_balance').on('focus', function() {
-                originalStartingBalance = $(this).val();
-            });
-
-            $('#starting-balance-form').on('submit', function(event) {
-                event.preventDefault();
-                pendingStartingBalance = $('#starting_balance').val();
-                $('#starting-balance-modal').css('display', 'flex');
-            });
-
-            $('#close-starting-balance-modal').on('click', function() {
-                $('#starting-balance-modal').css('display', 'none');
-                $('#starting_balance').val(originalStartingBalance); // Reset immediately
-                pendingStartingBalance = null;
-            });
-
-            $('#confirm-starting-balance-change').on('click', function() {
-                if (pendingStartingBalance !== null) {
-                    $.ajax({
-                        url: "{{ url_for('update_starting_balance') }}",
-                        method: "POST",
-                        data: { starting_balance: pendingStartingBalance },
-                        success: function(response) {
-                            showSuccessMessage('Starting balance updated successfully');
-                            saveTotalsAndRemainders();
-                        },
-                        error: function() {
-                            showToast('An error occurred while updating the starting balance.', 'error');
-                        },
-                        complete: function() {
-                            $('#starting-balance-modal').css('display', 'none');
-                            pendingStartingBalance = null;
-                            // Optionally update originalStartingBalance here if you want to reflect the new value without reload:
-                            // originalStartingBalance = $('#starting_balance').val();
-                        }
-                    });
-                }
-            });
-            // Allow closing the modal by clicking the background overlay
-            $('#starting-balance-modal').on('click', function(event) {
-                // Only close if the click is directly on the modal background, not the content
-                if (event.target === this) {
-                    $(this).css('display', 'none');
-                    $('#starting_balance').val(originalStartingBalance); // Reset immediately
-                    pendingStartingBalance = null;
-                }
-            });
-
-            // Starting Savings form handling
-            let originalStartingSavings = $('#starting_savings').val();
-            let pendingStartingSavings = null;
-
-            $('#starting_savings').on('focus', function() {
-                originalStartingSavings = $(this).val();
-            });
-
-            $('#starting-savings-form').on('submit', function(event) {
-                event.preventDefault();
-                pendingStartingSavings = $('#starting_savings').val();
-                $('#starting-savings-modal').css('display', 'flex');
-            });
-
-            $('#close-starting-savings-modal').on('click', function() {
-                $('#starting-savings-modal').css('display', 'none');
-                $('#starting_savings').val(originalStartingSavings);
-                pendingStartingSavings = null;
-            });
-
-            $('#confirm-starting-savings-change').on('click', function() {
-                if (pendingStartingSavings !== null) {
-                    $.ajax({
-                        url: "{{ url_for('update_starting_savings') }}",
-                        method: "POST",
-                        data: { starting_savings: pendingStartingSavings },
-                        success: function(response) {
-                            if (response.status === 'success') {
-                                showSuccessMessage('Starting savings updated successfully');
-                                saveDailyTotalsAndRemainders();
-                                originalStartingSavings = pendingStartingSavings;
-                            } else {
-                                showToast('Error updating starting savings: ' + response.message, 'error');
-                                $('#starting_savings').val(originalStartingSavings);
-                            }
-                        },
-                        error: function() {
-                            showToast('An error occurred while updating the starting savings.', 'error');
-                            $('#starting_savings').val(originalStartingSavings);
-                        },
-                        complete: function() {
-                            $('#starting-savings-modal').css('display', 'none');
-                            pendingStartingSavings = null;
-                        }
-                    });
-                }
-            });
-
-            $('#starting-savings-modal').on('click', function(event) {
-                if (event.target === this) {
-                    $(this).css('display', 'none');
-                    $('#starting_savings').val(originalStartingSavings);
-                    pendingStartingSavings = null;
-                }
-            });
         });
 
         function saveDailyTotalsAndRemainders() {

@@ -1784,6 +1784,49 @@ transform: scale(1.2);
     transition-delay: 0s;
 }
 
+/* Hide tooltip when popover dropdown is open on the button itself */
+.popover-open > .nav-tooltip {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    transition-delay: 0s !important;
+}
+
+/* When any dropdown is open, show all category-btn-container tooltips on top */
+.category-btn-container.popover-active .nav-tooltip {
+    top: auto;
+    bottom: 120%;
+}
+
+.category-btn-container.popover-active .nav-tooltip::after {
+    top: auto;
+    bottom: -7px;
+    border-width: 7px 7px 0;
+    border-color: var(--primary-lighter) transparent transparent;
+}
+
+.category-btn-container.popover-active *:hover > .nav-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 0.3s;
+}
+
+.category-btn-container.popover-active .popover-open > .nav-tooltip {
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+/* Label header inside type-selector popover */
+.type-selector-label {
+    padding: 6px 14px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--secondary-dark);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    border-bottom: 1px solid var(--secondary-hover);
+    margin-bottom: 2px;
+}
+
 @media (width <=460px) {
     .nav-tooltip {
         display: none;
@@ -2582,28 +2625,68 @@ transform: scale(1.02);
     max-width: 220px;
     outline: none;
     transition: border-color 0.2s, background 0.2s;
+    cursor: default;
 }
 
-.account-alias-input:hover {
+.account-alias-input[readonly] {
+    pointer-events: none;
+}
+
+.account-alias-input:not([readonly]):hover {
     border-color: var(--secondary-hover);
     background: var(--secondary-lighter);
 }
 
-.account-alias-input:focus {
+.account-alias-input:not([readonly]):focus {
     border-color: var(--primary);
     background: var(--white);
     box-shadow: 0 0 0 2px var(--primary-lighter);
+    cursor: text;
 }
 
 .account-alias-edit-icon {
-    font-size: 0.7em;
-    color: var(--secondary);
-    opacity: 0.5;
-    transition: opacity 0.2s;
-    pointer-events: none;
+    font-size: 0.95em;
+    color: var(--secondary-dark);
+    opacity: 0.7;
+    transition: opacity 0.2s, color 0.2s;
+    cursor: pointer;
+    pointer-events: auto;
 }
 
-.account-selection-name:hover .account-alias-edit-icon {
+.account-alias-edit-icon:hover {
+    opacity: 1;
+    color: var(--primary);
+}
+
+.account-alias-edit-icon.editing {
+    display: none;
+}
+
+.account-alias-save-icon {
+    font-size: 0.95em;
+    color: var(--success);
+    opacity: 0;
+    transition: opacity 0.2s, color 0.2s, transform 0.2s;
+    cursor: pointer;
+    pointer-events: none;
+    width: 0;
+    overflow: hidden;
+}
+
+.account-alias-save-icon.visible {
+    opacity: 1;
+    pointer-events: auto;
+    width: auto;
+    overflow: visible;
+}
+
+.account-alias-save-icon:hover {
+    opacity: 1;
+    color: var(--success-hover);
+    transform: scale(1.2);
+}
+
+.account-selection-name:hover .account-alias-edit-icon:not(.editing) {
     opacity: 1;
 }
 
@@ -2612,16 +2695,37 @@ transform: scale(1.02);
     background: none;
     border: none;
     cursor: pointer;
-    color: var(--secondary);
-    font-size: 0.7em;
+    color: var(--secondary-dark);
+    font-size: 0.9em;
     padding: 2px 4px;
     transition: color 0.2s, transform 0.2s;
     margin-left: 4px;
 }
 
 .account-rename-btn:hover {
-    color: var(--secondary-dark);
-    transform: scale(1.2);
+    color: var(--primary);
+    transform: scale(1.15);
+}
+
+.account-rename-save-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--success);
+    font-size: 0.9em;
+    padding: 2px 4px;
+    transition: color 0.2s, transform 0.2s;
+    margin-left: 2px;
+    display: none;
+}
+
+.account-rename-save-btn.visible {
+    display: inline-flex;
+}
+
+.account-rename-save-btn:hover {
+    color: var(--success-hover);
+    transform: scale(1.15);
 }
 
 .account-rename-input {
@@ -7529,7 +7633,7 @@ transform: scale(1.2);
 }
 
 .mfa-digit {
-    width: 35px;
+    width: 40px;
     height: 48px;
     font-size: 1.4em;
     text-align: center;
@@ -7537,6 +7641,8 @@ transform: scale(1.2);
     border-radius: 8px;
     background: var(--text-light);
     transition: border-color 0.2s, box-shadow 0.2s;
+    padding: 0;
+    box-sizing: border-box;
 }
 
 .mfa-digit:focus {
@@ -11738,7 +11844,7 @@ transform: scale(1.2);
 .summary-right-column {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* Buffer Card Styles */
@@ -11869,10 +11975,16 @@ transform: scale(1.2);
     gap: 24px;
 }
 
+#ca-graphs-container {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
 .summary-section {
     background: var(--text-light);
     border-radius: 12px;
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* Expense Buckets Section */
@@ -11882,10 +11994,11 @@ transform: scale(1.2);
 
 /* Credit Account Expense Buckets Section */
 #c-expense-buckets-section .summary-section-header {
-    background: var(--text-dark);
+    background: var(--secondary);
 }
 
 .summary-section-header {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -11894,6 +12007,33 @@ transform: scale(1.2);
     font-weight: 600;
     color: var(--text-light);
     padding-left: 10px;
+    border-radius: 12px 12px 0 0;
+}
+
+.summary-section > :last-child {
+    border-radius: 0 0 12px 12px;
+    overflow: hidden;
+}
+
+.summary-section-header.has-negative-warning::after {
+    content: '!';
+    position: absolute;
+    right: -4px;
+    top: 0px;
+    transform: translateY(-50%);
+    z-index: 2;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 15px;
+    height: 15px;
+    background: var(--danger);
+    border: 2px solid var(--secondary-dark);
+    border-radius: 50%;
+    color: var(--text-light);
+    font-size: 11px;
+    font-weight: bold;
+    pointer-events: none;
 }
 
 .summary-section-header i {
@@ -12062,26 +12202,82 @@ transform: scale(1.2);
 }
 
 /* Balance Graph Section */
-#balance-graph-section {
+#balance-graph-section,
+#savings-graph-section,
+[id^="ca-graph-section-"] {
     background: var(--text-light);
     max-width: 100%;
-    overflow: hidden;
+    overflow: visible;
 }
 
 #balance-graph-section .summary-section-header {
-    background: var(--secondary);
+    background: var(--primary);
     justify-content: flex-start;
+}
+
+#savings-graph-section .summary-section-header {
+    background: var(--primary);
+    justify-content: flex-start;
+}
+
+.ca-graph-header {
+    background: var(--secondary) !important;
+    justify-content: flex-start;
+}
+
+.ca-bucket-header {
+    background: var(--secondary);
+    margin-top: 0;
+    border-radius: 0;
+}
+
+.savings-graph-header {
+    justify-content: flex-start;
+}
+
+/* Bill status display in summary rows */
+.summary-bill-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.summary-bill-status .status-paid,
+.summary-bill-status .status-unpaid {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.summary-bill-status .bill-amount {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.summary-bill-status .bill-amount.paid {
+    color: var(--success);
+}
+
+.summary-bill-status .bill-amount.unpaid {
+    color: var(--danger);
 }
 
 .trend-indicator {
     margin-left: auto;
     margin-right: 12px;
-    font-size: 16px;
+    font-size: 19px;
+}
+
+.trend-indicator i {
+    font-size: 19px;
 }
 
 .trend-indicator.trend-up,
 .trend-indicator.trend-up i {
-    color: var(--primary);
+    color: var(--text-light);
 }
 
 .trend-indicator.trend-down,
@@ -12090,7 +12286,7 @@ transform: scale(1.2);
 }
 
 .trend-indicator.trend-flat {
-    color: var(--secondary-lighter);
+    color: var(--text-light);
 }
 
 .graph-controls {
@@ -12178,16 +12374,6 @@ transform: scale(1.2);
     height: 100%;
     color: var(--secondary);
     font-size: 14px;
-}
-
-.graph-date-indicator {
-    padding: 10px 16px;
-    background: var(--secondary-lighter);
-    border-top: 1px solid var(--secondary-lighter);
-    text-align: center;
-    font-size: 13px;
-    color: var(--text-dark);
-    font-weight: 500;
 }
 
 /* Test Purchase Modal */
@@ -13907,6 +14093,44 @@ transform: scale(1.2);
 @keyframes toastOut {
     from { opacity: 1; transform: translateY(0); }
     to   { opacity: 0; transform: translateY(-20px); }
+}
+
+/* ── Inline End-Date Warning ── */
+.date-row.end-date-warning-highlight {
+    position: relative;
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    border-radius: 8px;
+}
+
+.end-date-inline-toast {
+    position: absolute;
+    top: -6px;
+    left: 10%;
+    transform: translate(-50%, -100%);
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent);
+    color: var(--text-light);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px var(--shadow-xl);
+    animation: toastIn 0.3s ease forwards;
+}
+
+.end-date-inline-toast i {
+    flex-shrink: 0;
+    font-size: 14px;
+}
+
+.end-date-inline-toast-removing {
+    animation: toastOut 0.25s ease forwards;
 }
 
 /* ═══════════════════════════════════════════════════════════════

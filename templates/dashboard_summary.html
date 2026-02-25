@@ -112,17 +112,12 @@
                         <div class="summary-section-header">
                             <i class="fa-solid fa-chart-line"></i>
                             <span>Balance Trend</span>
-                            <span id="trend-indicator" class="trend-indicator">
-                                <i class="fa-solid fa-arrow-trend-up"></i>
-                            </span>
+                            <span id="trend-indicator" class="trend-indicator"></span>
                         </div>
                         <div class="graph-container" id="balance-graph-container">
                             <div class="graph-scroll-wrapper" id="graph-scroll-wrapper">
                                 <canvas id="balance-chart"></canvas>
                             </div>
-                        </div>
-                        <div class="graph-date-indicator">
-                            <span id="graph-current-date">Today</span>
                         </div>
                     </div>
 
@@ -137,14 +132,22 @@
                         </div>
                     </div>
 
-                    <!-- Credit Account Expense Buckets Section -->
-                    <div class="summary-section" id="c-expense-buckets-section">
-                        <div class="summary-section-header">
-                            <i class="fa-kit fa-solid-credit-card-circle-minus"></i>
-                            <span>Credit Account Expense Buckets</span>
+                    <!-- Credit Account Balance Graphs + Buckets (one per account) -->
+                    <div id="ca-graphs-container">
+                        <!-- Populated by JavaScript -->
+                    </div>
+
+                    <!-- Savings Trend Graph Section -->
+                    <div class="summary-section" id="savings-graph-section">
+                        <div class="summary-section-header savings-graph-header">
+                            <i class="fa-solid fa-piggy-bank"></i>
+                            <span>Savings Trend</span>
+                            <span id="savings-trend-indicator" class="trend-indicator"></span>
                         </div>
-                        <div class="summary-list" id="c-expense-buckets-list">
-                            <!-- Populated by JavaScript -->
+                        <div class="graph-container" id="savings-graph-container">
+                            <div class="graph-scroll-wrapper" id="savings-graph-scroll-wrapper">
+                                <canvas id="savings-chart"></canvas>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -245,12 +248,25 @@
         const recurringCExpenseCategories = {{ c_expense_categories | tojson | safe }};
         const cExpenseEntries = {{ c_expense_entries | tojson | safe }};
         const cExpenseBucketRecords = {{ c_expense_bucket_records | tojson | safe }};
+        const recurringExpenseRecords = {{ recurring_expense_records | tojson | safe }};
+        const recurringCExpenseRecords = {{ recurring_c_expense_records | tojson | safe }};
         const currencyType = {{ currency_type | tojson | safe }};
+
+        // Build wage_bill lookup by category_id
+        const wageBillLookup = {};
+        (recurringExpenseRecords || []).forEach(r => {
+            wageBillLookup[r.category_id] = parseInt(r.wage_bill) || 0;
+        });
+        (recurringCExpenseRecords || []).forEach(r => {
+            wageBillLookup[r.category_id] = parseInt(r.wage_bill) || 0;
+        });
         const incomeEntries = {{ income_entries | tojson | safe }};
         const totalsRemaindersD = {{ totals_remainders_d | tojson | safe }};
         const totalsRemaindersW = {{ totals_remainders_w | tojson | safe }};
         const totalsRemaindersM = {{ totals_remainders_m | tojson | safe }};
         const startingBalance = {{ starting_balance | tojson | safe }};
+        const caBalancesD = {{ ca_balances_d | tojson | safe }};
+        const savingsEntriesData = {{ savings_entries | tojson | safe }};
 
         // Chart instance
         let balanceChart = null;
@@ -555,25 +571,52 @@
                 return;
             }
             
-            // Calculate trend
+            // Calculate trend (compare today's value vs last future data point)
             const trendIndicator = document.getElementById('trend-indicator');
             if (sortedData.length >= 2) {
-                const recentValues = sortedData.slice(-7);
-                const firstVal = recentValues[0].remainder;
-                const lastVal = recentValues[recentValues.length - 1].remainder;
+                const tNow = new Date();
+                tNow.setHours(0, 0, 0, 0);
                 
-                if (lastVal > firstVal) {
-                    trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-up fa-beat"></i>';
-                    trendIndicator.className = 'trend-indicator trend-up';
-                    trendIndicator.title = 'Your balance is trending upward';
-                } else if (lastVal < firstVal) {
-                    trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-down fa-beat"></i>';
-                    trendIndicator.className = 'trend-indicator trend-down';
-                    trendIndicator.title = 'Your balance is trending downward';
+                // Find today's value (closest date <= today)
+                let todayVal = null;
+                for (let i = sortedData.length - 1; i >= 0; i--) {
+                    if (sortedData[i].date <= tNow) {
+                        todayVal = sortedData[i].remainder;
+                        break;
+                    }
+                }
+                const lastVal = sortedData[sortedData.length - 1].remainder;
+                
+                if (todayVal !== null) {
+                    // Check if any future data point goes below 0
+                    const futureData = sortedData.filter(d => d.date > tNow);
+                    const hasNegativeFuture = futureData.some(d => d.remainder < 0);
+                    
+                    // Add/remove negative warning on the section header
+                    const balanceHeader = document.querySelector('#balance-graph-section .summary-section-header');
+                    if (hasNegativeFuture) {
+                        balanceHeader.classList.add('has-negative-warning');
+                        balanceHeader.title = 'Balance goes negative in the future';
+                    } else {
+                        balanceHeader.classList.remove('has-negative-warning');
+                        balanceHeader.title = '';
+                    }
+                    
+                    if (lastVal > todayVal) {
+                        trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-up fa-beat"></i>';
+                        trendIndicator.className = 'trend-indicator trend-up';
+                        trendIndicator.title = 'Your balance is projected to increase';
+                    } else if (lastVal < todayVal) {
+                        trendIndicator.innerHTML = '<i class="fa-solid fa-arrow-trend-down fa-beat"></i>';
+                        trendIndicator.className = 'trend-indicator trend-down';
+                        trendIndicator.title = 'Your balance is projected to decrease';
+                    } else {
+                        trendIndicator.innerHTML = '<i class="fa-solid fa-minus"></i>';
+                        trendIndicator.className = 'trend-indicator trend-flat';
+                        trendIndicator.title = 'Your balance is projected to stay the same';
+                    }
                 } else {
-                    trendIndicator.innerHTML = '<i class="fa-solid fa-minus"></i>';
-                    trendIndicator.className = 'trend-indicator trend-flat';
-                    trendIndicator.title = 'Your balance is holding steady';
+                    trendIndicator.innerHTML = '';
                 }
             }
             
@@ -747,8 +790,6 @@
                 
                 // Update date indicator
                 const currentDate = sortedData[todayIndex];
-                document.getElementById('graph-current-date').textContent = 
-                    formatDateWithYear(currentDate.date) + ' • ' + formatCurrency(currentDate.remainder);
             }
         }
         
@@ -786,6 +827,22 @@
                 return symbol + (value / 1000).toFixed(1) + 'K';
             }
             return symbol + value.toFixed(0);
+        }
+
+        // Helper: convert hex/color to rgba string
+        function hexToRgba(color, alpha) {
+            if (color.startsWith('#')) {
+                const hex = color.replace('#', '');
+                const r = parseInt(hex.substring(0, 2), 16);
+                const g = parseInt(hex.substring(2, 4), 16);
+                const b = parseInt(hex.substring(4, 6), 16);
+                return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            }
+            // If already rgb/rgba format
+            if (color.startsWith('rgb')) {
+                return color.replace(')', `, ${alpha})`).replace('rgb(', 'rgba(');
+            }
+            return color;
         }
 
         // Build bucket lookup from bucket records
@@ -881,31 +938,48 @@
             const progressContainer = document.createElement('div');
             progressContainer.className = 'summary-progress-container';
             
+            // Determine if this is a bill (wage_bill == 1) or allowance
+            const isBill = wageBillLookup[category.id] === 1;
+            
             if (!bucket) {
                 // No bucket for this category
                 progressContainer.innerHTML = `
                     <div class="summary-no-bucket">
-                        <span>No active bucket</span>
+                        <span>—</span>
                     </div>
                 `;
+            } else if (isBill) {
+                // Bill: show paid/unpaid icon + amount (matching recurring_e style)
+                const originalAmount = bucket.original_amount;
+                const currentAmount = bucket.current_amount;
+                const spent = originalAmount - currentAmount;
+                const isPaid = spent >= originalAmount;
+                
+                if (isPaid) {
+                    progressContainer.innerHTML = `
+                        <div class="summary-week-label">${formatDate(bucket.week_start)}</div>
+                        <div class="summary-bill-status">
+                            <span class="status-paid" title="Paid"><i class="fa-solid fa-hand-holding-dollar"></i> Paid</span>
+                            <span class="bill-amount paid">${formatCurrency(originalAmount)}</span>
+                        </div>
+                    `;
+                } else {
+                    progressContainer.innerHTML = `
+                        <div class="summary-week-label">${formatDate(bucket.week_start)}</div>
+                        <div class="summary-bill-status">
+                            <span class="status-unpaid" title="Unpaid"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i> Unpaid</span>
+                            <span class="bill-amount unpaid">${formatCurrency(originalAmount)}</span>
+                        </div>
+                    `;
+                }
             } else {
                 const originalAmount = bucket.original_amount;
                 const currentAmount = bucket.current_amount;
                 const spent = originalAmount - currentAmount;
-                const percentage = originalAmount > 0 ? Math.min((spent / originalAmount) * 100, 100) : 0;
                 const remaining = currentAmount;
+                const percentage = originalAmount > 0 ? Math.min((spent / originalAmount) * 100, 100) : 0;
+                const isOver = spent >= originalAmount;
                 
-                // Determine color based on percentage
-                let progressClass = 'progress-green';
-                if (percentage >= 90) {
-                    progressClass = 'progress-red';
-                } else if (percentage >= 70) {
-                    progressClass = 'progress-yellow';
-                }
-                
-                const weekLabel = formatDate(bucket.week_start);
-                
-                // Format remaining text - show "overspent" if negative
                 let remainingText;
                 if (remaining < 0) {
                     remainingText = `<span class="remaining-amount overspent">${formatCurrency(Math.abs(remaining))} overspent</span>`;
@@ -914,13 +988,15 @@
                 }
                 
                 progressContainer.innerHTML = `
-                    <div class="summary-week-label">${weekLabel}</div>
-                    <div class="summary-progress-bar">
-                        <div class="summary-progress-fill ${progressClass}" style="width: ${percentage}%"></div>
-                    </div>
-                    <div class="summary-amounts">
-                        <span class="spent-amount">${formatCurrency(spent)} spent</span>
-                        ${remainingText}
+                    <div class="summary-week-label">${formatDate(bucket.week_start)}</div>
+                    <div class="bucket-status">
+                        <div class="bucket-bar-container">
+                            <div class="bucket-bar ${isOver ? 'bucket-bar-over' : 'bucket-bar-ok'}" style="width: ${percentage}%"></div>
+                        </div>
+                        <div class="summary-amounts">
+                            <span class="spent-amount">${formatCurrency(spent)} spent</span>
+                            ${remainingText}
+                        </div>
                     </div>
                 `;
             }
@@ -955,34 +1031,22 @@
             });
         }
 
-        // Render credit expense buckets
-        function renderCExpenseBuckets() {
-            const container = document.getElementById('c-expense-buckets-list');
-            container.innerHTML = '';
-            
+        // Build bucket rows for a specific credit account (used by renderCaGraphs)
+        function buildCaBucketList(accountId, listEl) {
             const bucketLookup = buildBucketLookup(cExpenseBucketRecords);
-            
-            // Build account name lookup
-            const accountNames = {};
-            creditAccounts.forEach(acc => {
-                accountNames[acc.id] = acc.name;
-            });
-            
-            // Filter to only visible recurring categories
-            const visibleCategories = recurringCExpenseCategories.filter(cat => 
-                !cat.hidden && cat.is_recurring === 1
+            const visibleCategories = recurringCExpenseCategories.filter(cat =>
+                !cat.hidden && cat.is_recurring === 1 && parseInt(cat.account_id) === parseInt(accountId)
             );
             
             if (visibleCategories.length === 0) {
-                container.innerHTML = '<div class="summary-empty">No recurring credit expense categories</div>';
+                listEl.innerHTML = '<div class="summary-empty">No recurring categories</div>';
                 return;
             }
             
             visibleCategories.forEach(category => {
                 const bucket = findCurrentBucket(category.id, bucketLookup);
-                const accountName = category.account_name || accountNames[category.account_id] || '';
-                const row = createBucketRow(category, bucket, cExpenseEntries, accountName);
-                container.appendChild(row);
+                const row = createBucketRow(category, bucket, cExpenseEntries);
+                listEl.appendChild(row);
             });
         }
 
@@ -1084,42 +1148,353 @@
             document.getElementById('test-purchase-result').style.display = 'none';
         }
 
+        // ===== Filter data to last entry per month =====
+        function filterToMonthly(data, dateField) {
+            if (!data || data.length === 0) return [];
+            const byMonth = {};
+            data.forEach(item => {
+                const d = item[dateField || 'date'];
+                if (!d) return;
+                const parsed = parseDate(d);
+                if (!parsed) return;
+                const key = parsed.getFullYear() + '-' + String(parsed.getMonth() + 1).padStart(2, '0');
+                if (!byMonth[key] || parsed > parseDate(byMonth[key][dateField || 'date'])) {
+                    byMonth[key] = item;
+                }
+            });
+            return Object.values(byMonth);
+        }
+
+        // ===== Generic scrollable chart renderer =====
+        // Store chart instances for cleanup
+        const chartInstances = {};
+
+        function renderScrollableChart(config) {
+            const {
+                chartId, containerId, scrollWrapperId, dateIndicatorId, trendIndicatorId,
+                rawData, dateField, valueField, chartColor, chartLabel,
+                pointSpacing: customSpacing, labelFormat: customLabelFormat,
+                showNegativeWarning: showNegativeWarning
+            } = config;
+            
+            if (!rawData || rawData.length === 0) {
+                const container = document.getElementById(containerId);
+                if (container) {
+                    const wrapper = document.getElementById(scrollWrapperId);
+                    if (wrapper) wrapper.innerHTML = '<div class="graph-empty">No data available</div>';
+                }
+                return;
+            }
+            
+            // Sort and parse
+            const sortedData = rawData
+                .map(item => ({
+                    date: parseDate(item[dateField || 'date']),
+                    dateStr: item[dateField || 'date'],
+                    value: parseFloat(item[valueField || 'balance']) || 0
+                }))
+                .filter(item => item.date)
+                .sort((a, b) => a.date - b.date);
+            
+            if (sortedData.length === 0) {
+                const wrapper = document.getElementById(scrollWrapperId);
+                if (wrapper) wrapper.innerHTML = '<div class="graph-empty">No data available</div>';
+                return;
+            }
+            
+            // Trend indicator (compare today's value vs last future data point)
+            if (trendIndicatorId) {
+                const trendEl = document.getElementById(trendIndicatorId);
+                if (trendEl && sortedData.length >= 2) {
+                    const tToday = new Date();
+                    tToday.setHours(0, 0, 0, 0);
+                    
+                    // Find today's value (closest date <= today)
+                    let todayVal = null;
+                    for (let i = sortedData.length - 1; i >= 0; i--) {
+                        if (sortedData[i].date <= tToday) {
+                            todayVal = sortedData[i].value;
+                            break;
+                        }
+                    }
+                    const lastVal = sortedData[sortedData.length - 1].value;
+                    
+                    if (todayVal !== null) {
+                        // Check if any future data point goes below 0 (only if showNegativeWarning)
+                        if (showNegativeWarning) {
+                            const sectionHeader = document.getElementById(trendIndicatorId)?.closest('.summary-section-header');
+                            if (sectionHeader) {
+                                const futureData = sortedData.filter(d => d.date > tToday);
+                                if (futureData.some(d => d.value < 0)) {
+                                    sectionHeader.classList.add('has-negative-warning');
+                                    sectionHeader.title = 'Value goes negative in the future';
+                                } else {
+                                    sectionHeader.classList.remove('has-negative-warning');
+                                    sectionHeader.title = '';
+                                }
+                            }
+                        }
+                        
+                        if (lastVal > todayVal) {
+                            trendEl.innerHTML = '<i class="fa-solid fa-arrow-trend-up fa-beat"></i>';
+                            trendEl.className = 'trend-indicator trend-up';
+                        } else if (lastVal < todayVal) {
+                            trendEl.innerHTML = '<i class="fa-solid fa-arrow-trend-down fa-beat"></i>';
+                            trendEl.className = 'trend-indicator trend-down';
+                        } else {
+                            trendEl.innerHTML = '<i class="fa-solid fa-minus"></i>';
+                            trendEl.className = 'trend-indicator trend-flat';
+                        }
+                    } else {
+                        trendEl.innerHTML = '';
+                    }
+                }
+            }
+            
+            // Find today's index
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            let todayIndex = -1;
+            for (let i = sortedData.length - 1; i >= 0; i--) {
+                if (sortedData[i].date <= today) {
+                    todayIndex = i;
+                    break;
+                }
+            }
+            
+            const pointSpacing = customSpacing || 25;
+            const minWidth = Math.max(sortedData.length * pointSpacing, 400);
+            
+            const labelFn = customLabelFormat || formatDateShort;
+            const labels = sortedData.map(item => labelFn(item.date));
+            const values = sortedData.map(item => item.value);
+            
+            // Point styling
+            const pointBgColors = sortedData.map((_, idx) => idx === todayIndex ? '#E45F1C' : '#fff');
+            const pointBorderColors = sortedData.map(() => chartColor);
+            const pointRadii = sortedData.map((_, idx) => idx === todayIndex ? 6 : 4);
+            
+            // Reset wrapper
+            const scrollWrapper = document.getElementById(scrollWrapperId);
+            scrollWrapper.innerHTML = `<canvas id="${chartId}"></canvas>`;
+            scrollWrapper.style.width = minWidth + 'px';
+            
+            const ctx = document.getElementById(chartId).getContext('2d');
+            
+            // Destroy previous instance
+            if (chartInstances[chartId]) {
+                chartInstances[chartId].destroy();
+            }
+            
+            // Today label plugin
+            const todayPlugin = {
+                id: 'todayLabel_' + chartId,
+                afterDatasetsDraw: function(chart) {
+                    if (todayIndex === -1) return;
+                    const c = chart.ctx;
+                    const meta = chart.getDatasetMeta(0);
+                    const point = meta.data[todayIndex];
+                    if (point) {
+                        c.save();
+                        c.font = 'bold 10px sans-serif';
+                        c.fillStyle = '#E45F1C';
+                        c.textAlign = 'center';
+                        c.fillText('Today', point.x, point.y - 12);
+                        c.restore();
+                    }
+                }
+            };
+            
+            chartInstances[chartId] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: chartLabel,
+                        data: values,
+                        borderColor: chartColor,
+                        backgroundColor: hexToRgba(chartColor, 0.1),
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointBackgroundColor: pointBgColors,
+                        pointBorderColor: pointBorderColors,
+                        pointRadius: pointRadii,
+                        pointHoverRadius: 8
+                    }]
+                },
+                plugins: [todayPlugin],
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return formatCurrency(context.parsed.y);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { font: { size: 10 }, maxRotation: 45, minRotation: 45 }
+                        },
+                        y: {
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                            ticks: {
+                                callback: function(v) { return formatCurrencyShort(v); },
+                                font: { size: 10 }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Scroll to today
+            if (todayIndex !== -1) {
+                const scrollContainer = document.getElementById(containerId);
+                const scrollPosition = Math.max(0, (todayIndex * pointSpacing) - (scrollContainer.clientWidth / 2));
+                scrollContainer.scrollLeft = scrollPosition;
+                
+            }
+            
+            // Drag-to-scroll
+            const scrollContainer = document.getElementById(containerId);
+            let isDrag = false, sX, sL;
+            scrollContainer.addEventListener('mousedown', (e) => {
+                isDrag = true; scrollContainer.classList.add('grabbing');
+                sX = e.pageX - scrollContainer.offsetLeft; sL = scrollContainer.scrollLeft;
+            });
+            scrollContainer.addEventListener('mouseleave', () => { isDrag = false; scrollContainer.classList.remove('grabbing'); });
+            scrollContainer.addEventListener('mouseup', () => { isDrag = false; scrollContainer.classList.remove('grabbing'); });
+            scrollContainer.addEventListener('mousemove', (e) => {
+                if (!isDrag) return; e.preventDefault();
+                scrollContainer.scrollLeft = sL - ((e.pageX - scrollContainer.offsetLeft - sX) * 1.5);
+            });
+            scrollContainer.addEventListener('touchstart', (e) => {
+                isDrag = true; sX = e.touches[0].pageX - scrollContainer.offsetLeft; sL = scrollContainer.scrollLeft;
+            }, { passive: true });
+            scrollContainer.addEventListener('touchend', () => { isDrag = false; });
+            scrollContainer.addEventListener('touchmove', (e) => {
+                if (!isDrag) return;
+                scrollContainer.scrollLeft = sL - ((e.touches[0].pageX - scrollContainer.offsetLeft - sX) * 1.5);
+            }, { passive: true });
+        }
+
+        // ===== Render credit account graphs =====
+        function renderCaGraphs() {
+            const container = document.getElementById('ca-graphs-container');
+            container.innerHTML = '';
+            
+            if (!creditAccounts || creditAccounts.length === 0 || !caBalancesD || caBalancesD.length === 0) return;
+            
+            creditAccounts.forEach((account, idx) => {
+                // Filter balances for this account, then reduce to monthly
+                const dailyBalances = caBalancesD
+                    .filter(b => parseInt(b.account_id) === parseInt(account.id));
+                const accountBalances = filterToMonthly(dailyBalances, 'date')
+                    .map(b => ({ date: b.date, balance: parseFloat(b.balance) || 0 }));
+                
+                const sectionId = `ca-graph-section-${account.id}`;
+                const containerId = `ca-graph-container-${account.id}`;
+                const wrapperId = `ca-graph-scroll-wrapper-${account.id}`;
+                const canvasId = `ca-chart-${account.id}`;
+                const trendId = `ca-trend-${account.id}`;
+                const bucketsListId = `ca-buckets-list-${account.id}`;
+                
+                const section = document.createElement('div');
+                section.className = 'summary-section';
+                section.id = sectionId;
+                
+                let graphHtml = '';
+                if (accountBalances.length > 0) {
+                    graphHtml = `
+                    <div class="graph-container" id="${containerId}">
+                        <div class="graph-scroll-wrapper" id="${wrapperId}">
+                            <canvas id="${canvasId}"></canvas>
+                        </div>
+                    </div>`;
+                }
+                
+                section.innerHTML = `
+                    <div class="summary-section-header ca-graph-header">
+                        <i class="fa-solid fa-credit-card"></i>
+                        <span>${account.name}</span>
+                        <span id="${trendId}" class="trend-indicator"></span>
+                    </div>
+                    ${graphHtml}
+                    <div class="summary-section-header ca-bucket-header">
+                        <i class="fa-kit fa-solid-credit-card-circle-minus"></i>
+                        <span>Expense Buckets</span>
+                    </div>
+                    <div class="summary-list" id="${bucketsListId}"></div>
+                `;
+                container.appendChild(section);
+                
+                // Render graph if data exists
+                if (accountBalances.length > 0) {
+                    renderScrollableChart({
+                        chartId: canvasId,
+                        containerId: containerId,
+                        scrollWrapperId: wrapperId,
+                        dateIndicatorId: null,
+                        trendIndicatorId: trendId,
+                        rawData: accountBalances,
+                        dateField: 'date',
+                        valueField: 'balance',
+                        chartColor: '#575757',
+                        chartLabel: account.name + ' Balance',
+                        pointSpacing: 30,
+                        labelFormat: formatMonthYear,
+                        showNegativeWarning: false
+                    });
+                }
+                
+                // Render buckets for this account
+                const bucketsListEl = document.getElementById(bucketsListId);
+                buildCaBucketList(account.id, bucketsListEl);
+            });
+        }
+
+        // ===== Render savings graph =====
+        function renderSavingsGraph() {
+            if (!savingsEntriesData || savingsEntriesData.length === 0) {
+                const wrapper = document.getElementById('savings-graph-scroll-wrapper');
+                if (wrapper) wrapper.innerHTML = '<div class="graph-empty">No savings data available</div>';
+                return;
+            }
+            
+            const monthlySavings = filterToMonthly(savingsEntriesData, 'date');
+            renderScrollableChart({
+                chartId: 'savings-chart',
+                containerId: 'savings-graph-container',
+                scrollWrapperId: 'savings-graph-scroll-wrapper',
+                dateIndicatorId: null,
+                trendIndicatorId: 'savings-trend-indicator',
+                rawData: monthlySavings,
+                dateField: 'date',
+                valueField: 'amount',
+                chartColor: '#2AAAA8',
+                chartLabel: 'Savings',
+                pointSpacing: 30,
+                labelFormat: formatMonthYear,
+                showNegativeWarning: true
+            });
+        }
+
         // Initialize on page load
         $(document).ready(function() {
             renderBufferCard();
             renderBalanceChart('month');
             renderExpenseBuckets();
-            renderCExpenseBuckets();
+            renderCaGraphs();
+            renderSavingsGraph();
             
-            // Update date indicator on scroll
-            $('#balance-graph-container').on('scroll', function() {
-                if (!balanceChart) return;
-                
-                const scrollLeft = this.scrollLeft;
-                const containerWidth = this.clientWidth;
-                const centerPosition = scrollLeft + (containerWidth / 2);
-                const pointSpacing = currentChartView === 'day' ? 25 : (currentChartView === 'week' ? 40 : 45);
-                const pointIndex = Math.round(centerPosition / pointSpacing);
-                
-                const data = currentChartView === 'day' ? totalsRemaindersD :
-                             currentChartView === 'week' ? totalsRemaindersW : totalsRemaindersM;
-                
-                if (data && data.length > 0) {
-                    const sortedData = data
-                        .map(item => ({
-                            date: parseDate(item.date),
-                            remainder: parseFloat(item.remainder) || 0
-                        }))
-                        .filter(item => item.date)
-                        .sort((a, b) => a.date - b.date);
-                    
-                    const idx = Math.min(Math.max(0, pointIndex), sortedData.length - 1);
-                    if (sortedData[idx]) {
-                        document.getElementById('graph-current-date').textContent = 
-                            formatDateWithYear(sortedData[idx].date) + ' • ' + formatCurrency(sortedData[idx].remainder);
-                    }
-                }
-            });
+
             
             // Drag-to-scroll functionality
             const graphContainer = document.getElementById('balance-graph-container');

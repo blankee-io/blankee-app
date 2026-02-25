@@ -11769,6 +11769,32 @@ def dashboard_summary():
     # Get c_expense bucket records
     c_expense_bucket_records = _get_entries_from_redis('recurring_c_expense_buckets', current_user.id) or []
     
+    # Get recurring expense records (for wage_bill lookup)
+    recurring_expense_records = _get_entries_from_redis('recurring_expense', current_user.id)
+    if recurring_expense_records is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, category_id, wage_bill
+                FROM recurring_expense
+                WHERE user_id = %s
+            """, (current_user.id,))
+            recurring_expense_records = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get recurring c_expense records (for wage_bill lookup)
+    recurring_c_expense_records = _get_entries_from_redis('recurring_c_expense', current_user.id)
+    if recurring_c_expense_records is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, category_id, wage_bill
+                FROM recurring_c_expense
+                WHERE user_id = %s
+            """, (current_user.id,))
+            recurring_c_expense_records = list(cursor.fetchall())
+            cursor.close()
+    
     # Get ALL income categories (for footer and finding next payday)
     all_income_categories = _get_categories_from_redis('income_categories', current_user.id)
     if all_income_categories is None:
@@ -11857,6 +11883,36 @@ def dashboard_summary():
     elif isinstance(starting_balance_data, list) and len(starting_balance_data) > 0:
         starting_balance_data = starting_balance_data[0]
     
+    # Get daily credit account balances for CA graphs
+    ca_balances_d = _get_ca_balances_from_redis('c_a_balances_d', current_user.id)
+    if ca_balances_d is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT account_id, date, balance
+                FROM c_a_balances_d
+                WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+                ORDER BY date DESC
+                LIMIT 3650
+            """, (current_user.id,))
+            ca_balances_d = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get savings entries for savings graph
+    savings_entries = _get_savings_entries_from_redis(current_user.id)
+    if savings_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT date, amount
+                FROM savings_entries
+                WHERE user_id = %s
+                ORDER BY date DESC
+                LIMIT 365
+            """, (current_user.id,))
+            savings_entries = list(cursor.fetchall())
+            cursor.close()
+
     return render_template(
         'dashboard_summary.html',
         profile_picture=profile_picture,
@@ -11878,11 +11934,15 @@ def dashboard_summary():
         credit_accounts=credit_accounts,
         c_expense_entries=c_expense_entries,
         c_expense_bucket_records=c_expense_bucket_records,
+        recurring_expense_records=recurring_expense_records,
+        recurring_c_expense_records=recurring_c_expense_records,
         income_entries=income_entries,
         totals_remainders_d=totals_remainders_d,
         totals_remainders_w=totals_remainders_w,
         totals_remainders_m=totals_remainders_m,
-        starting_balance=starting_balance_data
+        starting_balance=starting_balance_data,
+        ca_balances_d=ca_balances_d,
+        savings_entries=savings_entries
     )
 
 
@@ -12803,6 +12863,16 @@ def confirm_transaction():
         # Check if all pending transactions are now confirmed and clear notification
         _clear_pending_transactions_notification_if_none(current_user.id)
         
+        # Recalculate totals, remainders, savings, and credit balances
+        try:
+            if entry_type in ('income', 'expense'):
+                save_totals_remainders_d()
+            if entry_type == 'c_expense':
+                save_ca_daily_balance()
+        except Exception as e:
+            app.logger.error(f"[CONFIRM TXN] Error recalculating totals/balances: {e}")
+            # Continue even if recalc fails - the entry is already confirmed
+        
         app.logger.info(f"[CONFIRM TXN] === DONE === txn_id={transaction_id}, entry_id={entry_id}, category_id={category_id}")
         return jsonify({'status': 'success'})
         
@@ -12907,6 +12977,18 @@ def confirm_all_transactions():
         
         # Check if all pending transactions are now confirmed and clear notification
         _clear_pending_transactions_notification_if_none(current_user.id)
+        
+        # Recalculate totals, remainders, savings, and credit balances
+        try:
+            has_income_expense = bool(by_type.get('income') or by_type.get('expense'))
+            has_c_expense = bool(by_type.get('c_expense'))
+            if has_income_expense:
+                save_totals_remainders_d()
+            if has_c_expense:
+                save_ca_daily_balance()
+        except Exception as e:
+            app.logger.error(f"[CONFIRM ALL] Error recalculating totals/balances: {e}")
+            # Continue even if recalc fails - entries are already confirmed
         
         return jsonify({'status': 'success'})
         
@@ -13178,23 +13260,6 @@ def settings():
             """, (current_user.id,))
             user_data = cursor.fetchone()
 
-        # Fetch starting balance from income_entries where category is "Starting Balance"
-        cursor.execute("""
-            SELECT amount
-            FROM income_entries 
-            WHERE category_id = (
-                SELECT id FROM income_categories WHERE name = 'Starting Balance' AND user_id = %s LIMIT 1
-            ) 
-            LIMIT 1
-        """, (current_user.id,))
-        starting_balance_data = cursor.fetchone()
-
-        # Fetch starting_savings from users table
-        cursor.execute("SELECT starting_savings, member_since FROM users WHERE id = %s", (current_user.id,))
-        savings_data = cursor.fetchone()
-        starting_savings = float(savings_data['starting_savings']) if savings_data and savings_data['starting_savings'] else 0.0
-        member_since = savings_data['member_since'] if savings_data else None
-
         cursor.close()
 
     # Extract values from the query result
@@ -13206,8 +13271,6 @@ def settings():
     goofy_week_mode = user_data['goofy_week_mode'] if user_data else 0
     landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
-    # Convert starting_balance to float first, then int to handle decimal values
-    starting_balance = int(float(starting_balance_data['amount'])) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
     email_notifications = user_data.get('email_notifications', 0) if user_data else 0
 
@@ -13218,8 +13281,6 @@ def settings():
         profile_picture=profile_picture,
         first_name=first_name,
         last_name=last_name,
-        starting_balance=starting_balance,
-        starting_savings=starting_savings,
         balance_threshold=balance_threshold,
         goofy_week_mode=goofy_week_mode,
         landing_page=landing_page,
@@ -13635,180 +13696,6 @@ def cancel_mfa():
     session.pop('pending_mfa_secret', None)
     
     return jsonify({'status': 'success'})
-
-@app.route('/update_starting_balance', methods=['POST'])
-@login_required
-def update_starting_balance():
-    # Retrieve the new starting balance from the form
-    new_balance = request.form.get('starting_balance')
-
-    if new_balance:
-        # Update starting_savings in Redis (will be flushed to MySQL)
-        _update_user_setting_in_redis(current_user.id, 'starting_savings', float(new_balance))
-        
-        # Also update the Starting Balance income entry
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-            # Find the 'Starting Balance' category for the current user
-            cursor.execute("""
-                SELECT id FROM income_categories 
-                WHERE name = 'Starting Balance' AND user_id = %s LIMIT 1
-            """, (current_user.id,))
-            
-            result = cursor.fetchone()
-
-            if result:
-                STARTING_BALANCE_CATEGORY_ID = result['id']
-
-                # Check if there is already an entry in Redis or MySQL
-                income_entries = _get_entries_from_redis('income_entries', current_user.id)
-                
-                if income_entries is None:
-                    # Load from MySQL
-                    cursor.execute("""
-                        SELECT ie.* FROM income_entries ie
-                        JOIN income_categories ic ON ie.category_id = ic.id
-                        WHERE ic.user_id = %s
-                    """, (current_user.id,))
-                    income_entries = list(cursor.fetchall())
-                
-                # Find existing starting balance entry
-                existing_entry = next((e for e in income_entries if int(e.get('category_id', 0)) == int(STARTING_BALANCE_CATEGORY_ID)), None)
-                
-                if existing_entry:
-                    # Update existing entry in Redis
-                    entry_date = existing_entry.get('date')
-                    if isinstance(entry_date, str):
-                        entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
-                    _update_entry_in_redis('income_entries', current_user.id, 
-                                         STARTING_BALANCE_CATEGORY_ID, entry_date, 
-                                         float(new_balance))
-                else:
-                    # Create new entry in Redis
-                    _update_entry_in_redis('income_entries', current_user.id, 
-                                         STARTING_BALANCE_CATEGORY_ID, date.today(), 
-                                         float(new_balance))
-
-            cursor.close()
-
-    return redirect(url_for('profile'))
-
-
-@app.route('/update_starting_savings', methods=['POST'])
-@login_required
-def update_starting_savings():
-    """
-    Update starting savings - updates both users.starting_savings AND 
-    the savings_adjustments entry for the member_since date.
-    """
-    new_savings = request.form.get('starting_savings')
-    
-    if new_savings is None:
-        return jsonify({'status': 'error', 'message': 'No starting savings provided'}), 400
-    
-    try:
-        new_savings_float = float(new_savings)
-    except (ValueError, TypeError):
-        return jsonify({'status': 'error', 'message': 'Invalid starting savings value'}), 400
-    
-    try:
-        # 1. Update users.starting_savings in Redis
-        _update_user_setting_in_redis(current_user.id, 'starting_savings', new_savings_float)
-        
-        # 2. Get member_since date for the adjustment
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT member_since FROM users WHERE id = %s", (current_user.id,))
-            user_row = cursor.fetchone()
-            cursor.close()
-        
-        if not user_row or not user_row['member_since']:
-            return jsonify({'status': 'error', 'message': 'Member since date not found'}), 400
-        
-        member_since = user_row['member_since']
-        member_since_str = member_since.isoformat() if hasattr(member_since, 'isoformat') else str(member_since)
-        
-        # 3. Update or create savings_adjustments entry for member_since date
-        savings_adjustments = _get_savings_adjustments_from_redis(current_user.id)
-        
-        if savings_adjustments is None:
-            # Load from MySQL
-            savings_adjustments = []
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT id, user_id, date, amount, description, quiltt_account_id
-                    FROM savings_adjustments
-                    WHERE user_id = %s
-                    ORDER BY date
-                """, (current_user.id,))
-                for row in cursor.fetchall():
-                    savings_adjustments.append({
-                        'id': row['id'],
-                        'user_id': row['user_id'],
-                        'date': row['date'].isoformat() if hasattr(row['date'], 'isoformat') else row['date'],
-                        'amount': float(row['amount']) if row['amount'] else 0,
-                        'description': row['description'],
-                        'quiltt_account_id': row['quiltt_account_id']
-                    })
-                cursor.close()
-        
-        # Find existing adjustment - look for "Initial savings balance" first, then by member_since date
-        existing_adj = None
-        
-        # First, look for adjustment with "Initial savings balance" description (most reliable)
-        for adj in savings_adjustments:
-            if adj.get('description') == 'Initial savings balance':
-                existing_adj = adj
-                break
-        
-        # If not found by description, try by member_since date
-        if not existing_adj:
-            for adj in savings_adjustments:
-                adj_date = adj.get('date')
-                # Handle both string and date object formats
-                if isinstance(adj_date, str):
-                    if adj_date == member_since_str:
-                        existing_adj = adj
-                        break
-                elif hasattr(adj_date, 'isoformat'):
-                    if adj_date.isoformat() == member_since_str:
-                        existing_adj = adj
-                        break
-        
-        if existing_adj:
-            # Update existing adjustment
-            existing_adj['amount'] = new_savings_float
-            existing_adj['description'] = 'Initial savings balance'
-            app.logger.info(f"[UPDATE-STARTING-SAVINGS] Updated existing adjustment id={existing_adj.get('id')} to ${new_savings_float}")
-        else:
-            # Create new adjustment (shouldn't normally happen if profile was set up correctly)
-            existing_ids = [int(a.get('id', 0)) for a in savings_adjustments if a.get('id')]
-            min_id = min(existing_ids) if existing_ids else 0
-            temp_id = min_id - 1 if min_id <= 0 else -1
-            
-            savings_adjustments.append({
-                'id': temp_id,
-                'user_id': current_user.id,
-                'date': member_since_str,
-                'amount': new_savings_float,
-                'description': 'Initial savings balance',
-                'quiltt_account_id': None
-            })
-            # Sort by date
-            savings_adjustments.sort(key=lambda x: x['date'])
-            app.logger.info(f"[UPDATE-STARTING-SAVINGS] Created new adjustment for {member_since_str}: ${new_savings_float}")
-        
-        # Save to Redis
-        _set_savings_adjustments_to_redis(current_user.id, savings_adjustments)
-        
-        return jsonify({'status': 'success', 'message': 'Starting savings updated successfully'})
-        
-    except Exception as e:
-        app.logger.error(f"Error updating starting savings for user {current_user.id}: {e}", exc_info=True)
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
 
 @app.route('/update_balance_threshold', methods=['POST'])
 @login_required
