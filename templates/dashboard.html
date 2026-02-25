@@ -533,7 +533,7 @@
                     <div class="date-input-row">
                         <input type="date" id="convert-start-date" name="start_date" required>
                         <div class="end-date-container" id="convert-end-date-input-container">
-                            <input type="date" id="convert-end-date" name="end_date" required>
+                            <input type="date" id="convert-end-date" name="end_date">
                         </div>
                     </div>
                     <div class="date-checkbox-row">
@@ -5792,8 +5792,9 @@
                 $('#convert-end-date').prop('disabled', true);
                 $('#convert-occurrences-count').prop('disabled', false);
             } else {
-                setGreyedOut('.date-checkbox-row:has(#convert-no-end-date-checkbox)', true);
-                setGreyedOut('.date-checkbox-row:has(#convert-use-occurrences-checkbox)', true);
+                var hasEndDate = $('#convert-end-date').val() !== '';
+                setGreyedOut('.date-checkbox-row:has(#convert-no-end-date-checkbox)', hasEndDate);
+                setGreyedOut('.date-checkbox-row:has(#convert-use-occurrences-checkbox)', hasEndDate);
                 $('#convert-end-date-label-container, #convert-end-date-input-container').css('opacity', 1);
                 $('#convert-end-date').prop('disabled', false);
                 $('#convert-occurrences-count').prop('disabled', true).val('');
@@ -5805,6 +5806,9 @@
         });
         $('#convert-use-occurrences-checkbox').on('change', function() {
             if (this.checked) $('#convert-no-end-date-checkbox').prop('checked', false);
+            updateConvertEndDateState();
+        });
+        $('#convert-end-date').on('change input', function() {
             updateConvertEndDateState();
         });
         // Click on end date to activate it (Convert modal)
@@ -5868,6 +5872,12 @@
             const startDate = $form.find('#convert-start-date').val();
             const endDate = $form.find('#convert-end-date').val();
             const noEndDateChecked = $form.find('#convert-no-end-date-checkbox').is(':checked');
+            const useOccChecked = $form.find('#convert-use-occurrences-checkbox').is(':checked');
+
+            if (!noEndDateChecked && !useOccChecked && !endDate) {
+                showEndDateWarning('#convert-end-date');
+                return false;
+            }
 
             if (!noEndDateChecked && new Date(endDate) < new Date(startDate)) {
                 showToast("End date cannot be earlier than the start date.", 'warning');
@@ -6466,8 +6476,30 @@
             // === Unified Button Handlers ===
 
             // --- Type Selector Popover Logic ---
+            const categoryBtnContainer = document.getElementById('unified-category-btn-container');
+
             function closeAllPopovers() {
-                document.querySelectorAll('.type-selector-popover').forEach(p => p.style.display = 'none');
+                document.querySelectorAll('.type-selector-popover').forEach(p => {
+                    p.style.display = 'none';
+                    const label = p.querySelector('.type-selector-label');
+                    if (label) label.remove();
+                });
+                document.querySelectorAll('.popover-open').forEach(btn => btn.classList.remove('popover-open'));
+                if (categoryBtnContainer) categoryBtnContainer.classList.remove('popover-active');
+            }
+
+            function openPopover(btn, popover) {
+                popover.style.display = 'block';
+                btn.classList.add('popover-open');
+                if (categoryBtnContainer) categoryBtnContainer.classList.add('popover-active');
+                // Add tooltip text as label at top of popover
+                const tooltip = btn.querySelector('.nav-tooltip');
+                if (tooltip && !popover.querySelector('.type-selector-label')) {
+                    const label = document.createElement('div');
+                    label.className = 'type-selector-label';
+                    label.textContent = tooltip.textContent;
+                    popover.prepend(label);
+                }
             }
 
             // Close popovers on outside click
@@ -6487,7 +6519,7 @@
                     const isVisible = recurringTypeSelector.style.display === 'block';
                     closeAllPopovers();
                     if (!isVisible) {
-                        recurringTypeSelector.style.display = 'block';
+                        openPopover(unifiedRecurringBtn, recurringTypeSelector);
                     }
                 });
 
@@ -6559,7 +6591,7 @@
                     const isVisible = addTypeSelector.style.display === 'block';
                     closeAllPopovers();
                     if (!isVisible) {
-                        addTypeSelector.style.display = 'block';
+                        openPopover(unifiedAddBtn, addTypeSelector);
                     }
                 });
 
