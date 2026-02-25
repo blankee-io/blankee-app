@@ -82,7 +82,7 @@
                 <div class="date-input-row">
                     <input type="date" id="start_date" name="start_date" required>
                     <div class="end-date-container" id="end-date-input-container">
-                        <input type="date" id="end_date" name="end_date" required>
+                        <input type="date" id="end_date" name="end_date">
                     </div>
                 </div>
                 <div class="date-checkbox-row">
@@ -188,7 +188,7 @@
                 <div class="date-input-row">
                     <input type="date" id="expense-start_date" name="start_date" required>
                     <div class="end-date-container" id="expense-end-date-input-container">
-                        <input type="date" id="expense-end_date" name="end_date" required>
+                        <input type="date" id="expense-end_date" name="end_date">
                     </div>
                 </div>
                 <div class="date-checkbox-row">
@@ -293,7 +293,7 @@
                 <div class="date-input-row">
                     <input type="date" id="ca-start-date" name="start_date" required>
                     <div class="end-date-container" id="ca-end-date-input-container">
-                        <input type="date" id="ca-end-date" name="end_date" required>
+                        <input type="date" id="ca-end-date" name="end_date">
                     </div>
                 </div>
                 <div class="date-checkbox-row">
@@ -644,8 +644,9 @@
                 $('#end_date').prop('disabled', true);
                 $('#occurrences-count').prop('disabled', false);
             } else {
-                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', true);
-                setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', true);
+                var hasEndDate = $('#end_date').val() !== '';
+                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', hasEndDate);
+                setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', hasEndDate);
                 $('#end-date-label-container, #end-date-input-container').css('opacity', 1);
                 $('#end_date').prop('disabled', false);
                 $('#occurrences-count').prop('disabled', true).val('');
@@ -658,6 +659,9 @@
         });
         $('#use-occurrences-checkbox').on('change', function() {
             if (this.checked) $('#no-end-date-checkbox').prop('checked', false);
+            updateIncomeEndDateState();
+        });
+        $('#end_date').on('change input', function() {
             updateIncomeEndDateState();
         });
         // Click on end date to activate it (Income modal)
@@ -740,6 +744,11 @@
             const startDate = $('#start_date').val();
             const endDate = $('#end_date').val();
             const noEndDateChecked = $('#no-end-date-checkbox').is(':checked');
+            const useOccChecked = $('#use-occurrences-checkbox').is(':checked');
+            if (!noEndDateChecked && !useOccChecked && !endDate) {
+                showEndDateWarning('#end_date');
+                return false;
+            }
             if (new Date(endDate) < new Date(startDate)) {
                 showToast("End date cannot be earlier than the start date.", 'warning');
                 return false;
@@ -899,8 +908,9 @@
             $('#expense-end_date').prop('disabled', true);
             $('#expense-occurrences-count').prop('disabled', false);
         } else {
-            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', true);
-            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', true);
+            var hasEndDate = $('#expense-end_date').val() !== '';
+            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', hasEndDate);
+            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', hasEndDate);
             $('#expense-end-date-label-container, #expense-end-date-input-container').css('opacity', 1);
             $('#expense-end_date').prop('disabled', false);
             $('#expense-occurrences-count').prop('disabled', true).val('');
@@ -912,6 +922,9 @@
     });
     $('#expense-use-occurrences-checkbox').on('change', function() {
         if (this.checked) $('#expense-no-end-date-checkbox').prop('checked', false);
+        updateExpenseEndDateState();
+    });
+    $('#expense-end_date').on('change input', function() {
         updateExpenseEndDateState();
     });
     // Click on end date to activate it (Expense modal)
@@ -995,6 +1008,11 @@
         const startDate = $form.find('#expense-start_date').val();
         const endDate = $form.find('#expense-end_date').val();
         const noEndDateChecked = $form.find('#expense-no-end-date-checkbox').is(':checked');
+        const useOccChecked = $form.find('#expense-use-occurrences-checkbox').is(':checked');
+        if (!noEndDateChecked && !useOccChecked && !endDate) {
+            showEndDateWarning('#expense-end_date');
+            return false;
+        }
         if (new Date(endDate) < new Date(startDate)) {
             showToast("End date cannot be earlier than the start date.", 'warning');
             return false;
@@ -1303,8 +1321,9 @@
             $('#ca-end-date').prop('disabled', true);
             $('#ca-occurrences-count').prop('disabled', false);
         } else {
-            setGreyedOut('.date-checkbox-row:has(#ca-no-end-date-checkbox)', true);
-            setGreyedOut('.date-checkbox-row:has(#ca-use-occurrences-checkbox)', true);
+            var hasEndDate = $('#ca-end-date').val() !== '';
+            setGreyedOut('.date-checkbox-row:has(#ca-no-end-date-checkbox)', hasEndDate);
+            setGreyedOut('.date-checkbox-row:has(#ca-use-occurrences-checkbox)', hasEndDate);
             $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 1);
             $('#ca-end-date').prop('disabled', false);
             $('#ca-occurrences-count').prop('disabled', true).val('');
@@ -1316,6 +1335,9 @@
     });
     $('#ca-use-occurrences-checkbox').on('change', function() {
         if (this.checked) $('#ca-no-end-date-checkbox').prop('checked', false);
+        updateCaEndDateState();
+    });
+    $('#ca-end-date').on('change input', function() {
         updateCaEndDateState();
     });
     // Click on end date to activate it (CA modal)
@@ -1335,6 +1357,11 @@
         const startDate = $form.find('#ca-start-date').val();
         const endDate = $form.find('#ca-end-date').val();
         const noEndDateChecked = $form.find('#ca-no-end-date-checkbox').is(':checked');
+        const useOccChecked = $form.find('#ca-use-occurrences-checkbox').is(':checked');
+        if (!noEndDateChecked && !useOccChecked && !endDate) {
+            showEndDateWarning('#ca-end-date');
+            return false;
+        }
         if (new Date(endDate) < new Date(startDate)) {
             showToast("End date cannot be earlier than the start date.", 'warning');
             return false;

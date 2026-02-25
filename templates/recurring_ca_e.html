@@ -251,7 +251,7 @@
                     <div class="date-input-row">
                         <input type="date" id="start_date" name="start_date" required>
                         <div class="end-date-container" id="end-date-input-container">
-                            <input type="date" id="end_date" name="end_date" required>
+                            <input type="date" id="end_date" name="end_date">
                         </div>
                     </div>
                     <div class="date-checkbox-row">
@@ -661,8 +661,9 @@
                 $('#end_date').prop('disabled', true);
                 $('#occurrences-count').prop('disabled', false);
             } else {
-                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', true);
-                setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', true);
+                var hasEndDate = $('#end_date').val() !== '';
+                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', hasEndDate);
+                setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', hasEndDate);
                 $('#end-date-label-container, #end-date-input-container').css('opacity', 1);
                 $('#end_date').prop('disabled', false);
                 $('#occurrences-count').prop('disabled', true).val('');
@@ -676,6 +677,10 @@
 
         $('#use-occurrences-checkbox').on('change', function() {
             if (this.checked) $('#no-end-date-checkbox').prop('checked', false);
+            updateAddEndDateState();
+        });
+
+        $('#end_date').on('change input', function() {
             updateAddEndDateState();
         });
 
@@ -1016,6 +1021,13 @@
             const startDate = $('#start_date').val();
             const endDate = $('#end_date').val();
             const noEndDateChecked = $('#no-end-date-checkbox').is(':checked');
+            const useOccChecked = $('#use-occurrences-checkbox').is(':checked');
+
+            // Validate that an end date option is selected
+            if (!noEndDateChecked && !useOccChecked && !endDate) {
+                showEndDateWarning('#end_date');
+                return false;
+            }
 
             // Validate that end date is not before start date
             if (new Date(endDate) < new Date(startDate)) {

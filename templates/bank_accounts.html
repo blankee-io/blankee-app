@@ -716,10 +716,13 @@
                                                 <div class="account-selection-name">
                                                     <input type="text" class="account-alias-input" 
                                                            data-account-id="${account.account_id}"
+                                                           data-confirmed-name="${displayName}"
                                                            value="${displayName}" 
                                                            placeholder="${account.account_name || 'Account'}"
-                                                           maxlength="255">
-                                                    <i class="fa-solid fa-pen-to-square account-alias-edit-icon"></i>
+                                                           maxlength="255"
+                                                           readonly>
+                                                    <i class="fa-solid fa-check account-alias-save-icon" data-account-id="${account.account_id}"></i>
+                                                    <i class="fa-solid fa-pen-to-square account-alias-edit-icon" data-account-id="${account.account_id}"></i>
                                                 </div>`;
                                         } else {
                                             nameHtml = `<div class="account-selection-name">${displayName}</div>`;
@@ -804,21 +807,21 @@
                     return;
                 }
                 
-                // Save any aliases the user entered
+                // Save any aliases the user confirmed via checkmark
                 const aliasPromises = [];
                 $('.account-alias-input').each(function() {
                     const input = $(this);
                     const accountId = input.data('account-id');
-                    const alias = input.val().trim();
+                    const confirmedName = input.attr('data-confirmed-name');
                     const placeholder = input.attr('placeholder');
-                    // Only save if the user changed the name from the original
-                    if (alias && alias !== placeholder) {
+                    // Only save if user confirmed a name different from original
+                    if (confirmedName && confirmedName !== placeholder) {
                         aliasPromises.push(
                             $.ajax({
                                 url: '/quiltt/update-account-alias',
                                 method: 'POST',
                                 contentType: 'application/json',
-                                data: JSON.stringify({ account_id: accountId, alias: alias })
+                                data: JSON.stringify({ account_id: accountId, alias: confirmedName })
                             })
                         );
                     }
@@ -874,6 +877,64 @@
                 }
             });
             
+            // --- Modal: Inline alias edit/save for credit accounts ---
+            $(document).on('click', '.account-alias-edit-icon', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const accountId = $(this).data('account-id');
+                const wrapper = $(this).closest('.account-selection-name');
+                const input = wrapper.find('.account-alias-input');
+                const saveIcon = wrapper.find('.account-alias-save-icon');
+                
+                // Enable editing
+                input.removeAttr('readonly').focus().select();
+                saveIcon.addClass('visible');
+            });
+            
+            $(document).on('click', '.account-alias-save-icon', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const accountId = $(this).data('account-id');
+                const wrapper = $(this).closest('.account-selection-name');
+                const input = wrapper.find('.account-alias-input');
+                const editIcon = wrapper.find('.account-alias-edit-icon');
+                
+                // Confirm the current value
+                const newName = input.val().trim() || input.attr('placeholder');
+                input.val(newName);
+                input.data('confirmed-name', newName);
+                input.attr('data-confirmed-name', newName);
+                input.attr('readonly', true);
+                $(this).removeClass('visible');
+            });
+            
+            $(document).on('blur', '.account-alias-input:not([readonly])', function(e) {
+                const input = $(this);
+                // Small delay so click on save icon can fire first
+                setTimeout(function() {
+                    if (input.is('[readonly]')) return; // Already saved via checkmark
+                    const wrapper = input.closest('.account-selection-name');
+                    const editIcon = wrapper.find('.account-alias-edit-icon');
+                    const saveIcon = wrapper.find('.account-alias-save-icon');
+                    
+                    // Revert to last confirmed name
+                    const confirmedName = input.attr('data-confirmed-name') || input.attr('placeholder');
+                    input.val(confirmedName);
+                    input.attr('readonly', true);
+                    saveIcon.removeClass('visible');
+                }, 150);
+            });
+            
+            $(document).on('keydown', '.account-alias-input:not([readonly])', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    $(this).closest('.account-selection-name').find('.account-alias-save-icon').trigger('click');
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    $(this).trigger('blur');
+                }
+            });
+
             function deleteUnconfirmedConnection(connectionId) {
                 $.ajax({
                     url: '/quiltt/delete-unconfirmed',
@@ -1857,28 +1918,27 @@
                 const currentName = btn.data('current-name');
                 const nameEl = $(`.account-display-name[data-account-id="${accountId}"]`);
                 
+                // If already editing, do nothing
+                if (btn.hasClass('editing')) return;
+                
                 // Replace the name with an inline input
                 const input = $(`<input type="text" class="account-rename-input" value="${currentName}" maxlength="255">`);
+                const saveBtn = $(`<button class="account-rename-save-btn visible" title="Save name"><i class="fa-solid fa-check"></i></button>`);
                 nameEl.replaceWith(input);
+                input.after(saveBtn);
+                btn.addClass('editing').hide();
                 input.focus().select();
                 
-                // Hide the rename button
-                btn.hide();
+                let confirmed = false;
                 
-                function saveAlias() {
+                function confirmSave() {
+                    if (confirmed) return;
+                    confirmed = true;
                     const newAlias = input.val().trim();
-                    if (!newAlias) {
-                        // Restore original
-                        const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
-                        input.replaceWith(newLabel);
-                        btn.show();
-                        return;
-                    }
                     
-                    if (newAlias === currentName) {
-                        const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
-                        input.replaceWith(newLabel);
-                        btn.show();
+                    if (!newAlias || newAlias === currentName) {
+                        // No change — restore original
+                        restoreLabel(currentName);
                         return;
                     }
                     
@@ -1889,39 +1949,53 @@
                         data: JSON.stringify({ account_id: accountId, alias: newAlias }),
                         success: function(response) {
                             if (response.status === 'success') {
-                                const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${newAlias}</strong>`);
-                                input.replaceWith(newLabel);
                                 btn.data('current-name', newAlias);
-                                btn.show();
+                                restoreLabel(newAlias);
                                 showToast('Account renamed', 'success');
                             } else {
-                                const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
-                                input.replaceWith(newLabel);
-                                btn.show();
+                                restoreLabel(currentName);
                                 showToast('Failed to rename', 'error');
                             }
                         },
                         error: function() {
-                            const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
-                            input.replaceWith(newLabel);
-                            btn.show();
+                            restoreLabel(currentName);
                             showToast('Failed to rename', 'error');
                         }
                     });
                 }
                 
-                input.on('blur', saveAlias);
+                function restoreLabel(name) {
+                    const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${name}</strong>`);
+                    input.replaceWith(newLabel);
+                    saveBtn.remove();
+                    btn.removeClass('editing').show();
+                }
+                
+                // Checkmark click → save
+                saveBtn.on('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    confirmSave();
+                });
+                
+                // Blur → revert to last confirmed name (with delay for save click)
+                input.on('blur', function() {
+                    setTimeout(function() {
+                        if (!confirmed) {
+                            confirmed = true;
+                            restoreLabel(currentName);
+                        }
+                    }, 150);
+                });
+                
                 input.on('keydown', function(e) {
                     if (e.key === 'Enter') {
                         e.preventDefault();
-                        input.off('blur');
-                        saveAlias();
+                        confirmSave();
                     } else if (e.key === 'Escape') {
                         e.preventDefault();
-                        input.off('blur');
-                        const newLabel = $(`<strong class="account-display-name" data-account-id="${accountId}">${currentName}</strong>`);
-                        input.replaceWith(newLabel);
-                        btn.show();
+                        confirmed = true;
+                        restoreLabel(currentName);
                     }
                 });
             });

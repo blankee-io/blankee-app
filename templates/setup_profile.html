@@ -312,7 +312,7 @@
                         <div class="date-input-row">
                             <input type="date" id="edit-category-start-date" name="start_date" required>
                             <div class="end-date-container" id="edit-category-end-date-input-container">
-                                <input type="date" id="edit-category-end-date" name="end_date" required>
+                                <input type="date" id="edit-category-end-date" name="end_date">
                             </div>
                         </div>
 
@@ -1799,8 +1799,9 @@
                         $('#edit-category-end-date').prop('disabled', true);
                         $('#edit-category-occurrences-count').prop('disabled', false);
                     } else {
-                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', true);
-                        setGreyedOut('.date-checkbox-row:has(#edit-category-use-occurrences-checkbox)', true);
+                        var hasEndDate = $('#edit-category-end-date').val() !== '';
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', hasEndDate);
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-use-occurrences-checkbox)', hasEndDate);
                         $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 1);
                         $('#edit-category-end-date').prop('disabled', false);
                         $('#edit-category-occurrences-count').prop('disabled', true).val('');
@@ -1814,6 +1815,10 @@
                 
                 $('#edit-category-use-occurrences-checkbox').on('change', function() {
                     if (this.checked) $('#edit-category-no-end-date-checkbox').prop('checked', false);
+                    updateEditCategoryEndDateState();
+                });
+                
+                $('#edit-category-end-date').on('change input', function() {
                     updateEditCategoryEndDateState();
                 });
 
@@ -1906,8 +1911,13 @@
                             category.end_date = null;
                             category.occurrences_count = parseInt($('#edit-category-occurrences-count').val()) || 1;
                         } else {
+                            var endDateVal = $('#edit-category-end-date').val();
+                            if (!endDateVal) {
+                                showEndDateWarning('#edit-category-end-date');
+                                return;
+                            }
                             category.no_end_date = false;
-                            category.end_date = $('#edit-category-end-date').val();
+                            category.end_date = endDateVal;
                             category.occurrences_count = null;
                         }
                     } else {
