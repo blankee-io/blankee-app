@@ -151,6 +151,7 @@
 
     <!-- Link to the external JavaScript file -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
 
     <script>
 
@@ -3149,6 +3150,113 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                     }
                 });
             }
+
+            // Page tutorial (delay to ensure dynamic containers are built)
+            setTimeout(function() {
+                var todayCard = document.querySelector('.dashboard-d-container.today-outline');
+                if (!todayCard) return;
+
+                var contentWrapper = todayCard.querySelector('.dashboard-d-content-wrapper');
+                if (!contentWrapper) return;
+
+                // Only create temp examples and run tutorial if not already completed
+                fetch('/api/tutorial/status', { credentials: 'same-origin' })
+                    .then(function(res) { return res.json(); })
+                    .then(function(data) {
+                        var completed = (data.status === 'success' && data.completed) ? data.completed : {};
+                        if (completed['tutorial_dashboard_d']) return; // already done
+
+                        var tempIncome = null;
+                        var tempExpense = null;
+                        var tempCreditAccounts = [];
+                        var sym = currencySymbol || '$';
+
+                        function makeTempRow(cls, label) {
+                            var div = document.createElement('div');
+                            div.classList.add(cls, 'tutorial-temp');
+                            div.innerHTML = '<div class="dashboard-d-row">' +
+                                '<div class="dashboard-d-label-cell"><i class="fa-regular fa-folder category-icon"></i> ' + label + '</div>' +
+                                '<div class="dashboard-d-amount-cell">' + sym + '0.00</div></div>';
+                            return div;
+                        }
+
+                        // Ensure income entries div exists
+                        if (!todayCard.querySelector('.dashboard-d-income-entries')) {
+                            tempIncome = makeTempRow('dashboard-d-income-entries', 'Example Income');
+                            var incomeTotal = contentWrapper.querySelector('.dashboard-d-income-total');
+                            if (incomeTotal) contentWrapper.insertBefore(tempIncome, incomeTotal);
+                            else {
+                                var lastRem = contentWrapper.querySelector('.dashboard-d-lastremainder');
+                                if (lastRem) lastRem.after(tempIncome);
+                            }
+                        }
+
+                        // Ensure expense entries div exists
+                        if (!todayCard.querySelector('.dashboard-d-expense-entries')) {
+                            tempExpense = makeTempRow('dashboard-d-expense-entries', 'Example Expense');
+                            var expenseTotal = contentWrapper.querySelector('.dashboard-d-expense-total');
+                            if (expenseTotal) contentWrapper.insertBefore(tempExpense, expenseTotal);
+                            else {
+                                var incTotal = contentWrapper.querySelector('.dashboard-d-income-total');
+                                if (incTotal) incTotal.after(tempExpense);
+                            }
+                        }
+
+                        // Ensure credit account sections exist (create 2 example accounts)
+                        if (!todayCard.querySelector('.dashboard-d-credit-account')) {
+                            var creditDivider = contentWrapper.querySelector('.dashboard-d-credit-divider');
+                            var savingsDivider = null;
+                            var allDividers = contentWrapper.querySelectorAll('.dashboard-d-credit-divider');
+                            if (allDividers.length >= 2) savingsDivider = allDividers[1];
+
+                            var exampleAccounts = [
+                                { name: 'Example Visa', mask: '1234', entry: 'Groceries' },
+                                { name: 'Example Mastercard', mask: '5678', entry: 'Gas' }
+                            ];
+                            exampleAccounts.forEach(function(acct) {
+                                var caDiv = document.createElement('div');
+                                caDiv.classList.add('dashboard-d-credit-account', 'tutorial-temp');
+                                caDiv.innerHTML =
+                                    '<div class="dashboard-d-credit-row dashboard-d-credit-name-row">' +
+                                        '<div class="dashboard-d-label-cell">' + acct.name + '</div>' +
+                                        '<div class="dashboard-d-amount-cell">...' + acct.mask + '</div>' +
+                                    '</div>' +
+                                    '<div class="dashboard-d-credit-row dashboard-d-row">' +
+                                        '<div class="dashboard-d-label-cell"><i class="fa-regular fa-folder category-icon"></i> ' + acct.entry + '</div>' +
+                                        '<div class="dashboard-d-amount-cell">' + sym + '0.00</div>' +
+                                    '</div>' +
+                                    '<div class="dashboard-d-credit-row dashboard-d-credit-balance">' +
+                                        '<div class="dashboard-d-label-cell">Balance:</div>' +
+                                        '<div class="dashboard-d-amount-cell">' + sym + '0.00</div>' +
+                                    '</div>';
+                                if (savingsDivider) contentWrapper.insertBefore(caDiv, savingsDivider);
+                                else if (creditDivider) creditDivider.after(caDiv);
+                                else contentWrapper.appendChild(caDiv);
+                                tempCreditAccounts.push(caDiv);
+                            });
+                        }
+
+                        function cleanup() {
+                            if (tempIncome && tempIncome.parentNode) tempIncome.parentNode.removeChild(tempIncome);
+                            if (tempExpense && tempExpense.parentNode) tempExpense.parentNode.removeChild(tempExpense);
+                            tempCreditAccounts.forEach(function(el) { if (el && el.parentNode) el.parentNode.removeChild(el); });
+                            tempIncome = null;
+                            tempExpense = null;
+                            tempCreditAccounts = [];
+                        }
+
+                        startTutorial('tutorial_dashboard_d', [
+                            { selector: '.dashboard-d-container.today-outline', text: 'Each card represents one day of the week. Today\'s card has a highlighted border so you can spot it quickly.' },
+                            { selector: '.today-outline .dashboard-d-income-entries, .today-outline .dashboard-d-expense-entries', text: 'Income and expense entries are listed by category. Tap any amount to edit it directly.' },
+                            { selector: '.today-outline .dashboard-d-add-entry-btn', text: 'Tap this icon to add a new income or expense entry for that day.' },
+                            { selector: '.today-outline .dashboard-d-remainder', text: 'The remainder shows your income minus expenses for the day.' },
+                            { selector: '.today-outline .dashboard-d-credit-account', text: 'Credit account expenses and balances are tracked separately for each account.' },
+                            { selector: '.today-outline .dashboard-d-savings', text: 'Your cumulative savings balance is shown at the bottom of each day.' },
+                            { selector: '#today-floating-banner', text: 'When today\'s card scrolls off-screen, tap this banner to jump back to it.' }
+                        ], { delay: 500, onComplete: cleanup });
+                    })
+                    .catch(function() { /* silently ignore */ });
+            }, 1500);
 
             // Limit decimal places for dashboard-d-amount input (2 decimals)
             const dashboardDAmountInput = document.getElementById('dashboard-d-amount');

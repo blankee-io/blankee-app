@@ -623,5 +623,47 @@
 
 
     </script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            fetch('/api/tutorial/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.completed && data.completed['tutorial_manage_categories']) return;
+                    startTutorial('tutorial_manage_categories', [
+                        {
+                            selector: '#income-manage-table',
+                            text: 'View and manage your <b>income categories</b> here. Each row shows the category name, type, and visibility.'
+                        },
+                        {
+                            selector: '#expense-manage-table',
+                            text: 'Your <b>expense categories</b> are listed here — including standard, recurring, credit payment, and bud categories.'
+                        },
+                        {
+                            selector: '.sort-handle',
+                            text: 'Drag the <b>≡ handle</b> to reorder categories. This order is used across all dashboards.',
+                            padding: 6
+                        },
+                        {
+                            selector: '#add-income-btn, #add-expense-btn',
+                            text: 'Tap the <b>+</b> icon to create a new income or expense category.'
+                        },
+                        {
+                            selector: '.rename-category-btn',
+                            text: 'Tap the <b>pencil</b> to open the edit modal — rename, hide, or delete the category.',
+                            padding: 6
+                        },
+                        {
+                            selector: '.manage-cat-eye-icon',
+                            text: 'The <b>eye icon</b> shows whether a category is visible or hidden on your dashboards. Hidden categories keep their data but stay out of the way.',
+                            padding: 4
+                        }
+                    ], { delay: 500 });
+                })
+                .catch(function() {});
+        }, 600);
+    });
+    </script>
 </body>
 </html>

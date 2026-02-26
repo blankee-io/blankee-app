@@ -96,5 +96,41 @@
             }
         })();
     </script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            fetch('/api/tutorial/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.completed && data.completed['tutorial_feedback']) return;
+                    startTutorial('tutorial_feedback', [
+                        {
+                            selector: '#open-new-feedback',
+                            text: 'Tap this button to create a new feedback post — share suggestions, report bugs, or request features.',
+                            padding: 6
+                        },
+                        {
+                            selector: '.feedback-filters',
+                            text: 'Search for posts and filter by view (Trending, Most Wanted, Recent) or by tag.'
+                        },
+                        {
+                            selector: '#feedback-list',
+                            text: 'Browse feedback posts here. Each card shows the title, votes, and comments.'
+                        },
+                        {
+                            selector: '#feedback-detail',
+                            text: 'Select a post to see its full details, vote on it, and read comments.'
+                        },
+                        {
+                            selector: '#feedback-comment-form',
+                            text: 'Add a comment to share your thoughts on any feedback post.'
+                        }
+                    ], { delay: 500 });
+                })
+                .catch(function() {});
+        }, 600);
+    });
+    </script>
 </body>
 </html>
