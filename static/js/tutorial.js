@@ -2,7 +2,7 @@
  * Page Tutorial Engine
  * 
  * Shared system for guided tutorials across all pages.
- * Uses localStorage to track completion (shown once per user/browser).
+ * Uses server-side tracking (Redis → MySQL) to persist completion across devices.
  * 
  * Usage:
  *   startTutorial('tutorial_dashboard_3m', [
@@ -17,31 +17,91 @@
     // Tracks the currently active tutorial instance
     let activeTutorial = null;
 
+    // In-memory cache of completed tutorials (fetched from server on first use)
+    let _completedCache = null;
+    let _fetchPromise = null;
+
+    /**
+     * Fetch completed tutorials from the server (once per page load).
+     * Returns a Promise that resolves to {page_key: timestamp, ...}.
+     */
+    function fetchCompletedTutorials() {
+        if (_completedCache !== null) return Promise.resolve(_completedCache);
+        if (_fetchPromise) return _fetchPromise;
+
+        _fetchPromise = fetch('/api/tutorial/status', { credentials: 'same-origin' })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (data.status === 'success' && data.completed) {
+                    _completedCache = data.completed;
+                } else {
+                    _completedCache = {};
+                }
+                return _completedCache;
+            })
+            .catch(function() {
+                // Fallback: treat localStorage keys as the source of truth
+                _completedCache = {};
+                return _completedCache;
+            });
+
+        return _fetchPromise;
+    }
+
+    /**
+     * Mark a tutorial as completed on the server.
+     */
+    function markTutorialComplete(storageKey) {
+        // Update local cache immediately
+        if (_completedCache) _completedCache[storageKey] = new Date().toISOString();
+
+        // Fire-and-forget POST to server
+        fetch('/api/tutorial/complete', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ page_key: storageKey })
+        }).catch(function() { /* silently ignore */ });
+    }
+
     /**
      * Start a page tutorial.
      * 
-     * @param {string} storageKey - localStorage key (e.g. 'tutorial_dashboard_3m')
+     * @param {string} storageKey - tutorial key (e.g. 'tutorial_dashboard_3m')
      * @param {Array} steps - Array of { selector: string, text: string }
-     *   selector: CSS selector for the target element(s). If multiple match, their
-     *             bounding rects are merged into one highlight region.
-     *   text:     The instructional text shown in the modal.
      * @param {object} [options] - Optional overrides
      *   options.delay    - ms to wait before showing first step (default 500)
      *   options.padding  - px padding around highlight (default 8)
-     *   options.force    - if true, show even if localStorage key exists
+     *   options.force    - if true, show even if already completed
      */
     function startTutorial(storageKey, steps, options) {
         options = options || {};
         const delay = options.delay !== undefined ? options.delay : 500;
         const padding = options.padding !== undefined ? options.padding : 8;
         const force = options.force || false;
+        const onComplete = options.onComplete || null;
 
-        // Guard: already completed
-        if (!force && localStorage.getItem(storageKey)) return;
-        // Guard: no steps
+        // Guard: no steps or already running
         if (!steps || steps.length === 0) return;
-        // Guard: already running
         if (activeTutorial) return;
+
+        // Fetch server status, then decide whether to show
+        fetchCompletedTutorials().then(function(completed) {
+            if (!force && completed[storageKey]) return;
+            // Guard: another tutorial started while we were fetching
+            if (activeTutorial) return;
+
+            _launchTutorial(storageKey, steps, delay, padding, onComplete);
+        });
+    }
+
+    /**
+     * Internal: actually build and show the tutorial UI.
+     */
+    function _launchTutorial(storageKey, steps, delay, padding, onComplete) {
+
+        // Suppress data-version auto-reload while tutorial is active
+        window._disableDataVersionReload = true;
 
         // Create DOM elements (idempotent - reuse if already present)
         let overlay = document.querySelector('.tutorial-overlay');
@@ -108,7 +168,19 @@
                 return;
             }
 
+            // Call onHide for the previous step if it had one
+            var prevIdx = idx - 1;
+            if (prevIdx >= 0 && prevIdx < steps.length && typeof steps[prevIdx].onHide === 'function') {
+                try { steps[prevIdx].onHide(); } catch(e) { console.warn('Tutorial onHide error:', e); }
+            }
+
             var step = steps[idx];
+
+            // Call onShow before measuring
+            if (typeof step.onShow === 'function') {
+                try { step.onShow(); } catch(e) { console.warn('Tutorial onShow error:', e); }
+            }
+
             var rect = getBoundingRect(step.selector);
 
             // Skip steps with invisible/missing targets
@@ -119,16 +191,23 @@
             }
 
             // Scroll target into view if it's off-screen
-            var targetCenterY = rect.top + (rect.bottom - rect.top) / 2;
-            if (targetCenterY < 60 || targetCenterY > window.innerHeight - 60) {
+            // Only scroll if the element is truly outside the visible viewport
+            var isAboveViewport = rect.bottom < 0;
+            var isBelowViewport = rect.top > window.innerHeight;
+            var isMostlyHidden = rect.top < -20 || rect.bottom > window.innerHeight + 20;
+            var needsScroll = isAboveViewport || isBelowViewport || isMostlyHidden;
+            if (needsScroll) {
                 var scrollTarget = document.querySelector(step.selector);
                 if (scrollTarget) {
+                    // Hide highlight/modal while scrolling
+                    highlight.style.display = 'none';
+                    modal.style.display = 'none';
                     scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    // Re-measure after scroll settles
+                    // Re-measure after scroll fully settles
                     setTimeout(function() {
                         rect = getBoundingRect(step.selector);
                         if (rect) positionElements(rect, step, idx);
-                    }, 350);
+                    }, 700);
                     return;
                 }
             }
@@ -148,7 +227,7 @@
             highlight.style.height = (rect.bottom - rect.top + padding * 2) + 'px';
 
             // Update modal content
-            textEl.textContent = step.text;
+            textEl.innerHTML = step.text;
             counterEl.textContent = (idx + 1) + ' of ' + steps.length;
             nextBtn.textContent = idx === steps.length - 1 ? 'Done' : 'Next';
 
@@ -188,11 +267,15 @@
         }
 
         function endTutorial(completed) {
+            // Call onHide for the last shown step
+            if (currentStep >= 0 && currentStep < steps.length && typeof steps[currentStep].onHide === 'function') {
+                try { steps[currentStep].onHide(); } catch(e) { console.warn('Tutorial onHide error:', e); }
+            }
             overlay.style.display = 'none';
             highlight.style.display = 'none';
             modal.style.display = 'none';
             if (completed) {
-                localStorage.setItem(storageKey, '1');
+                markTutorialComplete(storageKey);
             }
             // Remove listeners
             skipBtn.removeEventListener('click', onSkip);
@@ -201,6 +284,19 @@
             window.removeEventListener('resize', onResize);
             window.removeEventListener('scroll', onScroll);
             activeTutorial = null;
+
+            // Re-enable data-version reload after a delay
+            // (gives time for the tutorial completion POST to settle)
+            setTimeout(function() {
+                window._disableDataVersionReload = false;
+            }, 5000);
+
+            // Call onComplete callback if provided (slight delay for DOM to settle)
+            if (onComplete) {
+                setTimeout(function() {
+                    try { onComplete(); } catch(e) { console.warn('Tutorial onComplete error:', e); }
+                }, 300);
+            }
         }
 
         function onNext(e) {
@@ -259,4 +355,22 @@
 
     // Expose globally
     window.startTutorial = startTutorial;
+    window.resetTutorial = function(pageKey) {
+        if (_completedCache) delete _completedCache[pageKey];
+        return fetch('/api/tutorial/reset', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ page_key: pageKey })
+        }).then(function(r) { return r.json(); });
+    };
+    window.resetAllTutorials = function() {
+        _completedCache = {};
+        return fetch('/api/tutorial/reset', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        }).then(function(r) { return r.json(); });
+    };
 })();

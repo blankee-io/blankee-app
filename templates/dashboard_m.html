@@ -107,6 +107,7 @@
 
     <!-- Link to the external JavaScript file -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
 
     <script>
 
@@ -819,6 +820,26 @@
                     $('#loading-screen').show();
                 }
             });
+        });
+
+        // --- Tutorial ---
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                fetch('/api/tutorial/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.completed && data.completed['tutorial_dashboard_m']) return;
+
+                        startTutorial('tutorial_dashboard_m', [
+                            { selector: '#dashboard-m-month-dropdown, #dashboard-m-year-dropdown', text: 'Use these dropdowns to jump directly to any month and year.' },
+                            { selector: '#dashboard-m-calendar', text: 'The calendar shows every day of the month. Each cell displays a quick summary of that day\'s totals.' },
+                            { selector: '.dashboard-m-today', text: '<b>Today</b> is highlighted so you can spot it at a glance.' },
+                            { selector: '.dashboard-m-today .dashboard-m-main-sections', text: 'Each day shows: <b>I</b> (income), <b>E</b> (expenses), <b>R</b> (remainder), credit account balances, and <b>S</b> (savings). Color coding on the remainder warns you of low or negative balances.' },
+                            { selector: '#dashboard-m-calendar', text: 'Tap any day to open it in the <b>Day view</b> for a detailed breakdown. You can also swipe left or right to change months.' }
+                        ], { delay: 500 });
+                    })
+                    .catch(function() { /* silently ignore */ });
+            }, 600);
         });
     </script>   
 </body>

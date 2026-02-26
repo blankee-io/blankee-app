@@ -93,6 +93,7 @@
 
     <!-- Link to the external JavaScript file -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
 
     <script>
         const incomeCategories = {{ income_categories | tojson }};
@@ -681,6 +682,26 @@
                     $('#loading-screen').show();
                 }
             });
+        });
+
+        // --- Tutorial ---
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                fetch('/api/tutorial/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.completed && data.completed['tutorial_dashboard_y']) return;
+
+                        startTutorial('tutorial_dashboard_y', [
+                            { selector: '#year-dropdown', text: 'Use this dropdown to jump to any year.' },
+                            { selector: '#year-calendar', text: 'The year overview shows all 12 months at a glance. Each day is color-coded by your remainder balance.' },
+                            { selector: '.dashboard-y-month-container:first-child .dashboard-y-month-title', text: 'Tap a <b>month name</b> to jump to that month in the Week view.' },
+                            { selector: '.dashboard-y-today', text: '<b>Today</b> is outlined so you can spot it quickly.' },
+                            { selector: '#year-calendar', text: '<b>Green</b> days are above your balance threshold, <b>orange</b> days are below it, and <b>red</b> days have a negative remainder. Swipe left or right to change years.' }
+                        ], { delay: 500 });
+                    })
+                    .catch(function() { /* silently ignore */ });
+            }, 600);
         });
     </script>
 </body>

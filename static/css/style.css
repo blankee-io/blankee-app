@@ -11525,7 +11525,7 @@ transform: scale(1.2);
 }
 
 .buffer-amount {
-    font-size: 52px;
+    font-size: 42px;
     font-weight: 700;
     margin-bottom: 6px;
     line-height: 1.1;
@@ -11538,7 +11538,7 @@ transform: scale(1.2);
     color: var(--primary);
 }
 
-.buffer-amount.negative {
+.buffer-amount.summary_negative {
     color: var(--accent) !important;
 }
 
@@ -11574,7 +11574,7 @@ transform: scale(1.2);
     color: var(--primary);
 }
 
-.projected-amount.negative {
+.projected-amount.summary_negative {
     color: var(--accent);
 }
 
@@ -11673,6 +11673,21 @@ transform: scale(1.2);
 .summary-section > :last-child {
     border-radius: 0 0 12px 12px;
     overflow: hidden;
+}
+
+.tutorial-negative-badge {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 18px;
+    height: 18px;
+    background: var(--danger);
+    border: 2px solid var(--secondary-dark);
+    border-radius: 50%;
+    color: var(--text-light);
+    font-size: 12px;
+    font-weight: bold;
+    vertical-align: middle;
 }
 
 .summary-section-header.has-negative-warning::after {

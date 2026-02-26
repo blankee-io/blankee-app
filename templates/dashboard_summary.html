@@ -183,6 +183,7 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
     
     <!-- Global variables needed by footer.html -->
     <script>
@@ -360,28 +361,30 @@
         function fitText(el, maxSize) {
             if (!el) return;
             const parent = el.parentElement;
-            const availableWidth = parent.clientWidth - 56; // Account for padding
-            
-            // Reset to max size first
-            el.style.fontSize = maxSize + 'px';
-            
-            // Create a temporary span to measure text width
-            const temp = document.createElement('span');
-            temp.style.fontSize = maxSize + 'px';
-            temp.style.fontWeight = '700';
-            temp.style.visibility = 'hidden';
-            temp.style.position = 'absolute';
-            temp.style.whiteSpace = 'nowrap';
-            temp.textContent = el.textContent;
-            document.body.appendChild(temp);
-            
-            let fontSize = maxSize;
-            while (temp.offsetWidth > availableWidth && fontSize > 16) {
-                fontSize -= 2;
-                temp.style.fontSize = fontSize + 'px';
+            if (!parent) return;
+
+            // Compute available width from parent's actual padding
+            const parentStyle = getComputedStyle(parent);
+            const padL = parseFloat(parentStyle.paddingLeft) || 0;
+            const padR = parseFloat(parentStyle.paddingRight) || 0;
+            const availableWidth = parent.clientWidth - padL - padR;
+            if (availableWidth <= 0) {
+                el.style.fontSize = maxSize + 'px';
+                return;
             }
-            
-            document.body.removeChild(temp);
+
+            // Use canvas for reliable text measurement
+            const canvas = fitText._canvas || (fitText._canvas = document.createElement('canvas'));
+            const ctx = canvas.getContext('2d');
+            const text = el.textContent;
+
+            let fontSize = maxSize;
+            while (fontSize > 16) {
+                ctx.font = '700 ' + fontSize + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+                if (ctx.measureText(text).width <= availableWidth) break;
+                fontSize -= 1;
+            }
+
             el.style.fontSize = fontSize + 'px';
         }
 
@@ -493,8 +496,8 @@
             // Buffer amount element
             const bufferEl = document.getElementById('buffer-amount');
             bufferEl.textContent = formatCurrency(currentBalance);
-            bufferEl.className = currentBalance >= 0 ? 'buffer-amount positive' : 'buffer-amount negative';
-            fitText(bufferEl, 52);
+            bufferEl.className = currentBalance >= 0 ? 'buffer-amount positive' : 'buffer-amount summary_negative';
+            fitText(bufferEl, 42);
             
             if (nextPayday) {
                 const paydayDate = nextPayday.date;
@@ -514,7 +517,7 @@
                 document.getElementById('projected-date').textContent = formatDate(projectedDate);
                 const projectedEl = document.getElementById('projected-amount');
                 projectedEl.textContent = formatCurrency(projectedBalance);
-                projectedEl.className = projectedBalance >= 0 ? 'projected-amount positive' : 'projected-amount negative';
+                projectedEl.className = projectedBalance >= 0 ? 'projected-amount positive' : 'projected-amount summary_negative';
                 fitText(projectedEl, 42);
             } else {
                 // No recurring income found
@@ -1492,9 +1495,19 @@
             renderExpenseBuckets();
             renderCaGraphs();
             renderSavingsGraph();
-            
 
-            
+            // Page tutorial
+            startTutorial('tutorial_dashboard_summary', [
+                { selector: '.summary-page-layout', text: 'This page summarizes your budget at a glance — buffer, trends, and upcoming expenses.' },
+                { selector: '.buffer-card', text: 'Your short-term buffer shows your current balance and projected amount until next payday.' },
+                { selector: '#test-purchase-open-btn', text: 'Test Purchase lets you simulate a purchase to see how it would affect your balance before you buy.' },
+                { selector: '#balance-graph-section', text: 'The balance trend chart shows how your balance changes over time.' },
+                { selector: '#trend-indicator', text: 'The arrow shows whether your balance is trending up or down. If you see a red <span class=\"tutorial-negative-badge\">!</span> badge on the header, it means your balance goes negative at some point in the future.' },
+                { selector: '#expense-buckets-section', text: 'Recurring expense buckets show what\'s been paid and what\'s still remaining this period.' },
+                { selector: '#ca-graphs-container', text: 'Credit account trends and recurring expense buckets for each account.' },
+                { selector: '#savings-graph-section', text: 'Your savings trend over time.' }
+            ], { onComplete: function() { window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+
             // Drag-to-scroll functionality
             const graphContainer = document.getElementById('balance-graph-container');
             let isDragging = false;
