@@ -1519,5 +1519,144 @@
         }
 
     </script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            fetch('/api/tutorial/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.completed && data.completed['tutorial_recurring_i']) return;
+
+                    // Always inject temp example rows at top for tutorial highlighting
+                    var cs = '{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}';
+                    var existingTable = document.querySelector('.income-recurring-table');
+                    var emptyInfo = document.querySelector('.recurring-income-empty-info');
+                    var createdTable = false;
+
+                    if (!existingTable) {
+                        // No table at all — hide empty info and create one
+                        if (emptyInfo) emptyInfo.style.display = 'none';
+                        existingTable = document.createElement('table');
+                        existingTable.className = 'income-recurring-table tutorial-temp-table';
+                        existingTable.innerHTML =
+                            '<thead><tr>' +
+                                '<th class="income-category-col">Category</th>' +
+                                '<th class="income-type-col">Type</th>' +
+                                '<th class="income-amount-col">Amount</th>' +
+                                '<th class="income-cadence-col">Every...</th>' +
+                                '<th class="income-bucket-col">Current<br>Status</th>' +
+                                '<th class="income-start-date-col"><span class="th-full">Start<br>Date</span><span class="th-mobile">Dates</span></th>' +
+                                '<th class="income-end-date-col">End<br>Date</th>' +
+                                '<th class="income-action-col"></th>' +
+                            '</tr></thead>' +
+                            '<tbody></tbody>' +
+                            '<tfoot><tr><td colspan="8" class="recurring-footer"></td></tr></tfoot>';
+                        var container = document.querySelector('.recurring-income-container');
+                        if (container) container.appendChild(existingTable);
+                        createdTable = true;
+                    }
+
+                    // Build two temp rows and prepend to tbody
+                    var tempRow1 = document.createElement('tr');
+                    tempRow1.className = 'tutorial-temp-row';
+                    tempRow1.innerHTML =
+                        '<td class="editable income-category" data-column="category_name">Paycheck<span class="mobile-type-label">Wages</span></td>' +
+                        '<td class="income-type" data-column="type">Wages</td>' +
+                        '<td class="editable income-amount" data-column="amount">' + cs + '2,500.00</td>' +
+                        '<td class="editable income-cadence" data-column="cadence" title="Every 2 weeks on Friday"><span class="cadence-top">2 <i class="fa-solid fa-calendar-week"></i></span><span class="cadence-detail">Fr</span></td>' +
+                        '<td class="income-bucket" data-column="bucket"><span class="status-paid" title="Received"><i class="fa-solid fa-hand-holding-dollar"></i></span></td>' +
+                        '<td class="editable income-start-date" data-column="start_date">25/01/01<span class="mobile-end-date">\u2192 No End</span></td>' +
+                        '<td class="editable income-end-date" data-column="end_date">No End</td>' +
+                        '<td class="income-actions">' +
+                            '<button class="edit-recurring-btn tutorial-temp-btn"><i class="fa-solid fa-pen-to-square"></i></button>' +
+                            '<button class="delete-recurring-btn tutorial-temp-btn"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>' +
+                        '</td>';
+
+                    var tempRow2 = document.createElement('tr');
+                    tempRow2.className = 'tutorial-temp-row';
+                    tempRow2.innerHTML =
+                        '<td class="editable income-category" data-column="category_name">Freelance<span class="mobile-type-label">Variable</span></td>' +
+                        '<td class="income-type" data-column="type">Variable</td>' +
+                        '<td class="editable income-amount" data-column="amount">' + cs + '800.00</td>' +
+                        '<td class="editable income-cadence" data-column="cadence" title="Every 1 month on the 1st"><span class="cadence-top">1 <i class="fa-solid fa-calendar-days"></i></span><span class="cadence-detail">1st</span></td>' +
+                        '<td class="income-bucket" data-column="bucket">' +
+                            '<div class="bucket-status"><div class="bucket-bar-container"><div class="bucket-bar bucket-bar-income" style="width:62%"></div></div>' +
+                            '<div class="bucket-text"><span class="bucket-spent">' + cs + '500.00</span><span class="bucket-separator">/</span><span class="bucket-total">' + cs + '800.00</span></div></div>' +
+                        '</td>' +
+                        '<td class="editable income-start-date" data-column="start_date">25/06/01<span class="mobile-end-date">\u2192 No End</span></td>' +
+                        '<td class="editable income-end-date" data-column="end_date">No End</td>' +
+                        '<td class="income-actions">' +
+                            '<button class="edit-recurring-btn tutorial-temp-btn"><i class="fa-solid fa-pen-to-square"></i></button>' +
+                            '<button class="delete-recurring-btn tutorial-temp-btn"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>' +
+                        '</td>';
+
+                    var tbody = existingTable.querySelector('tbody');
+                    if (tbody) {
+                        tbody.insertBefore(tempRow2, tbody.firstChild);
+                        tbody.insertBefore(tempRow1, tbody.firstChild);
+                    }
+
+                    function cleanup() {
+                        document.querySelectorAll('.tutorial-temp-row').forEach(function(r) { r.remove(); });
+                        var tempTbl = document.querySelector('.tutorial-temp-table');
+                        if (tempTbl) tempTbl.remove();
+                        if (emptyInfo) emptyInfo.style.display = '';
+                    }
+
+                    startTutorial('tutorial_recurring_i', [
+                        {
+                            selector: '.recurring-income-container .recurring-header',
+                            text: 'This page manages your <b>recurring income</b> — paychecks, transfers, and other deposits that repeat on a schedule.'
+                        },
+                        {
+                            selector: '.income-recurring-table',
+                            text: 'Each row shows a recurring income entry with its category, amount, cadence, and current status.'
+                        },
+                        {
+                            selector: '#add-income-btn',
+                            text: 'Tap this button to <b>add a new recurring income</b> entry.',
+                            padding: 6
+                        },
+                        {
+                            selector: '.tutorial-temp-row .income-type, .income-recurring-table tbody tr:first-child .income-type',
+                            text: '<b>Wages</b> means fixed income (like a paycheck). <b>Variable</b> means the amount can change each period (like freelance work).',
+                            padding: 4
+                        },
+                        {
+                            selector: '.tutorial-temp-row .income-cadence, .income-recurring-table tbody tr:first-child .income-cadence',
+                            text: 'The <b>cadence</b> shows how often this entry repeats — e.g. every 2 weeks on Friday, or monthly on the 1st.',
+                            padding: 4
+                        },
+                        {
+                            selector: '.tutorial-temp-row .income-bucket, .income-recurring-table tbody tr:first-child .income-bucket',
+                            text: '<b>Current Status</b> tracks whether this period\'s income has been received. Wages show a checkmark or pending icon; variable entries show a progress bar.',
+                            padding: 4
+                        },
+                        {
+                            selector: '.tutorial-temp-row .income-start-date, .tutorial-temp-row .income-end-date, .income-recurring-table tbody tr:first-child .income-start-date, .income-recurring-table tbody tr:first-child .income-end-date',
+                            text: '<b>Start Date</b> is when the recurring entry begins. <b>End Date</b> defines when it stops — or set "No End" to run indefinitely.',
+                            padding: 4
+                        },
+                        {
+                            selector: '.cadence-legend',
+                            text: 'The <b>cadence legend</b> explains the icons: day, week, month, year, and whether the current period has been received or is still pending.'
+                        },
+                        {
+                            selector: '.tutorial-temp-row .edit-recurring-btn, .income-recurring-table tbody tr:first-child .edit-recurring-btn',
+                            text: 'Tap the <b>pencil</b> to edit a recurring entry\u2019s amount, cadence, or dates.',
+                            padding: 6
+                        },
+                        {
+                            selector: '.tutorial-temp-row .delete-recurring-btn, .income-recurring-table tbody tr:first-child .delete-recurring-btn',
+                            text: 'Tap to <b>stop this recurring entry</b>. This removes the recurring schedule and future buckets, but does <b>not</b> delete the category or any past entries.',
+                            padding: 6
+                        }
+                    ], { delay: 500, onComplete: cleanup });
+                })
+                .catch(function() {});
+        }, 600);
+    });
+    </script>
 </body>
 </html>

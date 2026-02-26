@@ -4786,17 +4786,240 @@
 
             // Start page tutorial after view is fully rendered
             setTimeout(function() {
-                startTutorial('tutorial_dashboard_3m', [
-                    { selector: '#nav-inline-buttons', text: 'Switch between Day, Week, Month, Month Overview, and Year views using these icons.' },
-                    { selector: '#calendarnavbuttons', text: 'Navigate between months. The calendar icon returns you to the current month.' },
-                    { selector: '#month-table-container', text: 'Each cell shows one day. Tap a day to see its entries.' },
-                    { selector: '#income-table, #income-categories-table', text: 'This row shows your total income for the selected day.' },
-                    { selector: '#expenses-table, #expense-categories-table', text: 'This row shows your total expenses for the selected day.' },
-                    { selector: '.cas-table', text: 'If you have credit accounts, their expenses appear here.' },
-                    { selector: '#remainder-row-right, #remainder-row', text: 'The remainder shows income minus expenses. Green = positive, red = negative.' },
-                    { selector: '#unified-add-btn', text: 'Tap this icon to add a new income or expense entry for the selected day.' },
-                    { selector: '.nav-dash-container > a.nav-button:first-child', text: 'View and manage all your recurring entries from here.' }
-                ]);
+                // Check completion before creating temp elements
+                fetch('/api/tutorial/status', { credentials: 'same-origin' })
+                    .then(function(res) { return res.json(); })
+                    .then(function(data) {
+                        var completed = (data.status === 'success' && data.completed) ? data.completed : {};
+                        if (completed['tutorial_dashboard_3m']) return;
+
+                        var tempElements = [];
+                        var sym = currencySymbol || '$';
+
+                        // Create temp credit account tables if none exist
+                        if (!document.querySelector('.ca-categories-table')) {
+                            var categoriesContainer = document.getElementById('categories-container');
+                            var monthTableContainer = document.getElementById('month-table-container');
+                            var savingsCatTable = document.getElementById('savings-categories-table');
+                            var savingsTable = document.getElementById('savings-table');
+
+                            // Get expense category names (excluding Savings, Uncategorized, and credit account payment categories)
+                            var exCats = expenseCategories.filter(function(c) {
+                                return c.name !== 'Savings' && c.name !== 'Uncategorized' && c.name !== 'Interest Charge' && !c.is_credit_account && !c.is_auto_adjustment;
+                            });
+
+                            var exampleAccounts = [
+                                { name: 'Example Visa', mask: '1234', id: 'temp-ca-1', collapsed: false },
+                                { name: 'Example Mastercard', mask: '5678', id: 'temp-ca-2', collapsed: true }
+                            ];
+
+                            // Get current friday count for table cells
+                            var fridayRow = document.getElementById('friday-dates-row');
+                            var colCount = fridayRow ? fridayRow.children.length : 4;
+
+                            exampleAccounts.forEach(function(acct) {
+                                // --- Left side: ca-categories-table ---
+                                var catTable = document.createElement('table');
+                                catTable.className = 'ca-categories-table tutorial-temp';
+                                catTable.id = 'ca-categories-table-' + acct.id;
+                                if (acct.collapsed) catTable.classList.add('ca-collapsed');
+
+                                var thead = '<thead><tr><th class="ca-categories-header" id="ca-categories-header-' + acct.id + '">' +
+                                    '<button class="ca-collapse-toggle" data-account-id="' + acct.id + '" aria-label="Expand/Collapse">' +
+                                    '<i class="fa-solid fa-chevron-' + (acct.collapsed ? 'right' : 'down') + '"></i></button>' +
+                                    '<span class="ca-categories-title">Credit Categories</span></th></tr></thead>';
+                                var tbody = '<tbody>';
+                                // Regular categories + Interest Charge + Uncategorized
+                                var allCaCats = exCats.slice();
+                                allCaCats.push({ name: 'Interest Charge', icon: 'fa-regular fa-lock' });
+                                allCaCats.push({ name: 'Uncategorized', icon: 'fa-regular fa-lock' });
+                                allCaCats.forEach(function(c, idx) {
+                                    var zebraClass = idx % 2 === 0 ? 'zebra-odd-ca' : 'zebra-even-ca';
+                                    var iconClass = c.icon || 'fa-regular fa-folder';
+                                    tbody += '<tr class="' + zebraClass + '" data-category-id="temp-' + idx + '"><td class="category-cell"><span class="category-name"><i class="' + iconClass + ' category-icon"></i> ' + c.name + '</span></td></tr>';
+                                });
+                                tbody += '<tr class="ca-total-row" id="ca-total-row-' + acct.id + '"><td>Balance</td></tr></tbody>';
+                                catTable.innerHTML = thead + tbody;
+                                if (savingsCatTable) categoriesContainer.insertBefore(catTable, savingsCatTable);
+                                else categoriesContainer.appendChild(catTable);
+                                tempElements.push(catTable);
+
+                                // --- Right side: search field ---
+                                var searchDiv = document.createElement('div');
+                                searchDiv.className = 'search-btn-container ca tutorial-temp';
+                                searchDiv.id = 'ca-search-btn-container-' + acct.id;
+                                if (acct.collapsed) searchDiv.style.display = 'none';
+                                searchDiv.innerHTML = '<button class="clear-filter-btn ca" title="Clear Filter"><i class="fa-solid fa-filter-slash"></i></button>' +
+                                    '<input type="text" class="category-search-field ca" placeholder="Search ' + acct.name + ' categories..." autocomplete="off" />';
+                                if (savingsTable) monthTableContainer.insertBefore(searchDiv, savingsTable);
+                                else monthTableContainer.appendChild(searchDiv);
+                                tempElements.push(searchDiv);
+
+                                // --- Right side: cas-table ---
+                                var casTable = document.createElement('table');
+                                casTable.className = 'aligned-table cas-table tutorial-temp';
+                                casTable.id = 'cas-table-' + acct.id;
+                                if (acct.collapsed) casTable.classList.add('ca-collapsed');
+
+                                // Build header with individual th cells matching friday-dates-row
+                                var casHead = '<thead><tr id="cas-header-row-' + acct.id + '">';
+                                var fridayCells = fridayRow ? fridayRow.children : [];
+                                for (var fi = 0; fi < colCount; fi++) {
+                                    var fCell = fridayCells[fi];
+                                    var dataDate = fCell ? fCell.getAttribute('data-date') || '' : '';
+                                    var isCurrent = fCell ? fCell.classList.contains('current-week') : false;
+                                    casHead += '<th data-date="' + dataDate + '"' + (isCurrent ? ' class="current-week"' : '') + '></th>';
+                                }
+                                casHead += '</tr></thead>';
+                                // Style the first and last th after creation
+                                // Scatter just a couple entries across the whole table
+                                var caFilledCells = acct.collapsed ? [] : [
+                                    { row: 0, col: 1, amt: 45 },
+                                    { row: 2, col: 3, amt: 120 }
+                                ];
+                                var casBody = '<tbody id="ca-categories-body-' + acct.id + '">';
+                                var colTotals = [];
+                                for (var t = 0; t < colCount; t++) colTotals.push(0);
+                                allCaCats.forEach(function(c, idx) {
+                                    var zebraClass = idx % 2 === 0 ? 'zebra-odd-ca' : 'zebra-even-ca';
+                                    casBody += '<tr class="' + zebraClass + '">';
+                                    for (var i = 0; i < colCount; i++) {
+                                        var filled = caFilledCells.find(function(f) { return f.row === idx && f.col === i; });
+                                        if (filled) {
+                                            colTotals[i] += filled.amt;
+                                            casBody += '<td class="editable-cell">' + sym + filled.amt.toFixed(2) + '</td>';
+                                        } else {
+                                            casBody += '<td class="editable-cell"></td>';
+                                        }
+                                    }
+                                    casBody += '</tr>';
+                                });
+                                casBody += '</tbody><tbody id="ca-totals-body-' + acct.id + '"><tr class="ca-bottom-row" id="cas-bottom-row-' + acct.id + '">';
+                                for (var i = 0; i < colCount; i++) casBody += '<td>' + (colTotals[i] ? sym + colTotals[i].toFixed(2) : sym + '0.00') + '</td>';
+                                casBody += '</tr></tbody>';
+                                casTable.innerHTML = casHead + casBody;
+                                if (savingsTable) monthTableContainer.insertBefore(casTable, savingsTable);
+                                else monthTableContainer.appendChild(casTable);
+
+                                // Style the header: account name on first th, mask on last th
+                                var caHeaderRow = casTable.querySelector('tr[id^="cas-header-row-"]');
+                                if (caHeaderRow) {
+                                    var firstTh = caHeaderRow.querySelector('th:first-child');
+                                    var lastTh = caHeaderRow.querySelector('th:last-child');
+                                    if (firstTh) {
+                                        var nameSpan = document.createElement('span');
+                                        nameSpan.textContent = acct.name;
+                                        nameSpan.style.cssText = 'position:absolute;left:calc(.2px + 0.9vw);top:50%;transform:translateY(-50%);white-space:nowrap;color:white;z-index:10;font-size:clamp(13px, calc(1.13vw + 4.65px), 14px);overflow:hidden;text-overflow:ellipsis;';
+                                        var rowWidth = caHeaderRow.offsetWidth;
+                                        var lastThWidth = lastTh ? lastTh.offsetWidth : 0;
+                                        nameSpan.style.maxWidth = (rowWidth - lastThWidth - 5) + 'px';
+                                        firstTh.style.position = 'relative';
+                                        firstTh.classList.add('ca-name-header');
+                                        firstTh.appendChild(nameSpan);
+                                    }
+                                    if (lastTh) {
+                                        lastTh.textContent = '...' + acct.mask;
+                                        lastTh.classList.add('ca-mask-header');
+                                        lastTh.style.cssText = 'color:white;text-align:right;padding-right:calc(.2px + 0.9vw);font-size:clamp(13px, calc(1.13vw + 4.65px), 14px);';
+                                    }
+                                }
+
+                                tempElements.push(casTable);
+                            });
+
+                            // --- Add credit account payment categories to expense table (left side) ---
+                            // Insert before Savings category if it exists
+                            var expenseTbody = document.querySelector('#expense-categories-table tbody');
+                            var expenseTotalRow = document.getElementById('expense-total-row');
+                            var savingsRow = null;
+                            expenseTbody.querySelectorAll('tr .category-name').forEach(function(span) {
+                                if (span.textContent.trim() === 'Savings') savingsRow = span.closest('tr');
+                            });
+                            var insertBeforeLeft = savingsRow || expenseTotalRow;
+                            var existingExpenseRows = expenseTbody ? expenseTbody.querySelectorAll('tr:not(#expense-total-row)').length : 0;
+                            var tempExpensePaymentRows = [];
+                            exampleAccounts.forEach(function(acct, acctIdx) {
+                                var zebraIdx = existingExpenseRows + acctIdx;
+                                var zebraClass = zebraIdx % 2 === 0 ? 'zebra-odd-expense' : 'zebra-even-expense';
+                                var tr = document.createElement('tr');
+                                tr.className = zebraClass + ' tutorial-temp';
+                                tr.setAttribute('data-is-credit-account', '1');
+                                tr.innerHTML = '<td class="category-cell"><span class="category-name"><i class="fa-regular fa-credit-card category-icon"></i> ' + acct.name + ' Payment</span></td>';
+                                if (insertBeforeLeft) expenseTbody.insertBefore(tr, insertBeforeLeft);
+                                else expenseTbody.appendChild(tr);
+                                tempExpensePaymentRows.push(tr);
+                                tempElements.push(tr);
+                            });
+
+                            // --- Add corresponding payment rows to expense right-side table ---
+                            // Find the Savings row position in the right-side table
+                            var expenseBody = document.getElementById('expense-categories-body');
+                            var rightSideRows = expenseBody.querySelectorAll('tr');
+                            var savingsRowRight = null;
+                            if (savingsRow) {
+                                // Find matching row index in left table (excluding total row)
+                                var leftRows = expenseTbody.querySelectorAll('tr:not(#expense-total-row)');
+                                var savingsIdx = -1;
+                                leftRows.forEach(function(r, i) {
+                                    var nameSpan = r.querySelector('.category-name');
+                                    if (nameSpan && nameSpan.textContent.trim() === 'Savings') savingsIdx = i;
+                                });
+                                // Account for the 2 payment rows we just inserted before Savings
+                                if (savingsIdx >= 0) savingsRowRight = rightSideRows[savingsIdx] || null;
+                            }
+                            exampleAccounts.forEach(function(acct, acctIdx) {
+                                var zebraIdx = existingExpenseRows + acctIdx;
+                                var zebraClass = zebraIdx % 2 === 0 ? 'zebra-odd-expense' : 'zebra-even-expense';
+                                var tr = document.createElement('tr');
+                                tr.className = zebraClass + ' tutorial-temp';
+                                tr.setAttribute('data-is-credit-account', '1');
+                                var cells = '';
+                                for (var i = 0; i < colCount; i++) cells += '<td class="editable-cell">' + sym + '0.00</td>';
+                                tr.innerHTML = cells;
+                                if (savingsRowRight) expenseBody.insertBefore(tr, savingsRowRight);
+                                else expenseBody.appendChild(tr);
+                                tempElements.push(tr);
+                            });
+
+                            // Trigger outline recalculation to include temp CA tables
+                            setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 50);
+                        }
+
+                        function cleanup() {
+                            tempElements.forEach(function(el) { if (el && el.parentNode) el.parentNode.removeChild(el); });
+                            tempElements = [];
+                            // Ensure profile dropdown is closed
+                            var dd = document.getElementById('profileDropdown');
+                            if (dd) dd.style.display = 'none';
+                            // Recalculate outlines after removing temp elements
+                            setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 50);
+                        }
+
+                        startTutorial('tutorial_dashboard_3m', [
+                            { selector: '#nav-inline-buttons > :nth-child(1), #nav-inline-buttons > :nth-child(2), #nav-inline-buttons > :nth-child(3)', text: 'These icons switch between your main views: <b>Day</b>, <b>Week</b>, and <b>Month</b>. Each shows the same data at a different level of detail.' },
+                            { selector: '#nav-inline-buttons > :nth-child(4), #nav-inline-buttons > :nth-child(5)', text: 'The <b>Month Overview</b> and <b>Year Overview</b> show high-level summaries of your income, expenses, and remainder across longer time periods.' },
+                            { selector: '.nav-dash-container > a.nav-button:first-child', text: 'The <b>Dashboard Summary</b> shows all your recurring entries and their projected totals at a glance.' },
+                            { selector: '#calendarnavbuttons', text: 'Navigate between time periods. The arrows move forward and back, and the calendar icon returns you to the current period.' },
+                            { selector: '#income-categories-table tbody tr:not(#income-total-row), #expense-categories-table tbody tr:not(#expense-total-row):not([data-is-credit-account=\"1\"])', text: 'These are the categories you created during setup. Income categories are on top, expense categories below.' },
+                            { selector: '#toggle-all-hidden-btn', text: 'Toggle visibility of hidden categories.' },
+                            { selector: '#unified-recurring-btn', text: 'Create a new <b>recurring entry</b> — an entry that repeats automatically on a schedule you set.' },
+                            { selector: '#unified-add-btn', text: 'Add a new <b>category</b> for income or expenses.' },
+                            { selector: '#unified-edit-btn', text: 'Enter <b>edit mode</b> to rename, hide, or delete categories.' },
+                            { selector: '#income-category-search-field', text: 'Use the search field to quickly filter and find categories by name.' },
+                            { selector: '#income-table, #income-categories-table', text: 'The <b>Income</b> section shows your income categories and their amounts for each week of the month.' },
+                            { selector: '#expenses-table, #expense-categories-table', text: 'The <b>Expenses</b> section shows your expense categories and weekly amounts.' },
+                            { selector: '.cas-table, .ca-categories-table', text: 'Each <b>credit account</b> has its own section with expense categories and a running balance. Tap the arrow to collapse or expand.' },
+                            { selector: '.ca-collapsed', text: 'Credit accounts can be <b>collapsed</b> to keep the page tidy. Tap the arrow icon to expand or collapse any account.' },
+                            { selector: '#expense-categories-table tbody tr[data-is-credit-account=\"1\"]', text: 'Credit account <b>payment categories</b> appear in your expenses. Entries here represent payments you make toward that credit account.' },
+                            { selector: '#income-categories-body, #expense-categories-body, .cas-table:not(.ca-collapsed) tbody[id^=\"ca-categories-body-\"]', text: 'Tap any cell in the table to add, edit, or delete an entry for that category and week. Entries added here are placed on the <b>last day of the month</b>.' },
+                            { selector: '#savings-categories-table, #savings-table', text: 'The <b>Savings</b> row tracks your cumulative savings balance. The Savings categories in income and expenses modify this balance.' },
+                            { selector: '.nav-feedback', text: 'Tap the <b>Feedback</b> icon to share suggestions, report bugs, or vote on feature requests.' },
+                            { selector: '.nav-notifications', text: 'The <b>Notifications</b> bell alerts you to important updates like bank connection issues or balance warnings.' },
+                            { selector: '.sidenav-profile-pic', text: 'Tap your <b>profile picture</b> to open the navigation menu.' },
+                            { selector: '#profileDropdown', text: 'The menu gives you quick access to <b>Manage Categories</b>, <b>Manage Recurring</b> entries, <b>Credit Accounts</b>, <b>Settings</b>, <b>Bank Accounts</b>, and <b>Pending Transactions</b>.', onShow: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'block'; }, onHide: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'none'; } }
+                        ], { delay: 500, onComplete: cleanup });
+                    })
+                    .catch(function() { /* silently ignore */ });
             }, 600);
 
             // Attach the touch event listeners to the month table container

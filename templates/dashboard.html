@@ -4808,14 +4808,7 @@
             // Start page tutorial after view is fully rendered
             setTimeout(function() {
                 startTutorial('tutorial_dashboard', [
-                    { selector: '#nav-inline-buttons', text: 'Switch between Day, Week, Month, Month Overview, and Year views.' },
-                    { selector: '#calendarnavbuttons', text: 'Navigate between weeks. The calendar icon returns you to the current week.' },
-                    { selector: '#income-table, #income-categories-table', text: 'Your income categories and amounts for each day of the week.' },
-                    { selector: '#expenses-table, #expense-categories-table', text: 'Your expense categories and amounts for each day of the week.' },
-                    { selector: '.cas-table', text: 'Expenses for each credit account appear in separate tables.' },
-                    { selector: '#remainder-row-right, #remainder-row', text: 'Weekly totals and remainder. Green = surplus, red = deficit.' },
-                    { selector: '#unified-add-btn', text: 'Click any cell to add or edit an entry for that category and date.' },
-                    { selector: '#savings-table, #savings-categories-table', text: 'Track your cumulative savings balance over time.' }
+                    { selector: '#income-table, #expense-categories-table, .cas-table, #remainder-row-right, #remainder-row', text: 'The Week view works the same as the Month View, but shows one week at a time — Saturday through Friday. All entries for the week are added up and displayed in the Friday of their respective week. Editing cells will remove all entries that can be removed for that week, and add the new value to the Friday.' }
                 ]);
             }, 600);
             // Attach the touch event listeners to the month table container

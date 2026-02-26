@@ -1542,5 +1542,29 @@
             return `${year}-${month}-${day}`;
         }
     </script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            fetch('/api/tutorial/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.completed && data.completed['tutorial_recurring_e']) return;
+                    startTutorial('tutorial_recurring_e', [
+                        {
+                            selector: '.recurring-expense-container',
+                            text: 'This works just like <b>Recurring Income</b>, but for expenses — rent, utilities, subscriptions, and other repeating costs.'
+                        },
+                        {
+                            selector: '.expense-type, .recurring-expense-empty-info',
+                            text: '<b>Bill</b> means a fixed amount (like rent or a subscription). <b>Allowance</b> means flexible spending where the amount can vary each period (like groceries).',
+                            padding: 4
+                        }
+                    ], { delay: 500 });
+                })
+                .catch(function() {});
+        }, 600);
+    });
+    </script>
 </body>
 </html>

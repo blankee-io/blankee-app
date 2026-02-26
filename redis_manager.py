@@ -2762,7 +2762,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             quiltt_enabled = %s,
                             quiltt_auto_import = %s,
                             member_since = %s,
-                            setup_step = %s
+                            setup_step = %s,
+                            completed_tutorials = %s
                         WHERE id = %s
                     """, (
                         float(user_data.get('balance_threshold', 0)),
@@ -2781,6 +2782,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         int(user_data.get('quiltt_auto_import', 1)),
                         user_data.get('member_since'),
                         int(user_data.get('setup_step', 0)),
+                        user_data.get('completed_tutorials'),
                         user_id
                     ))
                     

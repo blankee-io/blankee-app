@@ -1479,5 +1479,99 @@
         }
 
     </script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            fetch('/api/tutorial/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.completed && data.completed['tutorial_recurring_ca_e']) return;
+
+                    var cs = '{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}';
+                    var container = document.querySelector('.recurring-ca-container');
+                    var emptyInfo = document.querySelector('.recurring-ca-empty-info');
+
+                    // Always inject two temp credit account tables with example rows
+                    if (emptyInfo) emptyInfo.style.display = 'none';
+
+                    function makeTempTable(name, rows) {
+                        var tbl = document.createElement('table');
+                        tbl.className = 'ca-recurring-table tutorial-temp-table';
+                        var rowsHtml = '';
+                        rows.forEach(function(r) {
+                            rowsHtml +=
+                                '<tr class="tutorial-temp-row">' +
+                                    '<td class="editable ca-category" data-column="category_name">' + r.cat + '<span class="mobile-type-label">' + r.type + '</span></td>' +
+                                    '<td class="ca-type" data-column="type">' + r.type + '</td>' +
+                                    '<td class="editable ca-amount" data-column="amount">' + cs + r.amount + '</td>' +
+                                    '<td class="editable ca-cadence" data-column="cadence" title="' + r.cadTitle + '"><span class="cadence-top">' + r.cadTop + '</span><span class="cadence-detail">' + r.cadDetail + '</span></td>' +
+                                    '<td class="ca-bucket" data-column="bucket">' + r.bucket + '</td>' +
+                                    '<td class="editable ca-start-date" data-column="start_date">25/01/01<span class="mobile-end-date">\u2192 No End</span></td>' +
+                                    '<td class="editable ca-end-date" data-column="end_date">No End</td>' +
+                                    '<td class="ca-actions">' +
+                                        '<button class="edit-recurring-btn tutorial-temp-btn"><i class="fa-solid fa-pen-to-square"></i></button>' +
+                                        '<button class="delete-recurring-btn tutorial-temp-btn"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>' +
+                                    '</td>' +
+                                '</tr>';
+                        });
+                        tbl.innerHTML =
+                            '<thead>' +
+                                '<tr><th class="ca-recurring-title" colspan="8"><span>' + name + '</span>' +
+                                    '<button class="add-ca-btn tutorial-temp-btn" title="Add Category"><i class="fa-kit fa-solid-arrows-repeat-circle-plus"></i></button></th></tr>' +
+                                '<tr>' +
+                                    '<th class="ca-category-col">Category</th>' +
+                                    '<th class="ca-type-col">Type</th>' +
+                                    '<th class="ca-amount-col">Amount</th>' +
+                                    '<th class="ca-cadence-col">Every...</th>' +
+                                    '<th class="ca-bucket-col">Current<br>Status</th>' +
+                                    '<th class="ca-start-date-col"><span class="th-full">Start<br>Date</span><span class="th-mobile">Dates</span></th>' +
+                                    '<th class="ca-end-date-col">End<br>Date</th>' +
+                                    '<th class="ca-action-col"></th>' +
+                                '</tr>' +
+                            '</thead>' +
+                            '<tbody>' + rowsHtml + '</tbody>' +
+                            '<tfoot><tr><td colspan="8" class="recurring-footer"></td></tr></tfoot>';
+                        return tbl;
+                    }
+
+                    var tbl1 = makeTempTable('Example Visa \u2022\u2022\u20224321', [
+                        { cat: 'Netflix', type: 'Bill', amount: '15.99', cadTitle: 'Every 1 month on the 1st', cadTop: '1 <i class="fa-solid fa-calendar-days"></i>', cadDetail: '1st', bucket: '<span class="status-paid" title="Paid"><i class="fa-solid fa-hand-holding-dollar"></i></span>' },
+                        { cat: 'Groceries', type: 'Allowance', amount: '400.00', cadTitle: 'Every 1 month on the 1st', cadTop: '1 <i class="fa-solid fa-calendar-days"></i>', cadDetail: '1st', bucket: '<div class="bucket-status"><div class="bucket-bar-container"><div class="bucket-bar bucket-bar-ok" style="width:45%"></div></div><div class="bucket-text"><span class="bucket-spent">' + cs + '180.00</span><span class="bucket-separator">/</span><span class="bucket-total">' + cs + '400.00</span></div></div>' }
+                    ]);
+                    var tbl2 = makeTempTable('Example Mastercard \u2022\u2022\u20228765', [
+                        { cat: 'Car Insurance', type: 'Bill', amount: '125.00', cadTitle: 'Every 1 month on the 15th', cadTop: '1 <i class="fa-solid fa-calendar-days"></i>', cadDetail: '15th', bucket: '<span class="status-unpaid" title="Unpaid"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i></span>' }
+                    ]);
+
+                    // Insert temp tables before any existing ones, or append
+                    var firstReal = container.querySelector('.ca-recurring-table:not(.tutorial-temp-table)');
+                    if (firstReal) {
+                        container.insertBefore(tbl2, firstReal);
+                        container.insertBefore(tbl1, tbl2);
+                    } else {
+                        container.appendChild(tbl1);
+                        container.appendChild(tbl2);
+                    }
+
+                    function cleanup() {
+                        document.querySelectorAll('.tutorial-temp-table').forEach(function(t) { t.remove(); });
+                        if (emptyInfo) emptyInfo.style.display = '';
+                    }
+
+                    startTutorial('tutorial_recurring_ca_e', [
+                        {
+                            selector: '.recurring-ca-container .recurring-header',
+                            text: 'This page manages <b>recurring expenses for your credit accounts</b> — subscriptions, monthly fees, and charges that repeat on each card or line of credit.'
+                        },
+                        {
+                            selector: '.ca-recurring-table',
+                            text: 'Each credit account gets its <b>own table</b>. The rows work just like Recurring Expenses — with category, type, cadence, and status — but charges are tracked per account.'
+                        }
+                    ], { delay: 500, onComplete: cleanup });
+                })
+                .catch(function() {});
+        }, 600);
+    });
+    </script>
 </body>
 </html>

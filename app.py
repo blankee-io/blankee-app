@@ -430,6 +430,119 @@ def update_landing_page():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
 
+@app.route('/api/tutorial/status', methods=['GET'])
+@login_required
+def get_tutorial_status():
+    """Return the completed_tutorials JSON for the current user."""
+    try:
+        completed = None
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(f"users:v1:{current_user.id}")
+                if cached:
+                    user_data = json.loads(cached)
+                    completed = user_data.get('completed_tutorials')
+            except Exception:
+                pass
+
+        if completed is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT completed_tutorials FROM users WHERE id = %s", (current_user.id,))
+                row = cursor.fetchone()
+                cursor.close()
+                completed = row[0] if row and row[0] else None
+
+        if completed and isinstance(completed, str):
+            completed = json.loads(completed)
+        elif not completed:
+            completed = {}
+
+        return jsonify({'status': 'success', 'completed': completed})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/tutorial/complete', methods=['POST'])
+@login_required
+def complete_tutorial():
+    """Mark a page tutorial as completed."""
+    page_key = request.json.get('page_key') if request.is_json else request.form.get('page_key')
+    if not page_key:
+        return jsonify({'status': 'error', 'message': 'page_key required'}), 400
+
+    try:
+        # Read current completed_tutorials from Redis (or MySQL fallback)
+        completed = None
+        if app.config.get('REDIS_OK'):
+            try:
+                cached = _redis_client.get(f"users:v1:{current_user.id}")
+                if cached:
+                    user_data = json.loads(cached)
+                    completed = user_data.get('completed_tutorials')
+            except Exception:
+                pass
+
+        if completed is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT completed_tutorials FROM users WHERE id = %s", (current_user.id,))
+                row = cursor.fetchone()
+                cursor.close()
+                completed = row[0] if row and row[0] else None
+
+        if completed and isinstance(completed, str):
+            completed = json.loads(completed)
+        elif not completed:
+            completed = {}
+
+        # Add this page with timestamp
+        completed[page_key] = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+
+        # Save back as JSON string via _update_user_setting_in_redis
+        _update_user_setting_in_redis(current_user.id, 'completed_tutorials', json.dumps(completed))
+
+        return jsonify({'status': 'success', 'completed': completed})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/tutorial/reset', methods=['POST'])
+@login_required
+def reset_tutorials():
+    """Reset all tutorial completions (or a specific one)."""
+    page_key = None
+    if request.is_json:
+        page_key = request.json.get('page_key')
+    elif request.form:
+        page_key = request.form.get('page_key')
+
+    try:
+        if page_key:
+            # Reset just one tutorial
+            completed = None
+            if app.config.get('REDIS_OK'):
+                try:
+                    cached = _redis_client.get(f"users:v1:{current_user.id}")
+                    if cached:
+                        user_data = json.loads(cached)
+                        completed = user_data.get('completed_tutorials')
+                except Exception:
+                    pass
+
+            if completed and isinstance(completed, str):
+                completed = json.loads(completed)
+            elif not completed:
+                completed = {}
+
+            completed.pop(page_key, None)
+            _update_user_setting_in_redis(current_user.id, 'completed_tutorials', json.dumps(completed) if completed else None)
+        else:
+            # Reset all tutorials
+            _update_user_setting_in_redis(current_user.id, 'completed_tutorials', None)
+
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
 def create_totals_remainders_for_new_user(user_id):
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor()
