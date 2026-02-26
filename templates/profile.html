@@ -108,9 +108,9 @@
                                 <div class="input-group">
                                     <label for="username">Change Email:</label>
                                     <input type="text" name="username" id="profile-username" class="login-input" value="{{ current_username }}" required> <!-- Input field for new email -->
-                                    <!-- Submit button, initially disabled -->
-                                    <button type="submit" id="profile-submit-button" class="submit-button disabled">
-                                        <i id="profile-submit-icon" class="fas fa-times"></i> <!-- Icon for the submit button -->
+                                    <!-- Submit button, initially unchanged -->
+                                    <button type="submit" id="profile-submit-button" class="submit-button submit-unchanged">
+                                        <i id="profile-submit-icon" class="fas fa-check"></i>
                                     </button>
                                     <!-- Container for email validation messages -->
                                     <div id="profile-email-requirements" class="profile-email-requirements">
@@ -306,6 +306,32 @@
 
     <script type="text/javascript">
     document.getElementById('loading-screen').style.display = 'none';
+
+        // === Submit button change tracking for first name / last name ===
+        (function() {
+            const initialFirstName = $('#profile-first-name').val();
+            const initialLastName = $('#profile-last-name').val();
+
+            function updateSubmitState(btn, hasChanged) {
+                if (hasChanged) {
+                    btn.removeClass('submit-unchanged');
+                } else {
+                    btn.addClass('submit-unchanged');
+                }
+            }
+
+            // Set initial grey state
+            $('#profile-first-name').closest('form').find('.submit-button').addClass('submit-unchanged');
+            $('#profile-last-name').closest('form').find('.submit-button').addClass('submit-unchanged');
+
+            $('#profile-first-name').on('input', function() {
+                updateSubmitState($(this).closest('form').find('.submit-button'), $(this).val() !== initialFirstName);
+            });
+
+            $('#profile-last-name').on('input', function() {
+                updateSubmitState($(this).closest('form').find('.submit-button'), $(this).val() !== initialLastName);
+            });
+        })();
     
         // Helper function to show success messages
         function showSuccessMessage(message, color) {
@@ -566,69 +592,78 @@
         });
 
         $(document).ready(function() {
-            const usernameInput = $('#profile-username');  // Select the email input field
-            const passwordInput = $('#profile-password');  // Select the password input field
-            const submitButton = $('#profile-submit-button');  // Select the email submit button
-            const passwordSubmitButton = $('#profile-password-submit-button');  // Select the password submit button
-            const submitIcon = $('#profile-submit-icon');  // Select the email submit button icon
-            const passwordSubmitIcon = $('#profile-password-submit-icon');  // Select the password submit button icon
+            const usernameInput = $('#profile-username');
+            const passwordInput = $('#profile-password');
+            const submitButton = $('#profile-submit-button');
+            const passwordSubmitButton = $('#profile-password-submit-button');
+            const submitIcon = $('#profile-submit-icon');
+            const passwordSubmitIcon = $('#profile-password-submit-icon');
 
-            const emailRequirements = $('#profile-email-requirements');  // Select the email requirements container
-            const emailFormatRequirement = $('#profile-email-format-requirement .profile-requirement-icon');  // Select the email format requirement icon
-            const emailAvailabilityRequirement = $('#profile-email-availability-requirement .profile-requirement-icon');  // Select the email availability requirement icon
+            const emailRequirements = $('#profile-email-requirements');
+            const emailFormatRequirement = $('#profile-email-format-requirement .profile-requirement-icon');
+            const emailAvailabilityRequirement = $('#profile-email-availability-requirement .profile-requirement-icon');
 
-            const passwordRequirements = $('#profile-password-requirements');  // Select the password requirements container
-            const lengthRequirement = $('#profile-length-requirement .profile-requirement-icon');  // Select the password length requirement icon
-            const symbolRequirement = $('#profile-symbol-requirement .profile-requirement-icon');  // Select the password symbol requirement icon
-            const capitalRequirement = $('#profile-capital-requirement .profile-requirement-icon');  // Select the password capital letter requirement icon
-            const numberRequirement = $('#profile-number-requirement .profile-requirement-icon');  // Select the password number requirement icon
+            const passwordRequirements = $('#profile-password-requirements');
+            const lengthRequirement = $('#profile-length-requirement .profile-requirement-icon');
+            const symbolRequirement = $('#profile-symbol-requirement .profile-requirement-icon');
+            const capitalRequirement = $('#profile-capital-requirement .profile-requirement-icon');
+            const numberRequirement = $('#profile-number-requirement .profile-requirement-icon');
 
-            let isEmailValid = false;  // Track email validity
-            let isPasswordValid = false;  // Track password validity
+            const initialEmail = usernameInput.val();
+            let isEmailValid = false;
+            let isPasswordValid = false;
 
-            // Function to enable a button
+            // Enable button: orange check, clickable
             function enableButton(button, icon) {
-                button.prop('disabled', false);  // Enable the button
-                button.removeAttr('disabled');  // Ensure the disabled attribute is removed
-                button.css('background-color', '#F15025');  // Set the button background color
-                icon.removeClass('fa-times').addClass('fa-check');  // Change the icon to a checkmark
-                button.addClass('hover-enabled');  // Add class for hover effect
-                button.removeClass('disabled');
-
+                button.prop('disabled', false);
+                button.removeAttr('disabled');
+                button.css('background-color', '');
+                button.removeClass('submit-unchanged disabled');
+                button.css('pointer-events', '');
             }
 
-            // Function to disable a button
+            // Disable button: grey check, non-interactive
             function disableButton(button, icon) {
-                button.prop('disabled', true);  // Disable the button
-                button.attr('disabled', 'disabled');  // Ensure the disabled attribute is added
-                button.css('background-color', '#ccc');  // Set the button background color
-                icon.removeClass('fa-check').addClass('fa-times');  // Change the icon to a cross
-                button.removeClass('hover-enabled');  // Remove hover effect
-                button.addClass('disabled');
+                button.prop('disabled', true);
+                button.attr('disabled', 'disabled');
+                button.css('background-color', '');
+                button.addClass('submit-unchanged');
+                button.removeClass('disabled');
+                button.css('pointer-events', '');
             }
 
-            // Function to check overall form validity and enable/disable the submit buttons accordingly
+            // Check form validity and toggle submit buttons
             function checkFormValidity() {
-                if (isEmailValid) {
-                    enableButton(submitButton, submitIcon);  // Enable the email submit button if the email is valid
+                // Email: must be valid AND different from original
+                if (isEmailValid && usernameInput.val() !== initialEmail) {
+                    enableButton(submitButton, submitIcon);
                 } else {
-                    disableButton(submitButton, submitIcon);  // Disable the email submit button if the email is invalid
+                    disableButton(submitButton, submitIcon);
                 }
 
                 if (isPasswordValid) {
-                    enableButton(passwordSubmitButton, passwordSubmitIcon);  // Enable the password submit button if the password is valid
+                    enableButton(passwordSubmitButton, passwordSubmitIcon);
                 } else {
-                    disableButton(passwordSubmitButton, passwordSubmitIcon);  // Disable the password submit button if the password is invalid
+                    disableButton(passwordSubmitButton, passwordSubmitIcon);
                 }
             }
 
             // Event listener for changes in the email input field
             usernameInput.on('input', function() {
-                const username = usernameInput.val();  // Get the email input value
-                let emailPatternValid = false;  // Track email pattern validity
-                isEmailValid = true;  // Assume the email is valid initially
+                const username = usernameInput.val();
 
-                emailRequirements.css('display', 'block').css('opacity', '1');  // Show the email requirements box
+                // If email matches original, hide requirements and grey the button
+                if (username === initialEmail) {
+                    emailRequirements.css('display', 'none');
+                    isEmailValid = false;
+                    checkFormValidity();
+                    return;
+                }
+
+                let emailPatternValid = false;
+                isEmailValid = true;
+
+                emailRequirements.css('display', 'block').css('opacity', '1');
                 
                 const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;  // Regular expression for email validation
                 if (emailPattern.test(username)) {

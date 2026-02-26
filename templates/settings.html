@@ -130,8 +130,36 @@
         }
 
         $(document).ready(function() {
+            // === Submit button change tracking ===
+            // Store initial values for each form field
+            const initialCurrency = $('#currency_type').val();
+            const initialLandingPage = $('#landing_page').val();
+
+            // Helper: toggle submit button grey/active state
+            function updateSubmitState(btn, hasChanged) {
+                if (hasChanged) {
+                    btn.removeClass('submit-unchanged');
+                } else {
+                    btn.addClass('submit-unchanged');
+                }
+            }
+
+            // Set initial grey state for all submit buttons
+            $('#currency-type-form .submit-button').addClass('submit-unchanged');
+            $('#balance-threshold-form .submit-button').addClass('submit-unchanged');
+            $('#landing-page-form .submit-button').addClass('submit-unchanged');
+
+            // Currency type change tracking
+            $('#currency_type').on('change', function() {
+                updateSubmitState($('#currency-type-form .submit-button'), $(this).val() !== initialCurrency);
+            });
+
+            // Landing page change tracking
+            $('#landing_page').on('change', function() {
+                updateSubmitState($('#landing-page-form .submit-button'), $(this).val() !== initialLandingPage);
+            });
+
             // JS for form submissions and validation
-            // For example, you can add similar logic to enable/disable buttons for balance fields
 
             // Format existing values to show .00 on page load
             const balanceThreshold = $('#balance_threshold');
@@ -139,6 +167,9 @@
             if (balanceThreshold.val() && !isNaN(balanceThreshold.val())) {
                 balanceThreshold.val(parseFloat(balanceThreshold.val()).toFixed(2));
             }
+
+            // Store initial threshold AFTER formatting
+            const initialThreshold = $('#balance_threshold').val();
 
             $('#balance_threshold').on('input', function() {
                 $('#balance-threshold-submit-icon').removeClass('fa-times').addClass('fa-check');
@@ -156,6 +187,8 @@
                         this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
                     }
                 }
+                // Update submit button state
+                updateSubmitState($('#balance-threshold-form .submit-button'), this.value !== initialThreshold);
             });
 
             // Format to show .00 on blur
@@ -163,6 +196,8 @@
                 if (this.value && !isNaN(this.value)) {
                     this.value = parseFloat(this.value).toFixed(2);
                 }
+                // Re-check after formatting
+                updateSubmitState($('#balance-threshold-form .submit-button'), this.value !== initialThreshold);
             });
 
             // Handle toggle switch clicks

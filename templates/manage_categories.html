@@ -47,13 +47,6 @@
                 </div>
             </div>
 
-            <!-- Add category input (hidden by default) -->
-            <div id="income-add-input-container" class="manage-cat-input-container" style="display:none;">
-                <input type="text" id="new-income-category-input" placeholder="New Income Category Name" maxlength="20">
-                <button id="submit-income-category-btn"><i class="fa-solid fa-plus"></i></button>
-                <button id="cancel-income-category-btn"><i class="fa-solid fa-times"></i></button>
-            </div>
-
             <table class="manage-cat-table income-manage-table" id="income-manage-table">
                 <thead>
                     <tr>
@@ -123,13 +116,6 @@
                         <i class="fa-kit fa-solid-folder-minus-circle-plus"></i>
                     </button>
                 </div>
-            </div>
-
-            <!-- Add category input (hidden by default) -->
-            <div id="expense-add-input-container" class="manage-cat-input-container" style="display:none;">
-                <input type="text" id="new-expense-category-input" placeholder="New Expense Category Name" maxlength="20">
-                <button id="submit-expense-category-btn"><i class="fa-solid fa-plus"></i></button>
-                <button id="cancel-expense-category-btn"><i class="fa-solid fa-times"></i></button>
             </div>
 
             <table class="manage-cat-table expense-manage-table" id="expense-manage-table">
@@ -206,6 +192,14 @@
         </div>
     </div>
 
+    <!-- Modal for adding a new category -->
+    <div id="addCategoryModal" class="category-input-overlay">
+        <div id="add-category-input-container" class="floating-input-container">
+            <input id="addCategoryInput" type="text" maxlength="20" placeholder="Category Name" />
+            <button id="confirmAddCategoryBtn"><i class="fa-solid fa-check"></i></button>
+        </div>
+    </div>
+
     <script>
         // Pass categories to JS
         let incomeCategories = {{ income_categories | tojson | safe }};
@@ -213,40 +207,53 @@
 
         let isModalOpen = false;
 
-        // ===================== ADD CATEGORY =====================
+        // ===================== ADD CATEGORY (Modal) =====================
+        let addCategoryType = null;
+        const addCategoryModal = document.getElementById('addCategoryModal');
+        const addCategoryContainer = document.getElementById('add-category-input-container');
+        const addCategoryInput = document.getElementById('addCategoryInput');
+        const confirmAddCategoryBtn = document.getElementById('confirmAddCategoryBtn');
+
+        function openAddCategoryModal(type) {
+            addCategoryType = type;
+            addCategoryInput.value = '';
+            addCategoryInput.placeholder = type === 'income' ? 'New Income Category Name' : 'New Expense Category Name';
+            addCategoryModal.style.display = 'block';
+            addCategoryContainer.style.display = 'flex';
+            addCategoryInput.focus();
+            isModalOpen = true;
+            // Clear any previous duplicate warning
+            if (addCategoryInput._dupWarning) addCategoryInput._dupWarning.classList.remove('visible');
+        }
+
+        function closeAddCategoryModal() {
+            addCategoryModal.style.display = 'none';
+            addCategoryContainer.style.display = 'none';
+            isModalOpen = false;
+        }
+
         document.getElementById('add-income-btn').addEventListener('click', function() {
-            const container = document.getElementById('income-add-input-container');
-            container.style.display = container.style.display === 'none' ? 'flex' : 'none';
-            if (container.style.display === 'flex') {
-                document.getElementById('new-income-category-input').focus();
-            }
+            openAddCategoryModal('income');
         });
         document.getElementById('add-expense-btn').addEventListener('click', function() {
-            const container = document.getElementById('expense-add-input-container');
-            container.style.display = container.style.display === 'none' ? 'flex' : 'none';
-            if (container.style.display === 'flex') {
-                document.getElementById('new-expense-category-input').focus();
+            openAddCategoryModal('expense');
+        });
+
+        // Close add modal on backdrop click or Escape
+        addCategoryModal.addEventListener('mousedown', function(e) {
+            if (e.target === addCategoryModal) {
+                closeAddCategoryModal();
             }
         });
-        document.getElementById('cancel-income-category-btn').addEventListener('click', function() {
-            document.getElementById('income-add-input-container').style.display = 'none';
-            document.getElementById('new-income-category-input').value = '';
-        });
-        document.getElementById('cancel-expense-category-btn').addEventListener('click', function() {
-            document.getElementById('expense-add-input-container').style.display = 'none';
-            document.getElementById('new-expense-category-input').value = '';
-        });
 
-        function addCategory(type) {
-            const inputId = type === 'income' ? 'new-income-category-input' : 'new-expense-category-input';
-            const input = document.getElementById(inputId);
-            const categoryName = input.value.trim();
+        function addCategory() {
+            const categoryName = addCategoryInput.value.trim();
             if (!categoryName) return;
 
-            const catsToCheck = type === 'income' ? incomeCategories : expenseCategories;
-            if (checkCategoryDuplicate(input, catsToCheck)) return;
+            const catsToCheck = addCategoryType === 'income' ? incomeCategories : expenseCategories;
+            if (checkCategoryDuplicate(addCategoryInput, catsToCheck)) return;
 
-            const url = type === 'income' ? "{{ url_for('add_income_category') }}" : "{{ url_for('add_expense_category') }}";
+            const url = addCategoryType === 'income' ? "{{ url_for('add_income_category') }}" : "{{ url_for('add_expense_category') }}";
 
             $.ajax({
                 url: url,
@@ -266,23 +273,15 @@
             });
         }
 
-        document.getElementById('submit-income-category-btn').addEventListener('click', function() {
-            addCategory('income');
-        });
-        document.getElementById('submit-expense-category-btn').addEventListener('click', function() {
-            addCategory('expense');
-        });
-        // Enter key support
-        document.getElementById('new-income-category-input').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') addCategory('income');
-        });
-        document.getElementById('new-expense-category-input').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') addCategory('expense');
+        confirmAddCategoryBtn.addEventListener('click', addCategory);
+        addCategoryInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') addCategory();
         });
 
-        // Live duplicate-name checks for add-category inputs
-        setupCategoryDuplicateCheck(document.getElementById('new-income-category-input'), function() { return incomeCategories; });
-        setupCategoryDuplicateCheck(document.getElementById('new-expense-category-input'), function() { return expenseCategories; });
+        // Live duplicate-name check for add-category modal input
+        setupCategoryDuplicateCheck(addCategoryInput, function() {
+            return addCategoryType === 'income' ? incomeCategories : expenseCategories;
+        });
 
         // ===================== SAVE NEW ORDER =====================
         function saveNewOrder(type) {
@@ -386,7 +385,7 @@
             document.addEventListener('keydown', function(e) {
                 if (isModalOpen && e.key === 'Escape') {
                     editCategoryModal.style.display = 'none';
-                    isModalOpen = false;
+                    closeAddCategoryModal();
                 }
             });
 
