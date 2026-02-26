@@ -125,19 +125,23 @@
             const entryType = input.dataset.entryType;
             const creditAccountId = input.dataset.creditAccountId;
             
+            let cats;
             if (entryType === 'c_expense') {
                 // For credit account expenses, filter by account_id
                 if (creditAccountId) {
-                    return cExpenseCategories.filter(cat => 
+                    cats = cExpenseCategories.filter(cat => 
                         String(cat.account_id) === String(creditAccountId)
                     );
+                } else {
+                    cats = cExpenseCategories.slice();
                 }
-                return cExpenseCategories;
             } else if (entryType === 'expense') {
-                return expenseCategories.filter(cat => cat.name !== 'Interest Charge');
+                cats = expenseCategories.filter(cat => cat.name !== 'Interest Charge');
             } else {
-                return incomeCategories;
+                cats = incomeCategories.slice();
             }
+            // Sort by display_order descending
+            return cats.sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
         }
 
         // Category dropdown functionality
