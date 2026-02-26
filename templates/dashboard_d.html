@@ -430,23 +430,26 @@
             if (entryType === 'income') {
                 incomeCategories.forEach(category => {
                     if (!category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
-                        dashboardDCategories.push({ id: category.id, name: category.name, is_recurring: category.is_recurring, is_auto_adjustment: category.is_auto_adjustment });
+                        dashboardDCategories.push({ id: category.id, name: category.name, display_order: category.display_order, is_recurring: category.is_recurring, is_auto_adjustment: category.is_auto_adjustment });
                     }
                 });
             } else if (entryType === 'expense') {
                 expenseCategories.forEach(category => {
                     if (!category.hidden && !category.is_bud) {
-                        dashboardDCategories.push({ id: category.id, name: category.name, is_recurring: category.is_recurring, is_credit_account: category.is_credit_account, is_auto_adjustment: category.is_auto_adjustment });
+                        dashboardDCategories.push({ id: category.id, name: category.name, display_order: category.display_order, is_recurring: category.is_recurring, is_credit_account: category.is_credit_account, is_auto_adjustment: category.is_auto_adjustment });
                     }
                 });
             } else if (entryType.startsWith('ca_')) {
                 const accountId = parseInt(entryType.split('_')[1]);
                 c_expense_categories.forEach(category => {
                     if (category.account_id === accountId && !category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
-                        dashboardDCategories.push({ id: category.id, name: category.name, is_recurring: category.is_recurring, is_interest: category.is_interest, is_auto_adjustment: category.is_auto_adjustment });
+                        dashboardDCategories.push({ id: category.id, name: category.name, display_order: category.display_order, is_recurring: category.is_recurring, is_interest: category.is_interest, is_auto_adjustment: category.is_auto_adjustment });
                     }
                 });
             }
+
+            // Sort by display_order descending
+            dashboardDCategories.sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
         }
 
         // Category search and dropdown functionality for dashboard_d
@@ -785,7 +788,11 @@
             const expenseArr = (window.expenseEntries && Array.isArray(window.expenseEntries)) ? window.expenseEntries : expenseEntries;
             const caExpenseArr = (window.c_expense_entries && Array.isArray(window.c_expense_entries)) ? window.c_expense_entries : c_expense_entries;
 
-            weekDates.forEach(date => {
+            weekDates.forEach((date, idx) => {
+                const zebraWrapper = document.createElement('div');
+                zebraWrapper.classList.add('dashboard-d-zebra-wrapper');
+                if (idx % 2 === 1) zebraWrapper.classList.add('dashboard-d-zebra');
+
                 const container = document.createElement('div');
                 container.classList.add('dashboard-d-container');
                 container.classList.add('dashboard-d-date-container');
@@ -1203,7 +1210,8 @@
                 // Append content wrapper to container
                 container.appendChild(contentWrapper);
 
-                dashboardWrapper.appendChild(container);
+                zebraWrapper.appendChild(container);
+                dashboardWrapper.appendChild(zebraWrapper);
             });
 
             document.querySelectorAll('.dashboard-d-amount-cell[contenteditable="true"]').forEach(cell => {

@@ -58,6 +58,49 @@ def _get_categories_from_redis(table_name: str, user_id: int) -> Optional[List[D
         return None
 
 
+def _get_categories_from_mysql(table_name: str, user_id: int) -> Optional[List[Dict]]:
+    """
+    Fallback: get categories directly from MySQL when Redis doesn't have them.
+    Used by cron scripts (nightly_sync) when users aren't hydrated in Redis.
+    
+    Args:
+        table_name: 'income_categories', 'expense_categories', or 'c_expense_categories'
+        user_id: User ID
+    
+    Returns:
+        List of category dicts with at least 'id' and 'name', or None on error
+    """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv('/var/www/budget_env/.env')
+        import mysql.connector
+        
+        conn = mysql.connector.connect(
+            host=os.environ.get('DB_HOST', 'localhost'),
+            user=os.environ.get('DB_USER'),
+            password=os.environ.get('DB_PASSWORD'),
+            database=os.environ.get('DB_NAME', 'budget')
+        )
+        cursor = conn.cursor(dictionary=True)
+        
+        if table_name == 'c_expense_categories':
+            cursor.execute("""
+                SELECT cec.id, cec.name FROM c_expense_categories cec
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+            """, (user_id,))
+        else:
+            cursor.execute(f"SELECT id, name FROM {table_name} WHERE user_id = %s", (user_id,))
+        
+        categories = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return categories if categories else None
+    except Exception as e:
+        logger.error(f"Error getting categories from {table_name} in MySQL: {e}")
+        return None
+
+
 def _get_user_categories(user_id: int) -> Dict[str, List[str]]:
     """
     Get all categories for a user, organized for Ntropy.
@@ -420,6 +463,11 @@ def _find_category_id(user_id: int, category_name: str, table_name: str) -> Opti
         return None
         
     categories = _get_categories_from_redis(table_name, user_id)
+    
+    # MySQL fallback if Redis doesn't have the data (e.g. cron scripts at midnight)
+    if not categories:
+        categories = _get_categories_from_mysql(table_name, user_id)
+    
     if not categories:
         return None
     
