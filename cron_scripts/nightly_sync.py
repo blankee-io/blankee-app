@@ -166,12 +166,12 @@ def get_quiltt_enabled_users(cursor):
     return cursor.fetchall()
 
 
-def refresh_session_if_needed(cursor, conn, user_id, profile_id, session_token, session_expires_at):
+def refresh_session_if_needed(cursor, conn, user_id, profile_id, session_token, session_expires_at, force=False):
     """Refresh Quiltt session token if expired or expiring soon"""
     now = datetime.now()
     
-    # Check if token is expired or expires in next hour
-    if session_expires_at and isinstance(session_expires_at, datetime):
+    # Check if token is expired or expires in next hour (skip check if force=True)
+    if not force and session_expires_at and isinstance(session_expires_at, datetime):
         if session_expires_at > now + timedelta(hours=1):
             # Token still valid
             return session_token
@@ -3198,6 +3198,14 @@ def process_user(cursor, conn, user_row):
     # STEP 2: Fetch and update account balances for ALL accounts
     # =========================================================================
     updated_accounts = fetch_and_update_balances(cursor, conn, user_id, session_token)
+    
+    # If balance fetch failed (likely 401 / stale token), force refresh and retry
+    if not updated_accounts:
+        logger.info(f"User {user_id}: Balance fetch failed, force-refreshing session token")
+        session_token = refresh_session_if_needed(cursor, conn, user_id, profile_id, session_token, session_expires, force=True)
+        if session_token:
+            updated_accounts = fetch_and_update_balances(cursor, conn, user_id, session_token)
+    
     result['balances_updated'] = len(updated_accounts)
     logger.info(f"User {user_id}: Updated {len(updated_accounts)} account balances")
     
