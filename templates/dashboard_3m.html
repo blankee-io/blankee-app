@@ -5016,7 +5016,8 @@
                             { selector: '.nav-feedback', text: 'Tap the <b>Feedback</b> icon to share suggestions, report bugs, or vote on feature requests.' },
                             { selector: '.nav-notifications', text: 'The <b>Notifications</b> bell alerts you to important updates like bank connection issues or balance warnings.' },
                             { selector: '.sidenav-profile-pic', text: 'Tap your <b>profile picture</b> to open the navigation menu.' },
-                            { selector: '#profileDropdown', text: 'The menu gives you quick access to <b>Manage Categories</b>, <b>Manage Recurring</b> entries, <b>Credit Accounts</b>, <b>Settings</b>, <b>Bank Accounts</b>, and <b>Pending Transactions</b>.', onShow: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'block'; }, onHide: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'none'; } }
+                            { selector: '#profileDropdown', text: 'The menu gives you quick access to <b>Manage Categories</b>, <b>Manage Recurring</b> entries, <b>Credit Accounts</b>, <b>Settings</b>, <b>Bank Accounts</b>, and <b>Pending Transactions</b>.', onShow: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'block'; }, onHide: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'none'; } },
+                            { selector: '#feedback-fab', text: 'The <b>quick feedback</b> button lets you leave feedback about the page you\u2019re on without navigating away.', padding: 6 }
                         ], { delay: 500, onComplete: cleanup });
                     })
                     .catch(function() { /* silently ignore */ });
