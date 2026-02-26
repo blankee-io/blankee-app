@@ -2001,6 +2001,127 @@
             });
         });
 
-    </script>    
+    </script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            fetch('/api/tutorial/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.completed && data.completed['tutorial_bank_accounts']) return;
+
+                    var cs = '{{ "$" if currency_type == "USD" else "\u20ac" if currency_type == "EUR" else currency_type }}';
+                    var section = document.getElementById('bank-connections-section');
+                    var sectionLiner = section ? section.querySelector('.section-liner') : null;
+                    var noConns = document.querySelector('.no-connections');
+                    var existingCards = document.querySelectorAll('.connection-card:not(.tutorial-temp-card)');
+                    var hadNoConnections = !existingCards.length;
+
+                    // Hide empty-state while tutorial runs
+                    if (noConns) noConns.style.display = 'none';
+
+                    // Build fake connection card
+                    var card = document.createElement('div');
+                    card.className = 'connection-card tutorial-temp-card';
+                    card.innerHTML =
+                        '<div class="connection-header">' +
+                            '<div class="connection-info">' +
+                                '<h3>Example Bank</h3>' +
+                                '<span class="connection-status connected">' +
+                                    '<i class="fa-solid fa-circle-check"></i> Connected' +
+                                '</span>' +
+                            '</div>' +
+                            '<div class="connection-actions">' +
+                                '<button class="delete-connection-btn danger-button tutorial-temp-btn" title="Delete Connection"><i class="fa-solid fa-trash"></i></button>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="accounts-list">' +
+                            '<div class="account-type-divider">Checking Accounts</div>' +
+                            '<div class="account-item">' +
+                                '<div class="account-info">' +
+                                    '<input type="checkbox" class="tutorial-temp-btn" checked style="width:18px;height:18px;cursor:pointer;">' +
+                                    '<label><strong>Everyday Checking</strong></label>' +
+                                '</div>' +
+                                '<div class="account-mask">...4821</div>' +
+                            '</div>' +
+                            '<div class="account-type-divider">Savings Accounts</div>' +
+                            '<div class="account-item">' +
+                                '<div class="account-info">' +
+                                    '<input type="checkbox" class="tutorial-temp-btn" checked style="width:18px;height:18px;cursor:pointer;">' +
+                                    '<label><strong>Savings</strong></label>' +
+                                '</div>' +
+                                '<div class="account-mask">...7390</div>' +
+                            '</div>' +
+                            '<div class="account-type-divider">Credit Accounts</div>' +
+                            '<div class="account-item tutorial-temp-credit-item">' +
+                                '<div class="account-info">' +
+                                    '<input type="checkbox" class="tutorial-temp-btn" checked style="width:18px;height:18px;cursor:pointer;">' +
+                                    '<label><strong class="account-display-name tutorial-temp-display-name">Platinum Rewards</strong></label>' +
+                                    '<button class="account-rename-btn tutorial-temp-btn tutorial-temp-rename-btn" title="Rename account"><i class="fa-solid fa-pen-to-square"></i></button>' +
+                                '</div>' +
+                                '<div class="account-mask">...5512</div>' +
+                            '</div>' +
+                            '<div class="account-item">' +
+                                '<div class="account-info">' +
+                                    '<input type="checkbox" class="tutorial-temp-btn" checked style="width:18px;height:18px;cursor:pointer;">' +
+                                    '<label><strong class="account-display-name">Cash Back Card</strong></label>' +
+                                    '<button class="account-rename-btn tutorial-temp-btn" title="Rename account"><i class="fa-solid fa-pen-to-square"></i></button>' +
+                                '</div>' +
+                                '<div class="account-mask">...3344</div>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="connection-footer">' +
+                            '<small>Last synced: just now</small>' +
+                        '</div>';
+
+                    // Insert before the connect-bank-container
+                    var connectContainer = sectionLiner ? sectionLiner.querySelector('.connect-bank-container') : null;
+                    if (connectContainer) {
+                        connectContainer.parentNode.insertBefore(card, connectContainer);
+                    } else if (sectionLiner) {
+                        sectionLiner.appendChild(card);
+                    }
+
+                    function cleanup() {
+                        var temp = document.querySelector('.tutorial-temp-card');
+                        if (temp) temp.remove();
+                        if (noConns) noConns.style.display = '';
+                    }
+
+                    startTutorial('tutorial_bank_accounts', [
+                        {
+                            selector: '#bank-connections-section',
+                            text: 'Manage your <b>bank connections</b> here \u2014 link accounts, toggle syncing, and monitor connection status.'
+                        },
+                        {
+                            selector: '.tutorial-temp-card .connection-header',
+                            text: 'Each card shows a connected bank with its <b>name</b>, <b>status</b>, and a <b>delete</b> button.'
+                        },
+                        {
+                            selector: '.tutorial-temp-card .accounts-list',
+                            text: 'Accounts are grouped by type \u2014 <b>Checking</b>, <b>Savings</b>, and <b>Credit</b>. Use the <b>checkboxes</b> to toggle which accounts sync transactions into your budget.'
+                        },
+                        {
+                            selector: '.tutorial-temp-credit-item',
+                            text: 'Credit accounts can be <b>renamed</b> \u2014 tap the <b>pencil icon</b> to give them a friendly name. This name appears across your dashboards.',
+                            padding: 4
+                        },
+                        {
+                            selector: '#connect-bank-btn',
+                            text: 'Tap to <b>connect a new bank</b>. You\u2019ll choose which accounts to sync after linking.',
+                            padding: 6
+                        },
+                        {
+                            selector: '.tutorial-temp-card .delete-connection-btn',
+                            text: 'Tap <b>delete</b> to remove a connection and all its data. If a connection ever breaks, a <b>reconnect</b> button will appear to re-authenticate with your bank.',
+                            padding: 6
+                        }
+                    ], { delay: 500, onComplete: cleanup });
+                })
+                .catch(function() {});
+        }, 600);
+    });
+    </script>
 </body>
 </html>

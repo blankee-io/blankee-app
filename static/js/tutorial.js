@@ -264,6 +264,17 @@
 
             modal.style.left = modalLeft + 'px';
             modal.style.top = modalTop + 'px';
+
+            // Ensure the bubble stays within the visible viewport by clamping
+            var viewportTop = window.scrollY + 8;
+            var viewportBottom = window.scrollY + window.innerHeight - 8;
+            if (modalTop + modalH > viewportBottom) {
+                modalTop = viewportBottom - modalH;
+            }
+            if (modalTop < viewportTop) {
+                modalTop = viewportTop;
+            }
+            modal.style.top = modalTop + 'px';
         }
 
         function endTutorial(completed) {

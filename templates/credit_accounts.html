@@ -582,11 +582,11 @@
                             text: 'Track your <b>credit cards and lines of credit</b> here \u2014 balances, interest rates, and account types.'
                         },
                         {
-                            selector: '.credit-accounts-table',
+                            selector: '.tutorial-temp-row',
                             text: 'Each row shows an account with its <b>name</b>, <b>interest rate</b>, <b>type</b> (Card or Line), and <b>today\u2019s balance</b>.'
                         },
                         {
-                            selector: '.tutorial-temp-row .sort-handle, .credit-accounts-table tbody tr:first-child .sort-handle',
+                            selector: '.tutorial-temp-row:first-of-type .sort-handle',
                             text: 'Drag the <b>\u2261 handle</b> to reorder accounts. This order is used across all dashboards.',
                             padding: 6
                         },
@@ -596,12 +596,12 @@
                             padding: 6
                         },
                         {
-                            selector: '.tutorial-temp-row .edit-credit-account-btn, .credit-accounts-table tbody tr:first-child .edit-credit-account-btn',
+                            selector: '.tutorial-temp-row:first-of-type .edit-credit-account-btn',
                             text: 'Tap the <b>pencil</b> to edit or the <b>trash</b> to delete an account.',
                             padding: 6
                         },
                         {
-                            selector: '.quiltt-linked-btn',
+                            selector: '.tutorial-temp-row .quiltt-linked-btn',
                             text: 'The <b>bank icon</b> means this account is linked to your bank via Quiltt. Linked accounts sync automatically and cannot be manually edited.',
                             padding: 6
                         }
