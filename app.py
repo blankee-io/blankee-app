@@ -13753,6 +13753,20 @@ def update_password():
 @login_required
 def enable_mfa():
     try:
+        # Verify password first
+        password = request.form.get('password')
+        if not password:
+            return jsonify({'status': 'error', 'message': 'Password is required'}), 400
+        
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT password FROM users WHERE id = %s", (current_user.id,))
+            user = cursor.fetchone()
+            cursor.close()
+        
+        if not user or not bcrypt.check_password_hash(user['password'], password):
+            return jsonify({'status': 'error', 'message': 'Incorrect password'}), 403
+        
         # Generate a new secret
         secret = pyotp.random_base32()
         
@@ -13797,6 +13811,20 @@ def verify_mfa():
 @app.route('/disable_mfa', methods=['POST'])
 @login_required
 def disable_mfa():
+    # Verify password first
+    password = request.form.get('password')
+    if not password:
+        return jsonify({'status': 'error', 'message': 'Password is required'}), 400
+    
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT password FROM users WHERE id = %s", (current_user.id,))
+        user = cursor.fetchone()
+        cursor.close()
+    
+    if not user or not bcrypt.check_password_hash(user['password'], password):
+        return jsonify({'status': 'error', 'message': 'Incorrect password'}), 403
+    
     # Update in Redis only - flush worker will persist to MySQL
     _update_user_setting_in_redis(current_user.id, 'mfa_secret', None)
     

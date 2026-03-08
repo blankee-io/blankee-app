@@ -572,7 +572,7 @@ class QuilttClient:
             
             return filtered_transactions
         else:
-            logger.warning("[NTROPY] No transactions found in any page")
+            logger.info("[NTROPY] No transactions found in any page")
         
         return None
     

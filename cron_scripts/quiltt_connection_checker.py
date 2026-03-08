@@ -107,7 +107,7 @@ def get_redis_key(table, user_id):
 def get_quiltt_enabled_users(cursor):
     """Get all users with Quiltt enabled"""
     cursor.execute("""
-        SELECT u.id, u.first_name, u.email, qp.profile_id, qp.session_token
+        SELECT u.id, u.first_name, u.email, qp.profile_id, qp.session_token, qp.session_expires_at
         FROM users u
         JOIN quiltt_profiles qp ON u.id = qp.user_id
         WHERE u.quiltt_enabled = 1
@@ -240,10 +240,43 @@ def update_connection_status(cursor, user_id, connection_id, new_status):
             logger.warning(f"  Failed to update Redis connection status: {e}")
 
 
-def refresh_session_if_needed(client, profile_id, session_token):
-    """Refresh session token if needed, returns new token or original"""
-    # Try to use existing token first - if it fails, we'll refresh
-    return session_token
+def refresh_session_if_needed(client, profile_id, session_token, session_expires_at, cursor, conn, user_id):
+    """Proactively refresh session token if expired or expiring soon, returns (token, updated)"""
+    if session_expires_at:
+        # Refresh if token expires within the next 30 minutes
+        buffer = timedelta(minutes=30)
+        now = datetime.utcnow()
+        if isinstance(session_expires_at, str):
+            try:
+                session_expires_at = datetime.fromisoformat(session_expires_at.replace('Z', '+00:00')).replace(tzinfo=None)
+            except Exception:
+                session_expires_at = None
+        if session_expires_at and now < (session_expires_at - buffer):
+            return session_token, False
+
+    # Token is expired or expiring soon — refresh it
+    logger.info(f"  Session token expired or missing expiry for user {user_id}, refreshing...")
+    token_data = client.refresh_session_token(profile_id)
+    if token_data:
+        new_token = token_data['token']
+        expires_at = token_data.get('expiresAt')
+        if expires_at:
+            try:
+                expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                expires_at = expires_dt.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                expires_at = None
+        cursor.execute("""
+            UPDATE quiltt_profiles
+            SET session_token = %s, session_expires_at = %s
+            WHERE user_id = %s
+        """, (new_token, expires_at, user_id))
+        conn.commit()
+        logger.info(f"  Proactively refreshed session token for user {user_id}")
+        return new_token, True
+
+    logger.warning(f"  Failed to refresh session token for user {user_id}")
+    return session_token, False
 
 
 def check_all_connections():
@@ -279,9 +312,15 @@ def check_all_connections():
             session_token = user['session_token']
             first_name = user['first_name'] or 'User'
             
+            session_expires_at = user.get('session_expires_at')
             hydrated = is_user_hydrated(user_id)
             logger.info(f"\nChecking user {user_id} ({first_name})... [Redis hydrated: {hydrated}]")
             stats['users_checked'] += 1
+            
+            # Proactively refresh session token if expired
+            session_token, token_refreshed = refresh_session_if_needed(
+                client, profile_id, session_token, session_expires_at, cursor, conn, user_id
+            )
             
             # Get stored connections for this user
             stored_connections = get_user_connections(cursor, user_id)
