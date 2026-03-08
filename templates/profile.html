@@ -243,6 +243,25 @@
         </div>
     </div>
 
+    <div id="mfa-password-modal" class="modal">
+        <div class="modal-content change-password-modal-content">
+            <span id="close-mfa-password-modal" class="close-modal">&times;</span>
+            <h2 id="mfa-password-modal-title">Enter Password</h2>
+            <p id="mfa-password-modal-desc">Please enter your password to continue.</p>
+            <form id="mfa-password-form">
+                <div class="password-form-group">
+                    <label for="mfa-password-input">Password:</label>
+                    <input type="password" id="mfa-password-input" class="login-input" required>
+                </div>
+                <div id="mfa-password-error" class="field-error"></div>
+                <div class="modal-buttons">
+                    <button type="submit" class="confirm-delete-category-btn">Continue</button>
+                    <button type="button" id="cancel-mfa-password" class="cancel-delete-category-btn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div id="password-mfa-modal" class="modal">
         <div class="modal-content">
             <span id="close-password-mfa-modal" class="close-modal">&times;</span>
@@ -345,6 +364,47 @@
         
         $(document).ready(function() {
             let mfaVerified = false; // Track if MFA was successfully verified
+            let pendingMfaAction = null; // 'enable' or 'disable'
+
+            // Prompt for password before MFA action, returns password or null
+            function promptMfaPassword(action) {
+                return new Promise(function(resolve) {
+                    pendingMfaAction = action;
+                    if (action === 'enable') {
+                        $('#mfa-password-modal-title').text('Enable MFA');
+                        $('#mfa-password-modal-desc').text('Enter your password to enable multi-factor authentication.');
+                    } else {
+                        $('#mfa-password-modal-title').text('Disable MFA');
+                        $('#mfa-password-modal-desc').text('Enter your password to disable multi-factor authentication.');
+                    }
+                    $('#mfa-password-input').val('');
+                    $('#mfa-password-error').text('');
+                    $('#mfa-password-modal').css('display', 'flex');
+                    $('#mfa-password-input').focus();
+
+                    // Remove any previous handlers
+                    $('#mfa-password-form').off('submit').on('submit', function(e) {
+                        e.preventDefault();
+                        const pw = $('#mfa-password-input').val();
+                        if (!pw) {
+                            $('#mfa-password-error').text('Password is required.');
+                            return;
+                        }
+                        $('#mfa-password-modal').css('display', 'none');
+                        resolve(pw);
+                    });
+
+                    function cancel() {
+                        $('#mfa-password-modal').css('display', 'none');
+                        resolve(null);
+                    }
+                    $('#cancel-mfa-password').off('click').on('click', cancel);
+                    $('#close-mfa-password-modal').off('click').on('click', cancel);
+                    $('#mfa-password-modal').off('click.bg').on('click.bg', function(e) {
+                        if (e.target.id === 'mfa-password-modal') cancel();
+                    });
+                });
+            }
 
             // Handle MFA toggle switch
             $('#mfa-toggle').on('change', function() {
@@ -352,22 +412,34 @@
                 const icon = $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon');
                 
                 if (isChecked) {
-                    // Enabling MFA - show QR modal
+                    // Enabling MFA - prompt password first
                     mfaVerified = false;
-                    $.post('/enable_mfa', function(data) {
-                        if (data.status === 'success' && data.qr_url) {
-                            $('#mfa-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code">');
-                            $('#mfa-secret-key').text(data.secret);
-                            $('#mfa-verify-message').text('');
-                            $('#mfa-code').val('');
-                            // Clear all digit inputs
-                            $('.mfa-digit').each(function() { $(this).val(''); });
-                            $('#mfa-qr-modal').css('display', 'flex');
-                        } else {
-                            // Error - revert toggle
+                    promptMfaPassword('enable').then(function(password) {
+                        if (!password) {
+                            // Cancelled - revert toggle
                             $('#mfa-toggle').prop('checked', false);
                             icon.addClass('toggle-off');
+                            return;
                         }
+                        $.post('/enable_mfa', { password: password }, function(data) {
+                            if (data.status === 'success' && data.qr_url) {
+                                $('#mfa-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code">');
+                                $('#mfa-secret-key').text(data.secret);
+                                $('#mfa-verify-message').text('');
+                                $('#mfa-code').val('');
+                                $('.mfa-digit').each(function() { $(this).val(''); });
+                                $('#mfa-qr-modal').css('display', 'flex');
+                            } else {
+                                $('#mfa-toggle').prop('checked', false);
+                                icon.addClass('toggle-off');
+                                showToast(data.message || 'Failed to enable MFA.', 'error');
+                            }
+                        }).fail(function(xhr) {
+                            $('#mfa-toggle').prop('checked', false);
+                            icon.addClass('toggle-off');
+                            const resp = xhr.responseJSON;
+                            showToast(resp && resp.message ? resp.message : 'Failed to enable MFA.', 'error');
+                        });
                     });
                 } else {
                     // Disabling MFA - show confirmation
@@ -437,12 +509,25 @@
                     $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
                     return;
                 }
-                $.post('/disable_mfa', function(data) {
+                // Prompt for password
+                const password = await promptMfaPassword('disable');
+                if (!password) {
+                    $('#mfa-toggle').prop('checked', true);
+                    $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
+                    return;
+                }
+                $.post('/disable_mfa', { password: password }, function(data) {
                     if (data.status !== 'success') {
                         // Revert toggle
                         $('#mfa-toggle').prop('checked', true);
                         $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
+                        showToast(data.message || 'Failed to disable MFA.', 'error');
                     }
+                }).fail(function(xhr) {
+                    $('#mfa-toggle').prop('checked', true);
+                    $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
+                    const resp = xhr.responseJSON;
+                    showToast(resp && resp.message ? resp.message : 'Incorrect password.', 'error');
                 });
             }
 

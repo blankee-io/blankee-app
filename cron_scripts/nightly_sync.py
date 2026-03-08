@@ -24,7 +24,7 @@ import os
 import sys
 import json
 import logging
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from decimal import Decimal
 
 # Add parent directory to path so we can import app modules
@@ -575,7 +575,7 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                             epoch = fin_response.get('createdDate')
                             if epoch:
                                 try:
-                                    finicity_created_date = datetime.utcfromtimestamp(int(epoch)).strftime('%Y-%m-%d %H:%M:%S')
+                                    finicity_created_date = datetime.fromtimestamp(int(epoch), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
                                 except (ValueError, TypeError, OSError):
                                     finicity_created_date = None
             
