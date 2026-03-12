@@ -19,7 +19,7 @@ import os
 import sys
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Add parent directory to path so we can import app modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -245,7 +245,7 @@ def refresh_session_if_needed(client, profile_id, session_token, session_expires
     if session_expires_at:
         # Refresh if token expires within the next 30 minutes
         buffer = timedelta(minutes=30)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         if isinstance(session_expires_at, str):
             try:
                 session_expires_at = datetime.fromisoformat(session_expires_at.replace('Z', '+00:00')).replace(tzinfo=None)
@@ -256,7 +256,7 @@ def refresh_session_if_needed(client, profile_id, session_token, session_expires
 
     # Token is expired or expiring soon — refresh it
     logger.info(f"  Session token expired or missing expiry for user {user_id}, refreshing...")
-    token_data = client.refresh_session_token(profile_id)
+    token_data = client.refresh_session_token(profile_id, metadata={'user_id': str(user_id)})
     if token_data:
         new_token = token_data['token']
         expires_at = token_data.get('expiresAt')
@@ -343,7 +343,7 @@ def check_all_connections():
                     if not live_conn:
                         logger.warning(f"  Could not fetch connection {connection_id} from Quiltt API")
                         # Session might be expired - try to refresh
-                        token_data = client.refresh_session_token(profile_id)
+                        token_data = client.refresh_session_token(profile_id, metadata={'user_id': str(user_id)})
                         if token_data:
                             session_token = token_data['token']
                             # Convert ISO datetime to MySQL format

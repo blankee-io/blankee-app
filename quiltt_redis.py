@@ -1395,3 +1395,54 @@ def get_savings_category_ids(user_id: int) -> Dict[str, Optional[int]]:
     except Exception as e:
         logger.error(f"Error getting Savings category IDs for user {user_id}: {e}", exc_info=True)
         return result
+
+
+def insert_quiltt_webhook_event(event_id: str, event_type: str, profile_id: str = None,
+                                 connection_id: str = None, payload: dict = None,
+                                 user_id: int = None) -> bool:
+    """
+    Insert a webhook event directly into MySQL (not Redis-first).
+    Webhook events are system-level, not user-scoped, so they bypass Redis.
+    Uses INSERT IGNORE to handle deduplication via unique_event_id constraint.
+
+    Returns True if inserted, False if duplicate or error.
+    """
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT IGNORE INTO quiltt_webhook_events
+                (event_id, event_type, profile_id, connection_id, payload)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                event_id,
+                event_type,
+                profile_id,
+                connection_id,
+                json.dumps(payload) if payload else '{}'
+            ))
+            conn.commit()
+            inserted = cursor.rowcount > 0
+            cursor.close()
+            return inserted
+    except Exception as e:
+        logger.error(f"Error inserting webhook event {event_id}: {e}", exc_info=True)
+        return False
+
+
+def mark_webhook_event_processed(event_id: str, error_message: str = None) -> bool:
+    """Mark a webhook event as processed (or failed with error message)."""
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE quiltt_webhook_events
+                SET processed = 1, processed_at = NOW(), error_message = %s
+                WHERE event_id = %s
+            """, (error_message, event_id))
+            conn.commit()
+            cursor.close()
+            return True
+    except Exception as e:
+        logger.error(f"Error marking webhook event {event_id} as processed: {e}", exc_info=True)
+        return False

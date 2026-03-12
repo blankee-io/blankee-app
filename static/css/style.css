@@ -2176,6 +2176,10 @@ transform: scale(1.02);
     cursor: not-allowed;
 }
 
+.account-selection-item.disabled .account-checkbox {
+    pointer-events: none;
+}
+
 .account-selection-item.disabled:hover {
     border-color: var(--secondary-hover);
     transform: none;
@@ -11082,7 +11086,6 @@ transform: scale(1.2);
 }
 
 .account-info label {
-    cursor: pointer;
     margin: 0;
     /* Prevent text from expanding the cell */
     overflow: hidden;
@@ -11400,7 +11403,6 @@ transform: scale(1.2);
     padding: 16px;
     border: 1px solid var(--secondary-hover);
     border-radius: 8px;
-    cursor: pointer;
     transition: all 0.2s;
     background: white;
 }
@@ -12804,15 +12806,31 @@ transform: scale(1.2);
     padding: 40px 20px;
 }
 
-.no-pending-message i {
+.no-pending-message::before {
+    content: "Pending Transactions";
+}
+
+.no-pending-message i,
+.no-notifications-message i {
     font-size: 3em;
     color: var(--success-hover);
     margin-bottom: 15px;
 }
 
-.no-pending-message h3 {
+.no-pending-message h3,
+.no-notifications-message h3 {
     margin-bottom: 10px;
     color: var(--text-dark);
+}
+
+.no-notifications-message {
+    text-align: center;
+    color: var(--secondary-dark);
+    padding: 40px 20px;
+}
+
+.no-notifications-message::before {
+    content: "Notifications";
 }
 
 .confirm-all-btn {
