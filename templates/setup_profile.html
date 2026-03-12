@@ -644,7 +644,8 @@
             window.setupSelectedAccountIds = [];
             selectedAccountIdsForCategories = [];
             // Delete ALL connections and accounts on the server
-            $.ajax({
+            // Returns a promise so callers can wait for completion
+            return $.ajax({
                 url: '/quiltt/delete-all-setup-connections',
                 method: 'POST',
                 contentType: 'application/json',
@@ -1182,44 +1183,23 @@
                                         hasAccounts = true;
                                         const mask = account.mask ? `<div class="account-mask">...${(account.mask || '').slice(-4)}</div>` : '';
                                         
-                                        // Determine if this should be checked by default and if disabled
-                                        // Disable if: already synced from another connection, OR already have one selected in this list
+                                        // Auto-check the first of each type; leave others unchecked
                                         let isChecked = false;
-                                        let isDisabled = false;
-                                        let disabledReason = '';
-                                        
                                         if (isChecking) {
                                             checkingCount++;
-                                            if (hasSyncedChecking) {
-                                                isDisabled = true;
-                                                disabledReason = 'Already syncing a Checking account';
-                                            } else if (checkingCount > 1) {
-                                                isDisabled = true;
-                                                disabledReason = 'Only one Checking account allowed';
-                                            } else {
-                                                isChecked = true;
-                                            }
+                                            if (!hasSyncedChecking && checkingCount === 1) isChecked = true;
                                         } else if (isSavings) {
                                             savingsCount++;
-                                            if (hasSyncedSavings) {
-                                                isDisabled = true;
-                                                disabledReason = 'Already syncing a Savings account';
-                                            } else if (savingsCount > 1) {
-                                                isDisabled = true;
-                                                disabledReason = 'Only one Savings account allowed';
-                                            } else {
-                                                isChecked = true;
-                                            }
+                                            if (!hasSyncedSavings && savingsCount === 1) isChecked = true;
                                         }
                                         
                                         const accountItem = $(`
-                                            <div class="account-selection-item${isDisabled ? ' disabled' : ''}">
+                                            <div class="account-selection-item">
                                                 <input type="checkbox" 
                                                        class="account-checkbox" 
                                                        data-account-id="${account.account_id}"
                                                        data-account-type="${isChecking ? 'checking' : 'savings'}"
-                                                       ${isChecked ? 'checked' : ''}
-                                                       ${isDisabled ? 'disabled' : ''}>
+                                                       ${isChecked ? 'checked' : ''}>
                                                 <div class="account-selection-info">
                                                     <div class="account-selection-name">${account.account_name || 'Account'}</div>
                                                     ${mask}
@@ -1230,6 +1210,9 @@
                                     });
                                 }
                             });
+                            
+                            // Apply initial disabled state for same-type accounts
+                            updateAccountCheckboxStates();
                             
                             if (hasAccounts) {
                                 $('#account-selection-modal-setup').show();
@@ -1246,26 +1229,37 @@
                 });
             }
 
-            // Prevent selecting more than one checking or savings account
-            $(document).on('change', '.account-checkbox', function() {
-                const checkbox = $(this);
-                const accountType = checkbox.data('account-type');
-                
-                if (!checkbox.is(':checked')) {
-                    // Always allow unchecking
-                    return;
-                }
-                
-                // Only enforce limit for checking and savings
-                if (accountType === 'checking' || accountType === 'savings') {
-                    const otherChecked = $(`.account-checkbox[data-account-type="${accountType}"]:checked`).not(checkbox);
-                    if (otherChecked.length > 0) {
-                        // Another one is already checked, prevent this selection
-                        checkbox.prop('checked', false);
-                        const typeLabel = accountType === 'checking' ? 'Checking' : 'Savings';
-                        showToast(`You can only select one ${typeLabel} account. Please deselect the other first.`, 'warning');
+            // Enforce one-per-type selection for checking and savings accounts
+            function updateAccountCheckboxStates() {
+                ['checking', 'savings'].forEach(function(type) {
+                    const allOfType = $(`.account-checkbox[data-account-type="${type}"]`);
+                    const checkedOfType = allOfType.filter(':checked');
+                    
+                    if (checkedOfType.length > 0) {
+                        // One is selected — disable and grey out the others
+                        allOfType.not(checkedOfType).prop('disabled', true)
+                            .closest('.account-selection-item').addClass('disabled');
+                        // Keep the selected one enabled
+                        checkedOfType.prop('disabled', false)
+                            .closest('.account-selection-item').removeClass('disabled');
+                    } else {
+                        // None selected — enable all so user can pick one
+                        allOfType.prop('disabled', false)
+                            .closest('.account-selection-item').removeClass('disabled');
                     }
-                }
+                });
+            }
+
+            $(document).on('change', '.account-checkbox', function() {
+                updateAccountCheckboxStates();
+            });
+
+            // Show toast when clicking a greyed-out row's checkbox area
+            // Disabled checkboxes swallow click events, so we listen on the parent row
+            $(document).on('click', '.account-selection-item.disabled', function(e) {
+                const type = $(this).find('.account-checkbox').data('account-type');
+                const label = type === 'checking' ? 'Checking' : 'Savings';
+                showToast(`Only one ${label} account can be synced in Blankee. Uncheck the current one first to switch.`, 'info');
             });
 
             // Handle account selection confirmation
@@ -1287,9 +1281,13 @@
 
             // Handle previous from account selection - remove connection and go back to bank connect
             $('#account-selection-prev-btn').on('click', function() {
-                removeBankConnection();
-                saveSetupStep(2, { setup_bank_flow: false, setup_selected_account_ids: [] });
-                goToStep('bank-connection-modal-setup');
+                const $btn = $(this);
+                $btn.prop('disabled', true).text('Removing...');
+                removeBankConnection().always(function() {
+                    $btn.prop('disabled', false).text('Previous');
+                    saveSetupStep(2, { setup_bank_flow: false, setup_selected_account_ids: [] });
+                    goToStep('bank-connection-modal-setup');
+                });
             });
 
             function updateAccountsAndSync(selectedAccountIds) {

@@ -560,9 +560,27 @@ def _create_bucket_depleted_notification(user_id, table, category_id, bucket_dat
                 message = f"You've spent more than the allowance for expense category \"{category_name}\"."
         
         # Insert notification directly into MySQL (avoid circular import with app.py)
+        # First, deduplicate: delete any existing bucket-depleted notification for this category
         notification_date = datetime.now()
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # Delete previous bucket-depleted notifications for same category
+            if table == 'income_entries':
+                dedup_pattern = f'%income for "{category_name}"%more than expected%'
+            elif table == 'c_expense_entries':
+                dedup_pattern = f'%allowance for credit expense category "{category_name}"%'
+            else:
+                dedup_pattern = f'%allowance for expense category "{category_name}"%'
+            
+            cursor.execute("""
+                DELETE FROM notifications
+                WHERE user_id = %s AND message LIKE %s
+            """, (user_id, dedup_pattern))
+            dedup_count = cursor.rowcount
+            if dedup_count > 0:
+                current_app.logger.info(f"[BUCKET NOTIFICATION] Deduplicated {dedup_count} old notification(s) for category \"{category_name}\"")
+            
             cursor.execute("""
                 INSERT INTO notifications (user_id, date, message, is_read)
                 VALUES (%s, %s, %s, 0)
@@ -579,6 +597,13 @@ def _create_bucket_depleted_notification(user_id, table, category_id, bucket_dat
             
             conn.commit()
             cursor.close()
+        
+        # Invalidate Redis notifications cache
+        if redis_manager._redis_client:
+            try:
+                redis_manager._redis_client.delete(f"notifications:v1:{user_id}")
+            except Exception:
+                pass
         
         current_app.logger.info(f"[BUCKET NOTIFICATION] Created notification {notification_id}: {message}")
         
