@@ -13143,6 +13143,13 @@ def mark_notification_read():
         conn.commit()
         cursor.close()
     
+    # Invalidate Redis cache so reload reflects the change
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(f"notifications:v1:{current_user.id}")
+        except Exception:
+            pass
+    
     return jsonify({'success': True, 'is_read': new_status})
 
 @app.route('/delete-notification', methods=['POST'])
@@ -13164,6 +13171,13 @@ def delete_notification():
         """, (notification_id, current_user.id))
         conn.commit()
         cursor.close()
+    
+    # Invalidate Redis cache so reload reflects the deletion
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(f"notifications:v1:{current_user.id}")
+        except Exception:
+            pass
     
     return jsonify({'success': True})
 
@@ -13190,6 +13204,14 @@ def delete_reconnect_notifications():
         cursor.close()
     
     app.logger.info(f"Deleted {deleted_count} reconnect notification(s) for connection {connection_id}, user {current_user.id}")
+    
+    # Invalidate Redis cache so reload reflects the deletion
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(f"notifications:v1:{current_user.id}")
+        except Exception:
+            pass
+    
     return jsonify({'success': True, 'deleted_count': deleted_count})
 
 @app.route('/clear-read-notifications', methods=['POST'])
@@ -13205,6 +13227,13 @@ def clear_read_notifications():
         deleted_count = cursor.rowcount
         conn.commit()
         cursor.close()
+    
+    # Invalidate Redis cache so reload reflects the deletion
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(f"notifications:v1:{current_user.id}")
+        except Exception:
+            pass
     
     return jsonify({'success': True, 'deleted_count': deleted_count})
 
@@ -13222,6 +13251,13 @@ def mark_all_notifications_read():
         updated_count = cursor.rowcount
         conn.commit()
         cursor.close()
+    
+    # Invalidate Redis cache so reload reflects the update
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(f"notifications:v1:{current_user.id}")
+        except Exception:
+            pass
     
     return jsonify({'success': True, 'updated_count': updated_count})
 
@@ -13753,19 +13789,17 @@ def update_password():
 @login_required
 def enable_mfa():
     try:
-        # Verify password first
+        # Verify password if provided (required from settings, optional during setup)
         password = request.form.get('password')
-        if not password:
-            return jsonify({'status': 'error', 'message': 'Password is required'}), 400
-        
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT password FROM users WHERE id = %s", (current_user.id,))
-            user = cursor.fetchone()
-            cursor.close()
-        
-        if not user or not bcrypt.check_password_hash(user['password'], password):
-            return jsonify({'status': 'error', 'message': 'Incorrect password'}), 403
+        if password:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT password FROM users WHERE id = %s", (current_user.id,))
+                user = cursor.fetchone()
+                cursor.close()
+            
+            if not user or not bcrypt.check_password_hash(user['password'], password):
+                return jsonify({'status': 'error', 'message': 'Incorrect password'}), 403
         
         # Generate a new secret
         secret = pyotp.random_base32()
@@ -16736,6 +16770,13 @@ def add_notification(user_id, message, notification_date=None):
         except Exception as push_err:
             app.logger.warning(f"APNs push failed for user {user_id}: {push_err}")
     
+    # Invalidate Redis cache so new notification appears on reload
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(f"notifications:v1:{user_id}")
+        except Exception:
+            pass
+    
     return notification_id
 
 
@@ -16794,6 +16835,12 @@ def _create_pending_transactions_notification(user_id, new_count):
         cursor.close()
         if deleted_count > 0:
             app.logger.info(f"Deleted {deleted_count} old pending transaction notification(s) for user {user_id}")
+            # Invalidate Redis cache after deleting old notifications
+            if app.config.get('REDIS_OK'):
+                try:
+                    _redis_client.delete(f"notifications:v1:{user_id}")
+                except Exception:
+                    pass
     
     # Build message with link to pending transactions page
     txn_word = "transaction" if total_pending == 1 else "transactions"
@@ -16861,6 +16908,12 @@ def _clear_pending_transactions_notification_if_none(user_id):
             cursor.close()
             if deleted_count > 0:
                 app.logger.info(f"Cleared pending transaction notification for user {user_id} (no pending left)")
+                # Invalidate Redis cache after deleting notification
+                if app.config.get('REDIS_OK'):
+                    try:
+                        _redis_client.delete(f"notifications:v1:{user_id}")
+                    except Exception:
+                        pass
                 return True
     except Exception as e:
         app.logger.error(f"Error deleting pending transaction notification: {e}")
@@ -16934,6 +16987,12 @@ def check_negative_remainders(user_id):
         cursor.close()
         if deleted_count > 0:
             app.logger.info(f"Deleted {deleted_count} old negative remainder notification(s) for user {user_id}")
+            # Invalidate Redis cache after deleting old notifications
+            if app.config.get('REDIS_OK'):
+                try:
+                    _redis_client.delete(f"notifications:v1:{user_id}")
+                except Exception:
+                    pass
     
     # Create new notification
     formatted_date = first_negative_date.strftime('%B %d, %Y')
@@ -19433,11 +19492,13 @@ def quiltt_settings():
            (profile['session_expires_at'] and profile['session_expires_at'] < datetime.now()):
             
             # Create new session token
+            app.logger.info(f"[QUILTT-META] Sending user_id={current_user.id} in metadata (create_session_token)")
             result = quiltt_client.create_session_token(
                 current_user.id,
                 metadata={
                     'username': current_user.username,
-                    'email': current_user.username  # Username is the email
+                    'email': current_user.username,  # Username is the email
+                    'user_id': str(current_user.id)
                 }
             )
             
@@ -19592,11 +19653,13 @@ def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
                     return True
         
         # Need a fresh token
+        app.logger.info(f"[QUILTT-META] Sending user_id={user_id} in metadata (refresh_session_token)")
         result = quiltt_client.refresh_session_token(
             profile['profile_id'],
             metadata={
                 'username': username,
-                'email': username
+                'email': username,
+                'user_id': str(user_id)
             }
         )
         
@@ -19669,20 +19732,24 @@ def get_quiltt_session_token():
         # Need a fresh token
         if profile and profile.get('profile_id'):
             # Existing profile - refresh token
+            app.logger.info(f"[QUILTT-META] Sending user_id={current_user.id} in metadata (refresh via get-session-token)")
             result = quiltt_client.refresh_session_token(
                 profile['profile_id'],
                 metadata={
                     'username': current_user.username,
-                    'email': current_user.username
+                    'email': current_user.username,
+                    'user_id': str(current_user.id)
                 }
             )
         else:
             # New profile - create token
+            app.logger.info(f"[QUILTT-META] Sending user_id={current_user.id} in metadata (create via get-session-token)")
             result = quiltt_client.create_session_token(
                 current_user.id,
                 metadata={
                     'username': current_user.username,
-                    'email': current_user.username
+                    'email': current_user.username,
+                    'user_id': str(current_user.id)
                 }
             )
         
@@ -19879,6 +19946,80 @@ def quiltt_disconnect():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/quiltt/cancel-connector', methods=['POST'])
+@login_required
+def quiltt_cancel_connector():
+    """Clean up all Quiltt data when user cancels the connector without completing.
+    Deletes any connections/accounts/transactions that webhooks may have created,
+    then deletes the Quiltt profile itself."""
+    try:
+        user_id = current_user.id
+
+        # First, delete any connections that may have been created during the connector session
+        connections = get_quiltt_connections(user_id)
+        if connections:
+            profile = get_quiltt_profile(user_id)
+            session_token = profile.get('session_token') if profile else None
+            deleted = 0
+            for conn_obj in connections:
+                conn_id = conn_obj.get('connection_id')
+                if conn_id:
+                    if session_token:
+                        try:
+                            quiltt_client.disconnect_connection(session_token, conn_id)
+                        except Exception as e:
+                            app.logger.warning(f"[CANCEL_CONNECTOR] API disconnect failed for {conn_id}: {e}")
+                    delete_quiltt_connection(conn_id, user_id)
+                    deleted += 1
+            app.logger.info(f"[CANCEL_CONNECTOR] Deleted {deleted} connections for user {user_id}")
+            # delete_quiltt_connection auto-deletes profile when last connection is removed
+        else:
+            # No connections — delete profile directly
+            profile = get_quiltt_profile(user_id)
+            if profile and profile.get('profile_id'):
+                profile_id = profile['profile_id']
+                app.logger.info(f"[CANCEL_CONNECTOR] Deleting Quiltt profile {profile_id} for user {user_id}")
+                quiltt_client.delete_profile(profile_id)
+
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM quiltt_profiles WHERE user_id = %s", (user_id,))
+                    conn.commit()
+                    cursor.close()
+
+                profiles_key = f"quiltt_profiles:v1:{user_id}"
+                _redis_client.delete(profiles_key)
+            else:
+                app.logger.info(f"[CANCEL_CONNECTOR] No profile found for user {user_id}")
+
+        # Clean up any disconnect/reconnect notifications from webhooks
+        try:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM notifications WHERE user_id = %s AND (message LIKE %s OR message LIKE %s)",
+                    (user_id, '%has been disconnected%', '%reconnect%')
+                )
+                conn.commit()
+                cursor.close()
+        except Exception:
+            pass
+
+        # Force flush to remove from MySQL
+        try:
+            from redis_manager import flush_dirty_tables_for_user
+            flush_dirty_tables_for_user(user_id)
+        except Exception as flush_err:
+            app.logger.warning(f"[CANCEL_CONNECTOR] Flush error (non-fatal): {flush_err}")
+
+        app.logger.info(f"[CANCEL_CONNECTOR] Cleanup complete for user {user_id}")
+        return jsonify({'status': 'success'})
+
+    except Exception as e:
+        app.logger.error(f"[CANCEL_CONNECTOR] Error: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/quiltt/delete', methods=['POST'])
 @login_required
 def quiltt_delete():
@@ -20018,6 +20159,31 @@ def quiltt_delete_all_setup_connections():
                 deleted += 1
         
         app.logger.info(f"[DELETE_ALL_SETUP] Deleted {deleted} connections for user {user_id}")
+        
+        # Remove any disconnect/reconnect notifications created by webhooks during setup
+        try:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM notifications WHERE user_id = %s AND (message LIKE %s OR message LIKE %s)",
+                    (user_id, '%has been disconnected%', '%reconnect%')
+                )
+                notif_deleted = cursor.rowcount
+                conn.commit()
+                cursor.close()
+                if notif_deleted:
+                    app.logger.info(f"[DELETE_ALL_SETUP] Removed {notif_deleted} disconnect/reconnect notifications for user {user_id}")
+        except Exception as notif_err:
+            app.logger.warning(f"[DELETE_ALL_SETUP] Failed to clear notifications: {notif_err}")
+        
+        # Force flush to MySQL so stale records don't persist
+        try:
+            from redis_manager import flush_dirty_tables_for_user
+            flush_dirty_tables_for_user(user_id)
+            app.logger.info(f"[DELETE_ALL_SETUP] Forced flush complete for user {user_id}")
+        except Exception as flush_err:
+            app.logger.warning(f"[DELETE_ALL_SETUP] Flush error (non-fatal): {flush_err}")
+        
         return jsonify({'status': 'success', 'deleted': deleted})
     except Exception as e:
         app.logger.error(f"[DELETE_ALL_SETUP] Error: {e}")
@@ -21086,6 +21252,413 @@ def quiltt_get_connections():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+def _webhook_autobalance(user_id):
+    """
+    Auto-balance checking, savings, and credit accounts after webhook transaction sync.
+    Fetches current bank balances from Quiltt, compares to calculated totals,
+    and creates adjustment entries for any differences.
+    
+    Mirrors nightly_sync's Steps 5-6 but uses today's date and app.py infrastructure.
+    """
+    import time
+    
+    try:
+        # Get session token
+        profile = get_quiltt_profile(user_id)
+        if not profile or not profile.get('session_token'):
+            app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No session token for user {user_id}")
+            return
+        
+        session_token = profile['session_token']
+        
+        # Fetch current bank balances from Quiltt API
+        balance_data = quiltt_client.get_profile(session_token)
+        if not balance_data:
+            app.logger.warning(f"[WEBHOOK-AUTOBALANCE] Failed to fetch balances for user {user_id}")
+            return
+        
+        # Build account_id → balance map and update stored balances
+        account_balances = {}
+        for connection in balance_data.get('connections', []):
+            if not connection:
+                continue
+            for account in (connection.get('accounts') or []):
+                if not account:
+                    continue
+                acct_id = account.get('id', '')
+                bal = account.get('balance') or {}
+                current = abs(float(bal.get('current', 0))) if isinstance(bal, dict) and bal.get('current') else 0
+                account_balances[acct_id] = current
+        
+        # Update quiltt_accounts balances in Redis
+        if account_balances and app.config.get('REDIS_OK'):
+            redis_key = f"quiltt_accounts:v1:{user_id}"
+            cached = _redis_client.get(redis_key)
+            if cached:
+                accounts_list = json.loads(cached)
+                for acc in accounts_list:
+                    new_bal = account_balances.get(acc.get('account_id'))
+                    if new_bal is not None:
+                        acc['current_balance'] = new_bal
+                _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(accounts_list, cls=DecimalEncoder))
+                dirty_key = f"dirty_tables:{user_id}"
+                _redis_client.sadd(dirty_key, 'quiltt_accounts')
+                _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        today = date.today()
+        target_date_str = today.strftime('%Y-%m-%d')
+        day_before = today - timedelta(days=1)
+        day_before_str = day_before.strftime('%Y-%m-%d')
+        
+        # Get active quiltt accounts
+        quiltt_accounts = get_quiltt_accounts(user_id) or []
+        
+        for qa in quiltt_accounts:
+            if not qa.get('is_active') or not qa.get('sync_transactions'):
+                continue
+            
+            quiltt_account_id = qa.get('account_id')
+            bank_balance = account_balances.get(quiltt_account_id)
+            if not bank_balance:
+                continue
+            
+            acct_type = (qa.get('account_type') or '').lower()
+            acct_subtype = (qa.get('account_subtype') or '').lower()
+            acct_name = qa.get('account_name', 'Account')
+            
+            if acct_type == 'depository':
+                if 'checking' in acct_name.lower() or acct_subtype == 'checking':
+                    _webhook_checking_adjustment(user_id, bank_balance, target_date_str, acct_name)
+                elif 'savings' in acct_name.lower() or acct_subtype == 'savings':
+                    _webhook_savings_adjustment(user_id, bank_balance, target_date_str, quiltt_account_id)
+            elif acct_type == 'credit':
+                _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_date_str, day_before_str, acct_name)
+        
+        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Completed for user {user_id}")
+        
+    except Exception as e:
+        app.logger.error(f"[WEBHOOK-AUTOBALANCE] Error for user {user_id}: {e}", exc_info=True)
+
+
+def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account_name):
+    """Create auto-adjustment entry for a checking account to match bank balance."""
+    import time
+    
+    try:
+        # Get auto-adjustment category IDs
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM income_categories WHERE user_id = %s AND is_auto_adjustment = 1 LIMIT 1", (user_id,))
+            row = cursor.fetchone()
+            income_cat_id = row[0] if row else None
+            
+            cursor.execute("SELECT id FROM expense_categories WHERE user_id = %s AND is_auto_adjustment = 1 LIMIT 1", (user_id,))
+            row = cursor.fetchone()
+            expense_cat_id = row[0] if row else None
+            cursor.close()
+        
+        if not income_cat_id or not expense_cat_id:
+            return
+        
+        # Get today's current remainder from totals_remainders_d
+        current_remainder = None
+        if app.config.get('REDIS_OK'):
+            cached = _redis_client.get(f"totals_remainders_d:v1:{user_id}")
+            if cached:
+                for t in json.loads(cached):
+                    if str(t.get('date', ''))[:10] == target_date_str:
+                        current_remainder = float(t.get('remainder', 0))
+                        break
+        
+        if current_remainder is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT remainder FROM totals_remainders_d WHERE user_id = %s AND date = %s", (user_id, target_date_str))
+                row = cursor.fetchone()
+                current_remainder = float(row[0]) if row and row[0] is not None else None
+                cursor.close()
+        
+        if current_remainder is None:
+            app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No remainder for {target_date_str}, skipping checking adjustment")
+            return
+        
+        diff = float(bank_balance) - current_remainder
+        
+        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Checking ({account_name}): Remainder=${current_remainder:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
+        
+        if abs(diff) < 0.01:
+            return
+        
+        # Create adjustment entry
+        entry_type_table = 'income_entries' if diff > 0 else 'expense_entries'
+        cat_id = income_cat_id if diff > 0 else expense_cat_id
+        adj_amount = abs(diff)
+        
+        redis_key = f"{entry_type_table}:v1:{user_id}"
+        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+        entries = json.loads(cached) if cached else []
+        
+        temp_id = -(int(time.time() * 1000) % 1000000000)
+        new_entry = {
+            'id': temp_id,
+            'category_id': cat_id,
+            'date': target_date_str,
+            'amount': adj_amount,
+            'recurring_id': None,
+            'is_bucket': 0,
+            'original_amount': None,
+            'processed': 1,
+            'pending': 0,
+            'auto_confirmed': 0,
+            'is_auto_adjustment': 1
+        }
+        if diff < 0:
+            new_entry['bud_item_id'] = None
+        
+        entries.append(new_entry)
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, entry_type_table)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        label = 'income' if diff > 0 else 'expense'
+        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created {label} adjustment ${adj_amount:.2f} for {account_name}")
+        
+    except Exception as e:
+        app.logger.error(f"[WEBHOOK-AUTOBALANCE] Checking adjustment error: {e}", exc_info=True)
+
+
+def _webhook_savings_adjustment(user_id, bank_balance, target_date_str, quiltt_account_id):
+    """Update savings adjustment to match bank balance."""
+    import time
+    
+    try:
+        # Get today's current savings
+        current_savings = None
+        if app.config.get('REDIS_OK'):
+            cached = _redis_client.get(f"savings_entries:v1:{user_id}")
+            if cached:
+                for s in json.loads(cached):
+                    if str(s.get('date', ''))[:10] == target_date_str:
+                        current_savings = float(s.get('amount', 0))
+                        break
+        
+        if current_savings is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT amount FROM savings_entries WHERE user_id = %s AND date = %s", (user_id, target_date_str))
+                row = cursor.fetchone()
+                current_savings = float(row[0]) if row and row[0] is not None else 0.0
+                cursor.close()
+        
+        # Get existing adjustment for today
+        existing_adjustment = 0.0
+        adjustments = []
+        if app.config.get('REDIS_OK'):
+            cached = _redis_client.get(f"savings_adjustments:v1:{user_id}")
+            if cached:
+                adjustments = json.loads(cached)
+        
+        existing_adj_record = None
+        for adj in adjustments:
+            if str(adj.get('date', ''))[:10] == target_date_str:
+                existing_adjustment = float(adj.get('amount', 0))
+                existing_adj_record = adj
+                break
+        
+        if not adjustments:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, amount FROM savings_adjustments WHERE user_id = %s AND date = %s", (user_id, target_date_str))
+                row = cursor.fetchone()
+                if row:
+                    existing_adjustment = float(row[1]) if row[1] is not None else 0.0
+                cursor.close()
+        
+        # Calculate delta: bank_balance - (current_savings - existing_adjustment)
+        base_savings = current_savings - existing_adjustment
+        delta = float(bank_balance) - base_savings
+        
+        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Savings: Current=${current_savings:.2f}, Base=${base_savings:.2f}, Bank=${bank_balance:.2f}, Delta=${delta:.2f}")
+        
+        if abs(delta) < 0.01:
+            return
+        
+        # Store delta in savings_adjustments
+        if existing_adj_record:
+            existing_adj_record['amount'] = delta
+            existing_adj_record['quiltt_account_id'] = quiltt_account_id
+        else:
+            temp_id = -(int(time.time() * 1000) % 1000000000)
+            adjustments.append({
+                'id': temp_id,
+                'user_id': user_id,
+                'date': target_date_str,
+                'amount': delta,
+                'description': 'Webhook sync from bank',
+                'quiltt_account_id': quiltt_account_id
+            })
+        
+        if app.config.get('REDIS_OK'):
+            _redis_client.setex(f"savings_adjustments:v1:{user_id}", PERSISTENT_CACHE_TTL, json.dumps(adjustments, cls=DecimalEncoder))
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, 'savings_adjustments')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Savings adjustment delta: ${delta:.2f}")
+        
+    except Exception as e:
+        app.logger.error(f"[WEBHOOK-AUTOBALANCE] Savings adjustment error: {e}", exc_info=True)
+
+
+def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_date_str, day_before_str, account_name):
+    """Create auto-adjustment entry for a credit account to match bank balance."""
+    import time
+    from quiltt_redis import get_blankee_credit_account_for_quiltt_account
+    
+    try:
+        # Find blankee credit account
+        ca = get_blankee_credit_account_for_quiltt_account(user_id, quiltt_account_id)
+        if not ca:
+            app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No blankee credit account for {account_name}")
+            return
+        
+        account_id = int(ca['id'])
+        starting_balance = float(ca.get('starting_balance') or 0)
+        
+        # Find auto-adjustment category
+        auto_adj_cat_id = None
+        c_cats = _get_entries_from_redis('c_expense_categories', user_id)
+        if not c_cats:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT id, account_id, is_auto_adjustment FROM c_expense_categories cec
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                c_cats = cursor.fetchall()
+                cursor.close()
+        
+        if c_cats:
+            for cat in c_cats:
+                if int(cat.get('account_id', 0)) == account_id and cat.get('is_auto_adjustment'):
+                    auto_adj_cat_id = int(cat['id'])
+                    break
+        
+        if not auto_adj_cat_id:
+            app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No auto-adjustment category for {account_name}")
+            return
+        
+        # Get day-before balance from c_a_balances_d
+        day_before_balance = None
+        if app.config.get('REDIS_OK'):
+            cached = _redis_client.get(f"c_a_balances_d:v1:{user_id}")
+            if cached:
+                for b in json.loads(cached):
+                    if int(b.get('account_id', 0)) == account_id and str(b.get('date', ''))[:10] == day_before_str:
+                        day_before_balance = float(b.get('balance', 0))
+                        break
+        
+        if day_before_balance is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT balance FROM c_a_balances_d WHERE account_id = %s AND date = %s", (account_id, day_before_str))
+                row = cursor.fetchone()
+                day_before_balance = float(row[0]) if row else starting_balance
+                cursor.close()
+        
+        # Calculate natural balance: day_before + today's expenses - today's payments (excluding auto-adj)
+        all_c_expenses = _get_entries_from_redis('c_expense_entries', user_id) or []
+        all_c_payments = _get_entries_from_redis('c_payment_entries', user_id) or []
+        
+        # Get all auto-adj category IDs and account category IDs
+        auto_adj_cat_ids = set()
+        account_cat_ids = set()
+        if c_cats:
+            for cat in c_cats:
+                if int(cat.get('account_id', 0)) == account_id:
+                    account_cat_ids.add(int(cat['id']))
+                    if cat.get('is_auto_adjustment'):
+                        auto_adj_cat_ids.add(int(cat['id']))
+        
+        target_expenses = sum(
+            float(e.get('amount', 0)) for e in all_c_expenses
+            if int(e.get('category_id', 0)) in account_cat_ids
+            and str(e.get('date', ''))[:10] == target_date_str
+            and int(e.get('category_id', 0)) not in auto_adj_cat_ids
+        )
+        
+        target_payments = sum(
+            float(e.get('amount', 0)) for e in all_c_payments
+            if int(e.get('account_id', 0)) == account_id
+            and str(e.get('date', ''))[:10] == target_date_str
+        )
+        
+        natural_balance = day_before_balance + target_expenses - target_payments
+        bank_float = abs(float(bank_balance))
+        diff = bank_float - natural_balance
+        
+        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Credit ({account_name}): Yesterday=${day_before_balance:.2f}, Natural=${natural_balance:.2f}, Bank=${bank_float:.2f}, Diff=${diff:.2f}")
+        
+        if abs(diff) < 0.01:
+            return
+        
+        adjustment_amount = abs(diff)
+        
+        if diff > 0:
+            # Balance needs to go UP → create expense entry
+            redis_key = f"c_expense_entries:v1:{user_id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            entries = json.loads(cached) if cached else []
+            
+            temp_id = -(int(time.time() * 1000) % 1000000000)
+            entries.append({
+                'id': temp_id,
+                'category_id': auto_adj_cat_id,
+                'date': target_date_str,
+                'amount': float(adjustment_amount),
+                'recurring_id': None,
+                'is_bucket': 0,
+                'original_amount': None,
+                'processed': 1,
+                'bud_item_id': None,
+                'is_auto_adjustment': 1
+            })
+            
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, 'c_expense_entries')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created expense adjustment +${adjustment_amount:.2f} for {account_name}")
+        else:
+            # Balance needs to go DOWN → create payment entry
+            redis_key = f"c_payment_entries:v1:{user_id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            entries = json.loads(cached) if cached else []
+            
+            temp_id = -(int(time.time() * 1000) % 1000000000)
+            entries.append({
+                'id': temp_id,
+                'account_id': account_id,
+                'date': target_date_str,
+                'amount': float(adjustment_amount),
+                'recurring_id': None,
+                'processed': 1
+            })
+            
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, 'c_payment_entries')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created payment adjustment -${adjustment_amount:.2f} for {account_name}")
+        
+    except Exception as e:
+        app.logger.error(f"[WEBHOOK-AUTOBALANCE] Credit adjustment error for {account_name}: {e}", exc_info=True)
+
+
 def _auto_import_transaction_to_entry(user_id, entry_type, category_id, amount, date, transaction_id, blankee_credit_account_id=None):
     """
     Auto-import a Quiltt transaction to the appropriate budget entry table.
@@ -21665,6 +22238,69 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             except Exception as notif_err:
                 app.logger.error(f"Error creating pending transactions notification: {notif_err}")
         # --- END NOTIFICATION ---
+        
+        # --- RECALCULATE TOTALS & BALANCES + AUTOBALANCE ---
+        if total_imported > 0:
+            try:
+                app.logger.info(f"[WEBHOOK-SYNC] Recalculating totals for user {user_id} after importing {total_imported} transactions")
+                
+                # Read goofy_week_mode (Redis first, MySQL fallback)
+                gwm = None
+                if app.config.get('REDIS_OK'):
+                    try:
+                        cached_user = _redis_client.get(f"users:v1:{user_id}")
+                        if cached_user:
+                            user_data = json.loads(cached_user)
+                            if 'goofy_week_mode' in user_data:
+                                gwm = bool(int(user_data['goofy_week_mode']))
+                    except Exception:
+                        pass
+                if gwm is None:
+                    with get_db_pool().get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+                        row = cursor.fetchone()
+                        gwm = bool(row[0]) if row else False
+                        cursor.close()
+                
+                # Use earliest imported transaction date as start
+                recalc_start = None
+                if start_date:
+                    try:
+                        recalc_start = datetime.strptime(start_date, '%Y-%m-%d').date() if isinstance(start_date, str) else start_date
+                    except Exception:
+                        pass
+                if not recalc_start:
+                    recalc_start = (datetime.now() - timedelta(days=1)).date()
+                
+                # STEP 1: First recalculation — accurate totals for autobalance comparison
+                date_to_remainder = {}
+                update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
+                update_daily_savings_for_savings_category(user_id, recalc_start)
+                update_weekly_totals(user_id, recalc_start, gwm, date_to_remainder)
+                update_monthly_totals(user_id, recalc_start, date_to_remainder)
+                update_daily_ca_totals(user_id, recalc_start)
+                update_weekly_ca_totals(user_id, recalc_start, gwm)
+                update_monthly_ca_totals(user_id, recalc_start)
+                app.logger.info(f"[WEBHOOK-SYNC] First recalculation complete (pre-adjustment)")
+                
+                # STEP 2: Autobalance — compare to bank balances, create adjustment entries
+                _webhook_autobalance(user_id)
+                
+                # STEP 3: Second recalculation — incorporate adjustment entries into totals
+                date_to_remainder = {}
+                update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
+                update_daily_savings_for_savings_category(user_id, recalc_start)
+                update_weekly_totals(user_id, recalc_start, gwm, date_to_remainder)
+                update_monthly_totals(user_id, recalc_start, date_to_remainder)
+                update_daily_ca_totals(user_id, recalc_start)
+                update_weekly_ca_totals(user_id, recalc_start, gwm)
+                update_monthly_ca_totals(user_id, recalc_start)
+                
+                app.logger.info(f"[WEBHOOK-SYNC] Recalculation + autobalance complete for user {user_id}")
+            except Exception as recalc_err:
+                app.logger.error(f"[WEBHOOK-SYNC] Error recalculating totals for user {user_id}: {recalc_err}", exc_info=True)
+        # --- END RECALCULATE + AUTOBALANCE ---
         
         return (True, total_synced, message)
         
@@ -24403,6 +25039,306 @@ def quiltt_toggle_auto_import():
         app.logger.error(f"Error toggling auto-import: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
+@app.route('/quiltt/webhook', methods=['POST'])
+def quiltt_webhook():
+    """
+    Receive and process webhook events from Quiltt.
+    - Verifies HMAC-SHA256 signature
+    - Logs events to quiltt_webhook_events table
+    - Returns 200 immediately, processes async via background thread
+    """
+    import hmac
+    import hashlib
+    from quiltt_redis import insert_quiltt_webhook_event, mark_webhook_event_processed
+
+    # --- Signature Verification ---
+    webhook_secret = os.getenv('QUILTT_WEBHOOK_SECRET', '')
+    signature = request.headers.get('Quiltt-Signature', '')
+    timestamp = request.headers.get('Quiltt-Timestamp', '')
+    raw_body = request.get_data(as_text=True)
+
+    if webhook_secret:
+        if not signature or not timestamp:
+            app.logger.warning("[WEBHOOK] Missing signature or timestamp headers")
+            return jsonify({'error': 'Missing signature'}), 401
+
+        # Verify timestamp is within 5 minutes
+        try:
+            from datetime import timezone
+            # Quiltt sends timestamp as Unix epoch (integer seconds)
+            event_time = datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
+            now = datetime.now(timezone.utc)
+            if abs((now - event_time).total_seconds()) > 300:
+                app.logger.warning(f"[WEBHOOK] Timestamp too old: {timestamp}")
+                return jsonify({'error': 'Timestamp expired'}), 401
+        except (ValueError, TypeError):
+            app.logger.warning(f"[WEBHOOK] Invalid timestamp format: {timestamp}")
+            return jsonify({'error': 'Invalid timestamp'}), 401
+
+        # Verify HMAC signature: HMAC-SHA256(secret, "1" + timestamp + body)
+        message = f"1{timestamp}{raw_body}"
+        expected = base64.b64encode(
+            hmac.new(webhook_secret.encode(), message.encode(), hashlib.sha256).digest()
+        ).decode()
+        if not hmac.compare_digest(signature, expected):
+            app.logger.warning("[WEBHOOK] Invalid signature")
+            return jsonify({'error': 'Invalid signature'}), 401
+    else:
+        app.logger.warning("[WEBHOOK] No QUILTT_WEBHOOK_SECRET configured — skipping verification")
+
+    # --- Parse Payload ---
+    try:
+        payload = json.loads(raw_body)
+    except (json.JSONDecodeError, TypeError):
+        app.logger.error("[WEBHOOK] Invalid JSON payload")
+        return jsonify({'error': 'Invalid JSON'}), 400
+
+    events = payload.get('events', [])
+    if not events:
+        app.logger.info("[WEBHOOK] Received payload with no events")
+        return jsonify({'status': 'ok', 'message': 'No events'}), 200
+
+    app.logger.info(f"[WEBHOOK] Received {len(events)} event(s): {[e.get('type') for e in events]}")
+
+    # --- Log Events & Deduplicate ---
+    new_events = []
+    for event in events:
+        event_id = event.get('id', '')
+        event_type = event.get('type', '')
+        profile = event.get('profile', {})
+        profile_id = profile.get('id', '')
+        record = event.get('record', {})
+        connection_id = record.get('id', '')
+
+        # Resolve user_id from profile metadata (fast path) or DB (fallback)
+        user_id = None
+        metadata = profile.get('metadata') or {}
+        if metadata.get('user_id'):
+            user_id = int(metadata['user_id'])
+        else:
+            # Fallback: look up profile_id in quiltt_profiles
+            try:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT user_id FROM quiltt_profiles WHERE profile_id = %s", (profile_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        user_id = row['user_id']
+                    cursor.close()
+            except Exception as e:
+                app.logger.error(f"[WEBHOOK] Error looking up user for profile {profile_id}: {e}")
+
+        # Insert event (INSERT IGNORE handles deduplication)
+        inserted = insert_quiltt_webhook_event(
+            event_id=event_id,
+            event_type=event_type,
+            profile_id=profile_id,
+            connection_id=connection_id if connection_id else None,
+            payload=event,
+            user_id=user_id
+        )
+
+        if inserted:
+            new_events.append({
+                'event_id': event_id,
+                'event_type': event_type,
+                'profile_id': profile_id,
+                'connection_id': connection_id,
+                'user_id': user_id,
+                'event': event
+            })
+            app.logger.info(f"[WEBHOOK] Logged event {event_id} ({event_type}) for user {user_id}")
+        else:
+            app.logger.info(f"[WEBHOOK] Duplicate event {event_id} — skipped")
+
+    # --- Async Processing ---
+    if new_events:
+        def process_webhook_events(events_to_process):
+            """Background thread to process webhook events based on event type."""
+            with app.app_context():
+                for evt in events_to_process:
+                    try:
+                        event_type = evt['event_type']
+                        user_id = evt.get('user_id')
+                        event_id = evt['event_id']
+                        connection_id = evt.get('connection_id')
+                        event_data = evt.get('event', {})
+                        metadata = event_data.get('metadata', {})
+
+                        if not user_id:
+                            mark_webhook_event_processed(event_id, error_message="Could not resolve user_id")
+                            continue
+
+                        app.logger.info(f"[WEBHOOK] Processing {event_type} for user {user_id}")
+
+                        # --- Events that don't need processing ---
+                        # initial/historical: handled by frontend UI flow during bank connection
+                        # profile.ready: Ntropy data is already fetched inline during sync
+                        if event_type in ('connection.synced.successful.initial',
+                                          'connection.synced.successful.historical',
+                                          'profile.ready'):
+                            app.logger.info(f"[WEBHOOK] Skipping {event_type} for user {user_id} — no action needed")
+                            mark_webhook_event_processed(event_id)
+                            continue
+
+                        # --- Connection Synced Successfully (ongoing periodic re-syncs) ---
+                        if event_type == 'connection.synced.successful':
+
+                            # Use date range from webhook metadata if available
+                            start_date = metadata.get('startDate')
+                            end_date = metadata.get('endDate')
+
+                            # Update connection status to SYNCED
+                            if connection_id:
+                                try:
+                                    from quiltt_redis import upsert_quiltt_connection
+                                    upsert_quiltt_connection({
+                                        'connection_id': connection_id,
+                                        'status': 'SYNCED',
+                                        'last_synced_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                    }, user_id=user_id)
+                                except Exception as e:
+                                    app.logger.warning(f"[WEBHOOK] Failed to update connection status: {e}")
+
+                            # Sync transactions for this user
+                            success, count, error = _sync_quiltt_transactions_for_user(
+                                user_id,
+                                start_date=start_date,
+                                end_date=end_date
+                            )
+
+                            if success:
+                                app.logger.info(f"[WEBHOOK] Synced {count} transactions for user {user_id}")
+                                mark_webhook_event_processed(event_id)
+                            else:
+                                app.logger.error(f"[WEBHOOK] Sync failed for user {user_id}: {error}")
+                                mark_webhook_event_processed(event_id, error_message=error)
+
+                        # --- Connection Errors (user needs to reconnect) ---
+                        elif event_type == 'connection.synced.errored.repairable':
+                            # Skip if connection was recently deleted (e.g., user went back during setup)
+                            conn_was_deleted = False
+                            if connection_id:
+                                try:
+                                    delete_key = f"quiltt_connections_to_delete:{user_id}"
+                                    if _redis_client.sismember(delete_key, connection_id):
+                                        conn_was_deleted = True
+                                except Exception:
+                                    pass
+
+                            if conn_was_deleted:
+                                app.logger.info(f"[WEBHOOK] Skipping {event_type} for user {user_id} — connection {connection_id} was recently deleted")
+                                mark_webhook_event_processed(event_id)
+                            else:
+                                # Update connection status
+                                if connection_id:
+                                    try:
+                                        from quiltt_redis import upsert_quiltt_connection
+                                        upsert_quiltt_connection({
+                                            'connection_id': connection_id,
+                                            'status': 'ERROR_REPAIRABLE'
+                                        }, user_id=user_id)
+                                    except Exception as e:
+                                        app.logger.warning(f"[WEBHOOK] Failed to update connection status: {e}")
+
+                                # Get institution name for notification
+                                institution_name = 'your bank'
+                                try:
+                                    with get_db_pool().get_connection() as conn:
+                                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                                        cursor.execute(
+                                            "SELECT institution_name FROM quiltt_connections WHERE connection_id = %s AND user_id = %s",
+                                            (connection_id, user_id)
+                                        )
+                                        row = cursor.fetchone()
+                                        if row and row.get('institution_name'):
+                                            institution_name = row['institution_name']
+                                        cursor.close()
+                                except Exception:
+                                    pass
+
+                                # Create notification with reconnect link
+                                notification_message = (
+                                    f'Your {institution_name} connection needs to be reconnected. '
+                                    f'<a href="/bank_accounts?reconnect={connection_id}" class="notification-link">'
+                                    f'Click here to reconnect</a>.'
+                                )
+                                add_notification(user_id, notification_message)
+                                app.logger.info(f"[WEBHOOK] Created reconnect notification for user {user_id} ({institution_name})")
+                                mark_webhook_event_processed(event_id)
+
+                        # --- Connection Disconnected ---
+                        elif event_type == 'connection.disconnected':
+                            # Skip if connection was recently deleted (e.g., user went back during setup)
+                            conn_was_deleted = False
+                            if connection_id:
+                                try:
+                                    delete_key = f"quiltt_connections_to_delete:{user_id}"
+                                    if _redis_client.sismember(delete_key, connection_id):
+                                        conn_was_deleted = True
+                                except Exception:
+                                    pass
+
+                            if conn_was_deleted:
+                                app.logger.info(f"[WEBHOOK] Skipping {event_type} for user {user_id} — connection {connection_id} was recently deleted")
+                                mark_webhook_event_processed(event_id)
+                            else:
+                                # Update connection status
+                                if connection_id:
+                                    try:
+                                        from quiltt_redis import upsert_quiltt_connection
+                                        upsert_quiltt_connection({
+                                            'connection_id': connection_id,
+                                            'status': 'DISCONNECTED'
+                                        }, user_id=user_id)
+                                    except Exception as e:
+                                        app.logger.warning(f"[WEBHOOK] Failed to update connection status: {e}")
+
+                                institution_name = 'your bank'
+                                try:
+                                    with get_db_pool().get_connection() as conn:
+                                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                                        cursor.execute(
+                                            "SELECT institution_name FROM quiltt_connections WHERE connection_id = %s AND user_id = %s",
+                                            (connection_id, user_id)
+                                        )
+                                        row = cursor.fetchone()
+                                        if row and row.get('institution_name'):
+                                            institution_name = row['institution_name']
+                                        cursor.close()
+                                except Exception:
+                                    pass
+
+                                notification_message = (
+                                    f'Your {institution_name} connection has been disconnected. '
+                                    f'<a href="/bank_accounts?reconnect={connection_id}" class="notification-link">'
+                                    f'Click here to reconnect</a>.'
+                                )
+                                add_notification(user_id, notification_message)
+                                app.logger.info(f"[WEBHOOK] Created disconnect notification for user {user_id} ({institution_name})")
+                                mark_webhook_event_processed(event_id)
+
+                        # --- Other error events (log only) ---
+                        elif event_type in ('connection.synced.errored.institution',
+                                            'connection.synced.errored.provider',
+                                            'connection.synced.errored.service'):
+                            app.logger.warning(f"[WEBHOOK] Connection error ({event_type}) for user {user_id}, connection {connection_id}")
+                            mark_webhook_event_processed(event_id)
+
+                        # --- Unknown event type ---
+                        else:
+                            app.logger.info(f"[WEBHOOK] Unhandled event type: {event_type}")
+                            mark_webhook_event_processed(event_id)
+
+                    except Exception as e:
+                        app.logger.error(f"[WEBHOOK] Error processing event {evt.get('event_id')}: {e}", exc_info=True)
+                        mark_webhook_event_processed(evt.get('event_id', ''), error_message=str(e))
+
+        thread = threading.Thread(target=process_webhook_events, args=(new_events,), daemon=True)
+        thread.start()
+
+    return jsonify({'status': 'ok', 'received': len(events), 'new': len(new_events)}), 200
 
 
 

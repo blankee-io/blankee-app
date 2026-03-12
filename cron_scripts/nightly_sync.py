@@ -179,7 +179,7 @@ def refresh_session_if_needed(cursor, conn, user_id, profile_id, session_token, 
     logger.info(f"User {user_id}: Refreshing expired session token")
     
     # Refresh token
-    result = quiltt_client.refresh_session_token(profile_id)
+    result = quiltt_client.refresh_session_token(profile_id, metadata={'user_id': str(user_id)})
     if not result or not result.get('token'):
         logger.error(f"User {user_id}: Failed to refresh session token")
         return None

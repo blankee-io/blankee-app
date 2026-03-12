@@ -70,8 +70,10 @@
                             </div>
                         {% endfor %}
                     {% else %}
-                        <div class="profile-section" id="notification-section">
-                            <p style="text-align: center; color: #666;">No notifications.</p>
+                        <div class="profile-section no-notifications-message">
+                            <i class="fa-solid fa-circle-check"></i>
+                            <h3>All caught up!</h3>
+                            <p>You have no notifications.</p>
                         </div>
                     {% endif %}
                 </div>
@@ -187,7 +189,7 @@
             notificationItem.fadeOut(300, function() {
                 $(this).remove();
                 if ($('.notification-item').length === 0) {
-                    $('.profile-actions').html('<div class="profile-section"><p style="text-align: center; color: var(--secondary-dark);">No notifications.</p></div>');
+                    $('.profile-actions').html('<div class="profile-section no-notifications-message"><i class="fa-solid fa-circle-check"></i><h3>All caught up!</h3><p>You have no notifications to review.</p></div>');
                     $('.clear-read-button').hide();
                     $('.mark-all-read-button').hide();
                 }
@@ -233,7 +235,7 @@
                         $('.notification-item.notification-read').fadeOut(300, function() {
                             $(this).remove();
                             if ($('.notification-item').length === 0) {
-                                $('.profile-actions').html('<div class="profile-section"><p style="text-align: center; color: var(--secondary-dark);">No notifications.</p></div>');
+                                $('.profile-actions').html('<div class="profile-section no-notifications-message"><i class="fa-solid fa-circle-check"></i><h3>All caught up!</h3><p>You have no notifications to review.</p></div>');
                                 $('.clear-read-button').hide();
                                 $('.mark-all-read-button').hide();
                             }
