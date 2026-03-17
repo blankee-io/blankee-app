@@ -1446,3 +1446,98 @@ def mark_webhook_event_processed(event_id: str, error_message: str = None) -> bo
     except Exception as e:
         logger.error(f"Error marking webhook event {event_id} as processed: {e}", exc_info=True)
         return False
+
+
+def get_quiltt_last_transaction_date(user_id: int) -> Optional[str]:
+    """
+    Get the date of the most recent synced transaction across all Quiltt connections.
+    Used for entry locking and dashboard sync markers.
+    
+    Checks dedicated cache key first, then computes from quiltt_transactions.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Date string 'YYYY-MM-DD' or None if no transactions
+    """
+    redis_client = _get_redis_client()
+    cache_key = f"quiltt_last_txn_date:v1:{user_id}"
+    
+    # Check dedicated cache key first
+    if redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return cached if isinstance(cached, str) else cached.decode('utf-8')
+        except Exception as e:
+            logger.warning(f"Error reading quiltt_last_txn_date cache for user {user_id}: {e}")
+    
+    # Compute from quiltt_transactions in Redis
+    last_date = None
+    if redis_client:
+        try:
+            txn_key = _get_redis_key('quiltt_transactions', user_id)
+            txn_data = redis_client.get(txn_key)
+            if txn_data:
+                transactions = json.loads(txn_data)
+                for txn in transactions:
+                    txn_date = txn.get('date')
+                    if txn_date and (last_date is None or txn_date > last_date):
+                        last_date = txn_date
+        except Exception as e:
+            logger.warning(f"Error computing last txn date from Redis for user {user_id}: {e}")
+    
+    # MySQL fallback
+    if last_date is None:
+        try:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT MAX(date) FROM quiltt_transactions WHERE user_id = %s", (user_id,))
+                row = cursor.fetchone()
+                cursor.close()
+                if row and row[0]:
+                    last_date = row[0].strftime('%Y-%m-%d') if hasattr(row[0], 'strftime') else str(row[0])
+        except Exception as e:
+            logger.error(f"Error fetching last txn date from MySQL for user {user_id}: {e}")
+    
+    # Cache the result
+    if last_date and redis_client:
+        try:
+            redis_client.setex(cache_key, INACTIVITY_TIMEOUT, last_date)
+        except Exception:
+            pass
+    
+    return last_date
+
+
+def update_quiltt_last_transaction_date(user_id: int, date_str: str = None):
+    """
+    Recompute and cache the last synced transaction date for a user.
+    Call after syncing transactions.
+    
+    Args:
+        user_id: User ID
+        date_str: Optional date string to set directly (skips recompute)
+    """
+    redis_client = _get_redis_client()
+    cache_key = f"quiltt_last_txn_date:v1:{user_id}"
+    
+    if date_str:
+        # Set directly if provided
+        if redis_client:
+            try:
+                redis_client.setex(cache_key, INACTIVITY_TIMEOUT, date_str)
+            except Exception as e:
+                logger.warning(f"Error caching quiltt_last_txn_date for user {user_id}: {e}")
+        return
+    
+    # Invalidate cache so get_quiltt_last_transaction_date() recomputes
+    if redis_client:
+        try:
+            redis_client.delete(cache_key)
+        except Exception:
+            pass
+    
+    # Trigger recompute
+    get_quiltt_last_transaction_date(user_id)
