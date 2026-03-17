@@ -83,7 +83,7 @@
         </div>
     </div>
 
-    <div class="main-container" id="main-container">
+    <div class="main-container dashbaord_container" id="main-container">
         <!-- Main container holding both categories and month tables -->
         <div class="table-container" id="table-container">
             <!-- Container for income and expense categories -->
@@ -700,10 +700,11 @@
 
         // Quiltt account flags for entry locking
         let quiltt_flags = {{ quiltt_flags | tojson | safe }};
+        let quiltt_last_txn_date = {{ quiltt_last_txn_date | tojson | safe }};
 
         /**
          * Check if an entry should be locked due to Quiltt bank account sync.
-         * Locked entries are from today or before, based on which accounts are linked.
+         * Locked entries are on or before the last synced transaction date.
          * @param {Date|string} entryDate - The date of the entry
          * @param {number|string} categoryId - The category ID of the entry
          * @param {string} entryType - 'income', 'expense', or 'ca' (credit account)
@@ -711,19 +712,25 @@
          * @returns {boolean} - True if entry should be locked
          */
         function isEntryLockedByQuiltt(entryDate, categoryId, entryType, accountId = null) {
-            // If no quiltt flags, nothing is locked
-            if (!quiltt_flags) return false;
+            // If no quiltt flags or no last txn date, nothing is locked
+            if (!quiltt_flags || !quiltt_last_txn_date) return false;
             
             // Get today's date at midnight for comparison
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             
+            // Parse the lock cutoff date (last synced transaction date)
+            const lockDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+            
             // Parse entry date
             const entryDateObj = typeof entryDate === 'string' ? new Date(entryDate) : new Date(entryDate);
             entryDateObj.setHours(0, 0, 0, 0);
             
-            // Only lock entries before today (today is editable)
+            // Today is always editable
             if (entryDateObj >= today) return false;
+            
+            // Lock entries on or before the last synced transaction date
+            if (entryDateObj > lockDate) return false;
             
             // Credit account entries - check if this specific account is Quiltt-linked
             if (entryType === 'ca' && accountId !== null) {
@@ -1398,6 +1405,36 @@
                 if (isMemberSinceMonth(monthObj.date)) {
                     // Mark cell so we can position badge after DOM is ready
                     th.classList.add('has-member-since-badge');
+                }
+                
+                // Add Quiltt sync marker if last synced transaction date falls in this month
+                if (quiltt_last_txn_date && quiltt_flags) {
+                    const monthParts = monthObj.date.split('-');
+                    const monthYear = parseInt(monthParts[0]);
+                    const monthNum = parseInt(monthParts[1]);
+                    const txnParts = quiltt_last_txn_date.split('-');
+                    const txnYear = parseInt(txnParts[0]);
+                    const txnMonth = parseInt(txnParts[1]);
+                    if (monthYear === txnYear && monthNum === txnMonth) {
+                        const txnDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+                        const marker = document.createElement('span');
+                        marker.className = 'quiltt-sync-marker dashboard-3m-sync-marker quiltt-sync-marker--alternate';
+                        marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+                        marker.innerHTML = `<span class="quiltt-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i><span class="quiltt-sync-marker-date">${txnDate.getUTCDate()}</span></span>`;
+                        const mDateSpan = marker.querySelector('.quiltt-sync-marker-date');
+                        const mIcon = marker.querySelector('i');
+                        mDateSpan.style.display = 'none';
+                        marker.addEventListener('animationiteration', function() {
+                            if (mIcon.style.display === 'none') {
+                                mIcon.style.display = '';
+                                mDateSpan.style.display = 'none';
+                            } else {
+                                mIcon.style.display = 'none';
+                                mDateSpan.style.display = '';
+                            }
+                        });
+                        th.appendChild(marker);
+                    }
                 }
                 
                 th.addEventListener('click', function() {

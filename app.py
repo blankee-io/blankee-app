@@ -32,7 +32,8 @@ from quiltt_redis import (
     get_quiltt_profile, update_quiltt_profile, get_quiltt_connections, get_quiltt_accounts,
     upsert_quiltt_connection, upsert_quiltt_account, update_quiltt_account_field, 
     delete_quiltt_connection, get_quiltt_transactions, upsert_quiltt_transaction,
-    get_user_quiltt_account_flags
+    get_user_quiltt_account_flags, get_quiltt_last_transaction_date,
+    update_quiltt_last_transaction_date
 )
 from bucket_utils import process_manual_entry_with_bucket, restore_bucket_for_category_change
 from push_notifications import apns_enabled, send_apns_notification
@@ -2546,6 +2547,7 @@ def dashboard_d():
 
     # Get Quiltt account flags for entry locking
     quiltt_flags = get_user_quiltt_account_flags(current_user.id)
+    quiltt_last_txn_date = get_quiltt_last_transaction_date(current_user.id)
 
     # Render the template, passing necessary data including selected date, goofy_week_mode, entries, and totals/remainders
     return render_template('dashboard_d.html', 
@@ -2573,7 +2575,8 @@ def dashboard_d():
         recurring_income_buckets=recurring_income_buckets,
         recurring_expense_buckets=recurring_expense_buckets,
         recurring_c_expense_buckets=recurring_c_expense_buckets,
-        quiltt_flags=quiltt_flags
+        quiltt_flags=quiltt_flags,
+        quiltt_last_txn_date=quiltt_last_txn_date
     )
 
 @app.route('/dashboard-d/add_entry', methods=['POST'])
@@ -8424,6 +8427,7 @@ def dashboard():
 
     # Get Quiltt account flags for entry locking
     quiltt_flags = get_user_quiltt_account_flags(current_user.id)
+    quiltt_last_txn_date = get_quiltt_last_transaction_date(current_user.id)
 
     return render_template(
         'dashboard.html',
@@ -8449,7 +8453,8 @@ def dashboard():
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
         c_a_balances=c_a_balances,
-        quiltt_flags=quiltt_flags
+        quiltt_flags=quiltt_flags,
+        quiltt_last_txn_date=quiltt_last_txn_date
     )
 
 
@@ -10586,6 +10591,7 @@ def dashboard_3m():
 
     # Get Quiltt account flags for entry locking
     quiltt_flags = get_user_quiltt_account_flags(current_user.id)
+    quiltt_last_txn_date = get_quiltt_last_transaction_date(current_user.id)
 
     return render_template(
         'dashboard_3m.html',
@@ -10611,7 +10617,8 @@ def dashboard_3m():
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
         c_a_balances_m=c_a_balances_m,
-        quiltt_flags=quiltt_flags
+        quiltt_flags=quiltt_flags,
+        quiltt_last_txn_date=quiltt_last_txn_date
     )
 
 @app.route('/get_ca_balance_3m', methods=['GET'])
@@ -11315,7 +11322,9 @@ def dashboard_m():
         credit_accounts=credit_accounts,
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
-        c_a_balances_d=c_a_balances_d
+        c_a_balances_d=c_a_balances_d,
+        quiltt_flags=get_user_quiltt_account_flags(current_user.id),
+        quiltt_last_txn_date=get_quiltt_last_transaction_date(current_user.id)
     )
 
 @app.route('/get_dashboard_m_data', methods=['GET'])
@@ -11670,7 +11679,9 @@ def dashboard_y():
         credit_accounts=credit_accounts,
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
-        c_a_balances_d=c_a_balances_d
+        c_a_balances_d=c_a_balances_d,
+        quiltt_flags=get_user_quiltt_account_flags(current_user.id),
+        quiltt_last_txn_date=get_quiltt_last_transaction_date(current_user.id)
     )
 
 @app.route('/get_dashboard_y_data', methods=['GET'])
@@ -12488,12 +12499,19 @@ def bank_accounts():
     except Exception as e:
         app.logger.error(f"Error loading Quiltt data for bank_accounts: {e}")
 
+    last_txn_date = get_quiltt_last_transaction_date(current_user.id)
+
     return render_template(
         'bank_accounts.html',
         landing_page=landing_page,
         connections=connections,
         currency_symbol=currency_symbol,
-        connector_id=connector_id
+        connector_id=connector_id,
+        quiltt_last_txn_date=last_txn_date,
+        quiltt_last_txn_date_formatted=(
+            datetime.strptime(last_txn_date, '%Y-%m-%d').strftime('%m/%d/%Y')
+            if last_txn_date else None
+        )
     )
 
 @app.route('/api/notifications/register', methods=['POST'])
@@ -21252,13 +21270,13 @@ def quiltt_get_connections():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-def _webhook_autobalance(user_id):
+def _webhook_autobalance(user_id, target_date_str=None):
     """
     Auto-balance checking, savings, and credit accounts after webhook transaction sync.
     Fetches current bank balances from Quiltt, compares to calculated totals,
     and creates adjustment entries for any differences.
     
-    Mirrors nightly_sync's Steps 5-6 but uses today's date and app.py infrastructure.
+    Uses the last synced transaction date as the target, falling back to today.
     """
     import time
     
@@ -21305,7 +21323,11 @@ def _webhook_autobalance(user_id):
                 _redis_client.sadd(dirty_key, 'quiltt_accounts')
                 _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
-        today = date.today()
+        # Use provided target date, fall back to today
+        if target_date_str:
+            today = date.fromisoformat(target_date_str[:10])
+        else:
+            today = date.today()
         target_date_str = today.strftime('%Y-%m-%d')
         day_before = today - timedelta(days=1)
         day_before_str = day_before.strftime('%Y-%m-%d')
@@ -22285,7 +22307,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 app.logger.info(f"[WEBHOOK-SYNC] First recalculation complete (pre-adjustment)")
                 
                 # STEP 2: Autobalance — compare to bank balances, create adjustment entries
-                _webhook_autobalance(user_id)
+                # Use last synced transaction date for autobalance target
+                last_txn_date_for_autobalance = get_quiltt_last_transaction_date(user_id)
+                _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance)
                 
                 # STEP 3: Second recalculation — incorporate adjustment entries into totals
                 date_to_remainder = {}
@@ -22301,6 +22325,14 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             except Exception as recalc_err:
                 app.logger.error(f"[WEBHOOK-SYNC] Error recalculating totals for user {user_id}: {recalc_err}", exc_info=True)
         # --- END RECALCULATE + AUTOBALANCE ---
+        
+        # Update cached last transaction date and signal UI refresh
+        try:
+            update_quiltt_last_transaction_date(user_id)
+            if app.config.get('REDIS_OK'):
+                _redis_client.setex(f"force_refresh:{user_id}", 60, "1")
+        except Exception:
+            pass
         
         return (True, total_synced, message)
         

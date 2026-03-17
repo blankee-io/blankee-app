@@ -187,10 +187,11 @@
 
         // Quiltt account flags for entry locking
         let quiltt_flags = {{ quiltt_flags | tojson | safe }};
+        let quiltt_last_txn_date = {{ quiltt_last_txn_date | tojson | safe }};
 
         /**
          * Check if an entry should be locked due to Quiltt bank account sync.
-         * Locked entries are from today or before, based on which accounts are linked.
+         * Locked entries are on or before the last synced transaction date.
          * @param {string} entryDate - The date of the entry (YYYY-MM-DD format)
          * @param {number|string} categoryId - The category ID of the entry
          * @param {string} entryType - 'income', 'expense', or 'ca' (credit account)
@@ -198,16 +199,18 @@
          * @returns {boolean} - True if entry should be locked
          */
         function isEntryLockedByQuiltt(entryDate, categoryId, entryType, accountId = null) {
-            // If no quiltt flags, nothing is locked
-            if (!quiltt_flags) return false;
+            // If no quiltt flags or no last txn date, nothing is locked
+            if (!quiltt_flags || !quiltt_last_txn_date) return false;
             
             // Get today's date string for reliable comparison (avoids UTC vs local timezone bugs)
             const today = new Date();
             const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD in local time
             
-            // Simple string comparison works because YYYY-MM-DD sorts correctly
-            // Only lock entries before today (today is editable)
+            // Today is always editable
             if (entryDate >= todayStr) return false;
+            
+            // Lock entries on or before the last synced transaction date
+            if (entryDate > quiltt_last_txn_date) return false;
             
             // Credit account entries - check if this specific account is Quiltt-linked
             if (entryType === 'ca' && accountId !== null) {
@@ -253,7 +256,10 @@
             // Future dates and today - always show add button
             if (dateStr >= todayStr) return true;
             
-            // For today and past dates, check if there are any valid entry options
+            // Dates after the last synced transaction date are not locked
+            if (!quiltt_last_txn_date || dateStr > quiltt_last_txn_date) return true;
+            
+            // For locked past dates, check if there are any valid entry options
             
             // If no checking account linked, income/expense are available
             if (!quiltt_flags.has_checking) return true;
@@ -849,6 +855,17 @@
                 const addButton = (isBeforeMemberSince || !hasValidEntryTypes) ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-kit fa-solid-money-bill-transfer-circle-plus-bl fa-flip-horizontal"></i><span class="nav-tooltip">Add New Entry</span></button>`;
                 
                 dayHeader.innerHTML = `${formattedDate} ${addButton}${memberSinceIcon}`;
+                
+                // Add Quiltt sync marker above the date (absolute positioned)
+                if (quiltt_last_txn_date && date === quiltt_last_txn_date) {
+                    const txnDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+                    const marker = document.createElement('span');
+                    marker.className = 'quiltt-sync-marker';
+                    marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+                    marker.innerHTML = '<span class="quiltt-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
+                    dayHeader.appendChild(marker);
+                }
+                
                 container.appendChild(dayHeader);
 
                 // Create content wrapper for border styling

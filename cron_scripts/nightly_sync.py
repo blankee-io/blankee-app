@@ -1173,12 +1173,12 @@ def cleanup_stale_ca_adjustments(cursor, conn, user_id, quiltt_account_id, affec
         logger.info(f"User {user_id}: Removed {removed_count} stale {account_name} auto-adjustment(s) on dates: {', '.join(date_strings)}")
 
 
-def create_auto_adjustment(cursor, conn, user_id, bank_balance, account_name):
+def create_auto_adjustment(cursor, conn, user_id, bank_balance, account_name, target_date=None):
     """
     Create auto-adjustment entry to match bank balance.
     
     Simple delta approach:
-    1. Get yesterday's CURRENT remainder from totals_remainders_d
+    1. Get target date's CURRENT remainder from totals_remainders_d
        (this already includes any previous auto-adjustments)
     2. Compare to bank balance
     3. If different, add ONE new entry for just the delta
@@ -1186,16 +1186,21 @@ def create_auto_adjustment(cursor, conn, user_id, bank_balance, account_name):
     No deleting old entries. The remainder already reflects everything.
     Each night we just add the incremental difference.
     
-    Note: Uses yesterday's date because nightly sync runs after midnight,
-    and we're reconciling the previous day's ending balance.
-    
     IMPORTANT: If user is hydrated, we update Redis first and mark dirty so the
     flush worker syncs to MySQL. We NEVER delete Redis keys, as that causes
     TTL refresh to re-hydrate stale data which then gets flushed back.
+    
+    Args:
+        target_date: Date to autobalance (date object or YYYY-MM-DD string). Defaults to yesterday.
     """
     try:
-        # Use yesterday since nightly sync runs after midnight
-        yesterday = date.today() - timedelta(days=1)
+        if target_date is not None:
+            if isinstance(target_date, str):
+                yesterday = date.fromisoformat(target_date[:10])
+            else:
+                yesterday = target_date
+        else:
+            yesterday = date.today() - timedelta(days=1)
         target_date_str = yesterday.strftime('%Y-%m-%d')
         
         # Get auto-adjustment category IDs
@@ -1322,14 +1327,14 @@ def create_auto_adjustment(cursor, conn, user_id, bank_balance, account_name):
         return False, str(e)
 
 
-def update_savings_balance(cursor, conn, user_id, bank_balance, account_id=None):
+def update_savings_balance(cursor, conn, user_id, bank_balance, account_id=None, target_date=None):
     """
-    Update YESTERDAY's savings to match bank balance by storing a DELTA adjustment.
+    Update target date's savings to match bank balance by storing a DELTA adjustment.
     
     Delta approach (matches checking account auto-adjustment pattern):
-    1. Get yesterday's current savings from savings_entries (post first recalc,
+    1. Get target date's current savings from savings_entries (post first recalc,
        which already includes any previous adjustment)
-    2. Get existing adjustment for yesterday (if any)
+    2. Get existing adjustment for target date (if any)
     3. base_savings = current_savings - existing_adjustment
     4. new_delta = bank_balance - base_savings
     5. Store new_delta in savings_adjustments
@@ -1339,14 +1344,19 @@ def update_savings_balance(cursor, conn, user_id, bank_balance, account_id=None)
     
     This is idempotent — re-runs produce the same delta.
     
-    Note: Uses yesterday's date because nightly sync runs after midnight,
-    and we're reconciling the previous day's ending balance.
+    Args:
+        target_date: Date to adjust (date object or YYYY-MM-DD string). Defaults to yesterday.
     """
     try:
         import time
         
-        # Use yesterday since nightly sync runs after midnight
-        yesterday = date.today() - timedelta(days=1)
+        if target_date is not None:
+            if isinstance(target_date, str):
+                yesterday = date.fromisoformat(target_date[:10])
+            else:
+                yesterday = target_date
+        else:
+            yesterday = date.today() - timedelta(days=1)
         target_date_str = yesterday.strftime('%Y-%m-%d')
         
         # Step 1: Get yesterday's current savings (after first recalculation)
@@ -1478,17 +1488,15 @@ def update_savings_balance(cursor, conn, user_id, bank_balance, account_id=None)
 # Remove expired bucket entries from the previous day
 # ============================================================================
 
-def cleanup_expired_bucket_entries(cursor, conn, user_id):
+def cleanup_expired_bucket_entries(cursor, conn, user_id, target_date=None):
     """
-    Handle bucket entries (is_bucket=1) from yesterday.
+    Handle bucket entries (is_bucket=1) from the target date.
     
     Bucket entries are placeholders for expected recurring income/expenses.
     Once the day passes, these need to be handled:
     
     - For Quiltt-linked accounts: DELETE the bucket entry (real transaction comes from bank sync)
     - For non-Quiltt accounts: CONVERT to regular entry (set is_bucket=0)
-    
-    The nightly sync runs at 00:05, so we process entries for yesterday.
     
     Uses Redis-first architecture: reads entries from Redis if hydrated, then
     modifies both Redis and MySQL. If not hydrated, reads/writes MySQL directly.
@@ -1497,11 +1505,15 @@ def cleanup_expired_bucket_entries(cursor, conn, user_id):
         cursor: MySQL cursor
         conn: MySQL connection
         user_id: User ID
+        target_date: Date to process (date object or YYYY-MM-DD string). Defaults to yesterday.
         
     Returns:
         dict with counts of processed entries per table
     """
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    if target_date is not None:
+        yesterday = str(target_date)[:10]
+    else:
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
     
     results = {}
     user_hydrated = is_user_hydrated(user_id)
@@ -2799,18 +2811,15 @@ def set_ca_balances_to_redis(table_name, user_id, updates):
         logger.warning(f"Error setting {table_name} in Redis for user {user_id}: {e}")
 
 
-def create_credit_account_auto_adjustment(cursor, conn, user_id, quiltt_account_id, bank_balance, account_mask, account_name):
+def create_credit_account_auto_adjustment(cursor, conn, user_id, quiltt_account_id, bank_balance, account_mask, account_name, target_date=None):
     """
     Create an auto-adjustment entry for a credit account to match the bank balance.
     Similar to app.py's _create_credit_account_auto_adjustment but for standalone use.
     
     Logic:
-    1. Delete any existing auto-adjustment entries for yesterday (clean slate)
+    1. Delete any existing auto-adjustment entries for target date (clean slate)
     2. Calculate the "natural" balance (without auto-adjustments)
     3. Create ONE adjustment entry for the difference
-    
-    Note: Uses yesterday's date because nightly sync runs after midnight,
-    and we're reconciling the previous day's ending balance.
     
     Args:
         cursor: DB cursor
@@ -2820,12 +2829,18 @@ def create_credit_account_auto_adjustment(cursor, conn, user_id, quiltt_account_
         bank_balance: Current balance from the bank (positive = amount owed)
         account_mask: Account mask for fallback matching
         account_name: Account name for logging
+        target_date: Date to adjust (date object or YYYY-MM-DD string). Defaults to yesterday.
         
     Returns: (success: bool, message: str)
     """
     try:
-        # Use yesterday since nightly sync runs after midnight
-        yesterday = date.today() - timedelta(days=1)
+        if target_date is not None:
+            if isinstance(target_date, str):
+                yesterday = date.fromisoformat(target_date[:10])
+            else:
+                yesterday = target_date
+        else:
+            yesterday = date.today() - timedelta(days=1)
         target_date_str = yesterday.strftime('%Y-%m-%d')
         day_before = yesterday - timedelta(days=1)
         day_before_str = day_before.strftime('%Y-%m-%d')
@@ -3250,10 +3265,32 @@ def process_user(cursor, conn, user_row):
             if 'earliest_transaction_date' not in result or earliest_txn_date < result['earliest_transaction_date']:
                 result['earliest_transaction_date'] = earliest_txn_date
     
+    # Update cached last transaction date for locking/marker
+    try:
+        cursor.execute("SELECT MAX(date) FROM quiltt_transactions WHERE user_id = %s", (user_id,))
+        max_row = cursor.fetchone()
+        if max_row and max_row[0]:
+            last_txn_date_str = max_row[0].strftime('%Y-%m-%d') if hasattr(max_row[0], 'strftime') else str(max_row[0])
+            cache_key = f"quiltt_last_txn_date:v1:{user_id}"
+            redis_client.setex(cache_key, INACTIVITY_TIMEOUT, last_txn_date_str)
+            result['last_transaction_date'] = last_txn_date_str
+            logger.info(f"User {user_id}: Last transaction date: {last_txn_date_str}")
+    except Exception as e:
+        logger.warning(f"User {user_id}: Failed to cache last txn date: {e}")
+    
     # =========================================================================
-    # STEP 4: Clean up expired bucket entries from yesterday
+    # STEP 4: Clean up expired bucket entries
+    # Use last synced transaction date if available (capped at yesterday)
     # =========================================================================
-    bucket_cleanup = cleanup_expired_bucket_entries(cursor, conn, user_id)
+    last_txn_date = result.get('last_transaction_date')
+    if last_txn_date:
+        last_txn_date_obj = date.fromisoformat(last_txn_date[:10])
+        if last_txn_date_obj > yesterday:
+            last_txn_date_obj = yesterday
+    else:
+        last_txn_date_obj = None  # functions will default to yesterday
+    
+    bucket_cleanup = cleanup_expired_bucket_entries(cursor, conn, user_id, target_date=last_txn_date_obj)
     total_buckets_deleted = sum(bucket_cleanup.values())
     if total_buckets_deleted > 0:
         logger.info(f"User {user_id}: Cleaned up {total_buckets_deleted} expired bucket entries")
@@ -3340,7 +3377,7 @@ def process_user(cursor, conn, user_row):
             
             if 'checking' in account_name_lower or account_subtype == 'checking':
                 # Checking account - create auto-adjustment entry
-                success, msg = create_auto_adjustment(cursor, conn, user_id, current_balance, account_name)
+                success, msg = create_auto_adjustment(cursor, conn, user_id, current_balance, account_name, target_date=last_txn_date_obj)
                 result['adjustments'].append({
                     'account': account_name,
                     'type': 'checking',
@@ -3351,7 +3388,7 @@ def process_user(cursor, conn, user_row):
                 
             elif 'savings' in account_name_lower or account_subtype == 'savings':
                 # Savings account - update savings balance
-                success, msg = update_savings_balance(cursor, conn, user_id, current_balance, account_id)
+                success, msg = update_savings_balance(cursor, conn, user_id, current_balance, account_id, target_date=last_txn_date_obj)
                 result['adjustments'].append({
                     'account': account_name,
                     'type': 'savings',
@@ -3364,7 +3401,7 @@ def process_user(cursor, conn, user_row):
         elif account_type == 'credit':
             # Credit card/line - create credit account auto-adjustment
             success, msg = create_credit_account_auto_adjustment(
-                cursor, conn, user_id, account_id, current_balance, mask, account_name
+                cursor, conn, user_id, account_id, current_balance, mask, account_name, target_date=last_txn_date_obj
             )
             result['adjustments'].append({
                 'account': account_name,
@@ -3377,20 +3414,21 @@ def process_user(cursor, conn, user_row):
     # =========================================================================
     # STEP 7: SECOND recalculation - incorporate auto-adjustments into totals
     # =========================================================================
-    # Only need to recalculate from yesterday since that's where adjustments were made
+    # Recalculate from the adjustment date (last_txn_date or yesterday)
+    adjustment_date = last_txn_date_obj if last_txn_date_obj else yesterday
     date_to_remainder = {}
     
-    recalculate_daily_totals(cursor, conn, user_id, yesterday, date_to_remainder, goofy_week_mode)
-    recalculate_weekly_totals(cursor, conn, user_id, yesterday, date_to_remainder, goofy_week_mode)
-    recalculate_monthly_totals(cursor, conn, user_id, yesterday, date_to_remainder)
-    recalculate_savings(cursor, conn, user_id, yesterday)
+    recalculate_daily_totals(cursor, conn, user_id, adjustment_date, date_to_remainder, goofy_week_mode)
+    recalculate_weekly_totals(cursor, conn, user_id, adjustment_date, date_to_remainder, goofy_week_mode)
+    recalculate_monthly_totals(cursor, conn, user_id, adjustment_date, date_to_remainder)
+    recalculate_savings(cursor, conn, user_id, adjustment_date)
     
     # Credit account calculations
-    recalculate_ca_daily_balances(cursor, conn, user_id, yesterday)
-    recalculate_ca_weekly_balances(cursor, conn, user_id, yesterday, goofy_week_mode)
-    recalculate_ca_monthly_balances(cursor, conn, user_id, yesterday)
+    recalculate_ca_daily_balances(cursor, conn, user_id, adjustment_date)
+    recalculate_ca_weekly_balances(cursor, conn, user_id, adjustment_date, goofy_week_mode)
+    recalculate_ca_monthly_balances(cursor, conn, user_id, adjustment_date)
     
-    logger.info(f"User {user_id}: Completed final recalculation (post-adjustment)")
+    logger.info(f"User {user_id}: Completed final recalculation (post-adjustment, from {adjustment_date})")
     
     return result
 
