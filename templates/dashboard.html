@@ -83,7 +83,7 @@
         </div>
     </div>
 
-    <div class="main-container" id="main-container">
+    <div class="main-container dashbaord_container" id="main-container">
         <!-- Main container holding both categories and month tables -->
         <div class="table-container" id="table-container">
             <!-- Container for income and expense categories -->
@@ -693,10 +693,11 @@
 
         // Quiltt account flags for entry locking
         let quiltt_flags = {{ quiltt_flags | tojson | safe }};
+        let quiltt_last_txn_date = {{ quiltt_last_txn_date | tojson | safe }};
 
         /**
          * Check if an entry should be locked due to Quiltt bank account sync.
-         * Locked entries are from today or before, based on which accounts are linked.
+         * Locked entries are on or before the last synced transaction date.
          * @param {Date|string} entryDate - The date of the entry
          * @param {number|string} categoryId - The category ID of the entry
          * @param {string} entryType - 'income', 'expense', or 'ca' (credit account)
@@ -704,12 +705,15 @@
          * @returns {boolean} - True if entry should be locked
          */
         function isEntryLockedByQuiltt(entryDate, categoryId, entryType, accountId = null) {
-            // If no quiltt flags, nothing is locked
-            if (!quiltt_flags) return false;
+            // If no quiltt flags or no last txn date, nothing is locked
+            if (!quiltt_flags || !quiltt_last_txn_date) return false;
             
             // Get today's date at midnight for comparison
             const today = new Date();
             today.setHours(0, 0, 0, 0);
+            
+            // Parse the lock cutoff date (last synced transaction date)
+            const lockDate = new Date(quiltt_last_txn_date + 'T00:00:00');
             
             // Parse entry date
             const entryDateObj = typeof entryDate === 'string' ? new Date(entryDate) : new Date(entryDate);
@@ -723,8 +727,11 @@
                 compareDate.setDate(compareDate.getDate() + 6);
             }
             
-            // Only lock entries before today (today is editable)
+            // Today is always editable
             if (compareDate >= today) return false;
+            
+            // Lock entries on or before the last synced transaction date
+            if (compareDate > lockDate) return false;
             
             // Credit account entries - check if this specific account is Quiltt-linked
             if (entryType === 'ca' && accountId !== null) {
@@ -1387,6 +1394,42 @@
                     if (memberSinceDate >= weekStart && memberSinceDate <= weekEnd) {
                         // Mark cell so we can position badge after DOM is ready
                         thFriday.classList.add('has-member-since-badge');
+                    }
+                }
+                
+                // Add Quiltt sync marker if last synced transaction date falls within this week
+                if (quiltt_last_txn_date && quiltt_flags) {
+                    const lastTxnDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+                    let wsStart, wsEnd;
+                    if (goofyWeekMode) {
+                        wsStart = new Date(friday);
+                        wsEnd = new Date(friday);
+                        wsEnd.setUTCDate(friday.getUTCDate() + 6);
+                    } else {
+                        wsStart = new Date(friday);
+                        wsStart.setUTCDate(friday.getUTCDate() - 6);
+                        wsEnd = new Date(friday);
+                    }
+                    wsStart.setUTCHours(0, 0, 0, 0);
+                    wsEnd.setUTCHours(23, 59, 59, 999);
+                    if (lastTxnDate >= wsStart && lastTxnDate <= wsEnd) {
+                        const marker = document.createElement('span');
+                        marker.className = 'quiltt-sync-marker quiltt-sync-marker--alternate';
+                        marker.title = `Last bank sync: ${lastTxnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+                        marker.innerHTML = `<span class="quiltt-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i><span class="quiltt-sync-marker-date">${lastTxnDate.getUTCDate()}</span></span>`;
+                        const mDateSpan = marker.querySelector('.quiltt-sync-marker-date');
+                        const mIcon = marker.querySelector('i');
+                        mDateSpan.style.display = 'none';
+                        marker.addEventListener('animationiteration', function() {
+                            if (mIcon.style.display === 'none') {
+                                mIcon.style.display = '';
+                                mDateSpan.style.display = 'none';
+                            } else {
+                                mIcon.style.display = 'none';
+                                mDateSpan.style.display = '';
+                            }
+                        });
+                        thFriday.appendChild(marker);
                     }
                 }
                 

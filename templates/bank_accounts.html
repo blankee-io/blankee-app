@@ -35,6 +35,28 @@
                     <!-- Bank Connections Section -->
                     <div class="profile-section" id="bank-connections-section">
                     <div class="section-liner profile-bank-connections">
+                            {% if quiltt_last_txn_date %}
+                            <div class="bank-connections-sync-date">
+                                <span class="bank-connections-sync-label">Last Transaction: <span class="bank-connections-sync-date-value"><span class="quiltt-sync-marker quiltt-sync-marker--alternate quiltt-sync-marker--bank-page" id="bank-sync-marker"><span class="quiltt-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i><span class="quiltt-sync-marker-date" style="display:none;">{{ quiltt_last_txn_date[-2:] | int }}</span></span></span>{{ quiltt_last_txn_date_formatted }}</span></span>
+                            </div>
+                            <script>
+                            (function() {
+                                var marker = document.getElementById('bank-sync-marker');
+                                if (!marker) return;
+                                var icon = marker.querySelector('i');
+                                var dateSpan = marker.querySelector('.quiltt-sync-marker-date');
+                                marker.addEventListener('animationiteration', function() {
+                                    if (icon.style.display === 'none') {
+                                        icon.style.display = '';
+                                        dateSpan.style.display = 'none';
+                                    } else {
+                                        icon.style.display = 'none';
+                                        dateSpan.style.display = '';
+                                    }
+                                });
+                            })();
+                            </script>
+                            {% endif %}
                             {% if connections and connections|length > 0 %}
                                 {% for connection in connections %}
                                 <div class="connection-card" data-connection-id="{{ connection.connection_id }}">
@@ -146,11 +168,7 @@
                     </div>
                     {% endif %}
                     
-                    {% if connection.last_synced_at %}
-                    <div class="connection-footer">
-                        <small>Last synced: <span class="last-synced-time" data-timestamp="{{ connection.last_synced_at }}"></span></small>
-                    </div>
-                    {% endif %}
+
                 </div>
                 {% endfor %}
                             {% else %}
@@ -473,10 +491,7 @@
                             </div>
                         </div>
                         ${accountsHtml ? '<div class="accounts-list">' + accountsHtml + '</div>' : ''}
-                        ${connection.last_synced_at ? 
-                            `<div class="connection-footer">
-                                <small>Last synced: <span class="last-synced-time" data-timestamp="${connection.last_synced_at}"></span></small>
-                            </div>` : ''}
+
                     </div>
                 `;
                 
@@ -1658,22 +1673,6 @@
                                         }
                                     }
                                     
-                                    if (conn.last_synced_at) {
-                                        let $footer = $card.find('.connection-footer');
-                                        if ($footer.length === 0) {
-                                            $card.append(`
-                                                <div class="connection-footer">
-                                                    <small>Last synced: <span class="last-synced-time" data-timestamp="${conn.last_synced_at}"></span></small>
-                                                </div>
-                                            `);
-                                            $footer = $card.find('.connection-footer');
-                                        } else {
-                                            $footer.find('.last-synced-time').attr('data-timestamp', conn.last_synced_at);
-                                        }
-                                        
-                                        formatTimestamp($footer.find('.last-synced-time'));
-                                    }
-                                    
                                     if ((conn.status === 'SYNCED' || conn.status === 'ACTIVE') && conn.account_count > 0) {
                                         const $accountsList = $card.find('.accounts-list');
                                         if ($accountsList.length === 0 || $accountsList.children().length === 0) {
@@ -1741,12 +1740,7 @@
                             
                             accountsHtml += '</div>';
                             
-                            const $footer = $card.find('.connection-footer');
-                            if ($footer.length > 0) {
-                                $footer.before(accountsHtml);
-                            } else {
-                                $card.find('.connection-header').after(accountsHtml);
-                            }
+                            $card.find('.connection-header').after(accountsHtml);
                         }
                     },
                     error: function(xhr, status, error) {
@@ -2081,9 +2075,7 @@
                                 '<div class="account-mask">...3344</div>' +
                             '</div>' +
                         '</div>' +
-                        '<div class="connection-footer">' +
-                            '<small>Last synced: just now</small>' +
-                        '</div>';
+                        '';
 
                     // Insert before the connect-bank-container
                     var connectContainer = sectionLiner ? sectionLiner.querySelector('.connect-bank-container') : null;

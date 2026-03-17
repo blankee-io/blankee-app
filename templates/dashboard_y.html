@@ -124,6 +124,8 @@
         const maxYear = currentYear + 3; // Three years into the future
 
         let member_since = {{ member_since | tojson | safe }};
+        let quiltt_flags = {{ quiltt_flags | tojson | safe }};
+        let quiltt_last_txn_date = {{ quiltt_last_txn_date | tojson | safe }};
     
         // Function to store the latest viewed year in localStorage
         function storeLatestViewedYear(year) {
@@ -428,6 +430,16 @@
                     });
 
                     dayCell.appendChild(dayContent); // Append the div inside the td
+                    
+                    // Add Quiltt sync marker if this date matches last synced transaction date
+                    if (quiltt_last_txn_date && quiltt_flags && formattedDate === quiltt_last_txn_date) {
+                        const txnDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+                        const marker = document.createElement('span');
+                        marker.className = 'quiltt-sync-marker';
+                        marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+                        marker.innerHTML = '<span class="quiltt-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
+                        dayContent.appendChild(marker);
+                    }
                     week.appendChild(dayCell);
 
                     // Start a new row when the week is complete

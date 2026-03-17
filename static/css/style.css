@@ -2867,6 +2867,100 @@ tr[data-category-id] td.before-member-since {
     color: var(--secondary);
 }
 
+/* ============================================================
+   Quiltt Sync Marker — bank-check icon on last synced date
+   Upside-down teardrop (pin) shape with icon + date number
+   ============================================================ */
+/* Teardrop pulse: continuous smooth sine-wave fade */
+@keyframes syncMarkerPulse {
+    0% { opacity: 0; }
+    50% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+.quiltt-sync-marker {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--primary);
+    color: var(--text-light);
+    cursor: default;
+    z-index: 25;
+    pointer-events: auto;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    box-shadow: 0 2px 6px var(--shadow-md);
+    width: 26px;
+    height: 26px;
+    font-size: 12px;
+    animation: syncMarkerPulse 1.8s ease-in-out infinite;
+}
+
+.quiltt-sync-marker-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transform: rotate(45deg);
+    line-height: 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    margin-top: -2px;
+    margin-right: -2px;
+}
+
+.quiltt-sync-marker-inner i {
+    font-size: inherit;
+}
+
+.quiltt-sync-marker--alternate .quiltt-sync-marker-date {
+    position: absolute;
+    font-weight: 700;
+    font-size: 11px;
+    line-height: 1;
+    margin-top: 3px;
+}
+
+/* Weekly dashboard: centered above the date number */
+#friday-dates-row th .quiltt-sync-marker {
+    top: -25px;
+    left: 50%;
+    margin-left: -13px;
+}
+
+/* Daily dashboard: centered above the date text */
+.dashboard-d-day-header .quiltt-sync-marker {
+    top: -26px;
+    left: 50%;
+    margin-left: -13px;
+}
+
+/* Monthly dashboard: centered above the day label */
+.dashboard-m-date .quiltt-sync-marker {
+    top: -13px;
+    left: 50%;
+    margin-left: -13px;
+    z-index: 100;
+}
+
+/* 3-month dashboard: above month name, 10px from left */
+.dashboard-3m-sync-marker {
+    top: -25px;
+    left: 10px;
+}
+
+/* Yearly dashboard: above the date number, centered */
+.dashboard-y-day-content .quiltt-sync-marker {
+    top: -28px;
+    left: 50%;
+    margin-left: -13px;
+}
+.dashboard-y-day-content {
+    position: relative;
+}
+
 /* Button for adding new entry */
 .dashboard-d-add-entry-btn {
     position: absolute;
@@ -3426,6 +3520,10 @@ transform: scale(1.2);
 
 
 /* ////////////////////// Dashboard Week Styles /////////////////////////// */
+.dashbaord_container {
+    margin-top: 10px;
+}
+
 .main-container {
     padding: 10px;
     transition: transform 0.3s ease-out, opacity 0.3s ease-out;
@@ -4770,7 +4868,6 @@ td:has(.bucket-progress-container) {
 }
 
 #month-table-container {
-    z-index: 5;
     align-items: center;
     width: 70%;
     margin-bottom: 10px;
@@ -5480,6 +5577,7 @@ td:has(.bucket-progress-container) {
 
 /* Ensure each date div inside the td fits without extra space */
 .dashboard-m-date {
+    position: relative;
     display: flex;
 
     /* Stack child divs vertically */
@@ -10838,6 +10936,43 @@ html.modal-open {
 }
 
 /* Profile Bank Connections Styles */
+.profile-bank-connections {
+    position: relative;
+    overflow: visible;
+}
+
+.bank-connections-sync-date {
+    display: flex;
+    justify-content: flex-end;
+    align-self: flex-end;
+    margin-bottom: 8px;
+}
+
+.bank-connections-sync-date-value {
+    position: relative;
+}
+
+.bank-connections-sync-date .quiltt-sync-marker--bank-page {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    margin-left: -13px;
+    margin-bottom: 2px;
+    transform: rotate(-45deg);
+    width: 26px;
+    height: 26px;
+    font-size: 12px;
+    animation: syncMarkerPulse 1.8s ease-in-out infinite;
+}
+
+.bank-connections-sync-label {
+    font-size: 11px;
+    color: var(--secondary-dark);
+    font-weight: 500;
+    margin-top: 4px;
+    white-space: nowrap;
+}
+
 .profile-bank-connections h2 {
     margin-bottom: 20px;
 }
@@ -10845,7 +10980,7 @@ html.modal-open {
 .connection-card {
     width: 100%;
     max-width: 100%;
-    margin: 20px 0px;
+    margin-bottom: 20px;
     padding: 20px 0px;
     border-top: 1px solid var(--secondary-hover);
     border-bottom: 1px solid var(--secondary-hover);
@@ -11131,14 +11266,6 @@ transform: scale(1.2);
     100% {
         transform: scale(1);
     }
-}
-
-.connection-footer {
-    margin-top: 12px;
-}
-
-.connection-footer small {
-    color: var(--secondary-dark);
 }
 
 .no-connections {

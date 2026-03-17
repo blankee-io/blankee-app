@@ -129,6 +129,8 @@
         let totals_remainders_d = {{ totals_remainders_d|tojson }};
         const balance_threshold = {{ balance_threshold|tojson }};
         let member_since = {{ member_since | tojson | safe }};
+        let quiltt_flags = {{ quiltt_flags | tojson | safe }};
+        let quiltt_last_txn_date = {{ quiltt_last_txn_date | tojson | safe }};
         let savingsEntries = {{ savings_entries | tojson }};
         let ca_balances_d = {{ c_a_balances_d|tojson }};
         const credit_accounts = {{ credit_accounts|tojson }};
@@ -381,6 +383,16 @@
                     const dateNumberDiv = document.createElement('div');
                     dateNumberDiv.classList.add('dashboard-m-date-number');
                     dateNumberDiv.textContent = currentDay.getDate();
+                    
+                    // Add Quiltt sync marker above the date (absolute positioned on dayDiv)
+                    if (quiltt_last_txn_date && quiltt_flags && dateStr === quiltt_last_txn_date) {
+                        const txnDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+                        const marker = document.createElement('span');
+                        marker.className = 'quiltt-sync-marker';
+                        marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+                        marker.innerHTML = '<span class="quiltt-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
+                        dayDiv.appendChild(marker);
+                    }
 
                     const incomeTotalDiv = document.createElement('div');
                     incomeTotalDiv.classList.add('dashboard-m-income-total');
