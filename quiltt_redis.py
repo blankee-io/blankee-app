@@ -1541,3 +1541,122 @@ def update_quiltt_last_transaction_date(user_id: int, date_str: str = None):
     
     # Trigger recompute
     get_quiltt_last_transaction_date(user_id)
+
+
+# ============================================================================
+# CATEGORY MEMORY — user-confirmed merchant→category mappings
+# ============================================================================
+
+def upsert_category_memory(user_id, merchant_id, description, category_id, category_type, account_id=None):
+    """
+    Save or update a user's category choice for a merchant/description.
+    Called when user confirms a pending transaction.
+    """
+    if not merchant_id and not description:
+        return
+
+    redis_key = f"quiltt_category_mappings:v1:{user_id}"
+    try:
+        cached = _get_from_redis('quiltt_category_mappings', user_id)
+        if cached is None:
+            cached = []
+
+        # Try to find existing mapping by merchant_id or description
+        found = False
+        for mapping in cached:
+            if merchant_id and mapping.get('merchant_id') == merchant_id and mapping.get('category_type') == category_type:
+                mapping['category_id'] = category_id
+                mapping['account_id'] = account_id
+                mapping['times_confirmed'] = mapping.get('times_confirmed', 1) + 1
+                found = True
+                break
+            elif not merchant_id and description and mapping.get('description') == description and mapping.get('category_type') == category_type:
+                mapping['category_id'] = category_id
+                mapping['account_id'] = account_id
+                mapping['times_confirmed'] = mapping.get('times_confirmed', 1) + 1
+                found = True
+                break
+
+        if not found:
+            new_id = -(len(cached) + 1)  # Temp negative ID for Redis-only rows
+            cached.append({
+                'id': new_id,
+                'user_id': user_id,
+                'merchant_id': merchant_id,
+                'description': description,
+                'category_id': category_id,
+                'category_type': category_type,
+                'account_id': account_id,
+                'times_confirmed': 1
+            })
+
+        _set_to_redis('quiltt_category_mappings', user_id, cached)
+
+        # Mark dirty for MySQL flush
+        redis_client = _get_redis_client()
+        if redis_client:
+            dirty_key = f"dirty_tables:{user_id}"
+            redis_client.sadd(dirty_key, 'quiltt_category_mappings')
+            redis_client.expire(dirty_key, INACTIVITY_TIMEOUT)
+    except Exception as e:
+        logger.error(f"Error upserting category memory for user {user_id}: {e}")
+
+
+def lookup_category_memory(user_id, merchant_id=None, description=None, category_type=None):
+    """
+    Look up a user's remembered category for a merchant/description.
+    Returns dict with category_id, category_type, account_id or None.
+
+    Lookup order:
+      1. Match by merchant_id + category_type (best)
+      2. Match by description + category_type (fallback)
+    """
+    if not merchant_id and not description:
+        return None
+
+    try:
+        cached = _get_from_redis('quiltt_category_mappings', user_id)
+        if cached is None:
+            # Fallback to MySQL
+            from db_connections import get_db_pool
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute(
+                    "SELECT * FROM quiltt_category_mappings WHERE user_id = %s",
+                    (user_id,)
+                )
+                cached = cursor.fetchall()
+                cursor.close()
+            if cached:
+                _set_to_redis('quiltt_category_mappings', user_id, list(cached))
+            else:
+                return None
+
+        # 1. Try merchant_id match
+        if merchant_id:
+            for m in cached:
+                if m.get('merchant_id') == merchant_id:
+                    if category_type is None or m.get('category_type') == category_type:
+                        return {
+                            'category_id': m.get('category_id'),
+                            'category_type': m.get('category_type'),
+                            'account_id': m.get('account_id'),
+                            'times_confirmed': m.get('times_confirmed', 1)
+                        }
+
+        # 2. Fallback: description match
+        if description:
+            for m in cached:
+                if m.get('description') == description:
+                    if category_type is None or m.get('category_type') == category_type:
+                        return {
+                            'category_id': m.get('category_id'),
+                            'category_type': m.get('category_type'),
+                            'account_id': m.get('account_id'),
+                            'times_confirmed': m.get('times_confirmed', 1)
+                        }
+
+        return None
+    except Exception as e:
+        logger.error(f"Error looking up category memory for user {user_id}: {e}")
+        return None
