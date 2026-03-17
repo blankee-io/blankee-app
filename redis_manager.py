@@ -3186,7 +3186,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 return len(batch_data)
                 
             elif table == 'quiltt_category_mappings':
-                # Quiltt category mappings table
+                # Category memory: user-confirmed merchant→category mappings
                 if not rows:
                     return 0
                 
@@ -3194,18 +3194,24 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 for row in rows:
                     batch_data.append((
                         user_id,
-                        row.get('quiltt_category'),
-                        row.get('local_category_id'),
-                        row.get('category_type', 'expense')
+                        row.get('merchant_id'),
+                        row.get('description'),
+                        row.get('category_id'),
+                        row.get('category_type', 'expense'),
+                        row.get('account_id'),
+                        row.get('times_confirmed', 1)
                     ))
                 
                 cursor.executemany("""
                     INSERT INTO quiltt_category_mappings
-                    (user_id, quiltt_category, local_category_id, category_type)
-                    VALUES (%s, %s, %s, %s)
+                    (user_id, merchant_id, description, category_id, category_type, account_id, times_confirmed)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
-                        local_category_id = VALUES(local_category_id),
-                        category_type = VALUES(category_type)
+                        category_id = VALUES(category_id),
+                        category_type = VALUES(category_type),
+                        account_id = VALUES(account_id),
+                        times_confirmed = VALUES(times_confirmed),
+                        description = VALUES(description)
                 """, batch_data)
                 
                 conn.commit()

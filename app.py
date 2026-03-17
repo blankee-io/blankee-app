@@ -12994,6 +12994,26 @@ def confirm_transaction():
         # Check if all pending transactions are now confirmed and clear notification
         _clear_pending_transactions_notification_if_none(current_user.id)
         
+        # --- SAVE CATEGORY MEMORY ---
+        # Remember this user's category choice for this merchant/description
+        try:
+            from quiltt_redis import upsert_category_memory, get_quiltt_transactions
+            quiltt_txns = get_quiltt_transactions(user_id=current_user.id)
+            txn_record = next((t for t in quiltt_txns if t.get('transaction_id') == transaction_id), None)
+            if txn_record:
+                upsert_category_memory(
+                    user_id=current_user.id,
+                    merchant_id=txn_record.get('ntropy_merchant_id'),
+                    description=txn_record.get('description'),
+                    category_id=category_id,
+                    category_type=entry_type,
+                    account_id=txn_record.get('account_id') if entry_type in ('c_expense', 'c_payment') else None
+                )
+                app.logger.info(f"[CONFIRM TXN] Saved category memory: merchant_id={txn_record.get('ntropy_merchant_id')}, desc={txn_record.get('description', '')[:50]}, cat={category_id}, type={entry_type}")
+        except Exception as mem_err:
+            app.logger.warning(f"[CONFIRM TXN] Failed to save category memory: {mem_err}")
+        # --- END SAVE CATEGORY MEMORY ---
+        
         # Recalculate totals, remainders, savings, and credit balances
         try:
             if entry_type in ('income', 'expense'):
@@ -13025,12 +13045,18 @@ def confirm_all_transactions():
     try:
         # Group by entry type
         by_type = {'income': [], 'expense': [], 'c_expense': []}
+        all_txn_mappings = []  # For category memory
         for txn in transactions:
             entry_type = txn.get('entry_type')
             if entry_type in by_type:
                 by_type[entry_type].append({
                     'entry_id': int(txn.get('entry_id')),
                     'category_id': int(txn.get('category_id'))
+                })
+                all_txn_mappings.append({
+                    'transaction_id': txn.get('transaction_id'),
+                    'category_id': int(txn.get('category_id')),
+                    'entry_type': entry_type
                 })
         
         table_map = {
@@ -13105,6 +13131,26 @@ def confirm_all_transactions():
                 except Exception as e:
                     app.logger.error(f"[CONFIRM ALL] Error processing bucket reduction: {e}")
                     # Continue even if bucket processing fails
+        
+        # --- SAVE CATEGORY MEMORY FOR ALL CONFIRMED TRANSACTIONS ---
+        try:
+            from quiltt_redis import upsert_category_memory, get_quiltt_transactions
+            quiltt_txns = get_quiltt_transactions(user_id=current_user.id)
+            txn_lookup = {t.get('transaction_id'): t for t in quiltt_txns}
+            for mapping in all_txn_mappings:
+                txn_record = txn_lookup.get(mapping['transaction_id'])
+                if txn_record:
+                    upsert_category_memory(
+                        user_id=current_user.id,
+                        merchant_id=txn_record.get('ntropy_merchant_id'),
+                        description=txn_record.get('description'),
+                        category_id=mapping['category_id'],
+                        category_type=mapping['entry_type'],
+                        account_id=txn_record.get('account_id') if mapping['entry_type'] in ('c_expense', 'c_payment') else None
+                    )
+        except Exception as mem_err:
+            app.logger.warning(f"[CONFIRM ALL] Failed to save category memory: {mem_err}")
+        # --- END SAVE CATEGORY MEMORY ---
         
         # Check if all pending transactions are now confirmed and clear notification
         _clear_pending_transactions_notification_if_none(current_user.id)
@@ -22125,38 +22171,70 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 **ntropy_data  # Include all Ntropy fields
             }
             
-            # --- CUSTOM CATEGORY SUGGESTION (Phase 3.2) ---
-            # Get custom category suggestion from Ntropy using user's own categories
-            # Only fetch if we don't have a cached suggestion yet
+            # --- CATEGORY MEMORY LOOKUP ---
+            # Check if the user has previously confirmed a category for this merchant/description.
+            # If so, use that instead of calling Ntropy.
+            memory_match = None
             try:
-                from ntropy_utils import suggest_category_for_transaction
-                
-                # Determine account type for category lookup
+                from quiltt_redis import lookup_category_memory
+                txn_merchant_id = ntropy_data.get('ntropy_merchant_id')
+                txn_description = txn.get('description', '')
+                memory_category_type = 'expense' if is_expense else 'income'
+
+                # For credit accounts, use c_expense / c_payment
                 quiltt_account_info = quiltt_account_map.get(account_id, {})
                 acct_type = quiltt_account_info.get('account_type', '').upper()
-                ntropy_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
-                
-                suggestion = suggest_category_for_transaction(
-                    user_id=user_id,
-                    transaction={
-                        'id': txn_id,
-                        'transaction_id': txn_id,
-                        'description': txn.get('description', ''),
-                        'amount': amount,
-                        'date': date,
-                        'transaction_type': 'expense' if is_expense else 'income'  # Pass expense/income indicator
-                    },
-                    account_type=ntropy_account_type
+                if acct_type == 'CREDIT':
+                    memory_category_type = 'c_expense' if is_expense else 'c_payment'
+
+                memory_match = lookup_category_memory(
+                    user_id, merchant_id=txn_merchant_id,
+                    description=txn_description, category_type=memory_category_type
                 )
-                if suggestion and suggestion.get('suggested_category'):
-                    transaction_data['custom_category_suggestion'] = suggestion.get('suggested_category')
-                    transaction_data['custom_category_id'] = suggestion.get('suggested_category_id')
-                    transaction_data['custom_category_type'] = suggestion.get('category_type')
-                    transaction_data['custom_category_confidence'] = suggestion.get('confidence')
+                if memory_match:
+                    transaction_data['custom_category_suggestion'] = 'Memory'
+                    transaction_data['custom_category_id'] = memory_match['category_id']
+                    transaction_data['custom_category_type'] = memory_match['category_type']
+                    transaction_data['custom_category_confidence'] = 'memory'
                     transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    app.logger.info(f"Custom category suggestion for {txn_id}: {suggestion.get('suggested_category')} (id={suggestion.get('suggested_category_id')})")
-            except Exception as suggest_err:
-                app.logger.warning(f"Failed to get custom category suggestion for {txn_id}: {suggest_err}")
+                    app.logger.info(f"Category memory match for {txn_id}: category_id={memory_match['category_id']} (confirmed {memory_match.get('times_confirmed', 1)}x)")
+            except Exception as mem_err:
+                app.logger.warning(f"Category memory lookup failed for {txn_id}: {mem_err}")
+            # --- END CATEGORY MEMORY LOOKUP ---
+
+            # --- CUSTOM CATEGORY SUGGESTION (Phase 3.2) ---
+            # Get custom category suggestion from Ntropy using user's own categories
+            # Only fetch if we don't have a memory match already
+            if not memory_match:
+                try:
+                    from ntropy_utils import suggest_category_for_transaction
+                    
+                    # Determine account type for category lookup
+                    quiltt_account_info = quiltt_account_map.get(account_id, {})
+                    acct_type = quiltt_account_info.get('account_type', '').upper()
+                    ntropy_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
+                    
+                    suggestion = suggest_category_for_transaction(
+                        user_id=user_id,
+                        transaction={
+                            'id': txn_id,
+                            'transaction_id': txn_id,
+                            'description': txn.get('description', ''),
+                            'amount': amount,
+                            'date': date,
+                            'transaction_type': 'expense' if is_expense else 'income'
+                        },
+                        account_type=ntropy_account_type
+                    )
+                    if suggestion and suggestion.get('suggested_category'):
+                        transaction_data['custom_category_suggestion'] = suggestion.get('suggested_category')
+                        transaction_data['custom_category_id'] = suggestion.get('suggested_category_id')
+                        transaction_data['custom_category_type'] = suggestion.get('category_type')
+                        transaction_data['custom_category_confidence'] = suggestion.get('confidence')
+                        transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        app.logger.info(f"Custom category suggestion for {txn_id}: {suggestion.get('suggested_category')} (id={suggestion.get('suggested_category_id')})")
+                except Exception as suggest_err:
+                    app.logger.warning(f"Failed to get custom category suggestion for {txn_id}: {suggest_err}")
             # --- END CUSTOM CATEGORY SUGGESTION ---
             
             app.logger.info(f"transaction_data keys: {list(transaction_data.keys())}")
