@@ -3187,6 +3187,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
             elif table == 'quiltt_category_mappings':
                 # Category memory: user-confirmed merchant→category mappings
+                # Unique key is (user_id, description, category_type)
                 if not rows:
                     return 0
                 
@@ -3207,11 +3208,10 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     (user_id, merchant_id, description, category_id, category_type, account_id, times_confirmed)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
+                        merchant_id = COALESCE(VALUES(merchant_id), merchant_id),
                         category_id = VALUES(category_id),
-                        category_type = VALUES(category_type),
                         account_id = VALUES(account_id),
-                        times_confirmed = VALUES(times_confirmed),
-                        description = VALUES(description)
+                        times_confirmed = VALUES(times_confirmed)
                 """, batch_data)
                 
                 conn.commit()

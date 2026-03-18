@@ -425,36 +425,12 @@
                     });
                     dropdown.appendChild(div);
                 });
-                if (nonMatchingCategories.length > 0) {
-                    const sep = document.createElement('div');
-                    sep.className = 'dropdown-separator';
-                    dropdown.appendChild(sep);
-                }
             }
 
-            const catsToShow = searchLower.length > 0 ? nonMatchingCategories : categories;
-            if (catsToShow.length > 0) {
-                dropdown.style.display = 'block';
-                catsToShow.forEach(cat => {
-                    const div = document.createElement('div');
-                    div.innerHTML = getCategoryIcon(cat) + ' ' + cat.name;
-                    div.className = 'pending-transactions-category-dropdown-item';
-                    div.addEventListener('click', function() {
-                        input.value = cat.name;
-                        hiddenInput.value = cat.id;
-                        dropdown.style.display = 'none';
-                    });
-                    dropdown.appendChild(div);
-                });
-            }
-
-            // Create new option — only if name doesn't match ANY category (including recurring)
+            // Create new option right after search results
             const allCatsExactMatch = allIncomeCategories.find(cat => cat.name.toLowerCase() === searchLower);
             if (searchLower.length > 0 && !allCatsExactMatch) {
                 dropdown.style.display = 'block';
-                const sep = document.createElement('div');
-                sep.className = 'dropdown-separator';
-                dropdown.appendChild(sep);
                 const createDiv = document.createElement('div');
                 createDiv.className = 'pending-transactions-category-dropdown-item create-new-category';
                 createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
@@ -471,6 +447,29 @@
                     dropdown.style.display = 'none';
                 });
                 dropdown.appendChild(createDiv);
+            }
+
+            // Add separator before remaining categories if there's content above
+            if (searchLower.length > 0 && dropdown.children.length > 0 && nonMatchingCategories.length > 0) {
+                const sep = document.createElement('div');
+                sep.className = 'dropdown-separator';
+                dropdown.appendChild(sep);
+            }
+
+            const catsToShow = searchLower.length > 0 ? nonMatchingCategories : categories;
+            if (catsToShow.length > 0) {
+                dropdown.style.display = 'block';
+                catsToShow.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.innerHTML = getCategoryIcon(cat) + ' ' + cat.name;
+                    div.className = 'pending-transactions-category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
             }
 
             if (dropdown.children.length === 0) {
