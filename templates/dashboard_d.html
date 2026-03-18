@@ -504,13 +504,25 @@
                     });
                     dashboardDDropdown.appendChild(div);
                 });
-                
-                // Add separator between search results and all categories
-                if (nonMatchingCategories.length > 0) {
-                    const separator = document.createElement('div');
-                    separator.className = 'dropdown-separator';
-                    dashboardDDropdown.appendChild(separator);
-                }
+            }
+
+            // Show "Create new..." option right after search results
+            if (searchText.length > 0 && !exactMatch) {
+                dashboardDDropdown.style.display = 'block';
+                const createDiv = document.createElement('div');
+                createDiv.className = 'category-dropdown-item create-new-category';
+                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+                createDiv.addEventListener('click', function() {
+                    createDashboardDCategory(searchText);
+                });
+                dashboardDDropdown.appendChild(createDiv);
+            }
+
+            // Add separator before remaining categories if there's content above
+            if (searchLower.length > 0 && dashboardDDropdown.children.length > 0 && nonMatchingCategories.length > 0) {
+                const separator = document.createElement('div');
+                separator.className = 'dropdown-separator';
+                dashboardDDropdown.appendChild(separator);
             }
 
             // Show all other categories (non-matching or all if no search)
@@ -528,18 +540,6 @@
                     });
                     dashboardDDropdown.appendChild(div);
                 });
-            }
-
-            // Show "Create new..." option if there's text and no exact match
-            if (searchText.length > 0 && !exactMatch) {
-                dashboardDDropdown.style.display = 'block';
-                const createDiv = document.createElement('div');
-                createDiv.className = 'category-dropdown-item create-new-category';
-                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
-                createDiv.addEventListener('click', function() {
-                    createDashboardDCategory(searchText);
-                });
-                dashboardDDropdown.appendChild(createDiv);
             }
 
             if (dashboardDDropdown.children.length === 0) {

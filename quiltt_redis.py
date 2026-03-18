@@ -1551,8 +1551,10 @@ def upsert_category_memory(user_id, merchant_id, description, category_id, categ
     """
     Save or update a user's category choice for a merchant/description.
     Called when user confirms a pending transaction.
+    Description is the primary match key (always present).
+    merchant_id is supplementary (stored for faster lookup when available).
     """
-    if not merchant_id and not description:
+    if not description:
         return
 
     redis_key = f"quiltt_category_mappings:v1:{user_id}"
@@ -1561,19 +1563,16 @@ def upsert_category_memory(user_id, merchant_id, description, category_id, categ
         if cached is None:
             cached = []
 
-        # Try to find existing mapping by merchant_id or description
+        # Match by description + category_type (the unique key)
         found = False
         for mapping in cached:
-            if merchant_id and mapping.get('merchant_id') == merchant_id and mapping.get('category_type') == category_type:
+            if mapping.get('description') == description and mapping.get('category_type') == category_type:
                 mapping['category_id'] = category_id
                 mapping['account_id'] = account_id
                 mapping['times_confirmed'] = mapping.get('times_confirmed', 1) + 1
-                found = True
-                break
-            elif not merchant_id and description and mapping.get('description') == description and mapping.get('category_type') == category_type:
-                mapping['category_id'] = category_id
-                mapping['account_id'] = account_id
-                mapping['times_confirmed'] = mapping.get('times_confirmed', 1) + 1
+                # Update merchant_id if we now have one
+                if merchant_id and not mapping.get('merchant_id'):
+                    mapping['merchant_id'] = merchant_id
                 found = True
                 break
 

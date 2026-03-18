@@ -1550,7 +1550,7 @@ def cleanup_expired_bucket_entries(cursor, conn, user_id, target_date=None):
     try:
         all_income = get_entries_from_redis_or_mysql(cursor, 'income_entries', user_id)
         entry_ids = [e.get('id') for e in all_income 
-                     if e.get('is_bucket') and str(e.get('date', ''))[:10] == yesterday]
+                     if e.get('is_bucket') and str(e.get('date', ''))[:10] <= yesterday]
         
         if entry_ids:
             if has_quiltt_depository:
@@ -1586,7 +1586,7 @@ def cleanup_expired_bucket_entries(cursor, conn, user_id, target_date=None):
     try:
         all_expense = get_entries_from_redis_or_mysql(cursor, 'expense_entries', user_id)
         entry_ids = [e.get('id') for e in all_expense
-                     if e.get('is_bucket') and str(e.get('date', ''))[:10] == yesterday]
+                     if e.get('is_bucket') and str(e.get('date', ''))[:10] <= yesterday]
         
         if entry_ids:
             if has_quiltt_depository:
@@ -1633,7 +1633,7 @@ def cleanup_expired_bucket_entries(cursor, conn, user_id, target_date=None):
         non_quiltt_entry_ids = []
         
         for entry in all_c_expenses:
-            if entry.get('is_bucket') and str(entry.get('date', ''))[:10] == yesterday:
+            if entry.get('is_bucket') and str(entry.get('date', ''))[:10] <= yesterday:
                 entry_id = entry.get('id')
                 cat_id = int(entry.get('category_id', 0))
                 account_id = cat_to_account.get(cat_id, 0)
