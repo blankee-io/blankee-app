@@ -81,8 +81,10 @@
                                 {% if record.wage_bill == 1 %}
                                     {% if record.bucket_original is not none %}
                                         {% if record.bucket_spent >= record.bucket_original %}
+                                            {% if record.bucket_date %}<div class="bucket-date bucket-date-paid">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}-{{ record.bucket_date[2:4] }}</div>{% endif %}
                                             <span class="status-paid" title="Paid"><i class="fa-solid fa-hand-holding-dollar"></i></span>
                                         {% else %}
+                                            {% if record.bucket_date %}<div class="bucket-date bucket-date-unpaid">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}-{{ record.bucket_date[2:4] }}</div>{% endif %}
                                             <span class="status-unpaid" title="Unpaid"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i></span>
                                         {% endif %}
                                     {% else %}
@@ -91,6 +93,7 @@
                                 {% else %}
                                     {% if record.bucket_original is not none %}
                                         <div class="bucket-status">
+                                            {% if record.bucket_date %}<div class="bucket-date {% if record.bucket_spent >= record.bucket_original %}bucket-date-unpaid{% else %}bucket-date-paid{% endif %}">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}-{{ record.bucket_date[2:4] }}</div>{% endif %}
                                             <div class="bucket-bar-container">
                                                 <div class="bucket-bar {% if record.bucket_spent >= record.bucket_original %}bucket-bar-over{% else %}bucket-bar-ok{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div>
                                             </div>
@@ -105,12 +108,12 @@
                                     {% endif %}
                                 {% endif %}
                             </td>
-                            <td class="editable ca-start-date" data-column="start_date">{{ record.start_date[2:] }}<span class="mobile-end-date">→ {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}No End{% else %}{{ record.end_date[2:] }}{% endif %}</span></td>
+                            <td class="editable ca-start-date" data-column="start_date">{{ record.start_date[5:7] }}-{{ record.start_date[8:] }}-{{ record.start_date[2:4] }}<span class="mobile-end-date">→ {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}No End{% else %}{{ record.end_date[5:7] }}-{{ record.end_date[8:] }}-{{ record.end_date[2:4] }}{% endif %}</span></td>
                             <td class="editable ca-end-date" data-column="end_date">
                                 {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}
                                     No End
                                 {% else %}
-                                    {{ record.end_date[2:] }}
+                                    {{ record.end_date[5:7] }}-{{ record.end_date[8:] }}-{{ record.end_date[2:4] }}
                                 {% endif %}
                             </td>
                             <td class="ca-actions">
