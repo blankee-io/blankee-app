@@ -2300,8 +2300,9 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                 const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
                 const weekDates = generateWeekDates(startOfWeek, endOfWeek);
                 createDashboardContainers(weekDates);
-                setupDashboardDInputFocus();
             }
+            // Always rebind input listeners so new rows get blur/keydown handlers
+            setupDashboardDInputFocus();
             
             $.ajax({
                 url: '/dashboard-d/add_entry',
