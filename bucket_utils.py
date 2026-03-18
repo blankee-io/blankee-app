@@ -951,6 +951,29 @@ def restore_bucket_for_category_change(bucket_table, category_id, entry_date, en
         return False
 
 
+def _get_wage_bill_for_category(entry_table, category_id, user_id):
+    """Get wage_bill flag for a category's recurring record from Redis."""
+    table_map = {
+        'income_entries': 'recurring_income',
+        'expense_entries': 'recurring_expense',
+        'c_expense_entries': 'recurring_c_expense'
+    }
+    recurring_table = table_map.get(entry_table)
+    if not recurring_table:
+        return 0
+    try:
+        redis_key = f"{recurring_table}:v1:{user_id}"
+        cached = redis_manager._redis_client.get(redis_key) if redis_manager._redis_client else None
+        if cached:
+            recurring_list = json.loads(cached)
+            for rec in recurring_list:
+                if int(rec.get('category_id', 0)) == int(category_id):
+                    return int(rec.get('wage_bill', 0))
+    except Exception:
+        pass
+    return 0
+
+
 def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amount, user_id, cadence_info=None):
     """
     Process a manual entry by checking for and depleting bucket entries.
@@ -960,13 +983,17 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
     - Finds the NEXT bucket in the category (earliest date > today)
     - Does NOT use cadence-based period matching
     
+    Wage/Bill vs Variable/Allowance:
+    - wage_bill=0 (Variable/Allowance): Gradual depletion by entry_amount
+    - wage_bill=1 (Wage/Bill): Complete bucket removal on any entry
+    
     Args:
         table: 'income_entries', 'expense_entries', or 'c_expense_entries'
         category_id: The category ID
         entry_date: Date of the manual entry (date object or string)
         entry_amount: Amount of the manual entry (Decimal or float)
         user_id: The user ID
-        cadence_info: (DEPRECATED) Dictionary with cadence details - no longer used
+        cadence_info: Dictionary with recurring info (may contain wage_bill)
     """
     import logging
     from flask import current_app
@@ -979,6 +1006,13 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
     today = date_type.today()
     
     current_app.logger.info(f"[BUCKET DEBUG] process_manual_entry_with_bucket called: table={table}, category_id={category_id}, entry_date={entry_date}, entry_amount={entry_amount}, user_id={user_id}")
+    
+    # Determine wage_bill from cadence_info (recurring_info)
+    wage_bill = 0
+    if cadence_info and isinstance(cadence_info, dict):
+        wage_bill = int(cadence_info.get('wage_bill', 0))
+    
+    current_app.logger.info(f"[BUCKET DEBUG] wage_bill={wage_bill}")
     
     # NEW LOGIC: Only reduce bucket if entry_date <= today
     if entry_date > today:
@@ -1006,13 +1040,31 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
             bucket_record_before = get_bucket_record_by_category_date(bucket_table, category_id, bucket_date, user_id)
             current_app.logger.info(f"[BUCKET DEBUG] Bucket record before subtraction: {bucket_record_before}")
         
+        # For wage_bill=1: subtract the FULL bucket amount to remove it completely
+        # For variable/allowance: subtract only the entry_amount (gradual depletion)
+        if wage_bill:
+            bucket_current_amount = Decimal(str(bucket.get('amount', 0)))
+            subtract_amount_entry = bucket_current_amount
+            current_app.logger.info(f"[BUCKET DEBUG] Wage/Bill mode: subtracting full bucket amount {bucket_current_amount} to remove completely")
+        else:
+            subtract_amount_entry = entry_amount
+        
         # Subtract from bucket entry (deletes if it hits 0)
-        entry_deleted = subtract_from_bucket(table, bucket['id'], entry_amount, user_id)
+        entry_deleted = subtract_from_bucket(table, bucket['id'], subtract_amount_entry, user_id)
         current_app.logger.info(f"[BUCKET DEBUG] Bucket entry subtraction result: {entry_deleted} (True=deleted, False=still remaining)")
+        
+        # For wage_bill=1: subtract the FULL record amount to set it to 0
+        # For variable/allowance: subtract entry_amount from record
+        if wage_bill and bucket_record_before:
+            record_current_amount = Decimal(str(bucket_record_before.get('amount', 0)))
+            subtract_amount_record = record_current_amount
+            current_app.logger.info(f"[BUCKET DEBUG] Wage/Bill mode: subtracting full record amount {record_current_amount}")
+        else:
+            subtract_amount_record = entry_amount
         
         # Subtract from bucket record (allows negative amounts for overspending)
         if bucket_table and bucket_record_before:
-            record_depleted = subtract_from_bucket_record_by_category_date(bucket_table, category_id, bucket_date, entry_amount, user_id)
+            record_depleted = subtract_from_bucket_record_by_category_date(bucket_table, category_id, bucket_date, subtract_amount_record, user_id)
             current_app.logger.info(f"[BUCKET DEBUG] Bucket record subtraction result: {record_depleted} (amount went to/below 0)")
             
             # CRITICAL: If bucket entry still exists but bucket record went negative,
@@ -1048,6 +1100,10 @@ def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount
     - If bucket entry was deleted (went negative), recreate it from bucket record
     - Does NOT use cadence-based logic
     
+    Wage/Bill vs Variable/Allowance:
+    - wage_bill=0: Restore deleted_entry_amount (gradual)
+    - wage_bill=1: Restore full original_amount (binary paid/unpaid)
+    
     Args:
         table: 'income_entries', 'expense_entries', or 'c_expense_entries'
         category_id: The category ID
@@ -1063,102 +1119,173 @@ def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount
     
     current_app.logger.info(f"[RESTORE BUCKET V2] Attempting restore: table={table}, category={category_id}, amount={deleted_entry_amount}")
     
-    # Find the next bucket ENTRY for this category
-    bucket = find_next_bucket_for_category(table, category_id, user_id)
+    # Determine wage_bill for this category
+    wage_bill = _get_wage_bill_for_category(table, category_id, user_id)
+    current_app.logger.info(f"[RESTORE BUCKET V2] wage_bill={wage_bill}")
     
     bucket_table = get_bucket_table_for_entry_table(table)
+    today = date_type.today()
+    
+    # FIRST: Check for depleted bucket records (amount < original_amount).
+    # When there are multiple future buckets, the depleted one is the correct
+    # target — not the next undepleted one that find_next_bucket_for_category returns.
+    if bucket_table:
+        all_records = get_bucket_records_for_category(bucket_table, category_id, user_id)
+        depleted_records = []
+        for record in all_records:
+            record_date = record.get('bucket_date')
+            if isinstance(record_date, str):
+                record_date = date_type.fromisoformat(record_date)
+            record_amount = float(record.get('amount', 0))
+            record_original = float(record.get('original_amount', 0))
+            if record_date >= today and record_amount < record_original:
+                depleted_records.append((record_date, record))
+        
+        if depleted_records:
+            # Restore the earliest depleted record
+            depleted_records.sort(key=lambda x: x[0])
+            bucket_date, depleted_record = depleted_records[0]
+            current_app.logger.info(f"[RESTORE BUCKET V2] Found depleted bucket record: date={bucket_date}, amount={depleted_record.get('amount')}, original={depleted_record.get('original_amount')}")
+            
+            # Determine restore amount
+            if wage_bill:
+                original_amount_val = Decimal(str(depleted_record.get('original_amount', 0)))
+                current_amount_val = Decimal(str(depleted_record.get('amount', 0)))
+                restore_amount = original_amount_val - current_amount_val
+                current_app.logger.info(f"[RESTORE BUCKET V2] Wage/Bill: restoring to original={original_amount_val} (adding {restore_amount})")
+            else:
+                restore_amount = Decimal(str(deleted_entry_amount))
+            
+            if restore_amount > 0:
+                add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, float(restore_amount), user_id)
+            
+            # Check if a bucket entry exists for this record's date
+            bucket_entry = None
+            from app import _get_entries_from_redis
+            entries = _get_entries_from_redis(table, user_id)
+            if entries:
+                for entry in entries:
+                    if (entry.get('category_id') == int(category_id) and
+                        entry.get('is_bucket') == 1 and
+                        entry.get('date') == bucket_date.isoformat()):
+                        bucket_entry = entry
+                        break
+            
+            if bucket_entry:
+                # Entry exists — add to it
+                bucket_id = bucket_entry.get('id')
+                if wage_bill:
+                    original_amount = Decimal(str(bucket_entry.get('original_amount', bucket_entry.get('amount', 0))))
+                    current_amount = Decimal(str(bucket_entry.get('amount', 0)))
+                    entry_restore = original_amount - current_amount
+                    if entry_restore > 0:
+                        add_to_bucket(table, bucket_id, entry_restore, user_id)
+                else:
+                    add_to_bucket(table, bucket_id, Decimal(str(deleted_entry_amount)), user_id)
+                current_app.logger.info(f"[RESTORE BUCKET V2] Restored existing bucket entry {bucket_id}")
+            else:
+                # Entry was deleted (fully depleted) — recreate if record is now positive
+                updated_records = get_bucket_records_for_category(bucket_table, category_id, user_id)
+                updated_record = next((r for r in updated_records if r.get('bucket_date') == bucket_date.isoformat() or r.get('bucket_date') == bucket_date), None)
+                if updated_record:
+                    new_amount = float(updated_record.get('amount', 0))
+                    original_amount = float(updated_record.get('original_amount', new_amount))
+                    if new_amount > 0:
+                        from app import _update_entry_in_redis
+                        _update_entry_in_redis(
+                            table, user_id, int(category_id),
+                            bucket_date.isoformat() if isinstance(bucket_date, date_type) else bucket_date,
+                            new_amount,
+                            is_bucket=True,
+                            original_amount=original_amount
+                        )
+                        current_app.logger.info(f"[RESTORE BUCKET V2] Recreated bucket entry for {bucket_date} with amount {new_amount}")
+                    else:
+                        current_app.logger.info(f"[RESTORE BUCKET V2] Amount still non-positive ({new_amount}), not recreating entry")
+            
+            updated_bucket = find_next_bucket_for_category(table, category_id, user_id)
+            return (True, updated_bucket)
+    
+    # FALLBACK: No depleted records found. Try adding to an existing undepleted bucket entry.
+    bucket = find_next_bucket_for_category(table, category_id, user_id)
     
     if bucket:
-        # Bucket entry exists - just add to it
         bucket_id = bucket.get('id')
         bucket_date = bucket.get('date')
         if isinstance(bucket_date, str):
             bucket_date = date_type.fromisoformat(bucket_date)
         
-        current_app.logger.info(f"[RESTORE BUCKET V2] Found bucket entry to restore: id={bucket_id}, date={bucket_date}")
+        current_app.logger.info(f"[RESTORE BUCKET V2] No depleted records. Found undepleted bucket entry: id={bucket_id}, date={bucket_date}")
         
-        # Add amount back to bucket entry
-        add_to_bucket(table, bucket_id, Decimal(str(deleted_entry_amount)), user_id)
+        if wage_bill:
+            original_amount = Decimal(str(bucket.get('original_amount', bucket.get('amount', 0))))
+            current_amount = Decimal(str(bucket.get('amount', 0)))
+            restore_amount = original_amount - current_amount
+            if restore_amount > 0:
+                add_to_bucket(table, bucket_id, restore_amount, user_id)
+            if bucket_table:
+                add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, float(restore_amount), user_id)
+        else:
+            add_to_bucket(table, bucket_id, Decimal(str(deleted_entry_amount)), user_id)
+            if bucket_table:
+                add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
         
-        # Also add back to bucket record
-        if bucket_table:
-            add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
-            current_app.logger.info(f"[RESTORE BUCKET V2] Restored bucket record for category {category_id}, date {bucket_date}")
-        
-        # Re-fetch the bucket to get updated amount
         updated_bucket = find_next_bucket_for_category(table, category_id, user_id)
         return (True, updated_bucket)
     
     else:
-        # No bucket entry found - check if bucket RECORD exists (entry was deleted when it went negative)
-        current_app.logger.info(f"[RESTORE BUCKET V2] No bucket entry found, checking for bucket records...")
+        # No bucket entry AND no depleted records — check for any future record
+        current_app.logger.info(f"[RESTORE BUCKET V2] No bucket entry or depleted records found, checking for any future records...")
         
         if not bucket_table:
-            current_app.logger.info(f"[RESTORE BUCKET V2] No bucket table for {table}")
             return (False, None)
         
-        # Get all bucket records for this category
-        bucket_records = get_bucket_records_for_category(bucket_table, category_id, user_id)
-        
-        if not bucket_records:
+        all_records = get_bucket_records_for_category(bucket_table, category_id, user_id)
+        if not all_records:
             current_app.logger.info(f"[RESTORE BUCKET V2] No bucket records found")
             return (False, None)
         
-        # Find the next bucket record (date > today)
-        today = date_type.today()
         future_records = []
-        for record in bucket_records:
+        for record in all_records:
             record_date = record.get('bucket_date')
             if isinstance(record_date, str):
                 record_date = date_type.fromisoformat(record_date)
-            if record_date > today:
+            if record_date >= today:
                 future_records.append((record_date, record))
         
         if not future_records:
             current_app.logger.info(f"[RESTORE BUCKET V2] No future bucket records found")
             return (False, None)
         
-        # Get the earliest future bucket record
         future_records.sort(key=lambda x: x[0])
         bucket_date, bucket_record = future_records[0]
         
-        current_app.logger.info(f"[RESTORE BUCKET V2] Found bucket record to restore: date={bucket_date}, current_amount={bucket_record.get('amount')}")
+        if wage_bill:
+            original_amount_val = Decimal(str(bucket_record.get('original_amount', 0)))
+            current_amount_val = Decimal(str(bucket_record.get('amount', 0)))
+            restore_amount = original_amount_val - current_amount_val
+            if restore_amount > 0:
+                add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, float(restore_amount), user_id)
+        else:
+            add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
         
-        # Add the deleted amount to the bucket record first
-        add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
-        
-        # Re-fetch the bucket record to get the new amount
         updated_records = get_bucket_records_for_category(bucket_table, category_id, user_id)
         updated_record = next((r for r in updated_records if r.get('bucket_date') == bucket_date.isoformat() or r.get('bucket_date') == bucket_date), None)
-        
         if updated_record:
             new_amount = float(updated_record.get('amount', 0))
             original_amount = float(updated_record.get('original_amount', new_amount))
-            
-            current_app.logger.info(f"[RESTORE BUCKET V2] Updated bucket record amount: {new_amount}")
-            
-            # If amount is now positive, recreate the bucket entry
             if new_amount > 0:
-                current_app.logger.info(f"[RESTORE BUCKET V2] Amount is positive, recreating bucket entry")
-                
-                # Create the bucket entry
                 from app import _update_entry_in_redis
                 _update_entry_in_redis(
-                    table, user_id, int(category_id), 
+                    table, user_id, int(category_id),
                     bucket_date.isoformat() if isinstance(bucket_date, date_type) else bucket_date,
                     new_amount,
                     is_bucket=True,
                     original_amount=original_amount
                 )
-                
                 current_app.logger.info(f"[RESTORE BUCKET V2] Recreated bucket entry for {bucket_date} with amount {new_amount}")
-                
-                # Re-fetch and return the recreated bucket
                 updated_bucket = find_next_bucket_for_category(table, category_id, user_id)
                 return (True, updated_bucket)
-            else:
-                current_app.logger.info(f"[RESTORE BUCKET V2] Amount still non-positive ({new_amount}), not recreating entry yet")
-                return (True, None)
         
         return (False, None)
 
@@ -1439,6 +1566,10 @@ def restore_bucket_for_deleted_entry(table, category_id, deleted_entry_date, del
     today = date_type.today()
     current_app.logger.info(f"[RESTORE BUCKET] Period: {period_start} to {bucket_date}, Today: {today}")
     
+    # Determine wage_bill from cadence_info
+    wage_bill = int(cadence_info.get('wage_bill', 0))
+    current_app.logger.info(f"[RESTORE BUCKET] wage_bill={wage_bill}")
+    
     # Allow bucket restoration regardless of whether today is in the period
     # The bucket should be restored to maintain accurate historical data
     current_app.logger.info(f"[RESTORE BUCKET] Proceeding with restoration")
@@ -1459,7 +1590,13 @@ def restore_bucket_for_deleted_entry(table, category_id, deleted_entry_date, del
             manual_entries_sum += Decimal(str(entry.get('amount', 0)))
     
     # Calculate what the bucket amount should be
-    new_bucket_amount = original_amount - manual_entries_sum
+    # For wage_bill: always use original_amount (binary paid/unpaid)
+    # For variable/allowance: subtract remaining manual entries
+    if wage_bill:
+        new_bucket_amount = original_amount
+        current_app.logger.info(f"[RESTORE BUCKET] Wage/Bill: using full original_amount={original_amount} for restoration")
+    else:
+        new_bucket_amount = original_amount - manual_entries_sum
     current_app.logger.info(f"[RESTORE BUCKET] Calculated new bucket amount: original={original_amount}, manual_sum={manual_entries_sum}, new_amount={new_bucket_amount}")
     
     # All bucket tables now use user_id consistently for Redis key
@@ -1478,16 +1615,32 @@ def restore_bucket_for_deleted_entry(table, category_id, deleted_entry_date, del
                 break
     
     if bucket_exists:
-        # Bucket still exists, just add back the deleted amount
-        current_app.logger.info(f"[RESTORE BUCKET] Bucket exists, adding back {deleted_entry_amount}")
-        add_to_bucket(table, bucket['id'], Decimal(str(deleted_entry_amount)), user_id)
-        
-        # Also add back to bucket record
+        # Bucket still exists, add back amount
         from recurring_bucket_manager import add_to_bucket_record_by_category_date, get_bucket_table_for_entry_table
         bucket_table = get_bucket_table_for_entry_table(table)
-        if bucket_table:
-            add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
-            current_app.logger.info(f"[RESTORE BUCKET] Also restored bucket record for category {category_id}, date {bucket_date}")
+        
+        if wage_bill:
+            # Wage/Bill: restore to full original_amount
+            # Find current entry amount in Redis to calculate how much to add
+            current_bucket_amount = Decimal('0')
+            if redis_data:
+                for entry in json.loads(redis_data):
+                    if entry.get('id') == bucket['id'] and entry.get('is_bucket') == 1:
+                        current_bucket_amount = Decimal(str(entry.get('amount', 0)))
+                        break
+            restore_amount = original_amount - current_bucket_amount
+            current_app.logger.info(f"[RESTORE BUCKET] Wage/Bill: restoring to original={original_amount} (current={current_bucket_amount}, adding {restore_amount})")
+            if restore_amount > 0:
+                add_to_bucket(table, bucket['id'], restore_amount, user_id)
+            if bucket_table:
+                add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, float(restore_amount), user_id)
+        else:
+            # Variable/Allowance: just add back the deleted amount
+            current_app.logger.info(f"[RESTORE BUCKET] Bucket exists, adding back {deleted_entry_amount}")
+            add_to_bucket(table, bucket['id'], Decimal(str(deleted_entry_amount)), user_id)
+            if bucket_table:
+                add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
+                current_app.logger.info(f"[RESTORE BUCKET] Also restored bucket record for category {category_id}, date {bucket_date}")
         return True
     
     # Bucket was deleted, need to recreate it if new_amount > 0
@@ -1518,9 +1671,14 @@ def restore_bucket_for_deleted_entry(table, category_id, deleted_entry_date, del
             from recurring_bucket_manager import add_to_bucket_record_by_category_date, get_bucket_table_for_entry_table
             bucket_table = get_bucket_table_for_entry_table(table)
             if bucket_table:
-                # Add back the deleted entry amount to restore the bucket record
-                add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
-                current_app.logger.info(f"[RESTORE BUCKET] Also restored bucket record for category {category_id}, date {bucket_date}")
+                if wage_bill:
+                    # Wage/Bill: restore record to original_amount
+                    add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, float(original_amount), user_id)
+                    current_app.logger.info(f"[RESTORE BUCKET] Wage/Bill: restored bucket record with original_amount={original_amount}")
+                else:
+                    # Variable/Allowance: add back the deleted entry amount
+                    add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
+                    current_app.logger.info(f"[RESTORE BUCKET] Also restored bucket record for category {category_id}, date {bucket_date}")
             
             return True
     else:
@@ -1533,8 +1691,13 @@ def restore_bucket_for_deleted_entry(table, category_id, deleted_entry_date, del
         bucket_table = get_bucket_table_for_entry_table(table)
         entry_was_recreated = False
         if bucket_table:
+            # Determine restore amount for the record
+            if wage_bill:
+                record_restore_amount = float(original_amount)
+            else:
+                record_restore_amount = deleted_entry_amount
             # This function returns True if it recreated a bucket entry (negative→positive transition)
-            result = add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, deleted_entry_amount, user_id)
+            result = add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, record_restore_amount, user_id)
             # Check if an entry was recreated by checking the return value or looking for specific log
             # For now, we need to check if the bucket record went positive
             # The function logs "Bucket went from negative/zero to positive" when it recreates
