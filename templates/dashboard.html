@@ -4070,10 +4070,10 @@
                                             bucketEntry.bucket_amount = bucket.amount;
                                             bucketEntry.original_amount = bucket.original_amount;
                                         } else {
-                                            // Bucket depleted - update to 0 (or remove if no manual entries)
+                                            // Bucket depleted - remove bucket indicator
                                             bucketEntry.amount = 0;
                                             bucketEntry.total_amount = 0;
-                                            bucketEntry.has_bucket = true;
+                                            bucketEntry.has_bucket = false;
                                             bucketEntry.bucket_amount = 0;
                                         }
                                     }
@@ -4100,16 +4100,10 @@
                                                         original_amount: bucket.original_amount
                                                     });
                                                 } else {
-                                                    // Bucket fully depleted - clear the value but keep progress bar at 100%
+                                                    // Bucket fully depleted - clear value and remove progress bar
                                                     input.value = '';
-                                                    // Show progress bar at 100% spent (all red)
-                                                    if (bucket.original_amount > 0) {
-                                                        updateBucketProgressBar(bucketCell, {
-                                                            has_bucket: true,
-                                                            bucket_amount: 0, // 0 remaining = 100% spent
-                                                            original_amount: bucket.original_amount
-                                                        });
-                                                    }
+                                                    const existingBar = bucketCell.querySelector('.bucket-progress-container');
+                                                    if (existingBar) existingBar.remove();
                                                 }
                                             }
                                         }
@@ -4248,10 +4242,10 @@
                                             bucketEntry.bucket_amount = bucket.amount;
                                             bucketEntry.original_amount = bucket.original_amount;
                                         } else {
-                                            // Bucket depleted - update to 0 (or remove if no manual entries)
+                                            // Bucket depleted - remove bucket indicator
                                             bucketEntry.amount = 0;
                                             bucketEntry.total_amount = 0;
-                                            bucketEntry.has_bucket = true;
+                                            bucketEntry.has_bucket = false;
                                             bucketEntry.bucket_amount = 0;
                                         }
                                     }
@@ -4278,16 +4272,10 @@
                                                         original_amount: bucket.original_amount
                                                     });
                                                 } else {
-                                                    // Bucket fully depleted - clear the value but keep progress bar at 100%
+                                                    // Bucket fully depleted - clear value and remove progress bar
                                                     input.value = '';
-                                                    // Show progress bar at 100% spent (all red)
-                                                    if (bucket.original_amount > 0) {
-                                                        updateBucketProgressBar(bucketCell, {
-                                                            has_bucket: true,
-                                                            bucket_amount: 0, // 0 remaining = 100% spent
-                                                            original_amount: bucket.original_amount
-                                                        });
-                                                    }
+                                                    const existingBar = bucketCell.querySelector('.bucket-progress-container');
+                                                    if (existingBar) existingBar.remove();
                                                 }
                                             }
                                         }
