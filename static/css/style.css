@@ -7895,11 +7895,26 @@ transform: scale(1.2);
 
 .bucket-separator {
     margin: 0 2px;
-    color: var(--secondary);
+    color: var(--text-dark);
 }
 
 .bucket-total {
-    color: var(--secondary);
+    color: var(--text-dark);
+}
+
+.bucket-date {
+    font-size: 0.75em;
+    text-align: center;
+    margin-bottom: 2px;
+    color: var(--text-dark);
+}
+
+.bucket-date-paid {
+    color: var(--text-dark);
+}
+
+.bucket-date-unpaid {
+    color: var(--text-dark);
 }
 
 .bucket-none {
@@ -7910,11 +7925,15 @@ transform: scale(1.2);
 .status-paid {
     color: var(--success);
     font-size: 1.2em;
+    display: block;
+    text-align: center;
 }
 
 .status-unpaid {
     color: var(--danger);
     font-size: 1.2em;
+    display: block;
+    text-align: center;
 }
 
 .add-income-btn {
