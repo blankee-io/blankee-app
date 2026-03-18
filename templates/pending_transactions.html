@@ -230,18 +230,33 @@
                     });
                     dropdown.appendChild(div);
                 });
-                
-                // Add separator between search results and all categories
-                if (nonMatchingCategories.length > 0) {
+            }
+
+            // Show "Create new..." option right after search results
+            if (searchLower.length > 0 && !exactMatch) {
+                // Add separator after AI suggestion if no search results
+                if (showAiSuggestion && matchingCategories.length === 0) {
                     const separator = document.createElement('div');
                     separator.className = 'dropdown-separator';
                     dropdown.appendChild(separator);
                 }
-            } else if (showAiSuggestion) {
-                // Add separator after AI suggestion if no search results
-                const separator = document.createElement('div');
-                separator.className = 'dropdown-separator';
-                dropdown.appendChild(separator);
+                dropdown.style.display = 'block';
+                const createDiv = document.createElement('div');
+                createDiv.className = 'pending-transactions-category-dropdown-item create-new-category';
+                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+                createDiv.addEventListener('click', function() {
+                    createPendingCategory(input, searchText);
+                });
+                dropdown.appendChild(createDiv);
+            }
+
+            // Add separator before remaining categories if there's content above
+            if (dropdown.children.length > 0 && (nonMatchingCategories.length > 0 || (searchLower.length === 0 && categories.length > 0))) {
+                if (searchLower.length > 0 || showAiSuggestion) {
+                    const separator = document.createElement('div');
+                    separator.className = 'dropdown-separator';
+                    dropdown.appendChild(separator);
+                }
             }
 
             // Show all other categories (non-matching or all if no search)
@@ -272,20 +287,27 @@
                 });
             }
 
-            // Show "Create new..." option if there's text and no exact match
-            if (searchLower.length > 0 && !exactMatch) {
-                dropdown.style.display = 'block';
-                const createDiv = document.createElement('div');
-                createDiv.className = 'pending-transactions-category-dropdown-item create-new-category';
-                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
-                createDiv.addEventListener('click', function() {
-                    createPendingCategory(input, searchText);
-                });
-                dropdown.appendChild(createDiv);
-            }
-
             if (dropdown.children.length === 0) {
                 dropdown.style.display = 'none';
+            } else {
+                // Position dropdown above or below based on available space
+                // On mobile, the keyboard reduces visible area significantly
+                dropdown.classList.remove('dropdown-above');
+                dropdown.style.top = '';
+                dropdown.style.bottom = '';
+                requestAnimationFrame(() => {
+                    const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                    const inputRect = input.getBoundingClientRect();
+                    const spaceBelow = viewportHeight - inputRect.bottom - 10;
+                    const spaceAbove = inputRect.top - 10;
+                    const dropdownHeight = dropdown.scrollHeight;
+                    if (dropdownHeight > spaceBelow && spaceAbove > spaceBelow) {
+                        dropdown.classList.add('dropdown-above');
+                        dropdown.style.maxHeight = Math.min(spaceAbove, window.innerHeight * 0.6) + 'px';
+                    } else {
+                        dropdown.style.maxHeight = Math.min(spaceBelow, window.innerHeight * 0.6) + 'px';
+                    }
+                });
             }
         }
 
@@ -426,6 +448,12 @@
                 this.dataset.clearedOnType = 'false';
                 // On focus, show all categories (don't treat pre-filled value as search)
                 showCategoryDropdown(this, '');
+
+                // Scroll input into view after keyboard appears (mobile)
+                const inputEl = this;
+                setTimeout(() => {
+                    inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 350);
             });
         });
 

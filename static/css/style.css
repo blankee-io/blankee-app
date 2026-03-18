@@ -12759,6 +12759,12 @@ transform: scale(1.2);
     box-shadow: 0 4px 6px var(--shadow-sm);
 }
 
+.pending-transactions-category-dropdown.dropdown-above {
+    top: auto;
+    bottom: 100%;
+    box-shadow: 0 -4px 6px var(--shadow-sm);
+}
+
 /* Override any inherited overflow styles for pending transactions page */
 #pending-transactions-body .profile-section {
     overflow: visible !important;
