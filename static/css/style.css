@@ -7705,12 +7705,8 @@ transform: scale(1.2);
     /* Subtract 20px from each side */
     width: 100%; 
     border-collapse: collapse;
-    --base-font-size: 7.5px;
 
-    /* Adjust this factor based on the desired responsiveness */
-    --scaling-factor: 0.5vw; 
-
-    font-size: calc(var(--base-font-size) + var(--scaling-factor));
+    font-size: clamp(11px, calc(7.5px + 0.5vw), 14px);
     text-align: left;
 }
 
