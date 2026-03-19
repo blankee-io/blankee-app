@@ -11,6 +11,9 @@
             <!-- Feedback icon -->
             <a href="{{ url_for('feedback_page') }}" class="nav-feedback" title="Feedback">
                 <i class="fa-kit fa-solid-comment-lightbulb"></i>
+                {% if unread_feedback_count > 0 %}
+                <span class="feedback-badge"></span>
+                {% endif %}
             </a>
 
             <!-- Notifications bell icon -->

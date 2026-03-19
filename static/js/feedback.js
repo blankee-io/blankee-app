@@ -18,6 +18,28 @@
         return resp.json();
     }
 
+    // Unread post numbers injected by the server
+    const _unreadPosts = new Set(
+        (window.__unreadPostNumbers || []).map(n => String(n))
+    );
+    // Maps post_number (string) → comment_id (number) for badge placement
+    const _unreadCommentIds = window.__unreadCommentIds || {};
+
+    function formatFiderDate(iso) {
+        if (!iso) return '';
+        try {
+            const d = new Date(iso);
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            const yyyy = d.getFullYear();
+            let hours = d.getHours();
+            const minutes = String(d.getMinutes()).padStart(2, '0');
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12 || 12;
+            return `${mm}-${dd}-${yyyy} ${hours}:${minutes} ${ampm}`;
+        } catch (e) { return ''; }
+    }
+
     function renderPostList(items, targetEl) {
         if (!targetEl) return;
         if (!items || !items.length) {
@@ -26,7 +48,9 @@
         }
         targetEl.innerHTML = items.map(item => {
             const tags = (item.tags || []).map(t => `<span class="feedback-tag">${t}</span>`).join('');
+            const unreadBadge = _unreadPosts.has(String(item.number)) ? '<span class="feedback-card-badge">New Comment</span>' : '';
             return `<div class="feedback-card" data-number="${item.number}">
+                ${unreadBadge}
                 <div class="feedback-card-header">
                     <div class="feedback-card-title">${item.title || ''}</div>
                     <div class="feedback-card-votes"><i class="fa-solid fa-thumbs-up"></i> ${item.votesCount || 0}</div>
@@ -77,7 +101,7 @@
         }
     }
 
-    async function loadPostDetail(number, detailEl, commentListEl) {
+    async function loadPostDetail(number, detailEl, commentListEl, isUnread) {
         if (!detailEl || !number) return;
         try {
             detailEl.dataset.loading = 'true';
@@ -93,13 +117,38 @@
                 </div>
                 <div class="feedback-detail-body">${post.description || ''}</div>
                 <div class="feedback-detail-meta">Status: ${post.status || 'open'}</div>
+                ${post.createdAt ? `<span class="feedback-timestamp">${formatFiderDate(post.createdAt)}</span>` : ''}
             `;
             if (commentListEl) {
-                commentListEl.innerHTML = (comments || []).map(c => `
-                    <div class="feedback-comment">
+                const commentItems = comments || [];
+                const targetIds = isUnread ? new Set(((_unreadCommentIds[String(number)] || [])).map(id => id)) : new Set();
+                commentListEl.innerHTML = commentItems.map((c) => {
+                    const isNewComment = targetIds.size > 0 && targetIds.has(c.id);
+                    return `<div class="feedback-comment${isNewComment ? ' feedback-comment--new' : ''}">
+                        ${isNewComment ? '<span class="feedback-comment-badge">New Comment</span>' : ''}
                         <div class="feedback-comment-author">${c.user?.name || 'User'}</div>
                         <div class="feedback-comment-body">${c.content || ''}</div>
-                    </div>`).join('');
+                        ${c.createdAt ? `<span class="feedback-timestamp">${formatFiderDate(c.createdAt)}</span>` : ''}
+                    </div>`;
+                }).join('');
+
+                if (isUnread && targetIds.size > 0) {
+                    const firstNew = commentListEl.querySelector('.feedback-comment--new');
+                    if (firstNew) firstNew.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    const clearBadges = (e) => {
+                        const newComments = commentListEl.querySelectorAll('.feedback-comment--new');
+                        let anyContains = false;
+                        newComments.forEach(el => { if (el.contains(e.target)) anyContains = true; });
+                        if (!anyContains) {
+                            newComments.forEach(el => {
+                                el.querySelector('.feedback-comment-badge')?.remove();
+                                el.classList.remove('feedback-comment--new');
+                            });
+                            document.removeEventListener('pointerdown', clearBadges);
+                        }
+                    };
+                    setTimeout(() => document.addEventListener('pointerdown', clearBadges), 150);
+                }
             }
         } catch (err) {
             detailEl.innerHTML = `<div class="feedback-error">${err.message}</div>`;
@@ -170,8 +219,22 @@
             const card = e.target.closest('.feedback-card');
             if (!card) return;
             const number = card.dataset.number;
-            loadPostDetail(number, detailEl, commentsEl);
+            const isUnread = _unreadPosts.has(String(number));
+            loadPostDetail(number, detailEl, commentsEl, isUnread);
             commentForm.dataset.number = number;
+
+            // Mark this post as read
+            if (isUnread) {
+                _unreadPosts.delete(String(number));
+                const badge = card.querySelector('.feedback-card-badge');
+                if (badge) badge.remove();
+                fetch(`/api/feedback/mark-read/${number}`, { method: 'POST' }).catch(() => {});
+                // Update nav badge if no more unread
+                if (_unreadPosts.size === 0) {
+                    const navBadge = document.querySelector('.nav-feedback .feedback-badge');
+                    if (navBadge) navBadge.remove();
+                }
+            }
         });
 
         if (searchInput) {

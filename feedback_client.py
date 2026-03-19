@@ -60,6 +60,8 @@ class FiderClient:
         if redis_client:
             try:
                 redis_client.setex(cache_key, _FIDER_CACHE_TTL, user_id)
+                # Reverse mapping: Fider ID → app user ID (for webhook lookups)
+                redis_client.setex(f"fider_reverse:{user_id}", _FIDER_CACHE_TTL, reference)
             except Exception:
                 pass
 
@@ -111,6 +113,12 @@ class FiderClient:
         resp.raise_for_status()
         return resp.json()
 
+    def list_votes(self, number: int) -> list:
+        """List all voters for a post. Requires admin API key."""
+        resp = self._request("GET", f"/api/v1/posts/{number}/votes")
+        resp.raise_for_status()
+        return resp.json()
+
     def add_comment(self, user_id: int, number: int, content: str) -> Dict[str, Any]:
         headers = {"X-Fider-UserID": str(user_id)}
         resp = self._request("POST", f"/api/v1/posts/{number}/comments", headers=headers, json={"content": content})
@@ -157,3 +165,16 @@ def get_fider_client() -> FiderClient:
         raise RuntimeError("FIDER_ADMIN_KEY is required for Fider integration")
     _client = FiderClient(base_url, api_key)
     return _client
+
+
+def get_app_user_id_from_fider_id(fider_id, redis_client):
+    """Look up the app user ID from a Fider user ID via reverse mapping in Redis."""
+    if not redis_client:
+        return None
+    try:
+        val = redis_client.get(f"fider_reverse:{fider_id}")
+        if val:
+            return int(val.decode() if isinstance(val, bytes) else val)
+    except Exception:
+        pass
+    return None
