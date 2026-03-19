@@ -21466,6 +21466,17 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
         cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
         entries = json.loads(cached) if cached else []
         
+        # Duplicate protection: remove any existing auto-adjustment for this date and category
+        existing_adj = [
+            e for e in entries
+            if e.get('is_auto_adjustment') == 1
+            and int(e.get('category_id', 0)) == cat_id
+            and str(e.get('date', ''))[:10] == target_date_str
+        ]
+        if existing_adj:
+            entries = [e for e in entries if e not in existing_adj]
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Replacing {len(existing_adj)} existing adjustment(s) for {account_name} on {target_date_str}")
+        
         temp_id = -(int(time.time() * 1000) % 1000000000)
         new_entry = {
             'id': temp_id,
@@ -21490,7 +21501,7 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
         label = 'income' if diff > 0 else 'expense'
-        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created {label} adjustment ${adj_amount:.2f} for {account_name}")
+        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created {label} adjustment ${adj_amount:.2f} for {account_name} on {target_date_str}")
         
     except Exception as e:
         app.logger.error(f"[WEBHOOK-AUTOBALANCE] Checking adjustment error: {e}", exc_info=True)
@@ -21680,6 +21691,17 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
             cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
             entries = json.loads(cached) if cached else []
             
+            # Duplicate protection: remove existing auto-adjustment for this date and category
+            existing_adj = [
+                e for e in entries
+                if e.get('is_auto_adjustment') == 1
+                and int(e.get('category_id', 0)) == auto_adj_cat_id
+                and str(e.get('date', ''))[:10] == target_date_str
+            ]
+            if existing_adj:
+                entries = [e for e in entries if e not in existing_adj]
+                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Replacing {len(existing_adj)} existing credit expense adjustment(s) for {account_name} on {target_date_str}")
+            
             temp_id = -(int(time.time() * 1000) % 1000000000)
             entries.append({
                 'id': temp_id,
@@ -21699,12 +21721,24 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
             _redis_client.sadd(dirty_key, 'c_expense_entries')
             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
             
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created expense adjustment +${adjustment_amount:.2f} for {account_name}")
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created expense adjustment +${adjustment_amount:.2f} for {account_name} on {target_date_str}")
         else:
             # Balance needs to go DOWN → create payment entry
             redis_key = f"c_payment_entries:v1:{user_id}"
             cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
             entries = json.loads(cached) if cached else []
+            
+            # Duplicate protection: remove existing auto-adjustment payment for this date and account
+            existing_adj = [
+                e for e in entries
+                if int(e.get('account_id', 0)) == account_id
+                and str(e.get('date', ''))[:10] == target_date_str
+                and e.get('recurring_id') is None
+                and e.get('processed') == 1
+            ]
+            if existing_adj:
+                entries = [e for e in entries if e not in existing_adj]
+                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Replacing {len(existing_adj)} existing credit payment adjustment(s) for {account_name} on {target_date_str}")
             
             temp_id = -(int(time.time() * 1000) % 1000000000)
             entries.append({
@@ -21721,7 +21755,7 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
             _redis_client.sadd(dirty_key, 'c_payment_entries')
             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
             
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created payment adjustment -${adjustment_amount:.2f} for {account_name}")
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created payment adjustment -${adjustment_amount:.2f} for {account_name} on {target_date_str}")
         
     except Exception as e:
         app.logger.error(f"[WEBHOOK-AUTOBALANCE] Credit adjustment error for {account_name}: {e}", exc_info=True)
@@ -22116,6 +22150,14 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         from quiltt_redis import get_uncategorized_category_id, get_blankee_credit_account_for_quiltt_account
         quiltt_account_map = {acc.get('account_id'): acc for acc in sync_enabled_accounts}
         
+        # --- DEHYDRATE FOR MySQL-DIRECT WRITES ---
+        # Dehydrate user so all reads come from MySQL (source of truth).
+        # After MySQL-direct writes are done, we rehydrate to sync Redis.
+        from redis_manager import _dehydrate_user_data, _hydrate_user_data, is_user_hydrated as _is_hydrated_check
+        if _is_hydrated_check(user_id):
+            _dehydrate_user_data(user_id)
+            app.logger.info(f"[WEBHOOK-SYNC] Dehydrated user {user_id} for MySQL-direct sync")
+        
         total_synced = 0
         total_imported = 0
         imported_dates = set()  # Track dates of imported transactions for bucket cleanup
@@ -22186,6 +22228,10 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             return (True, 0, 'No new transactions found')
         
         app.logger.info(f"Retrieved {len(transactions)} transactions with Ntropy data")
+        
+        # Open a single MySQL connection for all direct writes
+        _sync_conn = get_db_pool().engine.raw_connection()
+        _sync_cursor = _sync_conn.cursor()
         
         updated_count = 0
         for txn in transactions:
@@ -22405,7 +22451,102 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             app.logger.info(f"ntropy_labels value: {transaction_data.get('ntropy_labels')}")
             app.logger.info(f"ntropy_recurrence value: {transaction_data.get('ntropy_recurrence')}")
             
-            txn_db_id = upsert_quiltt_transaction(transaction_data, user_id)
+            # MySQL-direct upsert (bypasses Redis for consistency)
+            try:
+                _sync_cursor.execute("""
+                    INSERT INTO quiltt_transactions
+                    (user_id, account_id, transaction_id, date, description, amount, category, pending, merchant_name,
+                     transaction_type, imported_to_entry_id, imported_entry_type, imported_at,
+                     ntropy_labels, ntropy_merchant_id, ntropy_logo, ntropy_website, ntropy_mcc,
+                     ntropy_location, ntropy_location_city, ntropy_location_state, ntropy_location_country,
+                     ntropy_recurrence, ntropy_recurrence_group_id, ntropy_periodicity, ntropy_periodicity_days,
+                     ntropy_avg_amount, ntropy_first_payment_date, ntropy_latest_payment_date,
+                     ntropy_person, ntropy_transaction_type, ntropy_enriched_at,
+                     custom_category_suggestion, custom_category_id, custom_category_type, custom_category_confidence, custom_suggestion_at,
+                     finicity_created_date)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        description = VALUES(description),
+                        amount = VALUES(amount),
+                        category = VALUES(category),
+                        pending = VALUES(pending),
+                        merchant_name = VALUES(merchant_name),
+                        transaction_type = VALUES(transaction_type),
+                        imported_to_entry_id = COALESCE(VALUES(imported_to_entry_id), imported_to_entry_id),
+                        imported_entry_type = COALESCE(VALUES(imported_entry_type), imported_entry_type),
+                        imported_at = VALUES(imported_at),
+                        ntropy_labels = VALUES(ntropy_labels),
+                        ntropy_merchant_id = VALUES(ntropy_merchant_id),
+                        ntropy_logo = VALUES(ntropy_logo),
+                        ntropy_website = VALUES(ntropy_website),
+                        ntropy_mcc = VALUES(ntropy_mcc),
+                        ntropy_location = VALUES(ntropy_location),
+                        ntropy_location_city = VALUES(ntropy_location_city),
+                        ntropy_location_state = VALUES(ntropy_location_state),
+                        ntropy_location_country = VALUES(ntropy_location_country),
+                        ntropy_recurrence = VALUES(ntropy_recurrence),
+                        ntropy_recurrence_group_id = VALUES(ntropy_recurrence_group_id),
+                        ntropy_periodicity = VALUES(ntropy_periodicity),
+                        ntropy_periodicity_days = VALUES(ntropy_periodicity_days),
+                        ntropy_avg_amount = VALUES(ntropy_avg_amount),
+                        ntropy_first_payment_date = VALUES(ntropy_first_payment_date),
+                        ntropy_latest_payment_date = VALUES(ntropy_latest_payment_date),
+                        ntropy_person = VALUES(ntropy_person),
+                        ntropy_transaction_type = VALUES(ntropy_transaction_type),
+                        ntropy_enriched_at = VALUES(ntropy_enriched_at),
+                        custom_category_suggestion = VALUES(custom_category_suggestion),
+                        custom_category_id = VALUES(custom_category_id),
+                        custom_category_type = VALUES(custom_category_type),
+                        custom_category_confidence = VALUES(custom_category_confidence),
+                        custom_suggestion_at = VALUES(custom_suggestion_at),
+                        finicity_created_date = VALUES(finicity_created_date)
+                """, (
+                    user_id,
+                    transaction_data.get('account_id'),
+                    transaction_data.get('transaction_id'),
+                    transaction_data.get('date'),
+                    transaction_data.get('description', ''),
+                    float(transaction_data.get('amount', 0)),
+                    transaction_data.get('category', ''),
+                    int(transaction_data.get('pending', 0)),
+                    transaction_data.get('merchant_name'),
+                    transaction_data.get('transaction_type'),
+                    transaction_data.get('imported_to_entry_id'),
+                    transaction_data.get('imported_entry_type'),
+                    transaction_data.get('imported_at'),
+                    transaction_data.get('ntropy_labels'),
+                    transaction_data.get('ntropy_merchant_id'),
+                    transaction_data.get('ntropy_logo'),
+                    transaction_data.get('ntropy_website'),
+                    transaction_data.get('ntropy_mcc'),
+                    transaction_data.get('ntropy_location'),
+                    transaction_data.get('ntropy_location_city'),
+                    transaction_data.get('ntropy_location_state'),
+                    transaction_data.get('ntropy_location_country'),
+                    transaction_data.get('ntropy_recurrence'),
+                    transaction_data.get('ntropy_recurrence_group_id'),
+                    transaction_data.get('ntropy_periodicity'),
+                    transaction_data.get('ntropy_periodicity_days'),
+                    transaction_data.get('ntropy_avg_amount'),
+                    transaction_data.get('ntropy_first_payment_date'),
+                    transaction_data.get('ntropy_latest_payment_date'),
+                    transaction_data.get('ntropy_person'),
+                    transaction_data.get('ntropy_transaction_type'),
+                    transaction_data.get('ntropy_enriched_at'),
+                    transaction_data.get('custom_category_suggestion'),
+                    transaction_data.get('custom_category_id'),
+                    transaction_data.get('custom_category_type'),
+                    transaction_data.get('custom_category_confidence'),
+                    transaction_data.get('custom_suggestion_at'),
+                    transaction_data.get('finicity_created_date')
+                ))
+                _sync_conn.commit()
+                txn_db_id = True
+            except Exception as upsert_err:
+                app.logger.error(f"MySQL upsert failed for {txn_id}: {upsert_err}", exc_info=True)
+                _sync_conn.rollback()
+                txn_db_id = None
+            
             if txn_db_id:
                 total_synced += 1
                 app.logger.info(f"Successfully stored {txn_id}")
@@ -22466,22 +22607,48 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                 category_id = get_uncategorized_category_id(user_id, 'income')
                         
                         if entry_type and category_id:
-                            # Create the entry with processed=0 (pending categorization)
-                            entry_id = _auto_import_transaction_to_entry(
-                                user_id=user_id,
-                                entry_type=entry_type,
-                                category_id=category_id,
-                                amount=amount,
-                                date=date,
-                                transaction_id=txn_id,
-                                blankee_credit_account_id=blankee_credit_account_id
-                            )
+                            # MySQL-direct entry creation
+                            entry_id = None
+                            try:
+                                if entry_type == 'income':
+                                    _sync_cursor.execute("""
+                                        INSERT INTO income_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed)
+                                        VALUES (%s, %s, %s, NULL, 0, NULL, 0, 1, 0)
+                                    """, (category_id, date, amount))
+                                elif entry_type == 'expense':
+                                    _sync_cursor.execute("""
+                                        INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bud_item_id)
+                                        VALUES (%s, %s, %s, NULL, 0, NULL, 0, 1, 0, NULL)
+                                    """, (category_id, date, amount))
+                                elif entry_type == 'c_expense':
+                                    _sync_cursor.execute("""
+                                        INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bud_item_id)
+                                        VALUES (%s, %s, %s, NULL, 0, NULL, 0, 1, 0, NULL)
+                                    """, (category_id, date, amount))
+                                elif entry_type == 'c_payment':
+                                    _sync_cursor.execute("""
+                                        INSERT INTO c_payment_entries (account_id, date, amount, recurring_id, processed)
+                                        VALUES (%s, %s, %s, NULL, 0)
+                                    """, (blankee_credit_account_id, date, amount))
+                                _sync_conn.commit()
+                                entry_id = _sync_cursor.lastrowid
+                                app.logger.info(f"Created {entry_type} entry {entry_id} for transaction {txn_id} (MySQL-direct)")
+                            except Exception as entry_err:
+                                app.logger.error(f"MySQL entry creation failed for {txn_id}: {entry_err}", exc_info=True)
+                                _sync_conn.rollback()
                             
                             if entry_id:
-                                # Update the quiltt_transaction with imported_to_entry_id
-                                transaction_data['imported_to_entry_id'] = entry_id
-                                transaction_data['imported_entry_type'] = entry_type
-                                upsert_quiltt_transaction(transaction_data, user_id)
+                                # Update quiltt_transaction with import link (MySQL-direct)
+                                try:
+                                    _sync_cursor.execute("""
+                                        UPDATE quiltt_transactions
+                                        SET imported_to_entry_id = %s, imported_entry_type = %s
+                                        WHERE user_id = %s AND transaction_id = %s
+                                    """, (entry_id, entry_type, user_id, txn_id))
+                                    _sync_conn.commit()
+                                except Exception as link_err:
+                                    app.logger.error(f"MySQL import link update failed for {txn_id}: {link_err}", exc_info=True)
+                                    _sync_conn.rollback()
                                 total_imported += 1
                                 imported_dates.add(str(date)[:10])
                                 app.logger.info(f"Auto-imported {txn_id} to {entry_type} entry {entry_id}")
@@ -22495,7 +22662,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         # Don't fail the whole sync if auto-import fails
                 # --- END AUTO-IMPORT ---
             else:
-                app.logger.error(f"Failed to store transaction {txn_id} in Redis")
+                app.logger.error(f"Failed to store transaction {txn_id} in MySQL")
         
         message = f'Synced {total_synced} transactions'
         if updated_count > 0:
@@ -22511,7 +22678,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 app.logger.error(f"Error creating pending transactions notification: {notif_err}")
         # --- END NOTIFICATION ---
         
-        # --- CLEANUP BUCKET ENTRIES ---
+        # --- CLEANUP BUCKET ENTRIES (MySQL-direct) ---
         # Delete bucket placeholders on dates up to the last transaction date.
         # Without this, both the bucket (recurring placeholder) and the real bank transaction
         # would exist, causing double-counting until nightly sync cleans up.
@@ -22525,12 +22692,71 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     last_txn_date_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
                 
                 if last_txn_date_str:
-                    cleanup_count = _cleanup_bucket_entries_for_webhook(user_id, last_txn_date_str, quiltt_account_map)
+                    cleanup_count = 0
+                    has_quiltt_depository = any(
+                        str(a.get('account_type', '')).upper() == 'DEPOSITORY'
+                        for a in quiltt_account_map.values()
+                    )
+                    
+                    if has_quiltt_depository:
+                        # Delete income bucket entries
+                        _sync_cursor.execute("""
+                            DELETE ie FROM income_entries ie
+                            JOIN income_categories ic ON ie.category_id = ic.id
+                            WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date <= %s
+                        """, (user_id, last_txn_date_str))
+                        cleanup_count += _sync_cursor.rowcount
+                        
+                        # Delete expense bucket entries
+                        _sync_cursor.execute("""
+                            DELETE ee FROM expense_entries ee
+                            JOIN expense_categories ec ON ee.category_id = ec.id
+                            WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date <= %s
+                        """, (user_id, last_txn_date_str))
+                        cleanup_count += _sync_cursor.rowcount
+                    
+                    # Delete Quiltt-linked credit expense buckets
+                    _sync_cursor.execute("""
+                        DELETE ce FROM c_expense_entries ce
+                        JOIN c_expense_categories cec ON ce.category_id = cec.id
+                        JOIN credit_accounts ca ON cec.account_id = ca.id
+                        WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date <= %s AND ca.is_quiltt = 1
+                    """, (user_id, last_txn_date_str))
+                    cleanup_count += _sync_cursor.rowcount
+                    
+                    # Convert non-Quiltt credit expense buckets to regular entries
+                    _sync_cursor.execute("""
+                        UPDATE c_expense_entries ce
+                        JOIN c_expense_categories cec ON ce.category_id = cec.id
+                        JOIN credit_accounts ca ON cec.account_id = ca.id
+                        SET ce.is_bucket = 0
+                        WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date <= %s AND ca.is_quiltt = 0
+                    """, (user_id, last_txn_date_str))
+                    cleanup_count += _sync_cursor.rowcount
+                    
+                    _sync_conn.commit()
                     if cleanup_count > 0:
                         app.logger.info(f"[WEBHOOK-SYNC] Cleaned up {cleanup_count} bucket entries for user {user_id} on dates <= {last_txn_date_str}")
             except Exception as bucket_err:
                 app.logger.error(f"[WEBHOOK-SYNC] Error cleaning up bucket entries: {bucket_err}", exc_info=True)
+                try:
+                    _sync_conn.rollback()
+                except Exception:
+                    pass
         # --- END CLEANUP BUCKET ENTRIES ---
+        
+        # Close the MySQL connection used for direct writes
+        try:
+            _sync_cursor.close()
+            _sync_conn.close()
+        except Exception:
+            pass
+        
+        # --- REHYDRATE USER ---
+        # Reload all data from MySQL into Redis so recalculations and autobalance
+        # operate on consistent, up-to-date data
+        _hydrate_user_data(user_id)
+        app.logger.info(f"[WEBHOOK-SYNC] Rehydrated user {user_id} after MySQL-direct writes")
         
         # --- RECALCULATE TOTALS & BALANCES + AUTOBALANCE ---
         if total_imported > 0:
@@ -22582,6 +22808,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 if app.config.get('REDIS_OK'):
                     _redis_client.delete(f"quiltt_last_txn_date:v1:{user_id}")
                 last_txn_date_for_autobalance = get_quiltt_last_transaction_date(user_id)
+                app.logger.info(f"[WEBHOOK-SYNC] Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
                 _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance)
                 
                 # STEP 3: Second recalculation — incorporate adjustment entries into totals
@@ -22610,6 +22837,18 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         return (True, total_synced, message)
         
     except Exception as e:
+        # Clean up MySQL connection if it was opened
+        try:
+            _sync_cursor.close()
+            _sync_conn.close()
+        except Exception:
+            pass
+        # Rehydrate user if we dehydrated them (ensure Redis isn't left empty)
+        try:
+            from redis_manager import _hydrate_user_data
+            _hydrate_user_data(user_id)
+        except Exception:
+            pass
         app.logger.error(f"Error syncing Quiltt transactions for user {user_id}: {e}")
         return (False, 0, str(e))
 
