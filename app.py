@@ -22312,6 +22312,10 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                     finicity_created_date = None
             
             # Store transaction in Redis with Ntropy enrichment data
+            # Preserve existing import link if transaction was already imported
+            # (prevents re-sync from stomping imported_to_entry_id back to None)
+            existing_import_id = existing_txn.get('imported_to_entry_id') if existing_txn else None
+            existing_import_type = existing_txn.get('imported_entry_type') if existing_txn else None
             transaction_data = {
                 'transaction_id': txn_id,
                 'account_id': account_id,
@@ -22322,8 +22326,8 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 'category': txn.get('kind', ''),
                 'pending': 1 if is_pending else 0,
                 'transaction_type': 'expense' if is_expense else 'income',
-                'imported_to_entry_id': None,
-                'imported_entry_type': None,
+                'imported_to_entry_id': existing_import_id,
+                'imported_entry_type': existing_import_type,
                 'expense_category_id': default_expense_category_id,
                 'imported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'finicity_created_date': finicity_created_date,
