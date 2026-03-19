@@ -22578,7 +22578,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 app.logger.info(f"[WEBHOOK-SYNC] First recalculation complete (pre-adjustment)")
                 
                 # STEP 2: Autobalance — compare to bank balances, create adjustment entries
-                # Use last synced transaction date for autobalance target
+                # Invalidate cached last txn date so it recomputes from newly synced transactions
+                if app.config.get('REDIS_OK'):
+                    _redis_client.delete(f"quiltt_last_txn_date:v1:{user_id}")
                 last_txn_date_for_autobalance = get_quiltt_last_transaction_date(user_id)
                 _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance)
                 
