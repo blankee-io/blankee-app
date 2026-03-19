@@ -22759,71 +22759,72 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         app.logger.info(f"[WEBHOOK-SYNC] Rehydrated user {user_id} after MySQL-direct writes")
         
         # --- RECALCULATE TOTALS & BALANCES + AUTOBALANCE ---
-        if total_imported > 0:
-            try:
-                app.logger.info(f"[WEBHOOK-SYNC] Recalculating totals for user {user_id} after importing {total_imported} transactions")
-                
-                # Read goofy_week_mode (Redis first, MySQL fallback)
-                gwm = None
-                if app.config.get('REDIS_OK'):
-                    try:
-                        cached_user = _redis_client.get(f"users:v1:{user_id}")
-                        if cached_user:
-                            user_data = json.loads(cached_user)
-                            if 'goofy_week_mode' in user_data:
-                                gwm = bool(int(user_data['goofy_week_mode']))
-                    except Exception:
-                        pass
-                if gwm is None:
-                    with get_db_pool().get_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-                        row = cursor.fetchone()
-                        gwm = bool(row[0]) if row else False
-                        cursor.close()
-                
-                # Use earliest imported transaction date as start
-                recalc_start = None
-                if start_date:
-                    try:
-                        recalc_start = datetime.strptime(start_date, '%Y-%m-%d').date() if isinstance(start_date, str) else start_date
-                    except Exception:
-                        pass
-                if not recalc_start:
-                    recalc_start = (datetime.now() - timedelta(days=1)).date()
-                
-                # STEP 1: First recalculation — accurate totals for autobalance comparison
-                date_to_remainder = {}
-                update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
-                update_daily_savings_for_savings_category(user_id, recalc_start)
-                update_weekly_totals(user_id, recalc_start, gwm, date_to_remainder)
-                update_monthly_totals(user_id, recalc_start, date_to_remainder)
-                update_daily_ca_totals(user_id, recalc_start)
-                update_weekly_ca_totals(user_id, recalc_start, gwm)
-                update_monthly_ca_totals(user_id, recalc_start)
-                app.logger.info(f"[WEBHOOK-SYNC] First recalculation complete (pre-adjustment)")
-                
-                # STEP 2: Autobalance — compare to bank balances, create adjustment entries
-                # Invalidate cached last txn date so it recomputes from newly synced transactions
-                if app.config.get('REDIS_OK'):
-                    _redis_client.delete(f"quiltt_last_txn_date:v1:{user_id}")
-                last_txn_date_for_autobalance = get_quiltt_last_transaction_date(user_id)
-                app.logger.info(f"[WEBHOOK-SYNC] Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
-                _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance)
-                
-                # STEP 3: Second recalculation — incorporate adjustment entries into totals
-                date_to_remainder = {}
-                update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
-                update_daily_savings_for_savings_category(user_id, recalc_start)
-                update_weekly_totals(user_id, recalc_start, gwm, date_to_remainder)
-                update_monthly_totals(user_id, recalc_start, date_to_remainder)
-                update_daily_ca_totals(user_id, recalc_start)
-                update_weekly_ca_totals(user_id, recalc_start, gwm)
-                update_monthly_ca_totals(user_id, recalc_start)
-                
-                app.logger.info(f"[WEBHOOK-SYNC] Recalculation + autobalance complete for user {user_id}")
-            except Exception as recalc_err:
-                app.logger.error(f"[WEBHOOK-SYNC] Error recalculating totals for user {user_id}: {recalc_err}", exc_info=True)
+        # Always run recalculation + autobalance, even if no new transactions were imported.
+        # Bank balances may have changed and need adjustment entries.
+        try:
+            app.logger.info(f"[WEBHOOK-SYNC] Recalculating totals for user {user_id} (total_imported={total_imported}, total_synced={total_synced})")
+            
+            # Read goofy_week_mode (Redis first, MySQL fallback)
+            gwm = None
+            if app.config.get('REDIS_OK'):
+                try:
+                    cached_user = _redis_client.get(f"users:v1:{user_id}")
+                    if cached_user:
+                        user_data = json.loads(cached_user)
+                        if 'goofy_week_mode' in user_data:
+                            gwm = bool(int(user_data['goofy_week_mode']))
+                except Exception:
+                    pass
+            if gwm is None:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+                    row = cursor.fetchone()
+                    gwm = bool(row[0]) if row else False
+                    cursor.close()
+            
+            # Use earliest imported transaction date as start
+            recalc_start = None
+            if start_date:
+                try:
+                    recalc_start = datetime.strptime(start_date, '%Y-%m-%d').date() if isinstance(start_date, str) else start_date
+                except Exception:
+                    pass
+            if not recalc_start:
+                recalc_start = (datetime.now() - timedelta(days=1)).date()
+            
+            # STEP 1: First recalculation — accurate totals for autobalance comparison
+            date_to_remainder = {}
+            update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
+            update_daily_savings_for_savings_category(user_id, recalc_start)
+            update_weekly_totals(user_id, recalc_start, gwm, date_to_remainder)
+            update_monthly_totals(user_id, recalc_start, date_to_remainder)
+            update_daily_ca_totals(user_id, recalc_start)
+            update_weekly_ca_totals(user_id, recalc_start, gwm)
+            update_monthly_ca_totals(user_id, recalc_start)
+            app.logger.info(f"[WEBHOOK-SYNC] First recalculation complete (pre-adjustment)")
+            
+            # STEP 2: Autobalance — compare to bank balances, create adjustment entries
+            # Invalidate cached last txn date so it recomputes from newly synced transactions
+            if app.config.get('REDIS_OK'):
+                _redis_client.delete(f"quiltt_last_txn_date:v1:{user_id}")
+            last_txn_date_for_autobalance = get_quiltt_last_transaction_date(user_id)
+            app.logger.info(f"[WEBHOOK-SYNC] Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
+            _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance)
+            
+            # STEP 3: Second recalculation — incorporate adjustment entries into totals
+            date_to_remainder = {}
+            update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
+            update_daily_savings_for_savings_category(user_id, recalc_start)
+            update_weekly_totals(user_id, recalc_start, gwm, date_to_remainder)
+            update_monthly_totals(user_id, recalc_start, date_to_remainder)
+            update_daily_ca_totals(user_id, recalc_start)
+            update_weekly_ca_totals(user_id, recalc_start, gwm)
+            update_monthly_ca_totals(user_id, recalc_start)
+            
+            app.logger.info(f"[WEBHOOK-SYNC] Recalculation + autobalance complete for user {user_id}")
+        except Exception as recalc_err:
+            app.logger.error(f"[WEBHOOK-SYNC] Error recalculating totals for user {user_id}: {recalc_err}", exc_info=True)
         # --- END RECALCULATE + AUTOBALANCE ---
         
         # Update cached last transaction date and signal UI refresh
