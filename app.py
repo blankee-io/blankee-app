@@ -25339,6 +25339,104 @@ def quiltt_toggle_auto_import():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/quiltt/simulate-webhook', methods=['POST'])
+@login_required
+def quiltt_simulate_webhook():
+    """
+    Simulate a connection.synced.successful webhook event for the current user.
+    Runs the FULL webhook processing pipeline synchronously (not in a background thread)
+    so results are returned immediately.
+    
+    Optional JSON body:
+        start_date: YYYY-MM-DD (defaults to last_synced_at fallback)
+        end_date: YYYY-MM-DD (defaults to today)
+        connection_id: specific connection to simulate for (optional)
+    """
+    from quiltt_redis import get_quiltt_connections, upsert_quiltt_connection, insert_quiltt_webhook_event, mark_webhook_event_processed
+    import uuid
+
+    data = request.get_json(silent=True) or {}
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    target_connection_id = data.get('connection_id')
+    user_id = current_user.id
+
+    # Get user's connections
+    connections = get_quiltt_connections(user_id)
+    if not connections:
+        return jsonify({'status': 'error', 'message': 'No Quiltt connections found'}), 400
+
+    # Filter to target connection if specified
+    if target_connection_id:
+        connections = [c for c in connections if c.get('connection_id') == target_connection_id]
+        if not connections:
+            return jsonify({'status': 'error', 'message': f'Connection {target_connection_id} not found'}), 400
+
+    results = []
+    for conn_info in connections:
+        connection_id = conn_info.get('connection_id')
+        institution = conn_info.get('institution_name', 'Unknown')
+        fake_event_id = f"sim_{uuid.uuid4().hex[:12]}"
+
+        app.logger.info(f"[SIMULATE-WEBHOOK] Simulating connection.synced.successful for user {user_id}, connection {connection_id} ({institution})")
+
+        # 1. Log the simulated event
+        try:
+            insert_quiltt_webhook_event(
+                event_id=fake_event_id,
+                event_type='connection.synced.successful',
+                profile_id=f'simulated_{user_id}',
+                connection_id=connection_id,
+                payload={'simulated': True, 'user_id': user_id, 'connection_id': connection_id},
+                user_id=user_id
+            )
+        except Exception as e:
+            app.logger.warning(f"[SIMULATE-WEBHOOK] Failed to log event: {e}")
+
+        # 2. Update connection status to SYNCED
+        try:
+            upsert_quiltt_connection({
+                'connection_id': connection_id,
+                'status': 'SYNCED',
+                'last_synced_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }, user_id=user_id)
+        except Exception as e:
+            app.logger.warning(f"[SIMULATE-WEBHOOK] Failed to update connection status: {e}")
+
+        # 3. Sync transactions (the main work)
+        success, count, message = _sync_quiltt_transactions_for_user(
+            user_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        # 4. Mark event processed
+        try:
+            error_msg = message if not success else None
+            mark_webhook_event_processed(fake_event_id, error_message=error_msg)
+        except Exception as e:
+            app.logger.warning(f"[SIMULATE-WEBHOOK] Failed to mark event processed: {e}")
+
+        results.append({
+            'connection_id': connection_id,
+            'institution': institution,
+            'success': success,
+            'transactions_synced': count,
+            'message': message,
+            'event_id': fake_event_id
+        })
+
+    total_synced = sum(r['transactions_synced'] for r in results)
+    all_success = all(r['success'] for r in results)
+
+    return jsonify({
+        'status': 'success' if all_success else 'partial',
+        'total_transactions_synced': total_synced,
+        'connections_processed': len(results),
+        'results': results
+    })
+
+
 @app.route('/quiltt/webhook', methods=['POST'])
 def quiltt_webhook():
     """
