@@ -22120,12 +22120,41 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         total_imported = 0
         imported_dates = set()  # Track dates of imported transactions for bucket cleanup
         
-        # Use provided dates or default to last 1 day
+        # Use provided dates or fall back to last_synced_at from connections
         from datetime import datetime, timedelta
         if not start_date or not end_date:
-            start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-            end_date = datetime.now().strftime('%Y-%m-%d')
-            app.logger.info(f"No date range provided, using default: {start_date} to {end_date}")
+            # Try to determine start_date from earliest last_synced_at across user's connections
+            try:
+                from quiltt_redis import get_quiltt_connections
+                connections = get_quiltt_connections(user_id)
+                if connections:
+                    synced_dates = []
+                    for conn in connections:
+                        ls = conn.get('last_synced_at')
+                        if ls:
+                            if isinstance(ls, str):
+                                try:
+                                    ls = datetime.strptime(ls, '%Y-%m-%d %H:%M:%S')
+                                except (ValueError, TypeError):
+                                    try:
+                                        ls = datetime.strptime(ls[:10], '%Y-%m-%d')
+                                    except (ValueError, TypeError):
+                                        continue
+                            if hasattr(ls, 'strftime'):
+                                synced_dates.append(ls)
+                    if synced_dates:
+                        earliest_sync = min(synced_dates)
+                        start_date = earliest_sync.strftime('%Y-%m-%d')
+                        end_date = datetime.now().strftime('%Y-%m-%d')
+                        app.logger.info(f"Using last_synced_at fallback: {start_date} to {end_date}")
+            except Exception as e:
+                app.logger.warning(f"Failed to get last_synced_at for date range: {e}")
+            
+            # Ultimate fallback if last_synced_at lookup failed
+            if not start_date or not end_date:
+                start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                app.logger.info(f"No date range or last_synced_at available, using 1-day default: {start_date} to {end_date}")
         else:
             app.logger.info(f"Using provided date range: {start_date} to {end_date}")
         
@@ -22160,10 +22189,8 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         
         updated_count = 0
         for txn in transactions:
-            # Skip pending transactions (status is PENDING vs POSTED)
-            if txn.get('status') == 'PENDING':
-                app.logger.info(f"Skipping pending transaction {txn.get('id')}")
-                continue
+            # Track pending status — we still store pending transactions but don't auto-import them
+            is_pending = (txn.get('status') == 'PENDING')
             
             txn_id = txn.get('id')
             account_obj = txn.get('account', {})
@@ -22185,16 +22212,24 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         existing_txn = existing
                         break
                 
-                # If transaction exists and already has Ntropy data, skip it
+                # If transaction exists and already has Ntropy data, check if anything material changed
                 enriched_at_value = existing_txn.get('ntropy_enriched_at') if existing_txn else None
-                app.logger.info(f"Checking {txn_id}: ntropy_enriched_at={repr(enriched_at_value)}, type={type(enriched_at_value)}")
                 if existing_txn and enriched_at_value:
-                    app.logger.info(f"Skipping {txn_id} - already enriched")
-                    continue
-                
-                # Otherwise, we'll update it with Ntropy data below
-                app.logger.info(f"Updating transaction {txn_id} with Ntropy enrichment")
-                updated_count += 1
+                    # Check if amount, pending status, or date changed
+                    existing_amount = float(existing_txn.get('amount', 0))
+                    existing_pending = int(existing_txn.get('pending', 0))
+                    existing_date = str(existing_txn.get('date', ''))[:10]
+                    new_pending = 1 if is_pending else 0
+                    new_date = str(date)[:10] if date else ''
+                    
+                    if (abs(existing_amount - amount) < 0.01 and 
+                        existing_pending == new_pending and
+                        existing_date == new_date):
+                        app.logger.debug(f"Skipping {txn_id} - already enriched, no material changes")
+                        continue
+                    
+                    app.logger.info(f"Updating enriched txn {txn_id} - changes detected: amount {existing_amount}->{amount}, pending {existing_pending}->{new_pending}, date {existing_date}->{new_date}")
+                    updated_count += 1
             else:
                 # Brand new transaction
                 app.logger.info(f"New transaction {txn_id}")
@@ -22285,7 +22320,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 'description': txn.get('description', ''),
                 'merchant_name': ntropy_data.get('ntropy_merchant_name', ''),
                 'category': txn.get('kind', ''),
-                'pending': 0,
+                'pending': 1 if is_pending else 0,
                 'transaction_type': 'expense' if is_expense else 'income',
                 'imported_to_entry_id': None,
                 'imported_entry_type': None,
@@ -22375,15 +22410,23 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 # Only auto-import if:
                 # 1. skip_auto_import is False (not during explicit setup flows like initial connection)
                 # 2. Transaction is TRULY NEW (not in pre_sync_txn_ids - the set before this sync)
+                # 3. Transaction is not PENDING (only auto-import POSTED transactions)
                 # 
                 # This ensures:
                 # - Initial bank connection: skip_auto_import=True (via connection age check)
                 # - Historical transactions from initial sync: in pre_sync_txn_ids, won't be imported
                 # - Truly new transactions from daily sync: not in pre_sync_txn_ids, will be imported
+                # - Pending transactions: stored for tracking but not auto-imported until posted
                 is_new_transaction = txn_id not in pre_sync_txn_ids
                 
-                if not skip_auto_import and is_new_transaction:
-                    app.logger.info(f"Auto-importing NEW transaction {txn_id}")
+                # Check if a previously-pending transaction has now posted
+                was_pending = False
+                if existing_txn and existing_txn.get('pending') == 1 and not is_pending:
+                    was_pending = True
+                    app.logger.info(f"Transaction {txn_id} changed from PENDING to POSTED")
+                
+                if not skip_auto_import and not is_pending and (is_new_transaction or was_pending):
+                    app.logger.info(f"Auto-importing {'POSTED (was pending)' if was_pending else 'NEW'} transaction {txn_id}")
                     try:
                         # Determine account type and route to correct table
                         quiltt_account_info = quiltt_account_map.get(account_id, {})
