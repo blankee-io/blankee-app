@@ -2545,6 +2545,16 @@
             cell.appendChild(container);
         }
 
+        function addBucketLateBadge(cell, entry) {
+            if (!entry || !entry.has_bucket || !entry.max_days_late || entry.max_days_late <= 0) return;
+            cell.style.position = 'relative';
+            const badge = document.createElement('span');
+            badge.className = 'bucket-late-badge';
+            badge.textContent = entry.max_days_late;
+            badge.title = `This recurring entry is ${entry.max_days_late} day${entry.max_days_late > 1 ? 's' : ''} late`;
+            cell.appendChild(badge);
+        }
+
         function populateIncomeData() {
             const weekEntriesMap = {}; // Map to track entries for each week
             const allCells = new Set(); // Track all cells to identify empty ones
@@ -2598,6 +2608,7 @@
                         }
                         // Update bucket progress bar if applicable
                         updateBucketProgressBar(matchedCell, entry);
+                        addBucketLateBadge(matchedCell, entry);
                     }
                 }
             });
@@ -2700,6 +2711,7 @@
                         }
                         // Update bucket progress bar if applicable
                         updateBucketProgressBar(matchedCell, entry);
+                        addBucketLateBadge(matchedCell, entry);
                     }
                 }
             });
@@ -2781,6 +2793,7 @@
                                 input.value = currencySymbol + formatNumberWithCommas(parseFloat(entry.total_amount));
                                 // Update bucket progress bar if applicable
                                 updateBucketProgressBar(td, entry);
+                                addBucketLateBadge(td, entry);
                             } else {
                                 input.value = '';
                                 // Clear processed status when no entry exists

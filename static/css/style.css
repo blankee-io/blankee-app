@@ -3094,6 +3094,27 @@ tr[data-category-id] td.before-member-since {
     justify-content: center;
 }
 
+/* Late bucket badge — shows days late as a number in same style as pending question mark */
+.bucket-late-badge {
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    min-width: 11px;
+    height: 11px;
+    font-size: 7.5px;
+    font-weight: 900;
+    pointer-events: none;
+    color: var(--text-dark);
+    background-color: var(--secondary);
+    border: 1.5px solid var(--text-dark);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+    line-height: 1;
+}
+
 /* Alternating background colors for income entries */
 .dashboard-d-income-entries .dashboard-d-row:nth-child(odd) {
     /* Green for odd income entries */
