@@ -16,6 +16,10 @@
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
 </head>
 <body id="feedback-page">
+    <script>
+        window.__unreadPostNumbers = {{ unread_post_numbers | tojson }};
+        window.__unreadCommentIds = {{ unread_comment_ids | tojson }};
+    </script>
     {% include 'nav.html' %}
 
     <div class="calendarnav">
