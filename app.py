@@ -21672,282 +21672,6 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
         app.logger.error(f"[WEBHOOK-AUTOBALANCE] Credit adjustment error for {account_name}: {e}", exc_info=True)
 
 
-def _cleanup_bucket_entries_for_webhook(user_id, cutoff_date, quiltt_account_map):
-    """
-    Clean up bucket entries (is_bucket=1) on or before the cutoff_date.
-    
-    For Quiltt-linked accounts: DELETE bucket entries (real transaction from bank replaces them).
-    For non-Quiltt credit accounts: CONVERT to regular entries (set is_bucket=0).
-    
-    Args:
-        user_id: User ID
-        cutoff_date: Date string (YYYY-MM-DD) — clean buckets on this date and earlier.
-                     Must already be capped at yesterday (never today).
-        quiltt_account_map: Dict of Quiltt account_id -> account info
-        
-    Returns:
-        Total number of bucket entries cleaned up
-    """
-    total_cleaned = 0
-    
-    # Check if user has any Quiltt-linked depository accounts
-    has_quiltt_depository = any(
-        str(a.get('account_type', '')).upper() == 'DEPOSITORY'
-        for a in quiltt_account_map.values()
-    )
-    
-    # --- income_entries ---
-    try:
-        if has_quiltt_depository:
-            redis_key = f"income_entries:v1:{user_id}"
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-            if cached:
-                entries = json.loads(cached)
-                bucket_ids = [e['id'] for e in entries
-                              if e.get('is_bucket') and str(e.get('date', ''))[:10] <= cutoff_date]
-                if bucket_ids:
-                    entries = [e for e in entries if e.get('id') not in set(bucket_ids)]
-                    _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-                    dirty_key = f"dirty_tables:{user_id}"
-                    _redis_client.sadd(dirty_key, 'income_entries')
-                    _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-                    total_cleaned += len(bucket_ids)
-                    app.logger.info(f"[BUCKET-CLEANUP] Deleted {len(bucket_ids)} income bucket entries for user {user_id}")
-    except Exception as e:
-        app.logger.error(f"[BUCKET-CLEANUP] Error cleaning income_entries: {e}")
-    
-    # --- expense_entries ---
-    try:
-        if has_quiltt_depository:
-            redis_key = f"expense_entries:v1:{user_id}"
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-            if cached:
-                entries = json.loads(cached)
-                bucket_ids = [e['id'] for e in entries
-                              if e.get('is_bucket') and str(e.get('date', ''))[:10] <= cutoff_date]
-                if bucket_ids:
-                    entries = [e for e in entries if e.get('id') not in set(bucket_ids)]
-                    _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-                    dirty_key = f"dirty_tables:{user_id}"
-                    _redis_client.sadd(dirty_key, 'expense_entries')
-                    _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-                    total_cleaned += len(bucket_ids)
-                    app.logger.info(f"[BUCKET-CLEANUP] Deleted {len(bucket_ids)} expense bucket entries for user {user_id}")
-    except Exception as e:
-        app.logger.error(f"[BUCKET-CLEANUP] Error cleaning expense_entries: {e}")
-    
-    # --- c_expense_entries (credit accounts - check per-account) ---
-    try:
-        redis_key = f"c_expense_entries:v1:{user_id}"
-        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-        if cached:
-            entries = json.loads(cached)
-            
-            # Build lookups: category_id -> account_id, account_id -> is_quiltt
-            c_cats_key = f"c_expense_categories:v1:{user_id}"
-            c_cats_cached = _redis_client.get(c_cats_key) if app.config.get('REDIS_OK') else None
-            c_cats = json.loads(c_cats_cached) if c_cats_cached else []
-            
-            credit_accts_key = f"credit_accounts:v1:{user_id}"
-            credit_accts_cached = _redis_client.get(credit_accts_key) if app.config.get('REDIS_OK') else None
-            credit_accts = json.loads(credit_accts_cached) if credit_accts_cached else []
-            
-            cat_to_account = {int(c['id']): int(c['account_id']) for c in c_cats} if c_cats else {}
-            acct_is_quiltt = {int(a['id']): bool(int(a.get('is_quiltt', 0))) for a in credit_accts} if credit_accts else {}
-            
-            quiltt_bucket_ids = []
-            non_quiltt_bucket_ids = []
-            
-            for entry in entries:
-                if entry.get('is_bucket') and str(entry.get('date', ''))[:10] <= cutoff_date:
-                    cat_id = int(entry.get('category_id', 0))
-                    account_id = cat_to_account.get(cat_id, 0)
-                    if acct_is_quiltt.get(account_id, False):
-                        quiltt_bucket_ids.append(entry['id'])
-                    else:
-                        non_quiltt_bucket_ids.append(entry['id'])
-            
-            if quiltt_bucket_ids or non_quiltt_bucket_ids:
-                quiltt_set = set(quiltt_bucket_ids)
-                non_quiltt_set = set(non_quiltt_bucket_ids)
-                
-                new_entries = []
-                for e in entries:
-                    eid = e.get('id')
-                    if eid in quiltt_set:
-                        continue  # Delete
-                    if eid in non_quiltt_set:
-                        e['is_bucket'] = 0  # Convert
-                    new_entries.append(e)
-                
-                _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(new_entries, cls=DecimalEncoder))
-                dirty_key = f"dirty_tables:{user_id}"
-                _redis_client.sadd(dirty_key, 'c_expense_entries')
-                _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-                total_cleaned += len(quiltt_bucket_ids) + len(non_quiltt_bucket_ids)
-                if quiltt_bucket_ids:
-                    app.logger.info(f"[BUCKET-CLEANUP] Deleted {len(quiltt_bucket_ids)} c_expense bucket entries (Quiltt) for user {user_id}")
-                if non_quiltt_bucket_ids:
-                    app.logger.info(f"[BUCKET-CLEANUP] Converted {len(non_quiltt_bucket_ids)} c_expense bucket entries (non-Quiltt) for user {user_id}")
-    except Exception as e:
-        app.logger.error(f"[BUCKET-CLEANUP] Error cleaning c_expense_entries: {e}")
-    
-    return total_cleaned
-
-
-def _auto_import_transaction_to_entry(user_id, entry_type, category_id, amount, date, transaction_id, blankee_credit_account_id=None):
-    """
-    Auto-import a Quiltt transaction to the appropriate budget entry table.
-    
-    Args:
-        user_id: User ID
-        entry_type: One of 'income', 'expense', 'c_expense', 'c_payment'
-        category_id: The category ID (or account_id for c_payment)
-        amount: Transaction amount (already positive)
-        date: Transaction date (YYYY-MM-DD string)
-        transaction_id: The Quiltt transaction_id for logging
-        blankee_credit_account_id: For c_payment, the Blankee credit account ID
-        
-    Returns:
-        Entry ID if successful, None otherwise
-    """
-    try:
-        import time
-        
-        if entry_type == 'income':
-            # Add to income_entries via Redis
-            redis_key = f"income_entries:v1:{user_id}"
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-            entries = json.loads(cached) if cached else []
-            
-            # Generate temporary ID
-            temp_id = int(time.time() * 1000) % 1000000
-            
-            new_entry = {
-                'id': temp_id,
-                'category_id': category_id,
-                'date': date,
-                'amount': str(amount),
-                'recurring_id': None,
-                'is_bucket': 0,
-                'original_amount': None,
-                'processed': 0,
-                'pending': 1,  # needs category confirmation
-                'auto_confirmed': 0  # not auto-categorized
-            }
-            entries.append(new_entry)
-            
-            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-            
-            # Mark as dirty
-            dirty_key = f"dirty_tables:{user_id}"
-            _redis_client.sadd(dirty_key, 'income_entries')
-            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-            
-            app.logger.info(f"Created income_entry {temp_id} for transaction {transaction_id} (pending=1)")
-            return temp_id
-            
-        elif entry_type == 'expense':
-            # Add to expense_entries via Redis
-            redis_key = f"expense_entries:v1:{user_id}"
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-            entries = json.loads(cached) if cached else []
-            
-            temp_id = int(time.time() * 1000) % 1000000
-            
-            new_entry = {
-                'id': temp_id,
-                'category_id': category_id,
-                'date': date,
-                'amount': str(amount),
-                'recurring_id': None,
-                'is_bucket': 0,
-                'original_amount': None,
-                'processed': 0,
-                'pending': 1,  # needs category confirmation
-                'auto_confirmed': 0,  # not auto-categorized
-                'bud_item_id': None
-            }
-            entries.append(new_entry)
-            
-            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-            
-            dirty_key = f"dirty_tables:{user_id}"
-            _redis_client.sadd(dirty_key, 'expense_entries')
-            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-            
-            app.logger.info(f"Created expense_entry {temp_id} for transaction {transaction_id} (pending=1)")
-            return temp_id
-            
-        elif entry_type == 'c_expense':
-            # Add to c_expense_entries via Redis
-            redis_key = f"c_expense_entries:v1:{user_id}"
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-            entries = json.loads(cached) if cached else []
-            
-            temp_id = int(time.time() * 1000) % 1000000
-            
-            new_entry = {
-                'id': temp_id,
-                'category_id': category_id,
-                'date': date,
-                'amount': str(amount),
-                'recurring_id': None,
-                'is_bucket': 0,
-                'original_amount': None,
-                'processed': 0,
-                'pending': 1,  # needs category confirmation
-                'auto_confirmed': 0,  # not auto-categorized
-                'bud_item_id': None
-            }
-            entries.append(new_entry)
-            
-            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-            
-            dirty_key = f"dirty_tables:{user_id}"
-            _redis_client.sadd(dirty_key, 'c_expense_entries')
-            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-            
-            app.logger.info(f"Created c_expense_entry {temp_id} for transaction {transaction_id} (pending=1)")
-            return temp_id
-            
-        elif entry_type == 'c_payment':
-            # Add to c_payment_entries via Redis
-            # c_payment_entries use account_id, not category_id
-            redis_key = f"c_payment_entries:v1:{user_id}"
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-            entries = json.loads(cached) if cached else []
-            
-            temp_id = int(time.time() * 1000) % 1000000
-            
-            new_entry = {
-                'id': temp_id,
-                'account_id': blankee_credit_account_id,  # c_payment uses account_id
-                'date': date,
-                'amount': str(amount),
-                'recurring_id': None,
-                'processed': 0
-            }
-            entries.append(new_entry)
-            
-            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-            
-            dirty_key = f"dirty_tables:{user_id}"
-            _redis_client.sadd(dirty_key, 'c_payment_entries')
-            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-            
-            app.logger.info(f"Created c_payment_entry {temp_id} for transaction {transaction_id}")
-            return temp_id
-            
-        else:
-            app.logger.error(f"Unknown entry_type: {entry_type}")
-            return None
-            
-    except Exception as e:
-        app.logger.error(f"Error creating {entry_type} entry for transaction {transaction_id}: {e}", exc_info=True)
-        return None
-
-
 def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, specific_account_id=None, skip_auto_import=False):
     """
     Internal function to sync transactions for a specific user
@@ -22075,13 +21799,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     created = created.date()
             account_created_map[acc.get('account_id')] = created
         
-        # --- DEHYDRATE FOR MySQL-DIRECT WRITES ---
-        # Dehydrate user so all reads come from MySQL (source of truth).
-        # After MySQL-direct writes are done, we rehydrate to sync Redis.
         from redis_manager import _dehydrate_user_data, _hydrate_user_data, is_user_hydrated as _is_hydrated_check
-        if _is_hydrated_check(user_id):
-            _dehydrate_user_data(user_id)
-            app.logger.info(f"[WEBHOOK-SYNC] Dehydrated user {user_id} for MySQL-direct sync")
         
         total_synced = 0
         total_imported = 0
@@ -22607,14 +22325,6 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         if total_imported > 0:
             message += f', {total_imported} auto-imported to budget'
         
-        # --- CREATE NOTIFICATION FOR PENDING TRANSACTIONS ---
-        if total_imported > 0:
-            try:
-                _create_pending_transactions_notification(user_id, total_imported)
-            except Exception as notif_err:
-                app.logger.error(f"Error creating pending transactions notification: {notif_err}")
-        # --- END NOTIFICATION ---
-        
         # --- CLEANUP BUCKET ENTRIES (MySQL-direct) ---
         # Delete bucket placeholders on dates up to the last transaction date.
         # Without this, both the bucket (recurring placeholder) and the real bank transaction
@@ -22689,11 +22399,23 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         except Exception:
             pass
         
-        # --- REHYDRATE USER ---
-        # Reload all data from MySQL into Redis so recalculations and autobalance
-        # operate on consistent, up-to-date data
+        # --- DEHYDRATE + REHYDRATE ---
+        # Now that all MySQL-direct writes are done, dehydrate + rehydrate ONCE
+        # to sync Redis with the final MySQL state. User is only briefly dehydrated here
+        # (not during the slow API/write phase above).
+        if _is_hydrated_check(user_id):
+            _dehydrate_user_data(user_id)
         _hydrate_user_data(user_id)
-        app.logger.info(f"[WEBHOOK-SYNC] Rehydrated user {user_id} after MySQL-direct writes")
+        app.logger.info(f"[WEBHOOK-SYNC] Dehydrated + rehydrated user {user_id} after MySQL-direct writes")
+        
+        # --- CREATE NOTIFICATION FOR PENDING TRANSACTIONS ---
+        # Must happen after rehydrate so Redis has the new pending entries for accurate count
+        if total_imported > 0:
+            try:
+                _create_pending_transactions_notification(user_id, total_imported)
+            except Exception as notif_err:
+                app.logger.error(f"Error creating pending transactions notification: {notif_err}")
+        # --- END NOTIFICATION ---
         
         # --- RECALCULATE TOTALS & BALANCES + AUTOBALANCE ---
         # Always run recalculation + autobalance, even if no new transactions were imported.
@@ -22785,12 +22507,6 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         try:
             _sync_cursor.close()
             _sync_conn.close()
-        except Exception:
-            pass
-        # Rehydrate user if we dehydrated them (ensure Redis isn't left empty)
-        try:
-            from redis_manager import _hydrate_user_data
-            _hydrate_user_data(user_id)
         except Exception:
             pass
         app.logger.error(f"Error syncing Quiltt transactions for user {user_id}: {e}")
