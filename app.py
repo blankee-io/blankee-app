@@ -21618,10 +21618,18 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
             app.logger.info(f"[WEBHOOK-AUTOBALANCE] Credit ({account_name}): Yesterday=${day_before_balance:.2f}, Natural=${natural_balance:.2f}, Bank=${bank_float:.2f}, Diff=${diff:.2f}")
             
             # Always clean up existing auto-adjustments from BOTH c_expense and c_payment
-            cursor.execute(
-                "DELETE FROM c_expense_entries WHERE category_id = %s AND date = %s",
-                (auto_adj_cat_id, target_date_str)
-            )
+            # Use ALL auto-adj category IDs in case account has duplicate categories
+            if len(auto_adj_cat_ids) == 1:
+                cursor.execute(
+                    "DELETE FROM c_expense_entries WHERE category_id = %s AND date = %s",
+                    (auto_adj_cat_id, target_date_str)
+                )
+            else:
+                adj_placeholders = ','.join(['%s'] * len(auto_adj_cat_ids))
+                cursor.execute(
+                    f"DELETE FROM c_expense_entries WHERE category_id IN ({adj_placeholders}) AND date = %s",
+                    list(auto_adj_cat_ids) + [target_date_str]
+                )
             deleted_ce = cursor.rowcount
             if deleted_ce > 0:
                 app.logger.info(f"[WEBHOOK-AUTOBALANCE] Deleted {deleted_ce} credit expense adjustment(s) for {account_name} on {target_date_str}")
