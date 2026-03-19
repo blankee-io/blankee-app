@@ -2361,7 +2361,7 @@ def dashboard_d():
         if expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.recurring_id,
+                SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id,
                        ec.id AS category_id, ec.name AS category_name, ec.display_order
                 FROM expense_entries ee
                 JOIN expense_categories ec ON ee.category_id = ec.id
@@ -3197,7 +3197,7 @@ def get_dashboard_d_data():
             if not entries_cached:
                 # Fetch all income entries for the user
                 cursor.execute("""
-                    SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount,
+                    SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.original_date,
                            ic.id AS category_id, ic.name AS category_name, ic.display_order
                     FROM income_entries ie
                     JOIN income_categories ic ON ie.category_id = ic.id
@@ -3210,7 +3210,7 @@ def get_dashboard_d_data():
 
                 # Fetch all expense entries for the user
                 cursor.execute("""
-                    SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount,
+                    SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date,
                            ec.id AS category_id, ec.name AS category_name, ec.display_order
                     FROM expense_entries ee
                     JOIN expense_categories ec ON ee.category_id = ec.id
@@ -8128,7 +8128,7 @@ def dashboard():
         if raw_income_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id
+                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.original_date, ie.recurring_id
                 FROM income_entries ie
                 WHERE ie.category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -8169,11 +8169,20 @@ def dashboard():
             
             # Track bucket info
             if key not in bucket_info_map:
-                bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+                bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0}
             if entry.get('is_bucket') == 1:
                 bucket_info_map[key]['has_bucket'] = True
                 bucket_info_map[key]['bucket_amount'] += float(entry.get('amount', 0))
                 bucket_info_map[key]['original_amount'] = float(entry.get('original_amount', 0)) if entry.get('original_amount') else float(entry.get('amount', 0))
+                orig_date = entry.get('original_date')
+                if orig_date:
+                    if isinstance(orig_date, str):
+                        orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
+                    elif isinstance(orig_date, datetime):
+                        orig_date = orig_date.date()
+                    days_late = (date.today() - orig_date).days
+                    if days_late > bucket_info_map[key]['max_days_late']:
+                        bucket_info_map[key]['max_days_late'] = days_late
 
         income_entries = []
         for key, total_amount in income_map.items():
@@ -8181,7 +8190,7 @@ def dashboard():
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, week_key = key
-            bucket_info = bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            bucket_info = bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
                 'category_id': category_id,
                 'date': week_key,
@@ -8195,6 +8204,8 @@ def dashboard():
                 entry_data['has_bucket'] = True
                 entry_data['bucket_amount'] = bucket_info['bucket_amount']
                 entry_data['original_amount'] = bucket_info['original_amount']
+                if bucket_info['max_days_late'] > 0:
+                    entry_data['max_days_late'] = bucket_info['max_days_late']
             income_entries.append(entry_data)
 
         # --- AGGREGATE EXPENSE ENTRIES ---
@@ -8203,7 +8214,7 @@ def dashboard():
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.recurring_id, ee.bud_item_id
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bud_item_id
                 FROM expense_entries ee
                 WHERE ee.category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -8232,11 +8243,20 @@ def dashboard():
             
             # Track bucket info
             if key not in expense_bucket_info_map:
-                expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+                expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0}
             if entry.get('is_bucket') == 1:
                 expense_bucket_info_map[key]['has_bucket'] = True
                 expense_bucket_info_map[key]['bucket_amount'] += float(entry.get('amount', 0))
                 expense_bucket_info_map[key]['original_amount'] = float(entry.get('original_amount', 0)) if entry.get('original_amount') else float(entry.get('amount', 0))
+                orig_date = entry.get('original_date')
+                if orig_date:
+                    if isinstance(orig_date, str):
+                        orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
+                    elif isinstance(orig_date, datetime):
+                        orig_date = orig_date.date()
+                    days_late = (date.today() - orig_date).days
+                    if days_late > expense_bucket_info_map[key]['max_days_late']:
+                        expense_bucket_info_map[key]['max_days_late'] = days_late
 
         expense_entries = []
         for key, total_amount in expense_map.items():
@@ -8244,7 +8264,7 @@ def dashboard():
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, week_key = key
-            bucket_info = expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            bucket_info = expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
                 'category_id': category_id,
                 'date': week_key,
@@ -8258,6 +8278,8 @@ def dashboard():
                 entry_data['has_bucket'] = True
                 entry_data['bucket_amount'] = bucket_info['bucket_amount']
                 entry_data['original_amount'] = bucket_info['original_amount']
+                if bucket_info['max_days_late'] > 0:
+                    entry_data['max_days_late'] = bucket_info['max_days_late']
             expense_entries.append(entry_data)
 
         # --- AGGREGATE CA ENTRIES ---
@@ -8266,7 +8288,7 @@ def dashboard():
         if raw_c_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date
                 FROM c_expense_entries cee
                 JOIN c_expense_categories cec ON cee.category_id = cec.id
                 JOIN credit_accounts ca ON cec.account_id = ca.id
@@ -8297,11 +8319,20 @@ def dashboard():
             
             # Track bucket info
             if key not in c_expense_bucket_info_map:
-                c_expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+                c_expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0}
             if entry.get('is_bucket') == 1:
                 c_expense_bucket_info_map[key]['has_bucket'] = True
                 c_expense_bucket_info_map[key]['bucket_amount'] += float(entry.get('amount', 0))
                 c_expense_bucket_info_map[key]['original_amount'] = float(entry.get('original_amount', 0)) if entry.get('original_amount') else float(entry.get('amount', 0))
+                orig_date = entry.get('original_date')
+                if orig_date:
+                    if isinstance(orig_date, str):
+                        orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
+                    elif isinstance(orig_date, datetime):
+                        orig_date = orig_date.date()
+                    days_late = (date.today() - orig_date).days
+                    if days_late > c_expense_bucket_info_map[key]['max_days_late']:
+                        c_expense_bucket_info_map[key]['max_days_late'] = days_late
 
         c_expense_entries = []
         for key, total_amount in c_expense_map.items():
@@ -8309,7 +8340,7 @@ def dashboard():
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, week_key = key
-            bucket_info = c_expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            bucket_info = c_expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
                 'category_id': category_id,
                 'date': week_key,
@@ -8323,6 +8354,8 @@ def dashboard():
                 entry_data['has_bucket'] = True
                 entry_data['bucket_amount'] = bucket_info['bucket_amount']
                 entry_data['original_amount'] = bucket_info['original_amount']
+                if bucket_info['max_days_late'] > 0:
+                    entry_data['max_days_late'] = bucket_info['max_days_late']
             c_expense_entries.append(entry_data)
 
         # Fetch all totals and remainders
@@ -10310,7 +10343,7 @@ def dashboard_3m():
         if raw_income_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id
+                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.original_date, ie.recurring_id
                 FROM income_entries ie
                 WHERE ie.category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -10338,18 +10371,27 @@ def dashboard_3m():
             
             # Track bucket info
             if key not in bucket_info_map:
-                bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+                bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0}
             if entry.get('is_bucket') == 1:
                 bucket_info_map[key]['has_bucket'] = True
                 bucket_info_map[key]['bucket_amount'] += float(entry.get('amount', 0))
                 bucket_info_map[key]['original_amount'] = float(entry.get('original_amount', 0)) if entry.get('original_amount') else float(entry.get('amount', 0))
+                orig_date = entry.get('original_date')
+                if orig_date:
+                    if isinstance(orig_date, str):
+                        orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
+                    elif isinstance(orig_date, datetime):
+                        orig_date = orig_date.date()
+                    days_late = (date.today() - orig_date).days
+                    if days_late > bucket_info_map[key]['max_days_late']:
+                        bucket_info_map[key]['max_days_late'] = days_late
         income_entries = []
         for key, total_amount in income_map.items():
             processed_list = processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, month_end = key
-            bucket_info = bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            bucket_info = bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
                 'category_id': category_id,
                 'date': month_end,
@@ -10363,6 +10405,8 @@ def dashboard_3m():
                 entry_data['has_bucket'] = True
                 entry_data['bucket_amount'] = bucket_info['bucket_amount']
                 entry_data['original_amount'] = bucket_info['original_amount']
+                if bucket_info['max_days_late'] > 0:
+                    entry_data['max_days_late'] = bucket_info['max_days_late']
             income_entries.append(entry_data)
 
         # --- AGGREGATE EXPENSE ENTRIES BY MONTH ---
@@ -10371,7 +10415,7 @@ def dashboard_3m():
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.recurring_id, ee.bud_item_id
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bud_item_id
                 FROM expense_entries ee
                 WHERE ee.category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -10398,18 +10442,27 @@ def dashboard_3m():
                 expense_pending_count_map[key] = expense_pending_count_map.get(key, 0) + 1
             # Track bucket info
             if key not in expense_bucket_info_map:
-                expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+                expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0}
             if entry.get('is_bucket'):
                 expense_bucket_info_map[key]['has_bucket'] = True
                 expense_bucket_info_map[key]['bucket_amount'] += float(entry['amount'])
                 expense_bucket_info_map[key]['original_amount'] = float(entry.get('original_amount') or 0)
+                orig_date = entry.get('original_date')
+                if orig_date:
+                    if isinstance(orig_date, str):
+                        orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
+                    elif isinstance(orig_date, datetime):
+                        orig_date = orig_date.date()
+                    days_late = (date.today() - orig_date).days
+                    if days_late > expense_bucket_info_map[key]['max_days_late']:
+                        expense_bucket_info_map[key]['max_days_late'] = days_late
         expense_entries = []
         for key, total_amount in expense_map.items():
             processed_list = expense_processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, month_end = key
-            expense_bucket_info = expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            expense_bucket_info = expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
                 'category_id': category_id,
                 'date': month_end,
@@ -10423,6 +10476,8 @@ def dashboard_3m():
                 entry_data['has_bucket'] = True
                 entry_data['bucket_amount'] = expense_bucket_info['bucket_amount']
                 entry_data['original_amount'] = expense_bucket_info['original_amount']
+                if expense_bucket_info['max_days_late'] > 0:
+                    entry_data['max_days_late'] = expense_bucket_info['max_days_late']
             expense_entries.append(entry_data)
 
         # --- AGGREGATE CA ENTRIES BY MONTH ---
@@ -10431,7 +10486,7 @@ def dashboard_3m():
         if raw_c_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date
                 FROM c_expense_entries cee
                 JOIN c_expense_categories cec ON cee.category_id = cec.id
                 JOIN credit_accounts ca ON cec.account_id = ca.id
@@ -10460,18 +10515,27 @@ def dashboard_3m():
                 c_expense_pending_count_map[key] = c_expense_pending_count_map.get(key, 0) + 1
             # Track bucket info
             if key not in c_expense_bucket_info_map:
-                c_expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0}
+                c_expense_bucket_info_map[key] = {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0}
             if entry.get('is_bucket'):
                 c_expense_bucket_info_map[key]['has_bucket'] = True
                 c_expense_bucket_info_map[key]['bucket_amount'] += float(entry['amount'])
                 c_expense_bucket_info_map[key]['original_amount'] = float(entry.get('original_amount') or 0)
+                orig_date = entry.get('original_date')
+                if orig_date:
+                    if isinstance(orig_date, str):
+                        orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
+                    elif isinstance(orig_date, datetime):
+                        orig_date = orig_date.date()
+                    days_late = (date.today() - orig_date).days
+                    if days_late > c_expense_bucket_info_map[key]['max_days_late']:
+                        c_expense_bucket_info_map[key]['max_days_late'] = days_late
         c_expense_entries = []
         for key, total_amount in c_expense_map.items():
             processed_list = c_expense_processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
             category_id, month_end = key
-            c_expense_bucket_info = c_expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0})
+            c_expense_bucket_info = c_expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
                 'category_id': category_id,
                 'date': month_end,
@@ -10485,6 +10549,8 @@ def dashboard_3m():
                 entry_data['has_bucket'] = True
                 entry_data['bucket_amount'] = c_expense_bucket_info['bucket_amount']
                 entry_data['original_amount'] = c_expense_bucket_info['original_amount']
+                if c_expense_bucket_info['max_days_late'] > 0:
+                    entry_data['max_days_late'] = c_expense_bucket_info['max_days_late']
             c_expense_entries.append(entry_data)
 
         # Fetch all monthly totals and remainders
@@ -22325,18 +22391,20 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         if total_imported > 0:
             message += f', {total_imported} auto-imported to budget'
         
-        # --- CLEANUP BUCKET ENTRIES (MySQL-direct) ---
-        # Delete bucket placeholders on dates up to the last transaction date.
-        # Without this, both the bucket (recurring placeholder) and the real bank transaction
-        # would exist, causing double-counting until nightly sync cleans up.
-        # Never clean today's buckets — they're still valid placeholders for the current day.
+        # --- PUSH FORWARD BUCKET ENTRIES (MySQL-direct) ---
+        # Instead of deleting bucket placeholders, push them forward to today.
+        # This keeps them visible on the dashboard with a "X days late" indicator.
+        # Buckets older than 5 days are deleted (they're stale recurring placeholders).
+        # Non-Quiltt credit buckets are converted to regular entries (no bank feed to replace them).
         if total_imported > 0:
             try:
                 today_str = datetime.now().strftime('%Y-%m-%d')
-                # Cap cleanup at yesterday (never clean today, matching nightly sync)
+                yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+                five_days_ago_str = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
+                # Cap at yesterday (never touch today's buckets)
                 last_txn_date_str = max(imported_dates) if imported_dates else None
                 if last_txn_date_str and last_txn_date_str >= today_str:
-                    last_txn_date_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+                    last_txn_date_str = yesterday_str
                 
                 if last_txn_date_str:
                     cleanup_count = 0
@@ -22346,32 +22414,87 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     )
                     
                     if has_quiltt_depository:
-                        # Delete income bucket entries
+                        # --- income_entries ---
+                        # Delete buckets whose original date is > 5 days old
                         _sync_cursor.execute("""
                             DELETE ie FROM income_entries ie
                             JOIN income_categories ic ON ie.category_id = ic.id
                             WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date <= %s
-                        """, (user_id, last_txn_date_str))
-                        cleanup_count += _sync_cursor.rowcount
+                              AND ie.original_date IS NOT NULL AND ie.original_date < %s
+                        """, (user_id, last_txn_date_str, five_days_ago_str))
+                        deleted_inc = _sync_cursor.rowcount
+                        if deleted_inc > 0:
+                            app.logger.info(f"[BUCKET-PUSH] Deleted {deleted_inc} income buckets > 5 days late for user {user_id}")
+                        cleanup_count += deleted_inc
                         
-                        # Delete expense bucket entries
+                        # Push remaining income buckets to today
+                        _sync_cursor.execute("""
+                            UPDATE income_entries ie
+                            JOIN income_categories ic ON ie.category_id = ic.id
+                            SET ie.original_date = COALESCE(ie.original_date, ie.date),
+                                ie.date = %s
+                            WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date <= %s
+                        """, (today_str, user_id, last_txn_date_str))
+                        pushed_inc = _sync_cursor.rowcount
+                        if pushed_inc > 0:
+                            app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_inc} income buckets to {today_str} for user {user_id}")
+                        cleanup_count += pushed_inc
+                        
+                        # --- expense_entries ---
+                        # Delete buckets whose original date is > 5 days old
                         _sync_cursor.execute("""
                             DELETE ee FROM expense_entries ee
                             JOIN expense_categories ec ON ee.category_id = ec.id
                             WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date <= %s
-                        """, (user_id, last_txn_date_str))
-                        cleanup_count += _sync_cursor.rowcount
+                              AND ee.original_date IS NOT NULL AND ee.original_date < %s
+                        """, (user_id, last_txn_date_str, five_days_ago_str))
+                        deleted_exp = _sync_cursor.rowcount
+                        if deleted_exp > 0:
+                            app.logger.info(f"[BUCKET-PUSH] Deleted {deleted_exp} expense buckets > 5 days late for user {user_id}")
+                        cleanup_count += deleted_exp
+                        
+                        # Push remaining expense buckets to today
+                        _sync_cursor.execute("""
+                            UPDATE expense_entries ee
+                            JOIN expense_categories ec ON ee.category_id = ec.id
+                            SET ee.original_date = COALESCE(ee.original_date, ee.date),
+                                ee.date = %s
+                            WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date <= %s
+                        """, (today_str, user_id, last_txn_date_str))
+                        pushed_exp = _sync_cursor.rowcount
+                        if pushed_exp > 0:
+                            app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_exp} expense buckets to {today_str} for user {user_id}")
+                        cleanup_count += pushed_exp
                     
-                    # Delete Quiltt-linked credit expense buckets
+                    # --- c_expense_entries (Quiltt-linked credit accounts) ---
+                    # Delete Quiltt credit buckets whose original date is > 5 days old
                     _sync_cursor.execute("""
                         DELETE ce FROM c_expense_entries ce
                         JOIN c_expense_categories cec ON ce.category_id = cec.id
                         JOIN credit_accounts ca ON cec.account_id = ca.id
                         WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date <= %s AND ca.is_quiltt = 1
-                    """, (user_id, last_txn_date_str))
-                    cleanup_count += _sync_cursor.rowcount
+                          AND ce.original_date IS NOT NULL AND ce.original_date < %s
+                    """, (user_id, last_txn_date_str, five_days_ago_str))
+                    deleted_ce = _sync_cursor.rowcount
+                    if deleted_ce > 0:
+                        app.logger.info(f"[BUCKET-PUSH] Deleted {deleted_ce} credit buckets > 5 days late for user {user_id}")
+                    cleanup_count += deleted_ce
                     
-                    # Convert non-Quiltt credit expense buckets to regular entries
+                    # Push remaining Quiltt credit buckets to today
+                    _sync_cursor.execute("""
+                        UPDATE c_expense_entries ce
+                        JOIN c_expense_categories cec ON ce.category_id = cec.id
+                        JOIN credit_accounts ca ON cec.account_id = ca.id
+                        SET ce.original_date = COALESCE(ce.original_date, ce.date),
+                            ce.date = %s
+                        WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date <= %s AND ca.is_quiltt = 1
+                    """, (today_str, user_id, last_txn_date_str))
+                    pushed_ce = _sync_cursor.rowcount
+                    if pushed_ce > 0:
+                        app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_ce} credit buckets to {today_str} for user {user_id}")
+                    cleanup_count += pushed_ce
+                    
+                    # Convert non-Quiltt credit expense buckets to regular entries (unchanged)
                     _sync_cursor.execute("""
                         UPDATE c_expense_entries ce
                         JOIN c_expense_categories cec ON ce.category_id = cec.id
@@ -22383,14 +22506,14 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     
                     _sync_conn.commit()
                     if cleanup_count > 0:
-                        app.logger.info(f"[WEBHOOK-SYNC] Cleaned up {cleanup_count} bucket entries for user {user_id} on dates <= {last_txn_date_str}")
+                        app.logger.info(f"[WEBHOOK-SYNC] Bucket push/cleanup: {cleanup_count} entries processed for user {user_id}")
             except Exception as bucket_err:
-                app.logger.error(f"[WEBHOOK-SYNC] Error cleaning up bucket entries: {bucket_err}", exc_info=True)
+                app.logger.error(f"[WEBHOOK-SYNC] Error in bucket push/cleanup: {bucket_err}", exc_info=True)
                 try:
                     _sync_conn.rollback()
                 except Exception:
                     pass
-        # --- END CLEANUP BUCKET ENTRIES ---
+        # --- END PUSH FORWARD BUCKET ENTRIES ---
         
         # Close the MySQL connection used for direct writes
         try:

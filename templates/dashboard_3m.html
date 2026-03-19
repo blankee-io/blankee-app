@@ -2567,6 +2567,16 @@
             cell.appendChild(container);
         }
 
+        function addBucketLateBadge(cell, entry) {
+            if (!entry || !entry.has_bucket || !entry.max_days_late || entry.max_days_late <= 0) return;
+            cell.style.position = 'relative';
+            const badge = document.createElement('span');
+            badge.className = 'bucket-late-badge';
+            badge.textContent = entry.max_days_late;
+            badge.title = `This recurring entry is ${entry.max_days_late} day${entry.max_days_late > 1 ? 's' : ''} late`;
+            cell.appendChild(badge);
+        }
+
         function populateIncomeData() {
             const monthEntriesMap = {}; // Map to track entries for each month-category
 
@@ -2579,7 +2589,7 @@
                 const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                 if (!monthEntriesMap[monthKey]) {
-                    monthEntriesMap[monthKey] = { total: 0, processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
+                    monthEntriesMap[monthKey] = { total: 0, processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0, max_days_late: 0 };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                 // Convert processed to boolean and check if all entries are processed
@@ -2595,6 +2605,9 @@
                     monthEntriesMap[monthKey].has_bucket = true;
                     monthEntriesMap[monthKey].bucket_amount += parseFloat(entry.bucket_amount) || 0;
                     monthEntriesMap[monthKey].original_amount = parseFloat(entry.original_amount) || 0;
+                    if (entry.max_days_late && entry.max_days_late > monthEntriesMap[monthKey].max_days_late) {
+                        monthEntriesMap[monthKey].max_days_late = entry.max_days_late;
+                    }
                 }
             });
 
@@ -2628,6 +2641,7 @@
                         }
                         // Update bucket progress bar
                         updateBucketProgressBar(td, monthEntriesMap[monthKey]);
+                        addBucketLateBadge(td, monthEntriesMap[monthKey]);
                     } else {
                         if (input) input.value = '';
                         td.removeAttribute('data-processed');
@@ -2653,7 +2667,7 @@
                 const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                 if (!monthEntriesMap[monthKey]) {
-                    monthEntriesMap[monthKey] = { total: 0, processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
+                    monthEntriesMap[monthKey] = { total: 0, processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0, max_days_late: 0 };
                 }
                 monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                 // Convert processed to boolean and check if all entries are processed
@@ -2669,6 +2683,9 @@
                     monthEntriesMap[monthKey].has_bucket = true;
                     monthEntriesMap[monthKey].bucket_amount += parseFloat(entry.bucket_amount) || 0;
                     monthEntriesMap[monthKey].original_amount = parseFloat(entry.original_amount) || 0;
+                    if (entry.max_days_late && entry.max_days_late > monthEntriesMap[monthKey].max_days_late) {
+                        monthEntriesMap[monthKey].max_days_late = entry.max_days_late;
+                    }
                 }
             });
 
@@ -2702,6 +2719,7 @@
                         }
                         // Update bucket progress bar
                         updateBucketProgressBar(td, monthEntriesMap[monthKey]);
+                        addBucketLateBadge(td, monthEntriesMap[monthKey]);
                     } else {
                         if (input) input.value = '';
                         td.removeAttribute('data-processed');
@@ -2731,7 +2749,7 @@
                     const monthKey = `${startOfMonth.toISOString()}_${categoryId}`;
 
                     if (!monthEntriesMap[monthKey]) {
-                        monthEntriesMap[monthKey] = { total: 0, processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0 };
+                        monthEntriesMap[monthKey] = { total: 0, processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], has_bucket: false, bucket_amount: 0, original_amount: 0, max_days_late: 0 };
                     }
                     monthEntriesMap[monthKey].total += parseFloat(entry.total_amount) || 0;
                     // Convert processed to boolean and check if all entries are processed
@@ -2747,6 +2765,9 @@
                         monthEntriesMap[monthKey].has_bucket = true;
                         monthEntriesMap[monthKey].bucket_amount += parseFloat(entry.bucket_amount) || 0;
                         monthEntriesMap[monthKey].original_amount = parseFloat(entry.original_amount) || 0;
+                        if (entry.max_days_late && entry.max_days_late > monthEntriesMap[monthKey].max_days_late) {
+                            monthEntriesMap[monthKey].max_days_late = entry.max_days_late;
+                        }
                     }
                 });
 
@@ -2780,6 +2801,7 @@
                             }
                             // Update bucket progress bar
                             updateBucketProgressBar(td, monthEntriesMap[monthKey]);
+                            addBucketLateBadge(td, monthEntriesMap[monthKey]);
                         } else {
                             if (input) input.value = '';
                             td.removeAttribute('data-processed');

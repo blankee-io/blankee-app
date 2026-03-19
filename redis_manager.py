@@ -1056,6 +1056,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             'recurring_id': recurring_id,
                             'is_bucket': int(row.get('is_bucket', 0)),
                             'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                            'original_date': row.get('original_date'),
                             'processed': int(row.get('processed', 0)),
                             'pending': int(row.get('pending', 0)),
                             'auto_confirmed': int(row.get('auto_confirmed', 0)),
@@ -1071,6 +1072,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         recurring_id,
                         int(row.get('is_bucket', 0)),
                         float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                        row.get('original_date'),
                         int(row.get('processed', 0)),
                         int(row.get('pending', 0)),
                         int(row.get('auto_confirmed', 0)),
@@ -1091,8 +1093,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     for entry in temp_id_entries:
                         cursor.execute("""
-                            INSERT INTO income_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, is_auto_adjustment)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO income_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, pending, auto_confirmed, is_auto_adjustment)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             entry['category_id'],
                             entry['date'],
@@ -1100,6 +1102,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             entry['recurring_id'],
                             entry['is_bucket'],
                             entry['original_amount'],
+                            entry['original_date'],
                             entry['processed'],
                             entry['pending'],
                             entry['auto_confirmed'],
@@ -1136,8 +1139,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         logger.info(f"[FLUSH DEBUG] income_entries row {i}: id={data[0]}, category={data[1]}, date={data[2]}, amount={data[3]}, recurring_id={data[4]} (type: {type(data[4])}), is_bucket={data[5]}, original_amount={data[6]}, processed={data[7]}, pending={data[8]}, auto_confirmed={data[9]}, is_auto_adjustment={data[10]}")
                     
                     cursor.executemany("""
-                        INSERT INTO income_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, is_auto_adjustment)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO income_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, pending, auto_confirmed, is_auto_adjustment)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
@@ -1145,6 +1148,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             recurring_id = VALUES(recurring_id),
                             is_bucket = VALUES(is_bucket),
                             original_amount = VALUES(original_amount),
+                            original_date = VALUES(original_date),
                             pending = VALUES(pending),
                             auto_confirmed = VALUES(auto_confirmed),
                             is_auto_adjustment = VALUES(is_auto_adjustment)
@@ -1225,6 +1229,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             'recurring_id': recurring_id,
                             'is_bucket': int(row.get('is_bucket', 0)),
                             'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                            'original_date': row.get('original_date'),
                             'processed': int(row.get('processed', 0)),
                             'bud_item_id': row.get('bud_item_id'),
                             'pending': int(row.get('pending', 0)),
@@ -1241,6 +1246,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         recurring_id,
                         int(row.get('is_bucket', 0)),
                         float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                        row.get('original_date'),
                         int(row.get('processed', 0)),
                         row.get('bud_item_id'),
                         int(row.get('pending', 0)),
@@ -1262,8 +1268,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     for entry in temp_id_entries:
                         cursor.execute("""
-                            INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             entry['category_id'],
                             entry['date'],
@@ -1271,6 +1277,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             entry['recurring_id'],
                             entry['is_bucket'],
                             entry['original_amount'],
+                            entry['original_date'],
                             entry['processed'],
                             entry['bud_item_id'],
                             entry['pending'],
@@ -1302,8 +1309,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 if batch_data:
                     cursor.executemany("""
-                        INSERT INTO expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
@@ -1311,6 +1318,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             recurring_id = VALUES(recurring_id),
                             is_bucket = VALUES(is_bucket),
                             original_amount = VALUES(original_amount),
+                            original_date = VALUES(original_date),
                             bud_item_id = VALUES(bud_item_id),
                             pending = VALUES(pending),
                             auto_confirmed = VALUES(auto_confirmed),
@@ -1397,6 +1405,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             'recurring_id': recurring_id,
                             'is_bucket': int(row.get('is_bucket', 0)),
                             'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                            'original_date': row.get('original_date'),
                             'processed': int(row.get('processed', 0)),
                             'bud_item_id': row.get('bud_item_id'),
                             'pending': int(row.get('pending', 0)),
@@ -1413,6 +1422,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         recurring_id,
                         int(row.get('is_bucket', 0)),
                         float(row.get('original_amount')) if row.get('original_amount') is not None else None,
+                        row.get('original_date'),
                         int(row.get('processed', 0)),
                         row.get('bud_item_id'),
                         int(row.get('pending', 0)),
@@ -1434,8 +1444,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     for entry in temp_id_entries:
                         cursor.execute("""
-                            INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             entry['category_id'],
                             entry['date'],
@@ -1443,6 +1453,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             entry['recurring_id'],
                             entry['is_bucket'],
                             entry['original_amount'],
+                            entry['original_date'],
                             entry['processed'],
                             entry['bud_item_id'],
                             entry['pending'],
@@ -1474,8 +1485,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 if batch_data:
                     cursor.executemany("""
-                        INSERT INTO c_expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO c_expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
@@ -1483,6 +1494,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             recurring_id = VALUES(recurring_id),
                             is_bucket = VALUES(is_bucket),
                             original_amount = VALUES(original_amount),
+                            original_date = VALUES(original_date),
                             bud_item_id = VALUES(bud_item_id),
                             pending = VALUES(pending),
                             auto_confirmed = VALUES(auto_confirmed),
