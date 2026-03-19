@@ -21601,7 +21601,7 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute("""
-                    SELECT id, account_id, is_auto_adjustment FROM c_expense_categories cec
+                    SELECT cec.id, cec.account_id, cec.is_auto_adjustment FROM c_expense_categories cec
                     JOIN credit_accounts ca ON cec.account_id = ca.id
                     WHERE ca.user_id = %s
                 """, (user_id,))
