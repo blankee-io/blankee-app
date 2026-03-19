@@ -538,39 +538,21 @@ class QuilttClient:
                 break
         
         if all_transactions:
-            transactions = all_transactions
-            logger.info(f"[NTROPY] Total transactions fetched: {len(transactions)}")
+            logger.info(f"[NTROPY] Total transactions fetched: {len(all_transactions)}")
             
-            # Filter out LIABILITY account transactions (credit cards, loans, mortgages)
-            filtered_transactions = []
-            for txn in transactions:
-                account = txn.get('account', {})
-                account_type = account.get('type', '').upper()
-                
-                # Skip LIABILITY accounts (credit cards, loans, mortgages)
-                if account_type == 'LIABILITY':
-                    logger.debug(f"Skipping transaction from LIABILITY account: {account.get('id')}")
-                    continue
-                    
-                filtered_transactions.append(txn)
+            # Log account type breakdown for visibility
+            type_counts = {}
+            for txn in all_transactions:
+                acct = txn.get('account', {})
+                atype = acct.get('type', 'UNKNOWN').upper()
+                type_counts[atype] = type_counts.get(atype, 0) + 1
+            logger.info(f"[NTROPY] Account type breakdown: {type_counts}")
             
-            logger.info(f"[NTROPY] Retrieved {len(filtered_transactions)} transactions (filtered from {len(transactions)} total, excluded {len(transactions) - len(filtered_transactions)} LIABILITY transactions)")
+            # Log first transaction as sample
+            sample = all_transactions[0]
+            logger.info(f"Sample transaction: {sample.get('description')} - Amount: {sample.get('amount')}")
             
-            if len(filtered_transactions) == 0:
-                logger.warning("[NTROPY] No transactions after filtering - all were LIABILITY accounts or filter mismatch")
-                if account_ids:
-                    logger.warning(f"Requested account IDs: {account_ids}")
-                    logger.warning("First 3 transaction account IDs from response:")
-                    for i, txn in enumerate(transactions[:3]):
-                        account = txn.get('account', {})
-                        logger.warning(f"  Transaction {i+1}: account_id={account.get('id')}, type={account.get('type')}")
-            
-            if filtered_transactions:
-                # Log first transaction as sample
-                sample = filtered_transactions[0]
-                logger.info(f"Sample transaction: {sample.get('description')} - Amount: {sample.get('amount')}")
-            
-            return filtered_transactions
+            return all_transactions
         else:
             logger.info("[NTROPY] No transactions found in any page")
         
