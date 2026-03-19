@@ -21450,42 +21450,48 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
             app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No remainder for {target_date_str}, skipping checking adjustment")
             return
         
-        diff = float(bank_balance) - current_remainder
+        # Remove ALL existing auto-adjustments from BOTH tables (match by category_id, not entry flag)
+        existing_income_adj_total = 0.0
+        existing_expense_adj_total = 0.0
         
-        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Checking ({account_name}): Remainder=${current_remainder:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
-        
-        if abs(diff) < 0.01:
-            return
-        
-        # Create adjustment entry
-        entry_type_table = 'income_entries' if diff > 0 else 'expense_entries'
-        cat_id = income_cat_id if diff > 0 else expense_cat_id
-        adj_amount = abs(diff)
-        
-        # Duplicate protection: remove existing auto-adjustments from BOTH tables for this date
-        opposite_table = 'expense_entries' if diff > 0 else 'income_entries'
-        opposite_cat_id = expense_cat_id if diff > 0 else income_cat_id
-        
-        for tbl, cid in [(entry_type_table, cat_id), (opposite_table, opposite_cat_id)]:
+        for tbl, cid, side in [('income_entries', income_cat_id, 'income'), ('expense_entries', expense_cat_id, 'expense')]:
             tbl_key = f"{tbl}:v1:{user_id}"
             cached = _redis_client.get(tbl_key) if app.config.get('REDIS_OK') else None
             tbl_entries = json.loads(cached) if cached else []
             
             existing_adj = [
                 e for e in tbl_entries
-                if e.get('is_auto_adjustment') == 1
-                and int(e.get('category_id', 0)) == cid
+                if int(e.get('category_id', 0)) == cid
                 and str(e.get('date', ''))[:10] == target_date_str
             ]
             if existing_adj:
+                adj_total = sum(float(e.get('amount', 0)) for e in existing_adj)
+                if side == 'income':
+                    existing_income_adj_total = adj_total
+                else:
+                    existing_expense_adj_total = adj_total
                 tbl_entries = [e for e in tbl_entries if e not in existing_adj]
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Removing {len(existing_adj)} existing adjustment(s) from {tbl} for {account_name} on {target_date_str}")
+                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Removing {len(existing_adj)} existing adjustment(s) totaling ${adj_total:.2f} from {tbl} for {account_name} on {target_date_str}")
                 _redis_client.setex(tbl_key, PERSISTENT_CACHE_TTL, json.dumps(tbl_entries, cls=DecimalEncoder))
                 dirty_key = f"dirty_tables:{user_id}"
                 _redis_client.sadd(dirty_key, tbl)
                 _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
-        # Now create the new adjustment in the correct table
+        # Calculate natural remainder (without any auto-adjustments)
+        natural_remainder = current_remainder - existing_income_adj_total + existing_expense_adj_total
+        diff = float(bank_balance) - natural_remainder
+        
+        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Checking ({account_name}): Remainder=${current_remainder:.2f}, Natural=${natural_remainder:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
+        
+        if abs(diff) < 0.01:
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] No adjustment needed for {account_name} (delta < $0.01)")
+            return
+        
+        # Create adjustment entry in the correct table
+        entry_type_table = 'income_entries' if diff > 0 else 'expense_entries'
+        cat_id = income_cat_id if diff > 0 else expense_cat_id
+        adj_amount = abs(diff)
+        
         redis_key = f"{entry_type_table}:v1:{user_id}"
         cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
         entries = json.loads(cached) if cached else []
@@ -21693,27 +21699,56 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
         
         app.logger.info(f"[WEBHOOK-AUTOBALANCE] Credit ({account_name}): Yesterday=${day_before_balance:.2f}, Natural=${natural_balance:.2f}, Bank=${bank_float:.2f}, Diff=${diff:.2f}")
         
+        # Always clean up existing auto-adjustments from BOTH c_expense and c_payment FIRST
+        # Match by category_id (not entry is_auto_adjustment flag, which may not be set on old entries)
+        
+        # Clean c_expense_entries for this account's auto-adj category
+        ce_key = f"c_expense_entries:v1:{user_id}"
+        cached = _redis_client.get(ce_key) if app.config.get('REDIS_OK') else None
+        ce_entries = json.loads(cached) if cached else []
+        existing_ce_adj = [
+            e for e in ce_entries
+            if int(e.get('category_id', 0)) == auto_adj_cat_id
+            and str(e.get('date', ''))[:10] == target_date_str
+        ]
+        if existing_ce_adj:
+            ce_entries = [e for e in ce_entries if e not in existing_ce_adj]
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Removing {len(existing_ce_adj)} existing credit expense adjustment(s) for {account_name} on {target_date_str}")
+            _redis_client.setex(ce_key, PERSISTENT_CACHE_TTL, json.dumps(ce_entries, cls=DecimalEncoder))
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, 'c_expense_entries')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        # Clean c_payment_entries for this account (auto-adj payments have no recurring_id)
+        cp_key = f"c_payment_entries:v1:{user_id}"
+        cached = _redis_client.get(cp_key) if app.config.get('REDIS_OK') else None
+        cp_entries = json.loads(cached) if cached else []
+        existing_cp_adj = [
+            e for e in cp_entries
+            if int(e.get('account_id', 0)) == account_id
+            and str(e.get('date', ''))[:10] == target_date_str
+            and e.get('recurring_id') is None
+            and e.get('is_auto_adjustment') == 1
+        ]
+        if existing_cp_adj:
+            cp_entries = [e for e in cp_entries if e not in existing_cp_adj]
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Removing {len(existing_cp_adj)} existing credit payment adjustment(s) for {account_name} on {target_date_str}")
+            _redis_client.setex(cp_key, PERSISTENT_CACHE_TTL, json.dumps(cp_entries, cls=DecimalEncoder))
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, 'c_payment_entries')
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
         if abs(diff) < 0.01:
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] No adjustment needed for {account_name} (delta < $0.01)")
             return
         
         adjustment_amount = abs(diff)
         
         if diff > 0:
             # Balance needs to go UP → create expense entry
-            redis_key = f"c_expense_entries:v1:{user_id}"
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            # Re-read since we may have modified it above
+            cached = _redis_client.get(ce_key) if app.config.get('REDIS_OK') else None
             entries = json.loads(cached) if cached else []
-            
-            # Duplicate protection: remove existing auto-adjustment for this date and category
-            existing_adj = [
-                e for e in entries
-                if e.get('is_auto_adjustment') == 1
-                and int(e.get('category_id', 0)) == auto_adj_cat_id
-                and str(e.get('date', ''))[:10] == target_date_str
-            ]
-            if existing_adj:
-                entries = [e for e in entries if e not in existing_adj]
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Replacing {len(existing_adj)} existing credit expense adjustment(s) for {account_name} on {target_date_str}")
             
             temp_id = -(int(time.time() * 1000) % 1000000000)
             entries.append({
@@ -21729,7 +21764,7 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
                 'is_auto_adjustment': 1
             })
             
-            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+            _redis_client.setex(ce_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
             dirty_key = f"dirty_tables:{user_id}"
             _redis_client.sadd(dirty_key, 'c_expense_entries')
             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
@@ -21737,21 +21772,9 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
             app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created expense adjustment +${adjustment_amount:.2f} for {account_name} on {target_date_str}")
         else:
             # Balance needs to go DOWN → create payment entry
-            redis_key = f"c_payment_entries:v1:{user_id}"
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            # Re-read since we may have modified it above
+            cached = _redis_client.get(cp_key) if app.config.get('REDIS_OK') else None
             entries = json.loads(cached) if cached else []
-            
-            # Duplicate protection: remove existing auto-adjustment payment for this date and account
-            existing_adj = [
-                e for e in entries
-                if int(e.get('account_id', 0)) == account_id
-                and str(e.get('date', ''))[:10] == target_date_str
-                and e.get('recurring_id') is None
-                and e.get('processed') == 1
-            ]
-            if existing_adj:
-                entries = [e for e in entries if e not in existing_adj]
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Replacing {len(existing_adj)} existing credit payment adjustment(s) for {account_name} on {target_date_str}")
             
             temp_id = -(int(time.time() * 1000) % 1000000000)
             entries.append({
@@ -21760,10 +21783,11 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
                 'date': target_date_str,
                 'amount': float(adjustment_amount),
                 'recurring_id': None,
-                'processed': 1
+                'processed': 1,
+                'is_auto_adjustment': 1
             })
             
-            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
+            _redis_client.setex(cp_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
             dirty_key = f"dirty_tables:{user_id}"
             _redis_client.sadd(dirty_key, 'c_payment_entries')
             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
