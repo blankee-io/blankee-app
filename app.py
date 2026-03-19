@@ -21569,15 +21569,31 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
 
 def _webhook_savings_adjustment(user_id, bank_balance, target_date_str, quiltt_account_id):
     """Update savings adjustment to match bank balance.
-    MySQL-direct: all reads and writes go to MySQL. Caller handles dehydrate/rehydrate."""
+    Reads current savings from Redis (where recalculation just wrote it), falls back to MySQL.
+    Writes adjustment directly to MySQL. Caller handles dehydrate/rehydrate."""
     try:
+        # Read current savings from Redis first (recalculation just updated it there)
+        current_savings = None
+        savings_from_redis = _get_savings_entries_from_redis(user_id)
+        if savings_from_redis:
+            for entry in savings_from_redis:
+                entry_date = entry.get('date', '')
+                if isinstance(entry_date, str):
+                    if entry_date == target_date_str:
+                        current_savings = float(entry.get('amount', 0))
+                        break
+                elif hasattr(entry_date, 'isoformat') and entry_date.isoformat() == target_date_str:
+                    current_savings = float(entry.get('amount', 0))
+                    break
+        
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
             
-            # Get today's current savings
-            cursor.execute("SELECT amount FROM savings_entries WHERE user_id = %s AND date = %s", (user_id, target_date_str))
-            row = cursor.fetchone()
-            current_savings = float(row[0]) if row and row[0] is not None else 0.0
+            # Fall back to MySQL if Redis didn't have it
+            if current_savings is None:
+                cursor.execute("SELECT amount FROM savings_entries WHERE user_id = %s AND date = %s", (user_id, target_date_str))
+                row = cursor.fetchone()
+                current_savings = float(row[0]) if row and row[0] is not None else 0.0
             
             # Get existing adjustment for today
             cursor.execute("SELECT id, amount FROM savings_adjustments WHERE user_id = %s AND date = %s", (user_id, target_date_str))
