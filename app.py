@@ -377,8 +377,17 @@ def inject_unread_notifications():
     if current_user.is_authenticated:
         data_version = _get_data_version(current_user.id)
 
+    # Get unread feedback count (set by Fider webhook — stored as a SET of post numbers)
+    unread_feedback_count = 0
+    if current_user.is_authenticated and app.config.get('REDIS_OK'):
+        try:
+            unread_feedback_count = _redis_client.scard(f"feedback_unread:{current_user.id}")
+        except Exception:
+            pass
+
     return dict(
         unread_notifications_count=unread_count,
+        unread_feedback_count=unread_feedback_count,
         nav_first_name=first_name,
         nav_last_name=last_name,
         has_quiltt_accounts=has_quiltt_accounts,
@@ -25787,7 +25796,7 @@ def quiltt_webhook():
 ############################### FEEDBACK (FIDER) ###########################################
 ############################################################################################
 
-from feedback_client import get_fider_client
+from feedback_client import get_fider_client, get_app_user_id_from_fider_id
 
 def _get_user_profile_meta(user_id: int):
     """Fetch user display data from Redis (preferred) or MySQL."""
@@ -25847,6 +25856,21 @@ def _get_fider_client_and_user():
 @app.route('/feedback')
 @login_required
 def feedback_page():
+    # Get the set of unread post numbers to pass to the frontend
+    unread_post_numbers = []
+    unread_comment_ids = {}
+    if app.config.get('REDIS_OK'):
+        try:
+            members = _redis_client.smembers(f"feedback_unread:{current_user.id}")
+            unread_post_numbers = [int(m.decode() if isinstance(m, bytes) else m) for m in members] if members else []
+            for pn in unread_post_numbers:
+                ckey = f"feedback_unread_comment:{current_user.id}:{pn}"
+                cvals = _redis_client.smembers(ckey)
+                if cvals:
+                    unread_comment_ids[str(pn)] = [int(v.decode() if isinstance(v, bytes) else v) for v in cvals]
+        except Exception:
+            pass
+
     meta = _get_user_profile_meta(current_user.id)
     return render_template(
         'feedback.html',
@@ -25854,6 +25878,8 @@ def feedback_page():
         first_name=meta.get('first_name'),
         last_name=meta.get('last_name'),
         landing_page=meta.get('landing_page', 'dashboard_3m'),
+        unread_post_numbers=unread_post_numbers,
+        unread_comment_ids=unread_comment_ids,
     )
 
 
@@ -25979,6 +26005,96 @@ def feedback_tags():
     except Exception as e:
         app.logger.error(f"[FIDER] tags error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/feedback/mark-read/<int:number>', methods=['POST'])
+@login_required
+def feedback_mark_read(number):
+    """Remove a post number from the user's unread feedback set."""
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.srem(f"feedback_unread:{current_user.id}", str(number))
+            _redis_client.delete(f"feedback_unread_comment:{current_user.id}:{number}")
+        except Exception:
+            pass
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/feedback/webhook', methods=['POST'])
+def feedback_webhook():
+    """Receive Fider new_comment webhook and increment unread badge for interested users."""
+    import hmac
+    # Validate webhook secret
+    webhook_secret = os.getenv('FIDER_WEBHOOK_SECRET', '')
+    if webhook_secret:
+        header_secret = request.headers.get('X-Webhook-Secret', '')
+        if not hmac.compare_digest(header_secret, webhook_secret):
+            app.logger.warning("[FIDER WEBHOOK] Invalid webhook secret")
+            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({'status': 'error', 'message': 'Invalid payload'}), 400
+
+    post_number = payload.get('post_number')
+    comment_author_id = payload.get('comment_author_id')
+    post_author_id = payload.get('post_author_id')
+
+    if not post_number or comment_author_id is None:
+        return jsonify({'status': 'error', 'message': 'Missing post_number or comment_author_id'}), 400
+
+    redis_client = _redis_client if app.config.get('REDIS_OK') else None
+    if not redis_client:
+        app.logger.warning("[FIDER WEBHOOK] Redis not available")
+        return jsonify({'status': 'error', 'message': 'Redis unavailable'}), 503
+
+    try:
+        client = get_fider_client()
+
+        # Collect all Fider user IDs who should get a badge
+        interested_fider_ids = set()
+
+        # Add post author
+        if post_author_id:
+            interested_fider_ids.add(int(post_author_id))
+
+        # Add all voters on this post
+        try:
+            voters = client.list_votes(int(post_number))
+            for vote in (voters if isinstance(voters, list) else []):
+                voter_user = vote.get('user') or {}
+                voter_id = voter_user.get('id')
+                if voter_id:
+                    interested_fider_ids.add(int(voter_id))
+        except Exception as e:
+            app.logger.error(f"[FIDER WEBHOOK] Error fetching voters for post {post_number}: {e}")
+
+        # Remove the comment author (they don't need a badge for their own comment)
+        interested_fider_ids.discard(int(comment_author_id))
+
+        comment_id = payload.get('comment_id')
+        ttl = 7 * 24 * 60 * 60
+
+        # Add post number to each interested user's unread SET
+        notified = 0
+        for fider_id in interested_fider_ids:
+            app_user_id = get_app_user_id_from_fider_id(fider_id, redis_client)
+            if app_user_id:
+                key = f"feedback_unread:{app_user_id}"
+                redis_client.sadd(key, str(post_number))
+                redis_client.expire(key, ttl)
+                if comment_id:
+                    ckey = f"feedback_unread_comment:{app_user_id}:{post_number}"
+                    redis_client.sadd(ckey, str(comment_id))
+                    redis_client.expire(ckey, ttl)
+                notified += 1
+
+        app.logger.info(f"[FIDER WEBHOOK] Post #{post_number}: notified {notified} users")
+        return jsonify({'status': 'ok', 'notified': notified})
+
+    except Exception as e:
+        app.logger.error(f"[FIDER WEBHOOK] Error processing webhook: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
 
 
 ##############################################################################
