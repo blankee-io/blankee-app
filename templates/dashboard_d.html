@@ -969,11 +969,12 @@
                     `;
                     incomeEntriesDiv.appendChild(incomeRow);
                     
-                    // Add progress bar for bucket entries
+                    // Add progress bar and late badge for bucket entries
                     if (entry.is_bucket == 1) {
                         const amountCell = incomeRow.querySelector('.dashboard-d-amount-cell');
                         if (amountCell) {
                             updateBucketProgressBar(amountCell, entry, 'income');
+                            addBucketLateBadge(amountCell, entry);
                         }
                     }
                 });
@@ -1046,11 +1047,12 @@
                     `;
                     expenseEntriesDiv.appendChild(expenseRow);
                     
-                    // Add progress bar for bucket entries
+                    // Add progress bar and late badge for bucket entries
                     if (entry.is_bucket == 1) {
                         const amountCell = expenseRow.querySelector('.dashboard-d-amount-cell');
                         if (amountCell) {
                             updateBucketProgressBar(amountCell, entry, 'expense');
+                            addBucketLateBadge(amountCell, entry);
                         }
                     }
                 });
@@ -1176,11 +1178,12 @@
                         `;
                         caDiv.appendChild(entryRow);
                         
-                        // Add progress bar for bucket entries
+                        // Add progress bar and late badge for bucket entries
                         if (entry.is_bucket == 1) {
                             const amountCell = entryRow.querySelector('.dashboard-d-amount-cell');
                             if (amountCell) {
                                 updateBucketProgressBar(amountCell, entry, 'c_expense');
+                                addBucketLateBadge(amountCell, entry);
                             }
                         }
                     });
@@ -2001,6 +2004,22 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             // Ensure cell has relative positioning
             cell.style.position = 'relative';
             cell.appendChild(container);
+        }
+        
+        // Helper: add a "days late" badge to a bucket entry's amount cell
+        function addBucketLateBadge(cell, entry) {
+            if (!entry || entry.is_bucket != 1 || !entry.original_date) return;
+            const origDate = new Date(entry.original_date + 'T00:00:00');
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const daysLate = Math.floor((today - origDate) / 86400000);
+            if (daysLate <= 0) return;
+            cell.style.position = 'relative';
+            const badge = document.createElement('span');
+            badge.className = 'bucket-late-badge';
+            badge.textContent = daysLate;
+            badge.title = `This recurring entry is ${daysLate} day${daysLate > 1 ? 's' : ''} late`;
+            cell.appendChild(badge);
         }
         
         // Function to dynamically create and add an entry row to the dashboard
