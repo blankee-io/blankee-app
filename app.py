@@ -21462,20 +21462,33 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
         cat_id = income_cat_id if diff > 0 else expense_cat_id
         adj_amount = abs(diff)
         
+        # Duplicate protection: remove existing auto-adjustments from BOTH tables for this date
+        opposite_table = 'expense_entries' if diff > 0 else 'income_entries'
+        opposite_cat_id = expense_cat_id if diff > 0 else income_cat_id
+        
+        for tbl, cid in [(entry_type_table, cat_id), (opposite_table, opposite_cat_id)]:
+            tbl_key = f"{tbl}:v1:{user_id}"
+            cached = _redis_client.get(tbl_key) if app.config.get('REDIS_OK') else None
+            tbl_entries = json.loads(cached) if cached else []
+            
+            existing_adj = [
+                e for e in tbl_entries
+                if e.get('is_auto_adjustment') == 1
+                and int(e.get('category_id', 0)) == cid
+                and str(e.get('date', ''))[:10] == target_date_str
+            ]
+            if existing_adj:
+                tbl_entries = [e for e in tbl_entries if e not in existing_adj]
+                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Removing {len(existing_adj)} existing adjustment(s) from {tbl} for {account_name} on {target_date_str}")
+                _redis_client.setex(tbl_key, PERSISTENT_CACHE_TTL, json.dumps(tbl_entries, cls=DecimalEncoder))
+                dirty_key = f"dirty_tables:{user_id}"
+                _redis_client.sadd(dirty_key, tbl)
+                _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        # Now create the new adjustment in the correct table
         redis_key = f"{entry_type_table}:v1:{user_id}"
         cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
         entries = json.loads(cached) if cached else []
-        
-        # Duplicate protection: remove any existing auto-adjustment for this date and category
-        existing_adj = [
-            e for e in entries
-            if e.get('is_auto_adjustment') == 1
-            and int(e.get('category_id', 0)) == cat_id
-            and str(e.get('date', ''))[:10] == target_date_str
-        ]
-        if existing_adj:
-            entries = [e for e in entries if e not in existing_adj]
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Replacing {len(existing_adj)} existing adjustment(s) for {account_name} on {target_date_str}")
         
         temp_id = -(int(time.time() * 1000) % 1000000000)
         new_entry = {
@@ -22150,6 +22163,20 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         from quiltt_redis import get_uncategorized_category_id, get_blankee_credit_account_for_quiltt_account
         quiltt_account_map = {acc.get('account_id'): acc for acc in sync_enabled_accounts}
         
+        # Build account_id → created_at map to enforce account creation date
+        account_created_map = {}
+        for acc in sync_enabled_accounts:
+            created = acc.get('created_at')
+            if created:
+                if isinstance(created, str):
+                    try:
+                        created = datetime.strptime(created[:10], '%Y-%m-%d').date()
+                    except (ValueError, TypeError):
+                        created = None
+                elif hasattr(created, 'date'):
+                    created = created.date()
+            account_created_map[acc.get('account_id')] = created
+        
         # --- DEHYDRATE FOR MySQL-DIRECT WRITES ---
         # Dehydrate user so all reads come from MySQL (source of truth).
         # After MySQL-direct writes are done, we rehydrate to sync Redis.
@@ -22248,6 +22275,18 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             is_expense = (entry_type_raw != 'CREDIT')  # DEBIT or empty = expense
             
             app.logger.info(f"Processing txn {txn_id}: amount={txn.get('amount')}, entryType={entry_type_raw}, is_expense={is_expense}")
+            
+            # Skip transactions dated before the account was connected
+            acct_created = account_created_map.get(account_id)
+            if acct_created and date:
+                txn_date_obj = None
+                try:
+                    txn_date_obj = datetime.strptime(str(date)[:10], '%Y-%m-%d').date() if isinstance(date, str) else date
+                except (ValueError, TypeError):
+                    pass
+                if txn_date_obj and txn_date_obj < acct_created:
+                    app.logger.debug(f"Skipping {txn_id} - date {txn_date_obj} before account created {acct_created}")
+                    continue
             
             # Check if transaction already exists in Redis
             existing_txn = None
@@ -22613,22 +22652,22 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                 if entry_type == 'income':
                                     _sync_cursor.execute("""
                                         INSERT INTO income_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed)
-                                        VALUES (%s, %s, %s, NULL, 0, NULL, 0, 1, 0)
+                                        VALUES (%s, %s, %s, NULL, 0, NULL, 1, 1, 0)
                                     """, (category_id, date, amount))
                                 elif entry_type == 'expense':
                                     _sync_cursor.execute("""
                                         INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bud_item_id)
-                                        VALUES (%s, %s, %s, NULL, 0, NULL, 0, 1, 0, NULL)
+                                        VALUES (%s, %s, %s, NULL, 0, NULL, 1, 1, 0, NULL)
                                     """, (category_id, date, amount))
                                 elif entry_type == 'c_expense':
                                     _sync_cursor.execute("""
                                         INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bud_item_id)
-                                        VALUES (%s, %s, %s, NULL, 0, NULL, 0, 1, 0, NULL)
+                                        VALUES (%s, %s, %s, NULL, 0, NULL, 1, 1, 0, NULL)
                                     """, (category_id, date, amount))
                                 elif entry_type == 'c_payment':
                                     _sync_cursor.execute("""
                                         INSERT INTO c_payment_entries (account_id, date, amount, recurring_id, processed)
-                                        VALUES (%s, %s, %s, NULL, 0)
+                                        VALUES (%s, %s, %s, NULL, 1)
                                     """, (blankee_credit_account_id, date, amount))
                                 _sync_conn.commit()
                                 entry_id = _sync_cursor.lastrowid
