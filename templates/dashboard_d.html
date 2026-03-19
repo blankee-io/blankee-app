@@ -2357,24 +2357,32 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                 const input = currentCell.querySelector('input');
                 if (!input) return;
 
-                const processed = input.getAttribute('data-processed') === '1';
-                const newProcessed = processed ? '0' : '1';
-
                 // Gather necessary data for the request
                 const row = currentCell.closest('.dashboard-d-row');
                 const entryId = row.getAttribute('data-entry-id');
                 const categoryId = row.getAttribute('data-category-id');
-                const entryDate = new Date(row.getAttribute('data-date'));
+                const entryDateStr = row.getAttribute('data-date');
+                const entryDate = new Date(entryDateStr);
 
                 // Detect type: income, expense, or ca
                 let tableType;
+                let accountId = null;
                 if (row.classList.contains('dashboard-d-credit-row')) {
                     tableType = 'ca';
+                    accountId = row.getAttribute('data-account-id') || (row.closest('.dashboard-d-credit-account')?.getAttribute('data-account-id'));
                 } else if (row.closest('.dashboard-d-income-entries')) {
                     tableType = 'income';
                 } else {
                     tableType = 'expense';
                 }
+
+                // Block toggle if entry is locked by Quiltt
+                if (isEntryLockedByQuiltt(entryDateStr, categoryId, tableType, accountId)) {
+                    return;
+                }
+
+                const processed = input.getAttribute('data-processed') === '1';
+                const newProcessed = processed ? '0' : '1';
 
                 // AJAX call to update the backend with the new processed status
                 $.ajax({
@@ -2426,6 +2434,26 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                     if (!parentSection) {
                         return;
                     }
+
+                    // Check Quiltt lock before showing context menu
+                    const row = targetCell.closest('.dashboard-d-row');
+                    if (row) {
+                        const categoryId = row.getAttribute('data-category-id');
+                        const entryDateStr = row.getAttribute('data-date');
+                        let tableType, accountId = null;
+                        if (row.classList.contains('dashboard-d-credit-row')) {
+                            tableType = 'ca';
+                            accountId = row.getAttribute('data-account-id') || (row.closest('.dashboard-d-credit-account')?.getAttribute('data-account-id'));
+                        } else if (parentSection.classList.contains('dashboard-d-income-entries')) {
+                            tableType = 'income';
+                        } else {
+                            tableType = 'expense';
+                        }
+                        if (isEntryLockedByQuiltt(entryDateStr, categoryId, tableType, accountId)) {
+                            return; // Allow default context menu for locked entries
+                        }
+                    }
+
                     event.preventDefault();
                     event.stopPropagation();
 
@@ -2445,6 +2473,25 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                     const targetCell = event.target.closest('.dashboard-d-amount-cell');
                     if (!targetCell) {
                         return;
+                    }
+
+                    // Check Quiltt lock before allowing long-press toggle
+                    const row = targetCell.closest('.dashboard-d-row');
+                    if (row) {
+                        const categoryId = row.getAttribute('data-category-id');
+                        const entryDateStr = row.getAttribute('data-date');
+                        let tableType, accountId = null;
+                        if (row.classList.contains('dashboard-d-credit-row')) {
+                            tableType = 'ca';
+                            accountId = row.getAttribute('data-account-id') || (row.closest('.dashboard-d-credit-account')?.getAttribute('data-account-id'));
+                        } else if (row.closest('.dashboard-d-income-entries')) {
+                            tableType = 'income';
+                        } else {
+                            tableType = 'expense';
+                        }
+                        if (isEntryLockedByQuiltt(entryDateStr, categoryId, tableType, accountId)) {
+                            return;
+                        }
                     }
 
                     longPressTriggered = false; // Reset the flag

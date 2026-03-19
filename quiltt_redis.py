@@ -1501,6 +1501,23 @@ def get_quiltt_last_transaction_date(user_id: int) -> Optional[str]:
         except Exception as e:
             logger.error(f"Error fetching last txn date from MySQL for user {user_id}: {e}")
     
+    # Fallback: if no transactions at all, use earliest connection created_at date.
+    # This locks entries from the day the bank was connected even before any sync.
+    if last_date is None:
+        try:
+            connections = get_quiltt_connections(user_id)
+            earliest = None
+            for conn in connections:
+                created = conn.get('created_at')
+                if created:
+                    date_str_val = created.strftime('%Y-%m-%d') if hasattr(created, 'strftime') else str(created)[:10]
+                    if earliest is None or date_str_val < earliest:
+                        earliest = date_str_val
+            if earliest:
+                last_date = earliest
+        except Exception as e:
+            logger.error(f"Error fetching connection created_at fallback for user {user_id}: {e}")
+    
     # Cache the result
     if last_date and redis_client:
         try:

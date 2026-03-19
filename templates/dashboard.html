@@ -4874,17 +4874,13 @@
             // Function to toggle "Paid/Unpaid" status directly on long press
             function togglePaidStatus(targetCell) {
                 currentCell = targetCell;
-                const processed = currentCell.getAttribute('data-processed') === '1';
-                const newProcessed = processed ? '0' : '1';
-
-                currentCell.setAttribute('data-processed', newProcessed);
 
                 const categoryId = currentCell.closest('tr').getAttribute('data-category-id');
-                const fridayDate = new Date(currentCell.getAttribute('data-date'));
-                const { startOfWeek, endOfWeek } = calculateWeekRange(fridayDate);
+                const cellDateStr = currentCell.getAttribute('data-date');
 
                 // --- Detect table type: income, expense, or ca ---
                 let tableType = null;
+                let accountId = null;
                 const tbody = currentCell.closest('tbody');
                 if (tbody && tbody.id.startsWith('income')) {
                     tableType = 'income';
@@ -4892,7 +4888,21 @@
                     tableType = 'expense';
                 } else if (tbody && tbody.id.startsWith('ca-categories-body-')) {
                     tableType = 'ca';
+                    accountId = tbody.id.replace('ca-categories-body-', '');
                 }
+
+                // Block toggle if entry is locked by Quiltt
+                if (isEntryLockedByQuiltt(cellDateStr, categoryId, tableType, accountId)) {
+                    return;
+                }
+
+                const processed = currentCell.getAttribute('data-processed') === '1';
+                const newProcessed = processed ? '0' : '1';
+
+                currentCell.setAttribute('data-processed', newProcessed);
+
+                const fridayDate = new Date(cellDateStr);
+                const { startOfWeek, endOfWeek } = calculateWeekRange(fridayDate);
 
                 // AJAX call to update the backend with the new processed status
                 $.ajax({
@@ -4938,6 +4948,18 @@
                         return; // Not a cell, ignore
                     }
 
+                    // Check Quiltt lock before showing context menu
+                    const categoryId = targetCell.closest('tr')?.getAttribute('data-category-id');
+                    const cellDateStr = targetCell.getAttribute('data-date');
+                    let accountId = null;
+                    if (tableType === 'ca') {
+                        const tbody = targetCell.closest('tbody');
+                        accountId = tbody ? tbody.id.replace('ca-categories-body-', '') : null;
+                    }
+                    if (isEntryLockedByQuiltt(cellDateStr, categoryId, tableType, accountId)) {
+                        return; // Allow default context menu for locked entries
+                    }
+
                     event.preventDefault();
                     event.stopPropagation();
 
@@ -4958,6 +4980,24 @@
                 bodyElement.addEventListener('touchstart', function (event) {
                     const targetCell = event.target.closest('td'); // Ensure we're targeting a <td>
                     if (!targetCell) {
+                        return;
+                    }
+
+                    // Check Quiltt lock before allowing long-press toggle
+                    const categoryId = targetCell.closest('tr')?.getAttribute('data-category-id');
+                    const cellDateStr = targetCell.getAttribute('data-date');
+                    let lockTableType = null;
+                    let accountId = null;
+                    const tbody = targetCell.closest('tbody');
+                    if (tbody && tbody.id.startsWith('income')) {
+                        lockTableType = 'income';
+                    } else if (tbody && tbody.id.startsWith('expense')) {
+                        lockTableType = 'expense';
+                    } else if (tbody && tbody.id.startsWith('ca-categories-body-')) {
+                        lockTableType = 'ca';
+                        accountId = tbody.id.replace('ca-categories-body-', '');
+                    }
+                    if (isEntryLockedByQuiltt(cellDateStr, categoryId, lockTableType, accountId)) {
                         return;
                     }
 

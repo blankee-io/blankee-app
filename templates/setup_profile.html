@@ -1013,8 +1013,8 @@
                 }
             }
 
-            function pollForConnectionSync(attempt = 0, maxAttempts = 20) {
-                // Poll Quiltt API to check if connection is fully SYNCED (up to 20 attempts = 10 seconds)
+            function pollForConnectionSync(attempt = 0, maxAttempts = 360) {
+                // Poll Quiltt API to check if connection is fully SYNCED (up to 360 attempts = 3 minutes at 500ms)
                 $.ajax({
                     url: '/quiltt/connections?exclude_liability=true',
                     method: 'GET',
@@ -1053,9 +1053,43 @@
                                     pollForConnectionSync(attempt + 1, maxAttempts);
                                 }, 500);
                             } else {
-                                // Max attempts reached, proceed anyway
-                                showToast('Bank connection taking longer than expected. Balance data may not be available yet.', 'info');
-                                loadAccountSelection();
+                                // Max attempts reached — delete stuck connections and go back to bank connection step
+                                $('#setup-profile-loading-modal').hide();
+                                showToast('There was an issue with the bank connector. Please try again.', 'error', 6000);
+                                saveSetupStep(2);
+                                
+                                // Delete any stuck connections
+                                $.ajax({
+                                    url: '/quiltt/connections?exclude_liability=true',
+                                    method: 'GET',
+                                    success: function(connResponse) {
+                                        if (connResponse.status === 'success' && connResponse.connections) {
+                                            const stuck = connResponse.connections.filter(function(conn) {
+                                                return ['SYNCING', 'INITIALIZING', 'PENDING'].includes(conn.status);
+                                            });
+                                            if (stuck.length > 0) {
+                                                const deletePromises = stuck.map(function(conn) {
+                                                    return $.ajax({
+                                                        url: '/quiltt/delete',
+                                                        method: 'POST',
+                                                        contentType: 'application/json',
+                                                        data: JSON.stringify({ connection_id: conn.connection_id })
+                                                    });
+                                                });
+                                                Promise.all(deletePromises).finally(function() {
+                                                    $('#bank-connection-modal-setup').show();
+                                                });
+                                            } else {
+                                                $('#bank-connection-modal-setup').show();
+                                            }
+                                        } else {
+                                            $('#bank-connection-modal-setup').show();
+                                        }
+                                    },
+                                    error: function() {
+                                        $('#bank-connection-modal-setup').show();
+                                    }
+                                });
                             }
                         } else {
                             showToast('Unable to verify connection status. Continuing with manual setup.', 'error');
