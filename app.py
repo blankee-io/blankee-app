@@ -8938,27 +8938,34 @@ def update_income_order():
     order_data = request.json['order']
     user_id = current_user.id
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
+    # Build lookup: category id → new display_order
+    order_by_id = {int(item['id']): int(item['order']) for item in order_data if item.get('id')}
 
-        for item in order_data:
-            category_name = item['name']
-            display_order = item['order']
-            cursor.execute("""
-                UPDATE income_categories 
-                SET display_order = %s 
-                WHERE user_id = %s AND name = %s
-            """, (display_order, user_id, category_name))
-
-        conn.commit()
-        cursor.close()
-
-    # Clear Redis cache so new order is picked up
     try:
-        if _redis_client:
-            _redis_client.delete(f"income_categories:v1:{user_id}")
-    except Exception:
-        pass
+        redis_key = f"income_categories:v1:{user_id}"
+        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+        if cached:
+            categories = json.loads(cached)
+            for cat in categories:
+                cat_id = int(cat.get('id', 0))
+                if cat_id in order_by_id:
+                    cat['display_order'] = order_by_id[cat_id]
+            _redis_client.setex(redis_key, 604800, json.dumps(categories, cls=DecimalEncoder))
+            _redis_client.sadd(f"dirty_tables:{user_id}", 'income_categories')
+        else:
+            # Redis miss — fall back to direct MySQL update
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                for item in order_data:
+                    cursor.execute("""
+                        UPDATE income_categories SET display_order = %s
+                        WHERE user_id = %s AND id = %s
+                    """, (int(item['order']), user_id, int(item['id'])))
+                conn.commit()
+                cursor.close()
+    except Exception as e:
+        app.logger.error(f"[update_income_order] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to save order'}), 500
 
     return jsonify({'status': 'success'})
 
@@ -8968,45 +8975,67 @@ def update_expense_order():
     order_data = request.json['order']
     user_id = current_user.id
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
+    # Build lookup: category id → new display_order (and name for c_expense sync)
+    order_by_id = {int(item['id']): int(item['order']) for item in order_data if item.get('id')}
+    order_by_name = {item['name']: int(item['order']) for item in order_data if item.get('name')}
 
-        for item in order_data:
-            category_name = item['name']
-            display_order = item['order']
-            # Skip credit account payment categories — they have fixed display_order
-            cursor.execute("""
-                UPDATE expense_categories 
-                SET display_order = %s 
-                WHERE user_id = %s AND name = %s AND is_credit_account = 0
-            """, (display_order, user_id, category_name))
-
-        # Sync display_order to c_expense_categories across all credit accounts
-        cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
-        credit_accounts = cursor.fetchall()
-        if credit_accounts:
-            account_ids = [row[0] if isinstance(row, tuple) else row['id'] for row in credit_accounts]
-            for item in order_data:
-                category_name = item['name']
-                display_order = item['order']
-                for account_id in account_ids:
-                    cursor.execute("""
-                        UPDATE c_expense_categories
-                        SET display_order = %s
-                        WHERE account_id = %s AND name = %s
-                          AND is_interest = 0 AND is_auto_adjustment = 0
-                    """, (display_order, account_id, category_name))
-
-        conn.commit()
-        cursor.close()
-
-    # Clear Redis cache for c_expense_categories so new order is picked up
     try:
-        if _redis_client:
-            _redis_client.delete(f"c_expense_categories:v1:{user_id}")
-            _redis_client.delete(f"expense_categories:v1:{user_id}")
-    except Exception:
-        pass
+        if not app.config.get('REDIS_OK'):
+            raise Exception('Redis unavailable')
+
+        # Update expense_categories in Redis
+        exp_key = f"expense_categories:v1:{user_id}"
+        cached = _redis_client.get(exp_key)
+        if cached:
+            categories = json.loads(cached)
+            for cat in categories:
+                cat_id = int(cat.get('id', 0))
+                if cat_id in order_by_id and not cat.get('is_credit_account'):
+                    cat['display_order'] = order_by_id[cat_id]
+            _redis_client.setex(exp_key, 604800, json.dumps(categories, cls=DecimalEncoder))
+            _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_categories')
+
+        # Sync display_order to c_expense_categories in Redis (by name match)
+        ca_key = f"c_expense_categories:v1:{user_id}"
+        ca_cached = _redis_client.get(ca_key)
+        if ca_cached:
+            c_categories = json.loads(ca_cached)
+            changed = False
+            for cat in c_categories:
+                if cat.get('is_interest') or cat.get('is_auto_adjustment'):
+                    continue
+                new_order = order_by_name.get(cat.get('name'))
+                if new_order is not None:
+                    cat['display_order'] = new_order
+                    changed = True
+            if changed:
+                _redis_client.setex(ca_key, 604800, json.dumps(c_categories, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+
+        if not cached and not ca_cached:
+            # Full Redis miss — fall back to direct MySQL update
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                for item in order_data:
+                    cursor.execute("""
+                        UPDATE expense_categories SET display_order = %s
+                        WHERE user_id = %s AND id = %s AND is_credit_account = 0
+                    """, (int(item['order']), user_id, int(item['id'])))
+                cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
+                acct_rows = cursor.fetchall()
+                for item in order_data:
+                    for acct_row in acct_rows:
+                        acct_id = acct_row[0] if isinstance(acct_row, tuple) else acct_row['id']
+                        cursor.execute("""
+                            UPDATE c_expense_categories SET display_order = %s
+                            WHERE account_id = %s AND name = %s
+                              AND is_interest = 0 AND is_auto_adjustment = 0
+                        """, (int(item['order']), acct_id, item['name']))
+                conn.commit()
+                cursor.close()
+    except Exception as e:
+        app.logger.error(f"[update_expense_order] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to save order'}), 500
 
     return jsonify({'status': 'success'})
 
@@ -9015,24 +9044,40 @@ def update_expense_order():
 def update_ca_order():
     order_data = request.json['order']
     account_id = request.json.get('account_id')
+    user_id = current_user.id
 
     if not account_id or not order_data:
         return jsonify({'status': 'error', 'message': 'Missing account_id or order data'}), 400
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
+    order_by_id = {int(item['id']): int(item['order']) for item in order_data if item.get('id')}
 
-        for item in order_data:
-            category_name = item['name']
-            display_order = item['order']
-            cursor.execute("""
-                UPDATE c_expense_categories
-                SET display_order = %s
-                WHERE account_id = %s AND name = %s
-            """, (display_order, account_id, category_name))
-
-        conn.commit()
-        cursor.close()
+    try:
+        ca_key = f"c_expense_categories:v1:{user_id}"
+        cached = _redis_client.get(ca_key) if app.config.get('REDIS_OK') else None
+        if cached:
+            categories = json.loads(cached)
+            for cat in categories:
+                if int(cat.get('account_id', 0)) != int(account_id):
+                    continue
+                cat_id = int(cat.get('id', 0))
+                if cat_id in order_by_id:
+                    cat['display_order'] = order_by_id[cat_id]
+            _redis_client.setex(ca_key, 604800, json.dumps(categories, cls=DecimalEncoder))
+            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+        else:
+            # Redis miss — fall back to direct MySQL update
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor()
+                for item in order_data:
+                    cursor.execute("""
+                        UPDATE c_expense_categories SET display_order = %s
+                        WHERE account_id = %s AND id = %s
+                    """, (int(item['order']), account_id, int(item['id'])))
+                conn.commit()
+                cursor.close()
+    except Exception as e:
+        app.logger.error(f"[update_ca_order] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to save order'}), 500
 
     return jsonify({'status': 'success'})
 
