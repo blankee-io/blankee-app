@@ -4214,6 +4214,10 @@ transform: scale(1.2);
     cursor: move;
 }
 
+.ui-sortable-helper {
+    transition: none !important;
+}
+
 .sort-handle i {
     /* Adjust the icon size as needed */
     font-size: 15px; 
