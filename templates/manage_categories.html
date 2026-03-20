@@ -288,7 +288,19 @@
             let order = [];
             const tableId = type === 'income' ? 'income-manage-table' : 'expense-manage-table';
             const rows = $(`#${tableId} tbody tr`).get().reverse();
+
+            // For expenses, find the max display_order among credit account categories so regular categories start after them
             let orderNum = 1;
+            if (type === 'expense') {
+                let maxCreditOrder = 0;
+                expenseCategories.forEach(function(cat) {
+                    if (cat.is_credit_account == 1 && cat.display_order > maxCreditOrder) {
+                        maxCreditOrder = cat.display_order;
+                    }
+                });
+                orderNum = maxCreditOrder + 1;
+            }
+
             rows.forEach(function(element, index) {
                 // Skip credit account payment categories and auto-adjustment categories — they have fixed positions
                 if ($(element).attr('data-is-credit-account') === '1' || $(element).attr('data-is-auto-adjustment') === '1') return;
