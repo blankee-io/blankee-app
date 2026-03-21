@@ -180,9 +180,11 @@
                 const aiDiv = document.createElement('div');
                 aiDiv.className = 'pending-transactions-category-dropdown-item ai-suggestion';
                 // Show confidence level in badge
-                const confidenceClass = suggestedConfidence === 'high' ? 'confidence-high' : 'confidence-medium';
-                const confidenceLabel = suggestedConfidence === 'high' ? 'AI' : 'AI ?';
-                aiDiv.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${suggestedCategory} <span class="ai-badge ${confidenceClass}">${confidenceLabel}</span>`;
+                const isMemory = suggestedConfidence === 'memory';
+                const confidenceClass = isMemory ? 'confidence-high' : (suggestedConfidence === 'high' ? 'confidence-high' : 'confidence-medium');
+                const confidenceLabel = isMemory ? '<i class="fa-solid fa-brain"></i>' : (suggestedConfidence === 'high' ? 'AI' : 'AI ?');
+                const icon = '<i class="fa-solid fa-robot"></i>';
+                aiDiv.innerHTML = `${icon} ${suggestedCategory} <span class="ai-badge ${confidenceClass}">${confidenceLabel}</span>`;
                 aiDiv.addEventListener('click', function() {
                     console.log(`[CATEGORY SELECT] AI suggestion clicked for txn input:`, {
                         transactionId: input.dataset.transactionId,
