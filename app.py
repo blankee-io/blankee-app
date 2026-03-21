@@ -21511,20 +21511,37 @@ def _webhook_autobalance(user_id, target_date_str=None):
                 current = abs(float(bal.get('current', 0))) if isinstance(bal, dict) and bal.get('current') else 0
                 account_balances[acct_id] = current
         
-        # Update quiltt_accounts balances in Redis
-        if account_balances and app.config.get('REDIS_OK'):
-            redis_key = f"quiltt_accounts:v1:{user_id}"
-            cached = _redis_client.get(redis_key)
-            if cached:
-                accounts_list = json.loads(cached)
-                for acc in accounts_list:
-                    new_bal = account_balances.get(acc.get('account_id'))
-                    if new_bal is not None:
-                        acc['current_balance'] = new_bal
-                _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(accounts_list, cls=DecimalEncoder))
-                dirty_key = f"dirty_tables:{user_id}"
-                _redis_client.sadd(dirty_key, 'quiltt_accounts')
-                _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        # Update quiltt_accounts balances in both MySQL (direct) and Redis
+        # MySQL-direct ensures the balance survives dehydrate/rehydrate cycles
+        if account_balances:
+            try:
+                with get_db_pool().get_connection() as bal_conn:
+                    bal_cursor = bal_conn.cursor()
+                    for acct_id, bal_value in account_balances.items():
+                        bal_cursor.execute(
+                            "UPDATE quiltt_accounts SET current_balance = %s WHERE user_id = %s AND account_id = %s",
+                            (bal_value, user_id, acct_id)
+                        )
+                    bal_conn.commit()
+                    bal_cursor.close()
+                    app.logger.info(f"[WEBHOOK-AUTOBALANCE] Updated {len(account_balances)} account balances in MySQL for user {user_id}")
+            except Exception as bal_err:
+                app.logger.error(f"[WEBHOOK-AUTOBALANCE] Error updating balances in MySQL: {bal_err}", exc_info=True)
+            
+            # Also update Redis for immediate reads
+            if app.config.get('REDIS_OK'):
+                redis_key = f"quiltt_accounts:v1:{user_id}"
+                cached = _redis_client.get(redis_key)
+                if cached:
+                    accounts_list = json.loads(cached)
+                    for acc in accounts_list:
+                        new_bal = account_balances.get(acc.get('account_id'))
+                        if new_bal is not None:
+                            acc['current_balance'] = new_bal
+                    _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(accounts_list, cls=DecimalEncoder))
+                    dirty_key = f"dirty_tables:{user_id}"
+                    _redis_client.sadd(dirty_key, 'quiltt_accounts')
+                    _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
         # Use provided target date, fall back to today
         if target_date_str:
@@ -21599,28 +21616,28 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
             existing_income_adj_total = 0.0
             existing_expense_adj_total = 0.0
             
-            # Income adjustments
+            # Income adjustments (only delete entries flagged as auto-adjustments, not auto-imported entries)
             cursor.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM income_entries WHERE category_id = %s AND date = %s",
+                "SELECT COALESCE(SUM(amount), 0) FROM income_entries WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1",
                 (income_cat_id, target_date_str)
             )
             existing_income_adj_total = float(cursor.fetchone()[0])
             if existing_income_adj_total > 0:
                 cursor.execute(
-                    "DELETE FROM income_entries WHERE category_id = %s AND date = %s",
+                    "DELETE FROM income_entries WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1",
                     (income_cat_id, target_date_str)
                 )
                 app.logger.info(f"[WEBHOOK-AUTOBALANCE] Deleted income adjustments totaling ${existing_income_adj_total:.2f} for {account_name} on {target_date_str}")
             
-            # Expense adjustments
+            # Expense adjustments (only delete entries flagged as auto-adjustments, not auto-imported entries)
             cursor.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM expense_entries WHERE category_id = %s AND date = %s",
+                "SELECT COALESCE(SUM(amount), 0) FROM expense_entries WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1",
                 (expense_cat_id, target_date_str)
             )
             existing_expense_adj_total = float(cursor.fetchone()[0])
             if existing_expense_adj_total > 0:
                 cursor.execute(
-                    "DELETE FROM expense_entries WHERE category_id = %s AND date = %s",
+                    "DELETE FROM expense_entries WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1",
                     (expense_cat_id, target_date_str)
                 )
                 app.logger.info(f"[WEBHOOK-AUTOBALANCE] Deleted expense adjustments totaling ${existing_expense_adj_total:.2f} for {account_name} on {target_date_str}")
@@ -22079,6 +22096,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             
             # Check if transaction already exists in Redis
             existing_txn = None
+            needs_import = False
             if txn_id in existing_txn_ids:
                 # Find the existing transaction to check if it has Ntropy data
                 for existing in existing_transactions:
@@ -22096,11 +22114,18 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     new_pending = 1 if is_pending else 0
                     new_date = str(date)[:10] if date else ''
                     
+                    # Check if this transaction still needs auto-import (was synced but never imported to an entry)
+                    needs_import = not existing_txn.get('imported_to_entry_id') and not skip_auto_import and not is_pending
+                    
                     if (abs(existing_amount - amount) < 0.01 and 
                         existing_pending == new_pending and
-                        existing_date == new_date):
+                        existing_date == new_date and
+                        not needs_import):
                         app.logger.debug(f"Skipping {txn_id} - already enriched, no material changes")
                         continue
+                    
+                    if needs_import:
+                        app.logger.info(f"Re-processing {txn_id} - needs auto-import (no linked entry)")
                     
                     app.logger.info(f"Updating enriched txn {txn_id} - changes detected: amount {existing_amount}->{amount}, pending {existing_pending}->{new_pending}, date {existing_date}->{new_date}")
                     updated_count += 1
@@ -22398,8 +22423,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     was_pending = True
                     app.logger.info(f"Transaction {txn_id} changed from PENDING to POSTED")
                 
-                if not skip_auto_import and not is_pending and (is_new_transaction or was_pending):
-                    app.logger.info(f"Auto-importing {'POSTED (was pending)' if was_pending else 'NEW'} transaction {txn_id}")
+                if not skip_auto_import and not is_pending and (is_new_transaction or was_pending or needs_import):
+                    import_reason = 'NEEDS-IMPORT (previously skipped)' if needs_import else ('POSTED (was pending)' if was_pending else 'NEW')
+                    app.logger.info(f"Auto-importing {import_reason} transaction {txn_id}")
                     try:
                         # Determine account type and route to correct table
                         quiltt_account_info = quiltt_account_map.get(account_id, {})
@@ -22505,13 +22531,12 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         # Non-Quiltt credit buckets are converted to regular entries (no bank feed to replace them).
         if total_imported > 0:
             try:
-                today_str = datetime.now().strftime('%Y-%m-%d')
-                yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
                 five_days_ago_str = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
-                # Cap at yesterday (never touch today's buckets)
+                # Use the latest imported transaction date as the boundary
                 last_txn_date_str = max(imported_dates) if imported_dates else None
-                if last_txn_date_str and last_txn_date_str >= today_str:
-                    last_txn_date_str = yesterday_str
+                # Push buckets to the day AFTER the latest transaction
+                if last_txn_date_str:
+                    push_to_date = (datetime.strptime(last_txn_date_str, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
                 
                 if last_txn_date_str:
                     cleanup_count = 0
@@ -22534,17 +22559,17 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                             app.logger.info(f"[BUCKET-PUSH] Deleted {deleted_inc} income buckets > 5 days late for user {user_id}")
                         cleanup_count += deleted_inc
                         
-                        # Push remaining income buckets to today
+                        # Push remaining income buckets to day after last transaction
                         _sync_cursor.execute("""
                             UPDATE income_entries ie
                             JOIN income_categories ic ON ie.category_id = ic.id
                             SET ie.original_date = COALESCE(ie.original_date, ie.date),
                                 ie.date = %s
                             WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date <= %s
-                        """, (today_str, user_id, last_txn_date_str))
+                        """, (push_to_date, user_id, last_txn_date_str))
                         pushed_inc = _sync_cursor.rowcount
                         if pushed_inc > 0:
-                            app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_inc} income buckets to {today_str} for user {user_id}")
+                            app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_inc} income buckets to {push_to_date} for user {user_id}")
                         cleanup_count += pushed_inc
                         
                         # --- expense_entries ---
@@ -22560,17 +22585,17 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                             app.logger.info(f"[BUCKET-PUSH] Deleted {deleted_exp} expense buckets > 5 days late for user {user_id}")
                         cleanup_count += deleted_exp
                         
-                        # Push remaining expense buckets to today
+                        # Push remaining expense buckets to day after last transaction
                         _sync_cursor.execute("""
                             UPDATE expense_entries ee
                             JOIN expense_categories ec ON ee.category_id = ec.id
                             SET ee.original_date = COALESCE(ee.original_date, ee.date),
                                 ee.date = %s
                             WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date <= %s
-                        """, (today_str, user_id, last_txn_date_str))
+                        """, (push_to_date, user_id, last_txn_date_str))
                         pushed_exp = _sync_cursor.rowcount
                         if pushed_exp > 0:
-                            app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_exp} expense buckets to {today_str} for user {user_id}")
+                            app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_exp} expense buckets to {push_to_date} for user {user_id}")
                         cleanup_count += pushed_exp
                     
                     # --- c_expense_entries (Quiltt-linked credit accounts) ---
@@ -22587,7 +22612,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         app.logger.info(f"[BUCKET-PUSH] Deleted {deleted_ce} credit buckets > 5 days late for user {user_id}")
                     cleanup_count += deleted_ce
                     
-                    # Push remaining Quiltt credit buckets to today
+                    # Push remaining Quiltt credit buckets to day after last transaction
                     _sync_cursor.execute("""
                         UPDATE c_expense_entries ce
                         JOIN c_expense_categories cec ON ce.category_id = cec.id
@@ -22595,10 +22620,10 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         SET ce.original_date = COALESCE(ce.original_date, ce.date),
                             ce.date = %s
                         WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date <= %s AND ca.is_quiltt = 1
-                    """, (today_str, user_id, last_txn_date_str))
+                    """, (push_to_date, user_id, last_txn_date_str))
                     pushed_ce = _sync_cursor.rowcount
                     if pushed_ce > 0:
-                        app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_ce} credit buckets to {today_str} for user {user_id}")
+                        app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_ce} credit buckets to {push_to_date} for user {user_id}")
                     cleanup_count += pushed_ce
                     
                     # Convert non-Quiltt credit expense buckets to regular entries (unchanged)
