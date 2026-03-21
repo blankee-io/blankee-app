@@ -22283,47 +22283,50 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 app.logger.warning(f"Category memory lookup failed for {txn_id}: {mem_err}")
             # --- END CATEGORY MEMORY LOOKUP ---
 
-            # --- CUSTOM CATEGORY SUGGESTION (Phase 3.2) ---
-            # Get custom category suggestion from Ntropy using user's own categories
-            # Only fetch if we don't have a memory match already
-            if not memory_match:
-                try:
-                    from ntropy_utils import suggest_category_for_transaction
+            # --- CUSTOM CATEGORY SUGGESTION + MERCHANT ENRICHMENT (Phase 3.2) ---
+            # Always call Ntropy for merchant/entity data.
+            # Only use category suggestion if no memory match.
+            try:
+                from ntropy_utils import suggest_category_for_transaction
+                
+                # Determine account type for category lookup
+                quiltt_account_info = quiltt_account_map.get(account_id, {})
+                acct_type = quiltt_account_info.get('account_type', '').upper()
+                ntropy_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
+                
+                suggestion = suggest_category_for_transaction(
+                    user_id=user_id,
+                    transaction={
+                        'id': txn_id,
+                        'transaction_id': txn_id,
+                        'description': txn.get('description', ''),
+                        'amount': amount,
+                        'date': date,
+                        'transaction_type': 'expense' if is_expense else 'income'
+                    },
+                    account_type=ntropy_account_type
+                )
+                if suggestion:
+                    # Always save merchant/entity data from enrichment
+                    if suggestion.get('ntropy_merchant_id'):
+                        transaction_data['ntropy_merchant_id'] = suggestion['ntropy_merchant_id']
+                    if suggestion.get('ntropy_logo'):
+                        transaction_data['ntropy_logo'] = suggestion['ntropy_logo']
+                    if suggestion.get('ntropy_website'):
+                        transaction_data['ntropy_website'] = suggestion['ntropy_website']
                     
-                    # Determine account type for category lookup
-                    quiltt_account_info = quiltt_account_map.get(account_id, {})
-                    acct_type = quiltt_account_info.get('account_type', '').upper()
-                    ntropy_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
-                    
-                    suggestion = suggest_category_for_transaction(
-                        user_id=user_id,
-                        transaction={
-                            'id': txn_id,
-                            'transaction_id': txn_id,
-                            'description': txn.get('description', ''),
-                            'amount': amount,
-                            'date': date,
-                            'transaction_type': 'expense' if is_expense else 'income'
-                        },
-                        account_type=ntropy_account_type
-                    )
-                    if suggestion and suggestion.get('suggested_category'):
+                    # Only use category suggestion if no memory match
+                    if not memory_match and suggestion.get('suggested_category'):
                         transaction_data['custom_category_suggestion'] = suggestion.get('suggested_category')
                         transaction_data['custom_category_id'] = suggestion.get('suggested_category_id')
                         transaction_data['custom_category_type'] = suggestion.get('category_type')
                         transaction_data['custom_category_confidence'] = suggestion.get('confidence')
                         transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        # Save entity/merchant data from enrichment
-                        if suggestion.get('ntropy_merchant_id'):
-                            transaction_data['ntropy_merchant_id'] = suggestion['ntropy_merchant_id']
-                        if suggestion.get('ntropy_logo'):
-                            transaction_data['ntropy_logo'] = suggestion['ntropy_logo']
-                        if suggestion.get('ntropy_website'):
-                            transaction_data['ntropy_website'] = suggestion['ntropy_website']
-                        app.logger.info(f"Custom category suggestion for {txn_id}: {suggestion.get('suggested_category')} (id={suggestion.get('suggested_category_id')}, merchant={suggestion.get('ntropy_merchant_id')})")
-                except Exception as suggest_err:
-                    app.logger.warning(f"Failed to get custom category suggestion for {txn_id}: {suggest_err}")
-            # --- END CUSTOM CATEGORY SUGGESTION ---
+                    
+                    app.logger.info(f"Ntropy enrichment for {txn_id}: category={suggestion.get('suggested_category')}, merchant={suggestion.get('ntropy_merchant_id')}, memory_match={'yes' if memory_match else 'no'}")
+            except Exception as suggest_err:
+                app.logger.warning(f"Failed to get Ntropy enrichment for {txn_id}: {suggest_err}")
+            # --- END CUSTOM CATEGORY SUGGESTION + MERCHANT ENRICHMENT ---
             
 
             
