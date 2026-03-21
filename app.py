@@ -22180,15 +22180,25 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                     if mccs:
                                         ntropy_data['ntropy_mcc'] = json.dumps(mccs)
                             
-                            # Extract location info (Quiltt schema: location is a plain string)
+                            # Extract location info (Quiltt schema: location is RemoteDataNtropyLocation object)
                             location = response.get('location')
-                            if location and isinstance(location, str):
+                            if location and isinstance(location, dict):
+                                raw_address = location.get('rawAddress')
+                                if raw_address:
+                                    ntropy_data['ntropy_location'] = raw_address
+                                structured = location.get('structured')
+                                if structured and isinstance(structured, dict):
+                                    ntropy_data['ntropy_location_city'] = structured.get('city')
+                                    ntropy_data['ntropy_location_state'] = structured.get('state')
+                                    ntropy_data['ntropy_location_country'] = structured.get('country')
+                            elif location and isinstance(location, str):
+                                # Fallback: treat as plain string if API returns scalar
                                 ntropy_data['ntropy_location'] = location
                             
                             # Mark as enriched
                             ntropy_data['ntropy_enriched_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
-            # Extract Finicity createdDate (Unix epoch seconds → datetime)
+            # Extract Finicity data (createdDate + categorization fallback)
             finicity_created_date = None
             if remote_data:
                 finicity = remote_data.get('finicity', {})
@@ -22203,6 +22213,21 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                     finicity_created_date = datetime.utcfromtimestamp(int(epoch)).strftime('%Y-%m-%d %H:%M:%S')
                                 except (ValueError, TypeError, OSError):
                                     finicity_created_date = None
+                            # Use Finicity categorization as fallback for merchant/category
+                            categorization = fin_response.get('categorization', {})
+                            if categorization and isinstance(categorization, dict):
+                                if not ntropy_data.get('ntropy_merchant_name'):
+                                    payee = categorization.get('normalizedPayeeName')
+                                    if payee:
+                                        ntropy_data['ntropy_merchant_name'] = payee
+                                if not ntropy_data.get('ntropy_labels'):
+                                    fin_category = categorization.get('category')
+                                    if fin_category:
+                                        ntropy_data['ntropy_labels'] = json.dumps([fin_category])
+                                if not ntropy_data.get('ntropy_location_city'):
+                                    ntropy_data['ntropy_location_city'] = categorization.get('city') or None
+                                    ntropy_data['ntropy_location_state'] = categorization.get('state') or None
+                                    ntropy_data['ntropy_location_country'] = categorization.get('country') or None
             
             # Store transaction in Redis with Ntropy enrichment data
             # Preserve existing import link if transaction was already imported
@@ -22215,7 +22240,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 'amount': amount,
                 'date': date,
                 'description': txn.get('description', ''),
-                'merchant_name': ntropy_data.get('ntropy_merchant_name', ''),
+                'merchant_name': ntropy_data.get('ntropy_merchant_name') or txn.get('description', ''),
                 'category': txn.get('kind', ''),
                 'pending': 1 if is_pending else 0,
                 'transaction_type': 'expense' if is_expense else 'income',
@@ -22293,10 +22318,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     app.logger.warning(f"Failed to get custom category suggestion for {txn_id}: {suggest_err}")
             # --- END CUSTOM CATEGORY SUGGESTION ---
             
-            app.logger.info(f"transaction_data keys: {list(transaction_data.keys())}")
-            app.logger.info(f"ntropy_enriched_at value: {transaction_data.get('ntropy_enriched_at')}")
-            app.logger.info(f"ntropy_labels value: {transaction_data.get('ntropy_labels')}")
-            app.logger.info(f"ntropy_recurrence value: {transaction_data.get('ntropy_recurrence')}")
+
             
             # MySQL-direct upsert (bypasses Redis for consistency)
             try:
@@ -22517,6 +22539,21 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             message += f' ({updated_count} updated with Ntropy enrichment)'
         if total_imported > 0:
             message += f', {total_imported} auto-imported to budget'
+        
+        # --- UPDATE RECURRENCE DATA FROM NTROPY ---
+        if total_synced > 0:
+            try:
+                from ntropy_utils import get_recurring_groups, build_recurrence_map
+                from quiltt_redis import update_transaction_recurrence
+                quiltt_profile_id = profile.get('profile_id')
+                if quiltt_profile_id:
+                    groups = get_recurring_groups(quiltt_profile_id)
+                    if groups:
+                        recurrence_map = build_recurrence_map(groups)
+                        rec_updated = update_transaction_recurrence(recurrence_map, user_id)
+                        app.logger.info(f"[RECURRENCE] Updated {rec_updated} transactions with recurrence data for user {user_id}")
+            except Exception as rec_err:
+                app.logger.error(f"[RECURRENCE] Error updating recurrence for user {user_id}: {rec_err}", exc_info=True)
         
         # --- PUSH FORWARD BUCKET ENTRIES (MySQL-direct) ---
         # Instead of deleting bucket placeholders, push them forward to today.

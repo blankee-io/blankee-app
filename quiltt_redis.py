@@ -886,6 +886,56 @@ def upsert_quiltt_transaction(transaction_data: Dict[str, Any], user_id: Optiona
         return None
 
 
+def update_transaction_recurrence(recurrence_map: dict, user_id: int) -> int:
+    """
+    Batch-update recurrence fields on quiltt_transactions in Redis.
+    
+    Args:
+        recurrence_map: Dict mapping transaction_id → recurrence data dict
+                        (from ntropy_utils.build_recurrence_map)
+        user_id: User ID
+        
+    Returns:
+        Number of transactions updated
+    """
+    if not recurrence_map:
+        return 0
+    
+    try:
+        cached_data = _get_from_redis('quiltt_transactions', user_id)
+        
+        if cached_data is None:
+            cached_data = get_quiltt_transactions(user_id)
+            if cached_data is None:
+                return 0
+        
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
+        updated = 0
+        recurring_txn_ids = set(recurrence_map.keys())
+        
+        for txn in cached_data:
+            txn_id = txn.get('transaction_id')
+            if txn_id in recurring_txn_ids:
+                txn.update(recurrence_map[txn_id])
+                updated += 1
+            elif txn.get('ntropy_recurrence') != 'recurring':
+                # Mark non-recurring transactions (only if not already set to recurring
+                # by a previous call — avoids overwriting if groups API is stale)
+                txn['ntropy_recurrence'] = 'one off'
+        
+        if updated > 0:
+            _set_to_redis('quiltt_transactions', user_id, cached_data)
+            logger.info(f"Updated recurrence for {updated} transactions for user {user_id}")
+        
+        return updated
+        
+    except Exception as e:
+        logger.error(f"Error updating transaction recurrence for user {user_id}: {e}", exc_info=True)
+        return 0
+
+
 def delete_quiltt_accounts_by_ids(account_ids: List[str], user_id: Optional[int] = None) -> bool:
     """
     Delete specific Quiltt accounts by their account_id strings from Redis and MySQL.
