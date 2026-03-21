@@ -511,6 +511,14 @@ class QuilttClient:
                                 transaction {{
                                     response {{
                                         createdDate
+                                        categorization {{
+                                            bestRepresentation
+                                            normalizedPayeeName
+                                            category
+                                            city
+                                            state
+                                            country
+                                        }}
                                     }}
                                 }}
                             }}

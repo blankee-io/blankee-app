@@ -536,7 +536,6 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                 except (ValueError, TypeError):
                     pass
             description = txn.get('description', '')
-            merchant_name = txn.get('merchantName')
             category = txn.get('category')
             # Derive txn_type from entryType for auto-import routing
             txn_type = 'income' if entry_type_raw == 'CREDIT' else 'expense'
@@ -572,15 +571,25 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                         if mccs:
                             ntropy_data['ntropy_mcc'] = json.dumps(mccs)
                 
-                # Extract location info (Quiltt schema: location is a plain string)
+                # Extract location info (Quiltt schema: location is RemoteDataNtropyLocation object)
                 location = response.get('location')
-                if location and isinstance(location, str):
+                if location and isinstance(location, dict):
+                    raw_address = location.get('rawAddress')
+                    if raw_address:
+                        ntropy_data['ntropy_location'] = raw_address
+                    structured = location.get('structured')
+                    if structured and isinstance(structured, dict):
+                        ntropy_data['ntropy_location_city'] = structured.get('city')
+                        ntropy_data['ntropy_location_state'] = structured.get('state')
+                        ntropy_data['ntropy_location_country'] = structured.get('country')
+                elif location and isinstance(location, str):
+                    # Fallback: treat as plain string if API returns scalar
                     ntropy_data['ntropy_location'] = location
                 
                 if any(v for k, v in ntropy_data.items() if k != 'ntropy_enriched_at'):
                     ntropy_data['ntropy_enriched_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 
-                # Extract Finicity createdDate (Unix epoch seconds → datetime)
+                # Extract Finicity data (createdDate + categorization fallback)
                 finicity = remote_data.get('finicity', {})
                 if finicity:
                     fin_txn = finicity.get('transaction', {})
@@ -593,6 +602,21 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                                     finicity_created_date = datetime.fromtimestamp(int(epoch), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
                                 except (ValueError, TypeError, OSError):
                                     finicity_created_date = None
+                            # Use Finicity categorization as fallback for merchant/category
+                            categorization = fin_response.get('categorization', {})
+                            if categorization and isinstance(categorization, dict):
+                                if not ntropy_data.get('ntropy_merchant_name'):
+                                    payee = categorization.get('normalizedPayeeName')
+                                    if payee:
+                                        ntropy_data['ntropy_merchant_name'] = payee
+                                if not ntropy_data.get('ntropy_labels'):
+                                    fin_category = categorization.get('category')
+                                    if fin_category:
+                                        ntropy_data['ntropy_labels'] = json.dumps([fin_category])
+                                if not ntropy_data.get('ntropy_location_city'):
+                                    ntropy_data['ntropy_location_city'] = categorization.get('city') or None
+                                    ntropy_data['ntropy_location_state'] = categorization.get('state') or None
+                                    ntropy_data['ntropy_location_country'] = categorization.get('country') or None
             
             # Build transaction object
             new_quiltt_txn = {
@@ -602,7 +626,7 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                 'amount': str(amount),
                 'date': txn_date,
                 'description': description,
-                'merchant_name': merchant_name,
+                'merchant_name': ntropy_data.get('ntropy_merchant_name') or description,
                 'category': category,
                 'transaction_type': txn_type,
                 'pending': pending,
@@ -3279,6 +3303,19 @@ def process_user(cursor, conn, user_row):
         if earliest_txn_date:
             if 'earliest_transaction_date' not in result or earliest_txn_date < result['earliest_transaction_date']:
                 result['earliest_transaction_date'] = earliest_txn_date
+    
+    # --- UPDATE RECURRENCE DATA FROM NTROPY ---
+    if result['transactions_synced'] > 0 and profile_id:
+        try:
+            from ntropy_utils import get_recurring_groups, build_recurrence_map
+            from quiltt_redis import update_transaction_recurrence
+            groups = get_recurring_groups(profile_id)
+            if groups:
+                recurrence_map = build_recurrence_map(groups)
+                rec_updated = update_transaction_recurrence(recurrence_map, user_id)
+                logger.info(f"User {user_id}: Updated {rec_updated} transactions with recurrence data")
+        except Exception as rec_err:
+            logger.warning(f"User {user_id}: Error updating recurrence: {rec_err}")
     
     # Update cached last transaction date for locking/marker
     try:
