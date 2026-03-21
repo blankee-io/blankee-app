@@ -22801,59 +22801,58 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     if groups:
                         recurrence_map = build_recurrence_map(groups)
                         if recurrence_map:
-                            rec_conn = get_db_pool().get_connection()
-                            rec_cursor = rec_conn.cursor()
-                            rec_updated = 0
-                            try:
-                                # Update recurring transactions
-                                for txn_id, rec_data in recurrence_map.items():
-                                    rec_cursor.execute("""
-                                        UPDATE quiltt_transactions SET
-                                            ntropy_recurrence = %s,
-                                            ntropy_recurrence_group_id = %s,
-                                            ntropy_periodicity = %s,
-                                            ntropy_periodicity_days = %s,
-                                            ntropy_avg_amount = %s,
-                                            ntropy_first_payment_date = %s,
-                                            ntropy_latest_payment_date = %s,
-                                            ntropy_merchant_id = COALESCE(%s, ntropy_merchant_id),
-                                            ntropy_logo = COALESCE(%s, ntropy_logo),
-                                            ntropy_website = COALESCE(%s, ntropy_website)
-                                        WHERE user_id = %s AND transaction_id = %s
-                                    """, (
-                                        rec_data.get('ntropy_recurrence'),
-                                        rec_data.get('ntropy_recurrence_group_id'),
-                                        rec_data.get('ntropy_periodicity'),
-                                        rec_data.get('ntropy_periodicity_days'),
-                                        rec_data.get('ntropy_avg_amount'),
-                                        rec_data.get('ntropy_first_payment_date'),
-                                        rec_data.get('ntropy_latest_payment_date'),
-                                        rec_data.get('ntropy_merchant_id'),
-                                        rec_data.get('ntropy_logo'),
-                                        rec_data.get('ntropy_website'),
-                                        user_id, txn_id
-                                    ))
-                                    if rec_cursor.rowcount > 0:
-                                        rec_updated += 1
-                                
-                                # Mark non-recurring transactions as "one off"
-                                recurring_ids = list(recurrence_map.keys())
-                                placeholders = ','.join(['%s'] * len(recurring_ids))
-                                rec_cursor.execute(f"""
-                                    UPDATE quiltt_transactions
-                                    SET ntropy_recurrence = 'one off'
-                                    WHERE user_id = %s AND ntropy_recurrence IS NULL
-                                      AND transaction_id NOT IN ({placeholders})
-                                """, [user_id] + recurring_ids)
-                                
-                                rec_conn.commit()
-                                app.logger.info(f"[RECURRENCE] Updated {rec_updated} transactions via MySQL-direct for user {user_id}")
-                            except Exception as rec_sql_err:
-                                rec_conn.rollback()
-                                app.logger.error(f"[RECURRENCE] MySQL error: {rec_sql_err}", exc_info=True)
-                            finally:
-                                rec_cursor.close()
-                                rec_conn.close()
+                            with get_db_pool().get_connection() as rec_conn:
+                                rec_cursor = rec_conn.cursor()
+                                rec_updated = 0
+                                try:
+                                    # Update recurring transactions
+                                    for txn_id, rec_data in recurrence_map.items():
+                                        rec_cursor.execute("""
+                                            UPDATE quiltt_transactions SET
+                                                ntropy_recurrence = %s,
+                                                ntropy_recurrence_group_id = %s,
+                                                ntropy_periodicity = %s,
+                                                ntropy_periodicity_days = %s,
+                                                ntropy_avg_amount = %s,
+                                                ntropy_first_payment_date = %s,
+                                                ntropy_latest_payment_date = %s,
+                                                ntropy_merchant_id = COALESCE(%s, ntropy_merchant_id),
+                                                ntropy_logo = COALESCE(%s, ntropy_logo),
+                                                ntropy_website = COALESCE(%s, ntropy_website)
+                                            WHERE user_id = %s AND transaction_id = %s
+                                        """, (
+                                            rec_data.get('ntropy_recurrence'),
+                                            rec_data.get('ntropy_recurrence_group_id'),
+                                            rec_data.get('ntropy_periodicity'),
+                                            rec_data.get('ntropy_periodicity_days'),
+                                            rec_data.get('ntropy_avg_amount'),
+                                            rec_data.get('ntropy_first_payment_date'),
+                                            rec_data.get('ntropy_latest_payment_date'),
+                                            rec_data.get('ntropy_merchant_id'),
+                                            rec_data.get('ntropy_logo'),
+                                            rec_data.get('ntropy_website'),
+                                            user_id, txn_id
+                                        ))
+                                        if rec_cursor.rowcount > 0:
+                                            rec_updated += 1
+                                    
+                                    # Mark non-recurring transactions as "one off"
+                                    recurring_ids = list(recurrence_map.keys())
+                                    placeholders = ','.join(['%s'] * len(recurring_ids))
+                                    rec_cursor.execute(f"""
+                                        UPDATE quiltt_transactions
+                                        SET ntropy_recurrence = 'one off'
+                                        WHERE user_id = %s AND ntropy_recurrence IS NULL
+                                          AND transaction_id NOT IN ({placeholders})
+                                    """, [user_id] + recurring_ids)
+                                    
+                                    rec_conn.commit()
+                                    app.logger.info(f"[RECURRENCE] Updated {rec_updated} transactions via MySQL-direct for user {user_id}")
+                                except Exception as rec_sql_err:
+                                    rec_conn.rollback()
+                                    app.logger.error(f"[RECURRENCE] MySQL error: {rec_sql_err}", exc_info=True)
+                                finally:
+                                    rec_cursor.close()
                             
                             # Refresh Redis cache to include recurrence data
                             if rec_updated > 0 and app.config.get('REDIS_OK'):
