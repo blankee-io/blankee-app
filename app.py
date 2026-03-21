@@ -22273,12 +22273,28 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     description=txn_description, category_type=memory_category_type
                 )
                 if memory_match:
-                    transaction_data['custom_category_suggestion'] = 'Memory'
+                    # Look up category name from ID
+                    memory_cat_name = 'Memory'
+                    try:
+                        mem_cat_type = memory_match['category_type']
+                        mem_cat_id = memory_match['category_id']
+                        if mem_cat_type in ('income', 'expense', 'c_expense'):
+                            table_map = {'income': 'income_categories', 'expense': 'expense_categories', 'c_expense': 'c_expense_categories'}
+                            cat_redis_key = f"{table_map[mem_cat_type]}:v1:{user_id}"
+                            cat_cached = _redis_client.get(cat_redis_key) if app.config.get('REDIS_OK') else None
+                            if cat_cached:
+                                for cat in json.loads(cat_cached):
+                                    if int(cat.get('id', 0)) == int(mem_cat_id):
+                                        memory_cat_name = cat.get('name', 'Memory')
+                                        break
+                    except Exception:
+                        pass
+                    transaction_data['custom_category_suggestion'] = memory_cat_name
                     transaction_data['custom_category_id'] = memory_match['category_id']
                     transaction_data['custom_category_type'] = memory_match['category_type']
                     transaction_data['custom_category_confidence'] = 'memory'
                     transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    app.logger.info(f"Category memory match for {txn_id}: category_id={memory_match['category_id']} (confirmed {memory_match.get('times_confirmed', 1)}x)")
+                    app.logger.info(f"Category memory match for {txn_id}: {memory_cat_name} (category_id={memory_match['category_id']}, confirmed {memory_match.get('times_confirmed', 1)}x)")
             except Exception as mem_err:
                 app.logger.warning(f"Category memory lookup failed for {txn_id}: {mem_err}")
             # --- END CATEGORY MEMORY LOOKUP ---
@@ -22550,21 +22566,6 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         if total_imported > 0:
             message += f', {total_imported} auto-imported to budget'
         
-        # --- UPDATE RECURRENCE DATA FROM NTROPY ---
-        if total_synced > 0:
-            try:
-                from ntropy_utils import get_recurring_groups, build_recurrence_map
-                from quiltt_redis import update_transaction_recurrence
-                quiltt_profile_id = profile.get('profile_id')
-                if quiltt_profile_id:
-                    groups = get_recurring_groups(quiltt_profile_id)
-                    if groups:
-                        recurrence_map = build_recurrence_map(groups)
-                        rec_updated = update_transaction_recurrence(recurrence_map, user_id)
-                        app.logger.info(f"[RECURRENCE] Updated {rec_updated} transactions with recurrence data for user {user_id}")
-            except Exception as rec_err:
-                app.logger.error(f"[RECURRENCE] Error updating recurrence for user {user_id}: {rec_err}", exc_info=True)
-        
         # --- PUSH FORWARD BUCKET ENTRIES (MySQL-direct) ---
         # Instead of deleting bucket placeholders, push them forward to today.
         # This keeps them visible on the dashboard with a "X days late" indicator.
@@ -22787,6 +22788,79 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         except Exception as recalc_err:
             app.logger.error(f"[WEBHOOK-SYNC] Error recalculating totals for user {user_id}: {recalc_err}", exc_info=True)
         # --- END RECALCULATE + AUTOBALANCE ---
+        
+        # --- UPDATE RECURRENCE DATA FROM NTROPY ---
+        # Write directly to MySQL (consistent with rest of sync function)
+        # then update Redis cache. Avoids dependency on flush worker timing.
+        if total_synced > 0:
+            try:
+                from ntropy_utils import get_recurring_groups, build_recurrence_map
+                quiltt_profile_id = profile.get('profile_id')
+                if quiltt_profile_id:
+                    groups = get_recurring_groups(quiltt_profile_id)
+                    if groups:
+                        recurrence_map = build_recurrence_map(groups)
+                        if recurrence_map:
+                            rec_conn = get_db_pool().get_connection()
+                            rec_cursor = rec_conn.cursor()
+                            rec_updated = 0
+                            try:
+                                # Update recurring transactions
+                                for txn_id, rec_data in recurrence_map.items():
+                                    rec_cursor.execute("""
+                                        UPDATE quiltt_transactions SET
+                                            ntropy_recurrence = %s,
+                                            ntropy_recurrence_group_id = %s,
+                                            ntropy_periodicity = %s,
+                                            ntropy_periodicity_days = %s,
+                                            ntropy_avg_amount = %s,
+                                            ntropy_first_payment_date = %s,
+                                            ntropy_latest_payment_date = %s,
+                                            ntropy_merchant_id = COALESCE(%s, ntropy_merchant_id),
+                                            ntropy_logo = COALESCE(%s, ntropy_logo),
+                                            ntropy_website = COALESCE(%s, ntropy_website)
+                                        WHERE user_id = %s AND transaction_id = %s
+                                    """, (
+                                        rec_data.get('ntropy_recurrence'),
+                                        rec_data.get('ntropy_recurrence_group_id'),
+                                        rec_data.get('ntropy_periodicity'),
+                                        rec_data.get('ntropy_periodicity_days'),
+                                        rec_data.get('ntropy_avg_amount'),
+                                        rec_data.get('ntropy_first_payment_date'),
+                                        rec_data.get('ntropy_latest_payment_date'),
+                                        rec_data.get('ntropy_merchant_id'),
+                                        rec_data.get('ntropy_logo'),
+                                        rec_data.get('ntropy_website'),
+                                        user_id, txn_id
+                                    ))
+                                    if rec_cursor.rowcount > 0:
+                                        rec_updated += 1
+                                
+                                # Mark non-recurring transactions as "one off"
+                                recurring_ids = list(recurrence_map.keys())
+                                placeholders = ','.join(['%s'] * len(recurring_ids))
+                                rec_cursor.execute(f"""
+                                    UPDATE quiltt_transactions
+                                    SET ntropy_recurrence = 'one off'
+                                    WHERE user_id = %s AND ntropy_recurrence IS NULL
+                                      AND transaction_id NOT IN ({placeholders})
+                                """, [user_id] + recurring_ids)
+                                
+                                rec_conn.commit()
+                                app.logger.info(f"[RECURRENCE] Updated {rec_updated} transactions via MySQL-direct for user {user_id}")
+                            except Exception as rec_sql_err:
+                                rec_conn.rollback()
+                                app.logger.error(f"[RECURRENCE] MySQL error: {rec_sql_err}", exc_info=True)
+                            finally:
+                                rec_cursor.close()
+                                rec_conn.close()
+                            
+                            # Refresh Redis cache to include recurrence data
+                            if rec_updated > 0 and app.config.get('REDIS_OK'):
+                                _redis_client.delete(f"quiltt_transactions:v1:{user_id}")
+            except Exception as rec_err:
+                app.logger.error(f"[RECURRENCE] Error updating recurrence for user {user_id}: {rec_err}", exc_info=True)
+        # --- END UPDATE RECURRENCE ---
         
         # Update cached last transaction date and signal UI refresh
         try:
