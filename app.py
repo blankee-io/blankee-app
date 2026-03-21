@@ -12959,7 +12959,12 @@ def pending_transactions():
         # Resolve memory suggestions: replace 'Memory' with actual category name
         if txn.get('custom_category_confidence') == 'memory' and txn.get('custom_category_id'):
             sug_type = txn.get('custom_category_type') or entry_type
-            sug_name = category_name_lookup.get((sug_type, txn['custom_category_id']), '')
+            sug_id = txn['custom_category_id']
+            # Try both original type and int since Redis may store as string
+            try:
+                sug_name = category_name_lookup.get((sug_type, sug_id)) or category_name_lookup.get((sug_type, int(sug_id)))
+            except (ValueError, TypeError):
+                sug_name = None
             if sug_name:
                 txn['custom_category_suggestion'] = sug_name
     
