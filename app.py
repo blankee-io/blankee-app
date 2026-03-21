@@ -12956,11 +12956,10 @@ def pending_transactions():
         entry_type = txn.get('imported_entry_type')
         if cat_id:
             txn['current_category_name'] = category_name_lookup.get((entry_type, cat_id), '')
-        # Resolve memory suggestions: replace 'Memory' with actual category name
-        if txn.get('custom_category_confidence') == 'memory' and txn.get('custom_category_id'):
+        # Resolve memory suggestions: replace literal 'Memory' with actual category name
+        if txn.get('custom_category_suggestion') == 'Memory' and txn.get('custom_category_id'):
             sug_type = txn.get('custom_category_type') or entry_type
             sug_id = txn['custom_category_id']
-            # Try both original type and int since Redis may store as string
             try:
                 sug_name = category_name_lookup.get((sug_type, sug_id)) or category_name_lookup.get((sug_type, int(sug_id)))
             except (ValueError, TypeError):
