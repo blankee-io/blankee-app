@@ -22180,15 +22180,10 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                     if mccs:
                                         ntropy_data['ntropy_mcc'] = json.dumps(mccs)
                             
-                            # Extract location info (Quiltt schema: location.rawAddress, location.structured)
+                            # Extract location info (Quiltt schema: location is a plain string)
                             location = response.get('location')
-                            if location and isinstance(location, dict):
-                                ntropy_data['ntropy_location'] = location.get('rawAddress')
-                                structured = location.get('structured')
-                                if structured and isinstance(structured, dict):
-                                    ntropy_data['ntropy_location_city'] = structured.get('city')
-                                    ntropy_data['ntropy_location_state'] = structured.get('state')
-                                    ntropy_data['ntropy_location_country'] = structured.get('country')
+                            if location and isinstance(location, str):
+                                ntropy_data['ntropy_location'] = location
                             
                             # Mark as enriched
                             ntropy_data['ntropy_enriched_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

@@ -501,21 +501,7 @@ class QuilttClient:
                                                 website
                                             }}
                                         }}
-                                        location {{
-                                            rawAddress
-                                            structured {{
-                                                city
-                                                state
-                                                country
-                                                countryCode
-                                                postcode
-                                                street
-                                                houseNumber
-                                                storeNumber
-                                                latitude
-                                                longitude
-                                            }}
-                                        }}
+                                        location
                                         id
                                         createdAt
                                     }}

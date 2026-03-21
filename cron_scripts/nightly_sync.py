@@ -572,15 +572,10 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                         if mccs:
                             ntropy_data['ntropy_mcc'] = json.dumps(mccs)
                 
-                # Extract location info (Quiltt schema: location.rawAddress, location.structured)
+                # Extract location info (Quiltt schema: location is a plain string)
                 location = response.get('location')
-                if location and isinstance(location, dict):
-                    ntropy_data['ntropy_location'] = location.get('rawAddress')
-                    structured = location.get('structured')
-                    if structured and isinstance(structured, dict):
-                        ntropy_data['ntropy_location_city'] = structured.get('city')
-                        ntropy_data['ntropy_location_state'] = structured.get('state')
-                        ntropy_data['ntropy_location_country'] = structured.get('country')
+                if location and isinstance(location, str):
+                    ntropy_data['ntropy_location'] = location
                 
                 if any(v for k, v in ntropy_data.items() if k != 'ntropy_enriched_at'):
                     ntropy_data['ntropy_enriched_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
