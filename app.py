@@ -22313,7 +22313,14 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         transaction_data['custom_category_type'] = suggestion.get('category_type')
                         transaction_data['custom_category_confidence'] = suggestion.get('confidence')
                         transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        app.logger.info(f"Custom category suggestion for {txn_id}: {suggestion.get('suggested_category')} (id={suggestion.get('suggested_category_id')})")
+                        # Save entity/merchant data from enrichment
+                        if suggestion.get('ntropy_merchant_id'):
+                            transaction_data['ntropy_merchant_id'] = suggestion['ntropy_merchant_id']
+                        if suggestion.get('ntropy_logo'):
+                            transaction_data['ntropy_logo'] = suggestion['ntropy_logo']
+                        if suggestion.get('ntropy_website'):
+                            transaction_data['ntropy_website'] = suggestion['ntropy_website']
+                        app.logger.info(f"Custom category suggestion for {txn_id}: {suggestion.get('suggested_category')} (id={suggestion.get('suggested_category_id')}, merchant={suggestion.get('ntropy_merchant_id')})")
                 except Exception as suggest_err:
                     app.logger.warning(f"Failed to get custom category suggestion for {txn_id}: {suggest_err}")
             # --- END CUSTOM CATEGORY SUGGESTION ---
@@ -23469,10 +23476,17 @@ def quiltt_backfill_suggestions():
                     txn['custom_category_type'] = suggestion.get('category_type')
                     txn['custom_category_confidence'] = suggestion.get('confidence')
                     txn['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    # Save entity/merchant data from enrichment
+                    if suggestion.get('ntropy_merchant_id'):
+                        txn['ntropy_merchant_id'] = suggestion['ntropy_merchant_id']
+                    if suggestion.get('ntropy_logo'):
+                        txn['ntropy_logo'] = suggestion['ntropy_logo']
+                    if suggestion.get('ntropy_website'):
+                        txn['ntropy_website'] = suggestion['ntropy_website']
                     
                     upsert_quiltt_transaction(txn, current_user.id)
                     backfilled += 1
-                    app.logger.info(f"Backfilled: {description[:30]} -> {suggestion.get('suggested_category')}")
+                    app.logger.info(f"Backfilled: {description[:30]} -> {suggestion.get('suggested_category')} (merchant={suggestion.get('ntropy_merchant_id')})")
                     
             except Exception as e:
                 app.logger.warning(f"Error backfilling {txn.get('transaction_id')}: {e}")

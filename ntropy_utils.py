@@ -398,6 +398,30 @@ def suggest_category_for_transaction(
         if enrichment and enrichment.get('categories'):
             suggested_category = enrichment['categories'].get('general')
         
+        # Extract entity/merchant data from enrichment
+        # Check counterparty first, fall back to first intermediary (e.g. Venmo)
+        merchant_id = None
+        merchant_name = None
+        merchant_website = None
+        merchant_logo = None
+        entities = enrichment.get('entities', {}) if enrichment else {}
+        if entities:
+            counterparty = entities.get('counterparty')
+            if counterparty and isinstance(counterparty, dict):
+                merchant_id = counterparty.get('id')
+                merchant_name = counterparty.get('name')
+                merchant_website = counterparty.get('website')
+                merchant_logo = counterparty.get('logo')
+            if not merchant_id:
+                intermediaries = entities.get('intermediaries', [])
+                if intermediaries and isinstance(intermediaries, list) and len(intermediaries) > 0:
+                    intermediary = intermediaries[0]
+                    if isinstance(intermediary, dict):
+                        merchant_id = intermediary.get('id')
+                        merchant_name = intermediary.get('name')
+                        merchant_website = intermediary.get('website')
+                        merchant_logo = intermediary.get('logo')
+        
         # Determine which table to look up based on entry_type (already calculated correctly)
         if account_type == 'CREDIT':
             if entry_type == 'incoming':
@@ -434,7 +458,11 @@ def suggest_category_for_transaction(
             'suggested_category': suggested_category or 'Uncategorized',
             'suggested_category_id': suggested_category_id,
             'category_type': category_type,
-            'confidence': confidence
+            'confidence': confidence,
+            'ntropy_merchant_id': merchant_id,
+            'ntropy_merchant_name': merchant_name,
+            'ntropy_website': merchant_website,
+            'ntropy_logo': merchant_logo,
         }
         
     except Exception as e:
