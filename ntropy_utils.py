@@ -480,6 +480,86 @@ def _find_category_id(user_id: int, category_name: str, table_name: str) -> Opti
     return None
 
 
+def get_recurring_groups(profile_id: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Fetch recurring transaction groups from Ntropy for a Quiltt profile.
+    
+    Quiltt submits all transactions under the profile_id as account_holder_id.
+    This endpoint analyzes those transactions and returns detected recurring patterns.
+    
+    Args:
+        profile_id: The Quiltt profile ID (e.g., 'p_132UrS5UDu66vSa2QYUvpE')
+        
+    Returns:
+        List of recurring group dicts, each containing:
+            - id: Group UUID
+            - counterparty: {id, name, website, logo, ...}
+            - periodicity: 'monthly', 'bi-weekly', 'weekly', 'other'
+            - periodicity_in_days: float
+            - average_amount: float
+            - start_date, end_date: date strings
+            - transaction_ids: list of Quiltt transaction IDs
+            - entry_type: 'incoming' or 'outgoing'
+        Or None on error.
+    """
+    try:
+        if not NTROPY_API_KEY:
+            logger.warning("NTROPY_API_KEY not set, skipping recurring groups")
+            return None
+        
+        url = f"{NTROPY_API_BASE}/account_holders/{profile_id}/recurring_groups"
+        response = requests.post(url, headers=_get_api_headers())
+        
+        if response.status_code == 200:
+            groups = response.json()
+            logger.info(f"Ntropy recurring groups for {profile_id}: {len(groups)} groups found")
+            return groups
+        else:
+            logger.warning(f"Ntropy recurring_groups failed for {profile_id}: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error fetching recurring groups for {profile_id}: {e}", exc_info=True)
+        return None
+
+
+def build_recurrence_map(recurring_groups: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """
+    Build a mapping from transaction_id → recurrence data from recurring groups.
+    
+    Args:
+        recurring_groups: List of recurring group dicts from get_recurring_groups()
+        
+    Returns:
+        Dict mapping transaction_id to recurrence fields:
+            ntropy_recurrence, ntropy_recurrence_group_id, ntropy_periodicity,
+            ntropy_periodicity_days, ntropy_avg_amount, ntropy_first_payment_date,
+            ntropy_latest_payment_date, ntropy_merchant_id, ntropy_logo, ntropy_website
+    """
+    txn_map = {}
+    for group in recurring_groups:
+        group_id = group.get('id')
+        counterparty = group.get('counterparty') or {}
+        
+        recurrence_data = {
+            'ntropy_recurrence': 'recurring',
+            'ntropy_recurrence_group_id': group_id,
+            'ntropy_periodicity': group.get('periodicity'),
+            'ntropy_periodicity_days': group.get('periodicity_in_days'),
+            'ntropy_avg_amount': group.get('average_amount'),
+            'ntropy_first_payment_date': group.get('start_date'),
+            'ntropy_latest_payment_date': group.get('end_date'),
+            'ntropy_merchant_id': counterparty.get('id'),
+            'ntropy_logo': counterparty.get('logo'),
+            'ntropy_website': counterparty.get('website'),
+        }
+        
+        for txn_id in group.get('transaction_ids', []):
+            txn_map[txn_id] = recurrence_data
+    
+    return txn_map
+
+
 def delete_ntropy_user_data(user_id: int) -> bool:
     """
     Delete a user's data from Ntropy (for account deletion).
