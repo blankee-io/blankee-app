@@ -22157,49 +22157,38 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     if enrichment:
                         response = enrichment.get('response', {})
                         if response:
-                            # Extract labels (category) - store as JSON string
-                            labels = response.get('labels')
-                            if labels:
-                                import json
-                                ntropy_data['ntropy_labels'] = json.dumps(labels)
+                            # Extract categories (Quiltt schema: categories.general, categories.accounting)
+                            categories = response.get('categories')
+                            if categories and isinstance(categories, dict):
+                                # Store general category as labels (JSON array for compatibility)
+                                general = categories.get('general')
+                                if general:
+                                    ntropy_data['ntropy_labels'] = json.dumps([general])
                             
-                            # Extract merchant info (handle None case)
-                            merchant = response.get('merchant')
-                            merchant_id = response.get('merchantId')
+                            # Extract counterparty/merchant info (Quiltt schema: entities.counterparty)
+                            entities = response.get('entities')
+                            if entities and isinstance(entities, dict):
+                                counterparty = entities.get('counterparty')
+                                if counterparty and isinstance(counterparty, dict):
+                                    ntropy_data['ntropy_merchant_name'] = counterparty.get('name')
+                                    ntropy_data['ntropy_merchant_id'] = counterparty.get('id')
+                                    ntropy_data['ntropy_logo'] = counterparty.get('logo')
+                                    ntropy_data['ntropy_website'] = counterparty.get('website')
+                                    ntropy_data['ntropy_transaction_type'] = counterparty.get('type')
+                                    # Extract MCCs (merchant category codes)
+                                    mccs = counterparty.get('mccs')
+                                    if mccs:
+                                        ntropy_data['ntropy_mcc'] = json.dumps(mccs)
                             
-                            if merchant and isinstance(merchant, dict):
-                                ntropy_data['ntropy_merchant_name'] = merchant.get('name')
-                                ntropy_data['ntropy_logo'] = merchant.get('logo')
-                                ntropy_data['ntropy_website'] = merchant.get('website')
-                                
-                                location = merchant.get('location')
-                                if location and isinstance(location, dict):
-                                    ntropy_data['ntropy_location'] = location.get('address')
-                                    ntropy_data['ntropy_location_city'] = location.get('city')
-                                    ntropy_data['ntropy_location_state'] = location.get('state')
-                                    ntropy_data['ntropy_location_country'] = location.get('country')
-                            
-                            if merchant_id:
-                                ntropy_data['ntropy_merchant_id'] = merchant_id
-                            
-                            # Extract recurrence info
-                            recurrence = response.get('recurrence')
-                            if recurrence:
-                                ntropy_data['ntropy_recurrence'] = recurrence
-                            
-                            recurrence_group = response.get('recurrenceGroup')
-                            if recurrence_group and isinstance(recurrence_group, dict):
-                                ntropy_data['ntropy_recurrence_group_id'] = recurrence_group.get('id')
-                                ntropy_data['ntropy_periodicity'] = recurrence_group.get('periodicity')
-                                ntropy_data['ntropy_periodicity_days'] = recurrence_group.get('periodicityInDays')
-                                ntropy_data['ntropy_avg_amount'] = recurrence_group.get('averageAmount')
-                                ntropy_data['ntropy_first_payment_date'] = recurrence_group.get('firstPaymentDate')
-                                ntropy_data['ntropy_latest_payment_date'] = recurrence_group.get('latestPaymentDate')
-                            
-                            # Extract transaction type
-                            transaction_type = response.get('transactionType')
-                            if transaction_type:
-                                ntropy_data['ntropy_transaction_type'] = transaction_type
+                            # Extract location info (Quiltt schema: location.rawAddress, location.structured)
+                            location = response.get('location')
+                            if location and isinstance(location, dict):
+                                ntropy_data['ntropy_location'] = location.get('rawAddress')
+                                structured = location.get('structured')
+                                if structured and isinstance(structured, dict):
+                                    ntropy_data['ntropy_location_city'] = structured.get('city')
+                                    ntropy_data['ntropy_location_state'] = structured.get('state')
+                                    ntropy_data['ntropy_location_country'] = structured.get('country')
                             
                             # Mark as enriched
                             ntropy_data['ntropy_enriched_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

@@ -477,20 +477,47 @@ class QuilttClient:
                         remoteData {{
                             ntropy {{
                                 enrichment {{
+                                    id
+                                    timestamp
                                     response {{
-                                        labels
-                                        merchant
-                                        merchantId
-                                        recurrence
-                                        recurrenceGroup {{
-                                            id
-                                            periodicity
-                                            periodicityInDays
-                                            averageAmount
-                                            firstPaymentDate
-                                            latestPaymentDate
+                                        categories {{
+                                            general
+                                            accounting
                                         }}
-                                        transactionType
+                                        entities {{
+                                            counterparty {{
+                                                id
+                                                name
+                                                logo
+                                                mccs
+                                                website
+                                                type
+                                            }}
+                                            intermediaries {{
+                                                id
+                                                name
+                                                logo
+                                                mccs
+                                                website
+                                            }}
+                                        }}
+                                        location {{
+                                            rawAddress
+                                            structured {{
+                                                city
+                                                state
+                                                country
+                                                countryCode
+                                                postcode
+                                                street
+                                                houseNumber
+                                                storeNumber
+                                                latitude
+                                                longitude
+                                            }}
+                                        }}
+                                        id
+                                        createdAt
                                     }}
                                 }}
                             }}
@@ -583,19 +610,23 @@ class QuilttClient:
         expense_categories = defaultdict(list)
         
         for txn in transactions:
-            # Extract category from Ntropy labels (in remoteData.ntropy.enrichment.response.labels)
+            # Extract category from Ntropy enrichment (Quiltt schema: entities.counterparty, categories.general)
             remote_data = txn.get('remoteData', {})
             ntropy_data = remote_data.get('ntropy', {})
             enrichment = ntropy_data.get('enrichment', {})
             response = enrichment.get('response', {})
             
-            labels = response.get('labels', [])
-            merchant = response.get('merchant', '')
+            categories = response.get('categories', {})
+            general_category = categories.get('general', '') if isinstance(categories, dict) else ''
             
-            # Use first label as category, or merchant name, or skip
+            entities = response.get('entities', {})
+            counterparty = entities.get('counterparty', {}) if isinstance(entities, dict) else {}
+            merchant = counterparty.get('name', '') if isinstance(counterparty, dict) else ''
+            
+            # Use general category label, or counterparty name, or skip
             category_name = None
-            if labels and len(labels) > 0:
-                category_name = labels[0]  # Primary label
+            if general_category:
+                category_name = general_category
             elif merchant:
                 category_name = merchant
             
