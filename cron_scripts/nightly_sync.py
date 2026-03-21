@@ -675,7 +675,14 @@ def sync_transactions_for_account(cursor, conn, user_id, account_id, session_tok
                         new_quiltt_txn['custom_category_type'] = suggestion.get('category_type')
                         new_quiltt_txn['custom_category_confidence'] = suggestion.get('confidence')
                         new_quiltt_txn['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        logger.info(f"User {user_id}: Ntropy suggestion for {txn_id}: {suggestion.get('suggested_category')} (confidence={suggestion.get('confidence')})")
+                        # Save entity/merchant data from enrichment
+                        if suggestion.get('ntropy_merchant_id'):
+                            new_quiltt_txn['ntropy_merchant_id'] = suggestion['ntropy_merchant_id']
+                        if suggestion.get('ntropy_logo'):
+                            new_quiltt_txn['ntropy_logo'] = suggestion['ntropy_logo']
+                        if suggestion.get('ntropy_website'):
+                            new_quiltt_txn['ntropy_website'] = suggestion['ntropy_website']
+                        logger.info(f"User {user_id}: Ntropy suggestion for {txn_id}: {suggestion.get('suggested_category')} (confidence={suggestion.get('confidence')}, merchant={suggestion.get('ntropy_merchant_id')})")
                 except Exception as suggest_err:
                     logger.warning(f"User {user_id}: Failed to get category suggestion for {txn_id}: {suggest_err}")
             # --- END CUSTOM CATEGORY SUGGESTION ---
