@@ -92,6 +92,7 @@ USER_TABLES = [
     # Additional user tables
     'notifications',
     'password_resets',
+    'setup_state',
 ]
 
 
@@ -523,6 +524,7 @@ def _dehydrate_user_data(user_id: int):
                 'bud_items',
                 'users',  # User settings (goofy_week_mode, landing_page, etc.)
                 'notifications',  # User notifications
+                'setup_state',  # Setup wizard temporary state
             ]
             
             flushed_count = 0
@@ -663,6 +665,7 @@ def _flush_redis_to_mysql():
             'quiltt_accounts',  # Quiltt bank accounts
             'quiltt_transactions',  # Quiltt transactions
             'quiltt_category_mappings',  # Quiltt category mappings
+            'setup_state',  # Setup wizard temporary state
             # Deletion handlers (must run after updates)
             'quiltt_connections_deleted',
             'quiltt_accounts_deleted',
@@ -2767,6 +2770,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             email_notifications = %s,
                             first_name = %s,
                             last_name = %s,
+                            handle = %s,
                             goofy_week_mode = %s,
                             landing_page = %s,
                             profile_picture = %s,
@@ -2786,6 +2790,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         int(user_data.get('email_notifications', 0)),
                         user_data.get('first_name'),
                         user_data.get('last_name'),
+                        user_data.get('handle'),
                         int(user_data.get('goofy_week_mode', 0)),
                         user_data.get('landing_page', 'dashboard_3m'),
                         user_data.get('profile_picture'),
@@ -4005,6 +4010,37 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 logger.debug(f"[FLUSH] → starting_balance: 1 row")
                 return 1
             
+            elif table == 'setup_state':
+                # Setup wizard temporary state — single row per user, JSON blob
+                if not rows:
+                    # Empty means setup completed — delete from MySQL
+                    cursor.execute("DELETE FROM setup_state WHERE user_id = %s", (user_id,))
+                    conn.commit()
+                    cursor.close()
+                    logger.debug(f"[FLUSH] → setup_state: deleted (setup complete)")
+                    return 0
+                
+                row = rows[0]
+                state_json = row.get('state')
+                if isinstance(state_json, dict):
+                    state_json = json.dumps(state_json)
+                
+                cursor.execute("""
+                    INSERT INTO setup_state (user_id, state, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        state = VALUES(state),
+                        updated_at = NOW()
+                """, (
+                    user_id,
+                    state_json
+                ))
+                
+                conn.commit()
+                cursor.close()
+                logger.debug(f"[FLUSH] → setup_state: 1 row")
+                return 1
+            
             elif table == 'notifications':
                 # Notifications table
                 # First, handle pending deletes
@@ -4412,6 +4448,7 @@ def flush_dirty_tables_for_user(user_id: int):
             'bud_items',
             'users',  # User settings (balance_threshold, starting_savings)
             'notifications',  # User notifications
+            'setup_state',  # Setup wizard temporary state
         ]
         
         # Get dirty tables for this user
