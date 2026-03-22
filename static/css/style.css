@@ -3072,7 +3072,7 @@ tr[data-category-id] td.before-member-since {
     pointer-events: none;
     font-family: "Font Awesome 7 Pro";
     content: '\f00c';
-    color: var(--text-dark);
+    color: var(--white);
     background-color: var(--success);
     border: 1.5px solid var(--text-dark);
     border-radius: 50%;
@@ -3097,7 +3097,7 @@ tr[data-category-id] td.before-member-since {
     pointer-events: none;
     font-family: "Font Awesome 7 Pro";
     content: '\f128';
-    color: var(--text-dark);
+    color: var(--white);
     background-color: var(--secondary);
     border: 1.5px solid var(--text-dark);
     border-radius: 50%;
@@ -3111,12 +3111,12 @@ tr[data-category-id] td.before-member-since {
     position: absolute;
     top: -6px;
     right: -8px;
-    width: 11px;
-    height: 11px;
-    font-size: 8.5px;
+    width: 14px;
+    height: 14px;
+    font-size: 8px;
     font-weight: 900;
     pointer-events: none;
-    color: var(--text-dark);
+    color: var(--white);
     background-color: var(--danger);
     border: 1.5px solid var(--text-dark);
     border-radius: 50%;
@@ -3125,6 +3125,9 @@ tr[data-category-id] td.before-member-since {
     justify-content: center;
     z-index: 1;
     line-height: 1;
+    text-align: center;
+    padding: 0;
+    box-sizing: border-box;
 }
 
 /* Alternating background colors for income entries */
