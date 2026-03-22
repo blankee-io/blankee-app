@@ -373,9 +373,19 @@
                     <input type="text" id="setup-profile-first-name" name="first_name" placeholder="First Name" autocomplete="chrome-off" data-1p-ignore readonly required>
                     <input type="text" id="setup-profile-last-name" name="last_name" placeholder="Last Name" autocomplete="chrome-off" data-1p-ignore readonly required>
                 </div>
+                <label for="setup-profile-handle" style="margin-top: 12px;">Choose a unique handle for your account.</label>
+                <div style="position: relative; width: 100%;">
+                    <div class="currency-input-container">
+                        <input type="text" id="setup-profile-handle" name="handle" placeholder="user_handle" autocomplete="chrome-off" data-1p-ignore readonly required maxlength="30">
+                    </div>
+                    <div id="setup-handle-requirements" class="profile-email-requirements" style="display: none;">
+                        <p id="setup-handle-format-req"><span class="profile-requirement-icon">&#10007;</span> 3-30 chars: lowercase letters, numbers, _ or -</p>
+                        <p id="setup-handle-availability-req"><span class="profile-requirement-icon">&#10007;</span> Handle is available</p>
+                    </div>
+                </div>
                 <div class="setup-profile-button-container">
                     <button type="button" class="setup-profile-previous-button" id="name-modal-prev-btn">Previous</button>
-                    <button type="submit" class="setup-profile-next-button">Continue</button>
+                    <button type="submit" class="setup-profile-next-button" id="name-modal-continue-btn" disabled>Continue</button>
                 </div>
             </form>
         </div>
@@ -480,6 +490,7 @@
         // Saved form data for prefilling on resume
         let savedFirstName = {{ saved_first_name|tojson }};
         let savedLastName = {{ saved_last_name|tojson }};
+        let savedHandle = {{ saved_handle|tojson }};
         let savedCurrencyType = {{ saved_currency_type|tojson }};
         let savedStartingBalance = {{ saved_starting_balance|tojson }};
         let savedStartingSavings = {{ saved_starting_savings|tojson }};
@@ -671,7 +682,7 @@
 
             // Remove readonly from name fields after a short delay to prevent 1Password detection
             setTimeout(function() {
-                $('#setup-profile-first-name, #setup-profile-last-name').removeAttr('readonly');
+                $('#setup-profile-first-name, #setup-profile-last-name, #setup-profile-handle').removeAttr('readonly');
             }, 100);
 
             // If resuming with bank connected or saved bank flow, switch to bank flow
@@ -682,6 +693,7 @@
             // Prefill form fields from saved data
             if (savedFirstName) $('#setup-profile-first-name').val(savedFirstName);
             if (savedLastName) $('#setup-profile-last-name').val(savedLastName);
+            if (savedHandle) $('#setup-profile-handle').val(savedHandle);
             if (savedCurrencyType && savedCurrencyType !== 'USD') {
                 $('#setup-profile-currency-type').val(savedCurrencyType);
                 updateCurrencySymbols(savedCurrencyType);
@@ -697,6 +709,7 @@
             // Restore name JS vars if set
             if (savedFirstName) window.setupFirstName = savedFirstName;
             if (savedLastName) window.setupLastName = savedLastName;
+            if (savedHandle) window.setupHandle = savedHandle;
             // Restore saved categories if available
             if (savedCategories) {
                 recommendedCategories = JSON.parse(JSON.stringify(savedCategories));
@@ -2125,30 +2138,15 @@
             });
 
             // Handle previous from category recommendations
-            // Reset account sync selections and go back to account selection or bank
+            // Clear all connections and go back to bank connection step
             $('#category-recommendations-prev-btn').on('click', function() {
-                $('#category-recommendations-modal-setup').hide();
-                if (bankConnected) {
-                    // Reset all selected accounts' sync_transactions and is_active to null
-                    var accountIds = window.setupSelectedAccountIds || [];
-                    var resetPromises = accountIds.map(function(accountId) {
-                        return $.ajax({
-                            url: '/quiltt/update-account',
-                            method: 'POST',
-                            contentType: 'application/json',
-                            data: JSON.stringify({ account_id: accountId, is_active: null, sync_transactions: null })
-                        });
-                    });
-                    $.when.apply($, resetPromises).always(function() {
-                        window.setupSelectedAccountIds = [];
-                        saveSetupStep(3, { setup_selected_account_ids: [] });
-                        loadAccountSelection();
-                    });
-                } else {
-                    // Skipped bank, go back to bank connection
-                    saveSetupStep(2, { setup_bank_flow: false });
+                const $btn = $(this);
+                $btn.prop('disabled', true).text('Removing...');
+                removeBankConnection().always(function() {
+                    $btn.prop('disabled', false).text('Previous');
+                    saveSetupStep(2, { setup_bank_flow: false, setup_selected_account_ids: [] });
                     goToStep('bank-connection-modal-setup');
-                }
+                });
             });
 
             // Handle create categories button - Store data and proceed to name modal
@@ -2270,9 +2268,15 @@
                 event.preventDefault();
                 window.setupFirstName = $('#setup-profile-first-name').val().trim();
                 window.setupLastName = $('#setup-profile-last-name').val().trim();
+                window.setupHandle = $('#setup-profile-handle').val().trim().toLowerCase();
 
                 if (!window.setupFirstName || !window.setupLastName) {
                     showToast('Please enter your first and last name.', 'warning');
+                    return;
+                }
+
+                if (!window.setupHandle || !window.setupHandleValid) {
+                    showToast('Please enter a valid, available handle.', 'warning');
                     return;
                 }
 
@@ -2281,17 +2285,122 @@
                 if (bankConnected) {
                     // Show loading modal while we wait for Quiltt to finish syncing balances
                     document.getElementById('category-analysis-loading-modal').style.display = 'flex';
-                    saveSetupStep(7, { first_name: window.setupFirstName, last_name: window.setupLastName });
+                    saveSetupStep(7, { first_name: window.setupFirstName, last_name: window.setupLastName, handle: window.setupHandle });
 
                     // Poll for synced balances, then show balance page
                     pollForSyncedBalances();
                 } else {
                     // Normal flow - go to currency selection
-                    saveSetupStep(6, { first_name: window.setupFirstName, last_name: window.setupLastName });
+                    saveSetupStep(6, { first_name: window.setupFirstName, last_name: window.setupLastName, handle: window.setupHandle });
                     $('#currency-modal-setup').show();
                     $('#setup-profile-currency-type').focus();
                 }
             });
+
+            // Handle input validation for setup handle field
+            window.setupHandleValid = false;
+            // If resuming with a saved valid handle, mark as valid immediately
+            if (savedHandle && /^[a-z0-9_-]{3,30}$/.test(savedHandle)) {
+                window.setupHandleValid = true;
+            }
+            (function() {
+                var handleInput = $('#setup-profile-handle');
+                var formatReq = $('#setup-handle-format-req .profile-requirement-icon');
+                var availReq = $('#setup-handle-availability-req .profile-requirement-icon');
+                var reqBox = $('#setup-handle-requirements');
+                var continueBtn = $('#name-modal-continue-btn');
+                var handlePattern = /^[a-z0-9_-]{3,30}$/;
+                var debounceTimer = null;
+
+                function checkNameFormReady() {
+                    var firstName = $('#setup-profile-first-name').val().trim();
+                    var lastName = $('#setup-profile-last-name').val().trim();
+                    if (firstName && lastName && window.setupHandleValid) {
+                        continueBtn.prop('disabled', false);
+                    } else {
+                        continueBtn.prop('disabled', true);
+                    }
+                }
+
+                $('#setup-profile-first-name, #setup-profile-last-name').on('input', checkNameFormReady);
+
+                var blurTimer = null;
+
+                handleInput.on('input', function() {
+                    var handle = handleInput.val().trim().toLowerCase();
+                    handleInput.val(handle);  // Force lowercase in the input
+
+                    if (!handle) {
+                        reqBox.css('display', 'none');
+                        window.setupHandleValid = false;
+                        checkNameFormReady();
+                        return;
+                    }
+
+                    reqBox.css({'display': 'block', 'opacity': '1'});
+                    window.setupHandleValid = false;
+
+                    if (handlePattern.test(handle)) {
+                        formatReq.text('\u2713').addClass('valid');
+                    } else {
+                        formatReq.text('\u2717').removeClass('valid');
+                        availReq.text('\u2717').removeClass('valid');
+                        checkNameFormReady();
+                        // Position floating above the input
+                        reqBox.css({
+                            bottom: handleInput.outerHeight() + 5 + 'px',
+                            left: '0',
+                            width: handleInput.outerWidth() + 'px',
+                            borderRadius: handleInput.css('border-radius')
+                        });
+                        return;
+                    }
+
+                    // Debounce availability check
+                    if (debounceTimer) clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(function() {
+                        $.ajax({
+                            url: "{{ url_for('check_handle') }}",
+                            method: 'POST',
+                            data: { handle: handle },
+                            success: function(resp) {
+                                if (resp.status === 'available') {
+                                    availReq.text('\u2713').addClass('valid');
+                                    window.setupHandleValid = true;
+                                } else {
+                                    availReq.text('\u2717').removeClass('valid');
+                                    window.setupHandleValid = false;
+                                }
+                                checkNameFormReady();
+                            },
+                            error: function() {
+                                availReq.text('\u2717').removeClass('valid');
+                                window.setupHandleValid = false;
+                                checkNameFormReady();
+                            }
+                        });
+                    }, 300);
+
+                    // Position floating above the input
+                    reqBox.css({
+                        bottom: handleInput.outerHeight() + 5 + 'px',
+                        left: '0',
+                        width: handleInput.outerWidth() + 'px',
+                        borderRadius: handleInput.css('border-radius')
+                    });
+                });
+
+                // Hide requirements on blur after 1 second
+                handleInput.on('focusout', function() {
+                    if (blurTimer) clearTimeout(blurTimer);
+                    blurTimer = setTimeout(function() {
+                        reqBox.css('opacity', '0');
+                        setTimeout(function() {
+                            reqBox.css('display', 'none');
+                        }, 300);
+                    }, 1000);
+                });
+            })();
 
             function pollForSyncedBalances(attempt = 0, maxAttempts = 60) {
                 // Poll Quiltt to check if balances are synced (up to 60 attempts = 30 seconds)
@@ -2552,9 +2661,9 @@
                             income_entry_date: incomeEntryDate,
                             first_name: window.setupFirstName || '',
                             last_name: window.setupLastName || '',
+                            handle: window.setupHandle || '',
                             selected_account_ids: window.setupSelectedAccountIds || []
                         }),
-                        async: false,  // Set async to false for synchronous request
                         success: function (response) {
                             if (response.status === 'success') {
                                 // After profile is complete, create the recommended categories if any were selected
@@ -2602,7 +2711,6 @@
                         method: 'POST',
                         contentType: 'application/json',
                         data: JSON.stringify(categoriesToCreate),
-                        async: false,  // Synchronous to ensure categories are created before navigation
                         success: function(response) {
                             console.log('Categories created:', response);
                             if (response.status !== 'success') {
@@ -2670,7 +2778,6 @@
                 url: "/save_totals_remainders_d", // Back-end route
                 type: "POST", // Or "GET" depending on your method
                 contentType: "application/json",
-                async: false,  // Make the request synchronous
                 success: function(response) {
                     if (response.status === "success") {
                         // Refresh notification badge in case new notifications were created

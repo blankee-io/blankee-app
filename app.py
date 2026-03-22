@@ -976,16 +976,45 @@ def setup_profile():
     # Get Quiltt connector ID from environment
     connector_id = os.getenv('QUILTT_CONNECTOR_ID', '')
     
-    # Extract saved form data for prefilling
+    # Extract saved form data for prefilling (permanent fields from users blob)
     saved_first_name = user_data.get('first_name', '') or ''
     saved_last_name = user_data.get('last_name', '') or ''
+    saved_handle = user_data.get('handle', '') or ''
     saved_currency_type = user_data.get('currency_type', 'USD') or 'USD'
     saved_starting_savings = user_data.get('starting_savings', '') or ''
     saved_balance_threshold = user_data.get('balance_threshold', '') or ''
-    saved_starting_balance = user_data.get('setup_starting_balance', '') or ''
-    saved_bank_flow = bool(user_data.get('setup_bank_flow', False))
-    saved_selected_account_ids = user_data.get('setup_selected_account_ids', []) or []
-    saved_categories = user_data.get('setup_categories', None)
+
+    # Read temporary setup fields from setup_state (Redis-first, MySQL fallback)
+    setup_state = {}
+    r = init_redis()
+    if r and app.config.get('REDIS_OK'):
+        try:
+            cached_state = r.get(f"setup_state:v1:{user_id}")
+            if cached_state:
+                state_rows = json.loads(cached_state)
+                if isinstance(state_rows, list) and len(state_rows) > 0:
+                    state_row = state_rows[0]
+                    setup_state = state_row.get('state', {}) if isinstance(state_row.get('state'), dict) else {}
+                    if isinstance(state_row.get('state'), str):
+                        setup_state = json.loads(state_row['state'])
+        except Exception:
+            pass
+
+    if not setup_state:
+        try:
+            with get_db_pool().get_cursor(dictionary=True) as cursor:
+                cursor.execute("SELECT state FROM setup_state WHERE user_id = %s", (user_id,))
+                row = cursor.fetchone()
+                if row and row.get('state'):
+                    state_val = row['state']
+                    setup_state = json.loads(state_val) if isinstance(state_val, str) else state_val
+        except Exception:
+            pass
+
+    saved_starting_balance = setup_state.get('setup_starting_balance', '') or ''
+    saved_bank_flow = bool(setup_state.get('setup_bank_flow', False))
+    saved_selected_account_ids = setup_state.get('setup_selected_account_ids', []) or []
+    saved_categories = setup_state.get('setup_categories', None)
     
     # Render the setup profile page with connector ID and resume state
     return render_template('setup_profile.html',
@@ -995,6 +1024,7 @@ def setup_profile():
                            bank_connected=bank_connected,
                            saved_first_name=saved_first_name,
                            saved_last_name=saved_last_name,
+                           saved_handle=saved_handle,
                            saved_currency_type=saved_currency_type,
                            saved_starting_savings=saved_starting_savings,
                            saved_balance_threshold=saved_balance_threshold,
@@ -1173,31 +1203,55 @@ def save_setup_step():
                 user_data['setup_step'] = step
 
                 # Save permanent user fields directly (flush worker handles these)
-                DIRECT_FIELDS = ['first_name', 'last_name', 'currency_type', 'balance_threshold', 'starting_savings']
+                DIRECT_FIELDS = ['first_name', 'last_name', 'handle', 'currency_type', 'balance_threshold', 'starting_savings']
                 for field in DIRECT_FIELDS:
                     if field in data and data[field] is not None:
-                        user_data[field] = data[field]
-
-                # Save temporary setup fields (persist in Redis only, not flushed to MySQL)
-                SETUP_FIELDS = ['setup_bank_flow', 'setup_starting_balance', 'setup_selected_account_ids', 'setup_categories']
-                for field in SETUP_FIELDS:
-                    if field in data:
                         user_data[field] = data[field]
 
                 r.setex(redis_key, 604800, json.dumps(user_data, cls=DecimalEncoder))
                 # Mark users table as dirty so flush worker syncs to MySQL
                 r.sadd(f"dirty_tables:{user_id}", 'users')
+
+                # Save temporary setup fields to dedicated setup_state key (MySQL-backed)
+                SETUP_FIELDS = ['setup_bank_flow', 'setup_starting_balance', 'setup_selected_account_ids', 'setup_categories']
+                setup_data_present = any(field in data for field in SETUP_FIELDS)
+                if setup_data_present:
+                    setup_state_key = f"setup_state:v1:{user_id}"
+                    existing_state = r.get(setup_state_key)
+                    if existing_state:
+                        state = json.loads(existing_state)
+                        if isinstance(state, list) and len(state) > 0:
+                            state = state[0].get('state', {}) if 'state' in state[0] else state[0]
+                        elif isinstance(state, list):
+                            state = {}
+                        # MySQL JSON columns hydrate as strings — parse if needed
+                        if isinstance(state, str):
+                            try:
+                                state = json.loads(state)
+                            except (json.JSONDecodeError, TypeError):
+                                state = {}
+                    else:
+                        state = {}
+
+                    for field in SETUP_FIELDS:
+                        if field in data:
+                            state[field] = data[field]
+
+                    # Store as array with single row (matches hydration pattern)
+                    r.setex(setup_state_key, 604800, json.dumps([{'user_id': user_id, 'state': state}], cls=DecimalEncoder))
+                    r.sadd(f"dirty_tables:{user_id}", 'setup_state')
+
                 return jsonify({'status': 'success'})
         except Exception as e:
             print(f"[save_setup_step] Redis error: {e}")
 
-    # Fallback: write directly to MySQL (only permanent fields)
+    # Fallback: write directly to MySQL (only permanent fields + setup_state)
     try:
-        with get_db_pool().get_cursor() as cursor:
+        with get_db_pool().get_cursor(commit=True) as cursor:
             updates = ["setup_step = %s"]
             params = [step]
             DIRECT_FIELDS_SQL = {
-                'first_name': 'first_name', 'last_name': 'last_name',
+                'first_name': 'first_name', 'last_name': 'last_name', 'handle': 'handle',
                 'currency_type': 'currency_type', 'balance_threshold': 'balance_threshold',
                 'starting_savings': 'starting_savings'
             }
@@ -1207,6 +1261,23 @@ def save_setup_step():
                     params.append(data[js_field])
             params.append(user_id)
             cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = %s", tuple(params))
+
+            # Save temporary setup fields to setup_state table
+            SETUP_FIELDS = ['setup_bank_flow', 'setup_starting_balance', 'setup_selected_account_ids', 'setup_categories']
+            setup_data_present = any(field in data for field in SETUP_FIELDS)
+            if setup_data_present:
+                # Load existing state
+                cursor.execute("SELECT state FROM setup_state WHERE user_id = %s", (user_id,))
+                row = cursor.fetchone()
+                state = json.loads(row[0]) if row and row[0] else {}
+                for field in SETUP_FIELDS:
+                    if field in data:
+                        state[field] = data[field]
+                cursor.execute("""
+                    INSERT INTO setup_state (user_id, state, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON DUPLICATE KEY UPDATE state = VALUES(state), updated_at = NOW()
+                """, (user_id, json.dumps(state)))
     except Exception as e:
         print(f"[save_setup_step] MySQL error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -1226,10 +1297,11 @@ def complete_profile_setup():
         currency_type = request.json.get('currency_type', 'USD')
         first_name = request.json.get('first_name', '').strip()
         last_name = request.json.get('last_name', '').strip()
+        handle = request.json.get('handle', '').strip().lower()
         selected_account_ids = request.json.get('selected_account_ids', [])
 
         # If name or account IDs are empty (cross-browser resume), read from Redis
-        if not first_name or not last_name or not selected_account_ids:
+        if not first_name or not last_name or not handle:
             r = init_redis()
             if r and app.config.get('REDIS_OK'):
                 try:
@@ -1240,10 +1312,39 @@ def complete_profile_setup():
                             first_name = (user_data.get('first_name') or '').strip()
                         if not last_name:
                             last_name = (user_data.get('last_name') or '').strip()
-                        if not selected_account_ids:
-                            selected_account_ids = user_data.get('setup_selected_account_ids', [])
+                        if not handle:
+                            handle = (user_data.get('handle') or '').strip().lower()
                 except Exception:
                     pass
+
+        # If account IDs are empty, read from setup_state (Redis-first, MySQL fallback)
+        if not selected_account_ids:
+            r = init_redis()
+            setup_state = {}
+            if r and app.config.get('REDIS_OK'):
+                try:
+                    cached_state = r.get(f"setup_state:v1:{current_user.id}")
+                    if cached_state:
+                        state_rows = json.loads(cached_state)
+                        if isinstance(state_rows, list) and len(state_rows) > 0:
+                            state_row = state_rows[0]
+                            setup_state = state_row.get('state', {}) if isinstance(state_row.get('state'), dict) else {}
+                            if isinstance(state_row.get('state'), str):
+                                setup_state = json.loads(state_row['state'])
+                except Exception:
+                    pass
+            if not setup_state:
+                try:
+                    with get_db_pool().get_cursor(dictionary=True) as cursor:
+                        cursor.execute("SELECT state FROM setup_state WHERE user_id = %s", (current_user.id,))
+                        row = cursor.fetchone()
+                        if row and row.get('state'):
+                            state_val = row['state']
+                            setup_state = json.loads(state_val) if isinstance(state_val, str) else state_val
+                except Exception:
+                    pass
+            if setup_state:
+                selected_account_ids = setup_state.get('setup_selected_account_ids', [])
 
         print(f"[complete_profile_setup] starting_balance: {starting_balance}")
         print(f"[complete_profile_setup] starting_savings: {starting_savings}")
@@ -1295,6 +1396,8 @@ def complete_profile_setup():
         print(f"[complete_profile_setup] Updating names in Redis via _update_user_setting_in_redis")
         _update_user_setting_in_redis(current_user.id, 'first_name', first_name)
         _update_user_setting_in_redis(current_user.id, 'last_name', last_name)
+        if handle:
+            _update_user_setting_in_redis(current_user.id, 'handle', handle)
 
         # Get or create the 'Starting Balance' income category
         with get_db_pool().get_connection() as conn:
@@ -1468,6 +1571,19 @@ def complete_profile_setup():
 
         # Clear setup progress (setup is complete)
         _update_user_setting_in_redis(current_user.id, 'setup_step', 0)
+
+        # Delete setup_state — setup is complete, temp data no longer needed
+        r = init_redis()
+        if r and app.config.get('REDIS_OK'):
+            try:
+                r.delete(f"setup_state:v1:{current_user.id}")
+            except Exception:
+                pass
+        try:
+            with get_db_pool().get_cursor(commit=True) as cursor:
+                cursor.execute("DELETE FROM setup_state WHERE user_id = %s", (current_user.id,))
+        except Exception:
+            pass
 
         # Return success response
         return jsonify({'status': 'success'})
@@ -12558,6 +12674,9 @@ def profile():
     starting_balance = int(float(starting_balance_data['amount'])) if starting_balance_data and starting_balance_data['amount'] is not None else 0
     mfa_enabled = bool(user_data['mfa_secret']) if user_data and 'mfa_secret' in user_data else False
     pending_email = user_data.get('pending_email') if user_data else None
+    handle = user_data.get('handle', '') if user_data else ''
+    if handle is None:
+        handle = ''
 
     # Pass all retrieved data to the template
     return render_template(
@@ -12566,6 +12685,7 @@ def profile():
         profile_picture=profile_picture,
         first_name=first_name,
         last_name=last_name,
+        handle=handle,
         starting_balance=starting_balance,
         balance_threshold=balance_threshold,
         goofy_week_mode=goofy_week_mode,
@@ -13769,6 +13889,54 @@ def update_last_name():
 
     flash('Last name updated successfully.')
     return redirect(url_for('profile', success='last_name'))
+
+@app.route('/update_handle', methods=['POST'])
+@login_required
+def update_handle():
+    import re
+    new_handle = request.form.get('handle', '').strip().lower()
+    
+    if not new_handle:
+        flash('Handle cannot be empty.')
+        return redirect(url_for('profile'))
+    
+    # Validate format: 3-30 chars, lowercase alphanumeric, underscores, hyphens
+    if not re.match(r'^[a-z0-9_-]{3,30}$', new_handle):
+        flash('Handle must be 3-30 characters and contain only lowercase letters, numbers, underscores, or hyphens.')
+        return redirect(url_for('profile'))
+    
+    # Check if handle is already taken by another user
+    with get_db_pool().get_cursor() as cursor:
+        cursor.execute("SELECT id FROM users WHERE handle = %s AND id != %s", (new_handle, current_user.id))
+        existing = cursor.fetchone()
+    
+    if existing:
+        flash('That handle is already taken.')
+        return redirect(url_for('profile'))
+    
+    # Update in Redis only - flush worker will persist to MySQL
+    _update_user_setting_in_redis(current_user.id, 'handle', new_handle)
+    
+    flash('Handle updated successfully.')
+    return redirect(url_for('profile', success='handle'))
+
+@app.route('/check_handle', methods=['POST'])
+@login_required
+def check_handle():
+    import re
+    handle = request.form.get('handle', '').strip().lower()
+    
+    if not handle or not re.match(r'^[a-z0-9_-]{3,30}$', handle):
+        return jsonify({'status': 'invalid'})
+    
+    with get_db_pool().get_cursor() as cursor:
+        cursor.execute("SELECT id FROM users WHERE handle = %s AND id != %s", (handle, current_user.id))
+        existing = cursor.fetchone()
+    
+    if existing:
+        return jsonify({'status': 'taken'})
+    else:
+        return jsonify({'status': 'available'})
 
 @app.route('/update_username', methods=['POST'])
 @login_required
@@ -26042,7 +26210,7 @@ def _get_user_profile_meta(user_id: int):
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT profile_picture, first_name, last_name, landing_page, email, username
+                SELECT profile_picture, first_name, last_name, handle, landing_page, email, username
                 FROM users
                 WHERE id = %s
             """, (user_id,))
@@ -26052,6 +26220,7 @@ def _get_user_profile_meta(user_id: int):
     profile_picture = user_data.get('profile_picture') if user_data else None
     first_name = user_data.get('first_name', '') if user_data else ''
     last_name = user_data.get('last_name', '') if user_data else ''
+    handle = user_data.get('handle', '') if user_data else ''
     landing_page = user_data.get('landing_page', 'dashboard_3m') if user_data else 'dashboard_3m'
     email = user_data.get('email') or user_data.get('username') or ''
     username = user_data.get('username') or email
@@ -26060,6 +26229,7 @@ def _get_user_profile_meta(user_id: int):
         'profile_picture': profile_picture,
         'first_name': first_name,
         'last_name': last_name,
+        'handle': handle,
         'landing_page': landing_page,
         'email': email,
         'username': username,
@@ -26074,7 +26244,7 @@ def _page_context_tag(path: str) -> str:
 def _get_fider_client_and_user():
     client = get_fider_client()
     meta = _get_user_profile_meta(current_user.id)
-    display_name = f"{meta.get('first_name', '').strip()} {meta.get('last_name', '').strip()}".strip() or meta.get('username') or meta.get('email')
+    display_name = meta.get('handle', '').strip()
     email = meta.get('email') or meta.get('username')
     redis_client = _redis_client if app.config.get('REDIS_OK') else None
     fider_user_id = client.ensure_user(display_name, email, str(current_user.id), redis_client)
