@@ -3111,13 +3111,13 @@ tr[data-category-id] td.before-member-since {
     position: absolute;
     top: -6px;
     right: -8px;
-    min-width: 11px;
+    width: 11px;
     height: 11px;
-    font-size: 7.5px;
+    font-size: 8.5px;
     font-weight: 900;
     pointer-events: none;
     color: var(--text-dark);
-    background-color: var(--secondary);
+    background-color: var(--danger);
     border: 1.5px solid var(--text-dark);
     border-radius: 50%;
     display: inline-flex;
