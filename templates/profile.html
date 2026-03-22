@@ -102,6 +102,20 @@
                                         <i id="profile-last-submit-icon" class="fas fa-check"></i>
                                     </button>
                                 </div>
+                            </form>
+                            <!-- Form for changing the handle -->
+                            <form method="POST" action="{{ url_for('update_handle') }}" class="profile-form">
+                                <div class="input-group">
+                                    <label for="handle">Change Handle:</label>
+                                    <input type="text" name="handle" id="profile-handle" class="login-input" value="{{ handle }}" required maxlength="30">
+                                    <button type="submit" id="profile-handle-submit-button" class="submit-button submit-unchanged" disabled>
+                                        <i id="profile-handle-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                    <div id="profile-handle-requirements" class="profile-email-requirements" style="display: none;">
+                                        <p id="profile-handle-format-requirement"><span class="profile-requirement-icon">&#10007;</span> 3-30 chars: lowercase letters, numbers, _ or -</p>
+                                        <p id="profile-handle-availability-requirement"><span class="profile-requirement-icon">&#10007;</span> Handle is available</p>
+                                    </div>
+                                </div>
                             </form>          
                             <!-- Form for changing the email -->
                             <form method="POST" action="{{ url_for('update_username') }}" class="profile-form">
@@ -791,6 +805,108 @@
                     borderRadius: usernameInput.css('border-radius')
                 });
             });
+
+            // Handle field validation
+            (function() {
+                const handleInput = $('#profile-handle');
+                const handleSubmitBtn = $('#profile-handle-submit-button');
+                const handleSubmitIcon = $('#profile-handle-submit-icon');
+                const handleReqs = $('#profile-handle-requirements');
+                const handleFormatReq = $('#profile-handle-format-requirement .profile-requirement-icon');
+                const handleAvailReq = $('#profile-handle-availability-requirement .profile-requirement-icon');
+                const initialHandle = handleInput.val();
+                const handlePattern = /^[a-z0-9_-]{3,30}$/;
+                let isHandleValid = false;
+                let debounceTimer = null;
+
+                let blurTimer = null;
+
+                handleInput.on('input', function() {
+                    let handle = handleInput.val().trim().toLowerCase();
+                    handleInput.val(handle);
+
+                    if (handle === initialHandle) {
+                        handleReqs.css('display', 'none');
+                        isHandleValid = false;
+                        disableButton(handleSubmitBtn, handleSubmitIcon);
+                        return;
+                    }
+
+                    if (!handle) {
+                        handleReqs.css('display', 'none');
+                        isHandleValid = false;
+                        disableButton(handleSubmitBtn, handleSubmitIcon);
+                        return;
+                    }
+
+                    handleReqs.css({'display': 'block', 'opacity': '1'});
+                    isHandleValid = false;
+
+                    if (handlePattern.test(handle)) {
+                        handleFormatReq.text('\u2713').addClass('valid');
+                    } else {
+                        handleFormatReq.text('\u2717').removeClass('valid');
+                        handleAvailReq.text('\u2717').removeClass('valid');
+                        disableButton(handleSubmitBtn, handleSubmitIcon);
+                        // Position above input
+                        const handleOffset = handleInput.position();
+                        handleReqs.css({
+                            top: handleOffset.top - handleReqs.outerHeight() - 5 + 'px',
+                            left: handleOffset.left + 'px',
+                            width: handleInput.outerWidth() + 'px',
+                            position: 'absolute',
+                            borderRadius: handleInput.css('border-radius')
+                        });
+                        return;
+                    }
+
+                    if (debounceTimer) clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(function() {
+                        $.ajax({
+                            url: "{{ url_for('check_handle') }}",
+                            method: 'POST',
+                            data: { handle: handle },
+                            success: function(resp) {
+                                if (resp.status === 'available') {
+                                    handleAvailReq.text('\u2713').addClass('valid');
+                                    isHandleValid = true;
+                                    enableButton(handleSubmitBtn, handleSubmitIcon);
+                                } else {
+                                    handleAvailReq.text('\u2717').removeClass('valid');
+                                    isHandleValid = false;
+                                    disableButton(handleSubmitBtn, handleSubmitIcon);
+                                }
+                            },
+                            error: function() {
+                                handleAvailReq.text('\u2717').removeClass('valid');
+                                isHandleValid = false;
+                                disableButton(handleSubmitBtn, handleSubmitIcon);
+                            }
+                        });
+                    }, 300);
+
+                    // Position above input
+                    const handleOffset = handleInput.position();
+                    handleReqs.css({
+                        top: handleOffset.top - handleReqs.outerHeight() - 5 + 'px',
+                        left: handleOffset.left + 'px',
+                        width: handleInput.outerWidth() + 'px',
+                        position: 'absolute',
+                        borderRadius: handleInput.css('border-radius')
+                    });
+                });
+
+                // Hide requirements on blur after 1 second
+                handleInput.on('focusout', function() {
+                    if (blurTimer) clearTimeout(blurTimer);
+                    blurTimer = setTimeout(function() {
+                        handleReqs.css('opacity', '0');
+                        setTimeout(function() {
+                            handleReqs.css('display', 'none');
+                        }, 300);
+                    }, 1000);
+                });
+            })();
 
             // Event listener for changes in the password input field
             passwordInput.on('input', function() {

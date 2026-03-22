@@ -104,6 +104,7 @@ def init_redis_middleware(app):
             '/enable_mfa',
             '/cancel_mfa',
             '/check_has_categories',
+            '/check_handle',
             '/save_setup_name',
             '/quiltt/',
             '/static/',
