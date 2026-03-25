@@ -822,12 +822,9 @@ document.addEventListener('DOMContentLoaded', function() {
 // ═══════════════════════════════════════════════════════════════
 // CROSS-TAB DATA SYNC (poll for changes made in other tabs/browsers)
 // ═══════════════════════════════════════════════════════════════
-
+// DISABLED: cross-browser sync is currently broken — skip entirely
 (function() {
-    var DATA_POLL_INTERVAL = 3000; // 3 seconds
-    var _knownVersion = null;
-    var _pollTimer = null;
-    var _toastShowing = false;
+    return;
 
     // Restore scroll position after auto-refresh
     var savedScroll = sessionStorage.getItem('_scrollY');
