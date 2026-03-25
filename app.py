@@ -21651,11 +21651,15 @@ def quiltt_get_connections():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-def _webhook_autobalance(user_id, target_date_str=None):
+def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
     """
     Auto-balance checking, savings, and credit accounts after webhook transaction sync.
     Fetches current bank balances from Quiltt, compares to calculated totals,
     and creates adjustment entries for any differences.
+    
+    Args:
+        date_to_remainder: Dict of {date: remainder} from the first recalculation.
+            Used by checking adjustment to avoid reading stale MySQL values.
     
     Uses the last synced transaction date as the target, falling back to today.
     """
@@ -21748,7 +21752,7 @@ def _webhook_autobalance(user_id, target_date_str=None):
             
             if acct_type == 'depository':
                 if 'checking' in acct_name.lower() or acct_subtype == 'checking':
-                    _webhook_checking_adjustment(user_id, bank_balance, target_date_str, acct_name)
+                    _webhook_checking_adjustment(user_id, bank_balance, target_date_str, acct_name, date_to_remainder=date_to_remainder)
                 elif 'savings' in acct_name.lower() or acct_subtype == 'savings':
                     _webhook_savings_adjustment(user_id, bank_balance, target_date_str, quiltt_account_id)
             elif acct_type == 'credit':
@@ -21760,9 +21764,10 @@ def _webhook_autobalance(user_id, target_date_str=None):
         app.logger.error(f"[WEBHOOK-AUTOBALANCE] Error for user {user_id}: {e}", exc_info=True)
 
 
-def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account_name):
+def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account_name, date_to_remainder=None):
     """Create auto-adjustment entry for a checking account to match bank balance.
-    MySQL-direct: all reads and writes go to MySQL. Caller handles dehydrate/rehydrate."""
+    Reads remainder from date_to_remainder (first recalc) or Redis, falling back to MySQL.
+    Writes adjustment entries directly to MySQL. Caller handles dehydrate/rehydrate."""
     try:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
@@ -21780,10 +21785,31 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
                 cursor.close()
                 return
             
-            # Get today's current remainder from totals_remainders_d
-            cursor.execute("SELECT remainder FROM totals_remainders_d WHERE user_id = %s AND date = %s", (user_id, target_date_str))
-            row = cursor.fetchone()
-            current_remainder = float(row[0]) if row and row[0] is not None else None
+            # Get today's current remainder — prefer the freshly-calculated value from
+            # the first recalculation (date_to_remainder dict), which is in Redis but may
+            # not have been flushed to MySQL yet. Fall back to Redis, then MySQL.
+            current_remainder = None
+            target_date_obj = datetime.strptime(target_date_str, '%Y-%m-%d').date() if isinstance(target_date_str, str) else target_date_str
+            
+            # 1. From first recalculation dict (most accurate)
+            if date_to_remainder and target_date_obj in date_to_remainder:
+                current_remainder = float(date_to_remainder[target_date_obj])
+            
+            # 2. From Redis (where update_daily_totals wrote)
+            if current_remainder is None:
+                cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
+                if cached_daily:
+                    for r in cached_daily:
+                        r_date = datetime.strptime(r['date'], '%Y-%m-%d').date() if isinstance(r['date'], str) else r['date']
+                        if r_date == target_date_obj:
+                            current_remainder = float(r.get('remainder', 0))
+                            break
+            
+            # 3. MySQL fallback (may be stale if flush hasn't run)
+            if current_remainder is None:
+                cursor.execute("SELECT remainder FROM totals_remainders_d WHERE user_id = %s AND date = %s", (user_id, target_date_str))
+                row = cursor.fetchone()
+                current_remainder = float(row[0]) if row and row[0] is not None else None
             
             if current_remainder is None:
                 app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No remainder for {target_date_str}, skipping checking adjustment")
@@ -22739,6 +22765,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         # This keeps them visible on the dashboard with a "X days late" indicator.
         # Buckets older than 5 days are deleted (they're stale recurring placeholders).
         # Non-Quiltt credit buckets are converted to regular entries (no bank feed to replace them).
+        earliest_bucket_date = None  # Track earliest date affected by bucket push for recalc
         if total_imported > 0:
             try:
                 five_days_ago_str = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
@@ -22756,6 +22783,31 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     )
                     
                     if has_quiltt_depository:
+                        # Find earliest bucket date that will be affected by push/delete
+                        # so we can recalculate totals from that date onward
+                        _sync_cursor.execute("""
+                            SELECT MIN(ie.date) as min_date FROM income_entries ie
+                            JOIN income_categories ic ON ie.category_id = ic.id
+                            WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date <= %s
+                        """, (user_id, last_txn_date_str))
+                        row = _sync_cursor.fetchone()
+                        if row and row[0]:
+                            earliest_bucket_date = row[0] if isinstance(row[0], date) else datetime.strptime(str(row[0]), '%Y-%m-%d').date()
+                        
+                        _sync_cursor.execute("""
+                            SELECT MIN(ee.date) as min_date FROM expense_entries ee
+                            JOIN expense_categories ec ON ee.category_id = ec.id
+                            WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date <= %s
+                        """, (user_id, last_txn_date_str))
+                        row = _sync_cursor.fetchone()
+                        if row and row[0]:
+                            exp_min = row[0] if isinstance(row[0], date) else datetime.strptime(str(row[0]), '%Y-%m-%d').date()
+                            if earliest_bucket_date is None or exp_min < earliest_bucket_date:
+                                earliest_bucket_date = exp_min
+                        
+                        if earliest_bucket_date:
+                            app.logger.info(f"[BUCKET-PUSH] Earliest affected bucket date: {earliest_bucket_date} for user {user_id}")
+                        
                         # --- income_entries ---
                         # Delete buckets whose original date is > 5 days old
                         _sync_cursor.execute("""
@@ -22907,7 +22959,8 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     gwm = bool(row[0]) if row else False
                     cursor.close()
             
-            # Use earliest imported transaction date as start
+            # Use earliest imported transaction date as start, but go back further
+            # if bucket entries were pushed/deleted from earlier dates
             recalc_start = None
             if start_date:
                 try:
@@ -22916,6 +22969,11 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     pass
             if not recalc_start:
                 recalc_start = (datetime.now() - timedelta(days=1)).date()
+            
+            # If buckets were pushed from earlier dates, recalc must cover those dates too
+            if earliest_bucket_date and earliest_bucket_date < recalc_start:
+                app.logger.info(f"[WEBHOOK-SYNC] Extending recalc_start from {recalc_start} to {earliest_bucket_date} (bucket push affected earlier dates)")
+                recalc_start = earliest_bucket_date
             
             # STEP 1: First recalculation — accurate totals for autobalance comparison
             date_to_remainder = {}
@@ -22930,12 +22988,14 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             
             # STEP 2: Autobalance — compare to bank balances, create adjustment entries
             # Autobalance writes directly to MySQL, so we need to rehydrate after.
+            # Pass date_to_remainder so checking adjustment reads the fresh recalc values
+            # instead of stale MySQL (flush worker may not have synced Redis → MySQL yet).
             # Invalidate cached last txn date so it recomputes from newly synced transactions
             if app.config.get('REDIS_OK'):
                 _redis_client.delete(f"quiltt_last_txn_date:v1:{user_id}")
             last_txn_date_for_autobalance = get_quiltt_last_transaction_date(user_id)
             app.logger.info(f"[WEBHOOK-SYNC] Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
-            _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance)
+            _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance, date_to_remainder=date_to_remainder)
             
             # Dehydrate + rehydrate so Redis picks up MySQL-direct autobalance writes
             _dehydrate_user_data(user_id)
