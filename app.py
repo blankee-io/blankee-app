@@ -14444,27 +14444,38 @@ def recurring_income():
     
     
     # Create lookup for bucket records by category_id (use int for consistent comparison)
+    # Track both current bucket and previous (latest past) bucket per category
     today_str = date.today().isoformat()
     bucket_by_category = {}
+    prev_bucket_by_category = {}
+    # First pass: group all buckets by category
+    _buckets_by_cat = {}
     for bucket in bucket_records:
         cat_id = int(bucket.get('category_id')) if bucket.get('category_id') is not None else None
         bucket_date = bucket.get('bucket_date')
         if cat_id is None or not bucket_date:
             continue
-        bucket_date_str = bucket_date if isinstance(bucket_date, str) else bucket_date.isoformat()
-        existing = bucket_by_category.get(cat_id)
-        if existing is None:
-            bucket_by_category[cat_id] = bucket
-        else:
-            existing_str = existing.get('bucket_date') if isinstance(existing.get('bucket_date'), str) else existing.get('bucket_date').isoformat()
-            # Prefer earliest future/today bucket; among past buckets prefer latest
-            if bucket_date_str >= today_str and existing_str >= today_str:
-                if bucket_date_str < existing_str:
-                    bucket_by_category[cat_id] = bucket
-            elif bucket_date_str >= today_str:
-                bucket_by_category[cat_id] = bucket
-            elif existing_str < today_str and bucket_date_str > existing_str:
-                bucket_by_category[cat_id] = bucket
+        _buckets_by_cat.setdefault(cat_id, []).append(bucket)
+    # Second pass: for each category pick current + prev
+    for cat_id, buckets in _buckets_by_cat.items():
+        # Sort by date
+        buckets.sort(key=lambda b: b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat())
+        future_buckets = [b for b in buckets if (b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat()) >= today_str]
+        past_buckets = [b for b in buckets if (b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat()) < today_str]
+        # Current = earliest future bucket, or latest past if no future
+        if future_buckets:
+            bucket_by_category[cat_id] = future_buckets[0]
+        elif past_buckets:
+            bucket_by_category[cat_id] = past_buckets[-1]
+        # Previous = latest past bucket that is different from current
+        current = bucket_by_category.get(cat_id)
+        if current and past_buckets:
+            current_date_str = current.get('bucket_date') if isinstance(current.get('bucket_date'), str) else current.get('bucket_date').isoformat()
+            for b in reversed(past_buckets):
+                b_date_str = b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat()
+                if b_date_str != current_date_str:
+                    prev_bucket_by_category[cat_id] = b
+                    break
 
 
     # Calculate spent amount per category (sum of manual entries for current bucket period)
@@ -14512,6 +14523,18 @@ def recurring_income():
             record['bucket_remaining'] = None
             record['bucket_spent'] = None
             record['bucket_date'] = None
+        # Previous bucket
+        prev_record = prev_bucket_by_category.get(cat_id)
+        if prev_record:
+            prev_orig = float(prev_record.get('original_amount', 0))
+            prev_cur = float(prev_record.get('amount', 0))
+            record['prev_bucket_original'] = prev_orig
+            record['prev_bucket_spent'] = prev_orig - prev_cur
+            record['prev_bucket_date'] = prev_record.get('bucket_date')
+        else:
+            record['prev_bucket_original'] = None
+            record['prev_bucket_spent'] = None
+            record['prev_bucket_date'] = None
 
     # Pass landing_page to the template
     # Get all income categories for the searchable dropdown
@@ -15224,26 +15247,33 @@ def recurring_expense():
     bucket_records = _get_entries_from_redis('recurring_expense_buckets', current_user.id) or []
     
     # Create lookup for bucket records by category_id (use int for consistent comparison)
+    # Track both current bucket and previous (latest past) bucket per category
     today_str = date.today().isoformat()
     bucket_by_category = {}
+    prev_bucket_by_category = {}
+    _buckets_by_cat = {}
     for bucket in bucket_records:
         cat_id = int(bucket.get('category_id')) if bucket.get('category_id') is not None else None
         bucket_date = bucket.get('bucket_date')
         if cat_id is None or not bucket_date:
             continue
-        bucket_date_str = bucket_date if isinstance(bucket_date, str) else bucket_date.isoformat()
-        existing = bucket_by_category.get(cat_id)
-        if existing is None:
-            bucket_by_category[cat_id] = bucket
-        else:
-            existing_str = existing.get('bucket_date') if isinstance(existing.get('bucket_date'), str) else existing.get('bucket_date').isoformat()
-            if bucket_date_str >= today_str and existing_str >= today_str:
-                if bucket_date_str < existing_str:
-                    bucket_by_category[cat_id] = bucket
-            elif bucket_date_str >= today_str:
-                bucket_by_category[cat_id] = bucket
-            elif existing_str < today_str and bucket_date_str > existing_str:
-                bucket_by_category[cat_id] = bucket
+        _buckets_by_cat.setdefault(cat_id, []).append(bucket)
+    for cat_id, buckets in _buckets_by_cat.items():
+        buckets.sort(key=lambda b: b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat())
+        future_buckets = [b for b in buckets if (b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat()) >= today_str]
+        past_buckets = [b for b in buckets if (b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat()) < today_str]
+        if future_buckets:
+            bucket_by_category[cat_id] = future_buckets[0]
+        elif past_buckets:
+            bucket_by_category[cat_id] = past_buckets[-1]
+        current = bucket_by_category.get(cat_id)
+        if current and past_buckets:
+            current_date_str = current.get('bucket_date') if isinstance(current.get('bucket_date'), str) else current.get('bucket_date').isoformat()
+            for b in reversed(past_buckets):
+                b_date_str = b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat()
+                if b_date_str != current_date_str:
+                    prev_bucket_by_category[cat_id] = b
+                    break
 
     # Format cadence for display and check for 'No end date'
     for record in recurring_expense_records:
@@ -15284,6 +15314,17 @@ def recurring_expense():
             record['bucket_remaining'] = None
             record['bucket_spent'] = None
             record['bucket_date'] = None
+        prev_record = prev_bucket_by_category.get(cat_id)
+        if prev_record:
+            prev_orig = float(prev_record.get('original_amount', 0))
+            prev_cur = float(prev_record.get('amount', 0))
+            record['prev_bucket_original'] = prev_orig
+            record['prev_bucket_spent'] = prev_orig - prev_cur
+            record['prev_bucket_date'] = prev_record.get('bucket_date')
+        else:
+            record['prev_bucket_original'] = None
+            record['prev_bucket_spent'] = None
+            record['prev_bucket_date'] = None
 
     # Pass landing_page to the template
     # Get all expense categories for the searchable dropdown
@@ -16113,26 +16154,33 @@ def recurring_ca_expense():
     bucket_records = _get_entries_from_redis('recurring_c_expense_buckets', current_user.id) or []
     
     # Create lookup for bucket records by category_id (use int for consistent comparison)
+    # Track both current bucket and previous (latest past) bucket per category
     today_str = date.today().isoformat()
     bucket_by_category = {}
+    prev_bucket_by_category = {}
+    _buckets_by_cat = {}
     for bucket in bucket_records:
         cat_id = int(bucket.get('category_id')) if bucket.get('category_id') is not None else None
         bucket_date = bucket.get('bucket_date')
         if cat_id is None or not bucket_date:
             continue
-        bucket_date_str = bucket_date if isinstance(bucket_date, str) else bucket_date.isoformat()
-        existing = bucket_by_category.get(cat_id)
-        if existing is None:
-            bucket_by_category[cat_id] = bucket
-        else:
-            existing_str = existing.get('bucket_date') if isinstance(existing.get('bucket_date'), str) else existing.get('bucket_date').isoformat()
-            if bucket_date_str >= today_str and existing_str >= today_str:
-                if bucket_date_str < existing_str:
-                    bucket_by_category[cat_id] = bucket
-            elif bucket_date_str >= today_str:
-                bucket_by_category[cat_id] = bucket
-            elif existing_str < today_str and bucket_date_str > existing_str:
-                bucket_by_category[cat_id] = bucket
+        _buckets_by_cat.setdefault(cat_id, []).append(bucket)
+    for cat_id, buckets in _buckets_by_cat.items():
+        buckets.sort(key=lambda b: b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat())
+        future_buckets = [b for b in buckets if (b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat()) >= today_str]
+        past_buckets = [b for b in buckets if (b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat()) < today_str]
+        if future_buckets:
+            bucket_by_category[cat_id] = future_buckets[0]
+        elif past_buckets:
+            bucket_by_category[cat_id] = past_buckets[-1]
+        current = bucket_by_category.get(cat_id)
+        if current and past_buckets:
+            current_date_str = current.get('bucket_date') if isinstance(current.get('bucket_date'), str) else current.get('bucket_date').isoformat()
+            for b in reversed(past_buckets):
+                b_date_str = b.get('bucket_date') if isinstance(b.get('bucket_date'), str) else b.get('bucket_date').isoformat()
+                if b_date_str != current_date_str:
+                    prev_bucket_by_category[cat_id] = b
+                    break
 
     for record in recurring_ca_expense_records:
         record['cadence_description'] = get_cadence_description(
@@ -16165,6 +16213,17 @@ def recurring_ca_expense():
             record['bucket_remaining'] = None
             record['bucket_spent'] = None
             record['bucket_date'] = None
+        prev_record = prev_bucket_by_category.get(cat_id)
+        if prev_record:
+            prev_orig = float(prev_record.get('original_amount', 0))
+            prev_cur = float(prev_record.get('amount', 0))
+            record['prev_bucket_original'] = prev_orig
+            record['prev_bucket_spent'] = prev_orig - prev_cur
+            record['prev_bucket_date'] = prev_record.get('bucket_date')
+        else:
+            record['prev_bucket_original'] = None
+            record['prev_bucket_spent'] = None
+            record['prev_bucket_date'] = None
 
     return render_template(
         'recurring_ca_e.html',

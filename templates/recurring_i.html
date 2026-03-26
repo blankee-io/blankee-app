@@ -74,6 +74,41 @@
                             <td class="editable income-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
                             <td class="editable income-cadence" data-column="cadence" title="{{ record.cadence_description }}"><span class="cadence-top">{{ record.cadence_interval }} {% if record.cadence_unit == 'years' %}<i class="fa-solid fa-calendars"></i>{% elif record.cadence_unit == 'months' %}<i class="fa-solid fa-calendar-days"></i>{% elif record.cadence_unit == 'weeks' %}<i class="fa-solid fa-calendar-week"></i>{% else %}<i class="fa-solid fa-calendar-day"></i>{% endif %}</span>{% if record.cadence_unit == 'years' and record.yearly_month and record.yearly_day %}<span class="cadence-detail">{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][record.yearly_month | int] }} {{ record.yearly_day | ordinal }}</span>{% elif record.cadence_unit == 'months' and record.monthly_days %}<span class="cadence-detail">{{ record.monthly_days | ordinal }}</span>{% elif record.cadence_unit == 'weeks' and record.weekdays %}<span class="cadence-detail">{{ record.weekdays | replace('monday','Mo') | replace('tuesday','Tu') | replace('wednesday','We') | replace('thursday','Th') | replace('friday','Fr') | replace('saturday','Sa') | replace('sunday','Su') }}</span>{% endif %}</td>
                             <td class="income-bucket" data-column="bucket">
+                                {% set CUR = "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type %}
+                                {% if record.prev_bucket_original is not none and record.wage_bill == 1 %}
+                                <div class="bucket-dual">
+                                    <div class="bucket-side bucket-prev">
+                                        {% if record.wage_bill == 1 %}
+                                            <div class="bucket-date">{{ record.prev_bucket_date[5:7] }}-{{ record.prev_bucket_date[8:] }}</div>
+                                            {% if record.prev_bucket_spent >= record.prev_bucket_original %}<span class="status-paid"><i class="fa-solid fa-hand-holding-dollar"></i></span>{% else %}<span class="status-unpaid"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i></span>{% endif %}
+                                        {% else %}
+                                            <div class="bucket-status">
+                                                <div class="bucket-date">{{ record.prev_bucket_date[5:7] }}-{{ record.prev_bucket_date[8:] }}</div>
+                                                <div class="bucket-bar-container"><div class="bucket-bar {% if record.prev_bucket_spent > record.prev_bucket_original %}bucket-bar-over{% else %}bucket-bar-income{% endif %}" style="width: {{ [((record.prev_bucket_spent / record.prev_bucket_original) * 100) if record.prev_bucket_original > 0 else 0, 100] | min }}%"></div></div>
+                                                <div class="bucket-text {% if record.prev_bucket_spent > record.prev_bucket_original %}bucket-over{% endif %}"><span class="bucket-spent">{{ CUR }}{{ "%.0f"|format(record.prev_bucket_spent) }}</span><span class="bucket-separator">/</span><span class="bucket-total">{{ CUR }}{{ "%.0f"|format(record.prev_bucket_original) }}</span></div>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="bucket-dual-divider"></div>
+                                    <div class="bucket-side bucket-cur">
+                                        {% if record.wage_bill == 1 %}
+                                            {% if record.bucket_original is not none %}
+                                                <div class="bucket-date">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}</div>
+                                                {% if record.bucket_spent >= record.bucket_original %}<span class="status-paid" title="Received"><i class="fa-solid fa-hand-holding-dollar"></i></span>{% else %}<span class="status-unpaid" title="Pending"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i></span>{% endif %}
+                                            {% else %}<span class="bucket-none">—</span>{% endif %}
+                                        {% else %}
+                                            {% if record.bucket_original is not none %}
+                                                <div class="bucket-status">
+                                                    <div class="bucket-date">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}</div>
+                                                    <div class="bucket-bar-container"><div class="bucket-bar {% if record.bucket_spent > record.bucket_original %}bucket-bar-over{% else %}bucket-bar-income{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div></div>
+                                                    <div class="bucket-text {% if record.bucket_spent > record.bucket_original %}bucket-over{% endif %}"><span class="bucket-spent">{{ CUR }}{{ "%.0f"|format(record.bucket_spent) }}</span><span class="bucket-separator">/</span><span class="bucket-total">{{ CUR }}{{ "%.0f"|format(record.bucket_original) }}</span></div>
+                                                </div>
+                                            {% else %}<span class="bucket-none">—</span>{% endif %}
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% else %}
+                                {# ── Single bucket (no prev) — original layout ── #}
                                 {% if record.wage_bill == 1 %}
                                     {% if record.bucket_original is not none %}
                                         {% if record.bucket_spent >= record.bucket_original %}
@@ -94,14 +129,15 @@
                                                 <div class="bucket-bar {% if record.bucket_spent > record.bucket_original %}bucket-bar-over{% else %}bucket-bar-income{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div>
                                             </div>
                                             <div class="bucket-text {% if record.bucket_spent > record.bucket_original %}bucket-over{% endif %}">
-                                                <span class="bucket-spent">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_spent) }}</span>
+                                                <span class="bucket-spent">{{ CUR }}{{ "%.2f"|format(record.bucket_spent) }}</span>
                                                 <span class="bucket-separator">/</span>
-                                                <span class="bucket-total">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.bucket_original) }}</span>
+                                                <span class="bucket-total">{{ CUR }}{{ "%.2f"|format(record.bucket_original) }}</span>
                                             </div>
                                         </div>
                                     {% else %}
                                         <span class="bucket-none">—</span>
                                     {% endif %}
+                                {% endif %}
                                 {% endif %}
                             </td>
                             <td class="editable income-start-date" data-column="start_date">{{ record.start_date[5:7] }}-{{ record.start_date[8:] }}-{{ record.start_date[2:4] }}<span class="mobile-end-date">→ {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}No End{% else %}{{ record.end_date[5:7] }}-{{ record.end_date[8:] }}-{{ record.end_date[2:4] }}{% endif %}</span></td>
