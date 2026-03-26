@@ -125,10 +125,10 @@ def save_redis_entries(table_name, user_id, entries):
 
 
 def get_recurring_info(cursor, recurring_table, user_id, category_id):
-    """Get recurring info for a category"""
+    """Get recurring info for a category (including wage_bill flag)"""
     try:
         cursor.execute(f"""
-            SELECT id, amount, cadence_interval, cadence_unit, start_date, end_date, weekdays, monthly_days
+            SELECT id, amount, cadence_interval, cadence_unit, start_date, end_date, weekdays, monthly_days, wage_bill
             FROM {recurring_table}
             WHERE user_id = %s AND category_id = %s
             LIMIT 1
@@ -143,56 +143,181 @@ def get_recurring_info(cursor, recurring_table, user_id, category_id):
                 'start_date': row[4],
                 'end_date': row[5],
                 'weekdays': row[6],
-                'monthly_days': row[7]
+                'monthly_days': row[7],
+                'wage_bill': int(row[8]) if row[8] is not None else 0
             }
     except Exception as e:
         logger.warning(f"Error getting recurring info: {e}")
     return None
 
 
-def reduce_bucket_for_entry(cursor, conn, bucket_table, user_id, category_id, entry_date, amount):
-    """Reduce bucket amount for a recurring category entry"""
-    try:
-        # For credit account entries, we need to get account_id from the category
-        if bucket_table == 'recurring_c_expense_buckets':
-            cursor.execute("""
-                SELECT ca.id FROM c_expense_categories cec
-                JOIN credit_accounts ca ON cec.account_id = ca.id
-                WHERE cec.id = %s AND ca.user_id = %s
-            """, (category_id, user_id))
+def reduce_bucket_for_entry(cursor, conn, bucket_table, user_id, category_id, entry_date, amount, wage_bill=0, is_hydrated=False, entry_table=None):
+    """
+    Reduce bucket for a recurring category entry.
+    
+    Matches manual entry behavior from bucket_utils.process_manual_entry_with_bucket():
+    - Finds the NEXT bucket (earliest with date >= today), not exact date match
+    - wage_bill=1 (Wage/Bill): Removes entire bucket amount
+    - wage_bill=0 (Variable/Allowance): Subtracts only the entry amount
+    - Updates both the bucket ENTRY (in the entries table) and the bucket RECORD (in the recurring_*_buckets table)
+    - Works via Redis if user is hydrated, otherwise MySQL
+    """
+    from datetime import date as date_type
+    today = date_type.today()
+    
+    # Parse entry_date
+    if isinstance(entry_date, str):
+        entry_date = date_type.fromisoformat(str(entry_date)[:10])
+    elif hasattr(entry_date, 'date'):
+        entry_date = entry_date.date()
+    
+    # Only reduce bucket if entry_date <= today (future entries don't deplete)
+    if entry_date > today:
+        logger.info(f"Entry date {entry_date} is future, skipping bucket reduction")
+        return False
+    
+    # --- STEP 1: Find the next bucket entry (is_bucket=1, date >= today) ---
+    bucket_entry = None
+    
+    if is_hydrated and entry_table:
+        # Find next bucket from Redis
+        redis_entries = get_redis_entries(entry_table, user_id)
+        if redis_entries:
+            future_buckets = []
+            for e in redis_entries:
+                if (e.get('category_id') == int(category_id) and
+                    e.get('is_bucket') == 1 and
+                    float(e.get('amount', 0)) > 0):
+                    bdate = str(e.get('date', ''))[:10]
+                    if bdate >= str(today):
+                        future_buckets.append(e)
+            if future_buckets:
+                future_buckets.sort(key=lambda x: str(x.get('date', '')))
+                bucket_entry = future_buckets[0]
+                logger.info(f"Found next bucket from Redis: id={bucket_entry.get('id')}, date={bucket_entry.get('date')}, amount={bucket_entry.get('amount')}")
+    
+    if not bucket_entry and entry_table:
+        # Find next bucket from MySQL
+        try:
+            cursor.execute(f"""
+                SELECT id, amount, date FROM {entry_table}
+                WHERE category_id = %s AND is_bucket = 1 AND amount > 0 AND date >= %s
+                ORDER BY date ASC LIMIT 1
+            """, (category_id, today))
             row = cursor.fetchone()
-            if not row:
-                return False
-            account_id = row[0]
-            
-            # Find bucket for this category and date
-            cursor.execute("""
-                SELECT id, amount FROM recurring_c_expense_buckets
-                WHERE user_id = %s AND category_id = %s AND bucket_date = %s
-            """, (user_id, category_id, entry_date))
-        else:
-            # Income or expense buckets
-            cursor.execute(f"""
-                SELECT id, amount FROM {bucket_table}
-                WHERE user_id = %s AND category_id = %s AND bucket_date = %s
-            """, (user_id, category_id, entry_date))
+            if row:
+                bucket_entry = {'id': row[0], 'amount': float(row[1]), 'date': row[2]}
+                logger.info(f"Found next bucket from MySQL: id={row[0]}, date={row[2]}, amount={row[1]}")
+        except Exception as e:
+            logger.error(f"Error finding next bucket from MySQL: {e}")
+    
+    if not bucket_entry:
+        logger.info(f"No future bucket found for category {category_id}")
+        return False
+    
+    bucket_id = bucket_entry['id']
+    bucket_amount = float(bucket_entry.get('amount', 0))
+    bucket_date = bucket_entry.get('date')
+    if isinstance(bucket_date, str):
+        bucket_date = date_type.fromisoformat(str(bucket_date)[:10])
+    
+    # --- STEP 2: Calculate subtraction amount based on wage_bill ---
+    if wage_bill:
+        subtract_amount = bucket_amount  # Remove entire bucket
+        logger.info(f"Wage/Bill mode: subtracting full bucket amount {bucket_amount}")
+    else:
+        subtract_amount = abs(amount)  # Subtract only entry amount
+        logger.info(f"Variable/Allowance mode: subtracting entry amount {subtract_amount}")
+    
+    # --- STEP 3: Update bucket ENTRY (in entries table) ---
+    try:
+        if is_hydrated and entry_table:
+            # Update in Redis
+            redis_entries = get_redis_entries(entry_table, user_id)
+            if redis_entries:
+                for e in redis_entries:
+                    if e.get('id') == bucket_id and e.get('is_bucket') == 1:
+                        new_amount = float(e.get('amount', 0)) - subtract_amount
+                        if new_amount <= 0:
+                            # Remove the bucket entry
+                            redis_entries = [x for x in redis_entries if not (x.get('id') == bucket_id and x.get('is_bucket') == 1)]
+                            # Mark for MySQL deletion
+                            try:
+                                redis_client.sadd(f"pending_deletes:{entry_table}:{user_id}", str(bucket_id))
+                                redis_client.expire(f"pending_deletes:{entry_table}:{user_id}", REDIS_TTL)
+                            except Exception:
+                                pass
+                            logger.info(f"Bucket entry {bucket_id} removed from Redis (amount went to {new_amount})")
+                        else:
+                            e['amount'] = new_amount
+                            logger.info(f"Bucket entry {bucket_id} reduced to {new_amount} in Redis")
+                        break
+                save_redis_entries(entry_table, user_id, redis_entries)
         
-        bucket = cursor.fetchone()
-        if bucket:
-            bucket_id, current_amount = bucket
-            new_amount = float(current_amount) - abs(amount)
+        # Also update MySQL directly
+        new_mysql_amount = bucket_amount - subtract_amount
+        if new_mysql_amount <= 0:
+            cursor.execute(f"DELETE FROM {entry_table} WHERE id = %s AND is_bucket = 1", (bucket_id,))
+        else:
+            cursor.execute(f"UPDATE {entry_table} SET amount = %s WHERE id = %s AND is_bucket = 1", (new_mysql_amount, bucket_id))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error updating bucket entry: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    
+    # --- STEP 4: Update bucket RECORD (in recurring_*_buckets table) ---
+    try:
+        bucket_date_str = str(bucket_date)[:10] if bucket_date else str(entry_date)[:10]
+        
+        # Find the bucket record
+        cursor.execute(f"""
+            SELECT id, amount FROM {bucket_table}
+            WHERE user_id = %s AND category_id = %s AND bucket_date = %s
+        """, (user_id, category_id, bucket_date_str))
+        record = cursor.fetchone()
+        
+        if record:
+            record_id, record_amount = record
+            if wage_bill:
+                new_record_amount = 0  # Full removal
+            else:
+                new_record_amount = float(record_amount) - abs(amount)
             
             cursor.execute(f"""
-                UPDATE {bucket_table}
-                SET amount = %s
-                WHERE id = %s
-            """, (new_amount, bucket_id))
+                UPDATE {bucket_table} SET amount = %s WHERE id = %s
+            """, (new_record_amount, record_id))
             conn.commit()
-            logger.info(f"Reduced bucket {bucket_id} by {amount} (new amount: {new_amount})")
-            return True
+            logger.info(f"Bucket record {record_id} updated to {new_record_amount}")
+            
+            # Update Redis bucket record if hydrated
+            if is_hydrated:
+                redis_key = f"{bucket_table}:{REDIS_KEY_VERSION}:{user_id}"
+                try:
+                    cached = redis_client.get(redis_key)
+                    if cached:
+                        records = json.loads(cached)
+                        for r in records:
+                            if r.get('id') == record_id:
+                                r['amount'] = new_record_amount
+                                break
+                        redis_client.setex(redis_key, REDIS_TTL, json.dumps(records, cls=DecimalEncoder))
+                        redis_client.sadd(f"dirty_tables:{user_id}", bucket_table)
+                        redis_client.expire(f"dirty_tables:{user_id}", REDIS_TTL)
+                except Exception as re:
+                    logger.warning(f"Error updating Redis bucket record: {re}")
+        else:
+            logger.info(f"No bucket record found for category {category_id} on {bucket_date_str}")
     except Exception as e:
-        logger.error(f"Error reducing bucket: {e}")
-    return False
+        logger.error(f"Error updating bucket record: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    
+    return True
 
 
 def get_pending_entries_for_user(cursor, user_id):
@@ -326,7 +451,14 @@ def auto_confirm_entry(cursor, conn, user_id, entry, new_category_id, is_hydrate
     # Check if new category is recurring and reduce bucket
     recurring_info = get_recurring_info(cursor, recurring_table, user_id, new_category_id)
     if recurring_info:
-        reduce_bucket_for_entry(cursor, conn, bucket_table, user_id, new_category_id, entry_date, entry_amount)
+        wage_bill = recurring_info.get('wage_bill', 0)
+        reduce_bucket_for_entry(
+            cursor, conn, bucket_table, user_id, new_category_id,
+            entry_date, entry_amount,
+            wage_bill=wage_bill,
+            is_hydrated=is_hydrated,
+            entry_table=table_name
+        )
     
     return True
 
