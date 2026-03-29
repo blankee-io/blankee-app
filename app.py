@@ -14,7 +14,7 @@ import pymysql.cursors
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
 from flask_bcrypt import Bcrypt
 from flask import jsonify
-from datetime import date, datetime, timedelta
+from datetime import date as datetime_date, date, datetime, timedelta
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.utils import secure_filename
 from markupsafe import Markup
@@ -21824,8 +21824,10 @@ def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
 
 
 def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account_name, date_to_remainder=None):
-    """Create auto-adjustment entry for a checking account to match bank balance.
-    Reads remainder from date_to_remainder (first recalc) or Redis, falling back to MySQL.
+    """Create ADDITIVE auto-adjustment entry for a checking account to match bank balance.
+    Compares bank balance directly to current remainder (which already includes any prior adjustments).
+    Does NOT delete existing adjustments — creates a new one for the remaining diff only.
+    Reads remainder from date_to_remainder (first recalc), Redis, or MySQL.
     Writes adjustment entries directly to MySQL. Caller handles dehydrate/rehydrate."""
     try:
         with get_db_pool().get_connection() as conn:
@@ -21844,13 +21846,11 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
                 cursor.close()
                 return
             
-            # Get today's current remainder — prefer the freshly-calculated value from
-            # the first recalculation (date_to_remainder dict), which is in Redis but may
-            # not have been flushed to MySQL yet. Fall back to Redis, then MySQL.
+            # Get current remainder — prefer freshly-calculated value from first recalculation
             current_remainder = None
             target_date_obj = datetime.strptime(target_date_str, '%Y-%m-%d').date() if isinstance(target_date_str, str) else target_date_str
             
-            # 1. From first recalculation dict (most accurate)
+            # 1. From first recalculation dict (most accurate — includes all existing adjustments)
             if date_to_remainder and target_date_obj in date_to_remainder:
                 current_remainder = float(date_to_remainder[target_date_obj])
             
@@ -21864,7 +21864,7 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
                             current_remainder = float(r.get('remainder', 0))
                             break
             
-            # 3. MySQL fallback (may be stale if flush hasn't run)
+            # 3. MySQL fallback
             if current_remainder is None:
                 cursor.execute("SELECT remainder FROM totals_remainders_d WHERE user_id = %s AND date = %s", (user_id, target_date_str))
                 row = cursor.fetchone()
@@ -21875,61 +21875,30 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
                 cursor.close()
                 return
             
-            # Get existing auto-adjustment totals and delete them from BOTH tables
-            existing_income_adj_total = 0.0
-            existing_expense_adj_total = 0.0
+            # ADDITIVE: Compare bank balance directly to current remainder
+            # current_remainder already includes any previously-created auto-adjustments
+            diff = float(bank_balance) - current_remainder
             
-            # Income adjustments (only delete entries flagged as auto-adjustments, not auto-imported entries)
-            cursor.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM income_entries WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1",
-                (income_cat_id, target_date_str)
-            )
-            existing_income_adj_total = float(cursor.fetchone()[0])
-            if existing_income_adj_total > 0:
-                cursor.execute(
-                    "DELETE FROM income_entries WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1",
-                    (income_cat_id, target_date_str)
-                )
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Deleted income adjustments totaling ${existing_income_adj_total:.2f} for {account_name} on {target_date_str}")
-            
-            # Expense adjustments (only delete entries flagged as auto-adjustments, not auto-imported entries)
-            cursor.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM expense_entries WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1",
-                (expense_cat_id, target_date_str)
-            )
-            existing_expense_adj_total = float(cursor.fetchone()[0])
-            if existing_expense_adj_total > 0:
-                cursor.execute(
-                    "DELETE FROM expense_entries WHERE category_id = %s AND date = %s AND is_auto_adjustment = 1",
-                    (expense_cat_id, target_date_str)
-                )
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Deleted expense adjustments totaling ${existing_expense_adj_total:.2f} for {account_name} on {target_date_str}")
-            
-            # Calculate natural remainder (without any auto-adjustments)
-            natural_remainder = current_remainder - existing_income_adj_total + existing_expense_adj_total
-            diff = float(bank_balance) - natural_remainder
-            
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Checking ({account_name}): Remainder=${current_remainder:.2f}, Natural=${natural_remainder:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Checking ({account_name}): Remainder=${current_remainder:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
             
             if abs(diff) < 0.01:
                 app.logger.info(f"[WEBHOOK-AUTOBALANCE] No adjustment needed for {account_name} (delta < $0.01)")
-                conn.commit()
                 cursor.close()
                 return
             
-            # Insert new adjustment entry directly into MySQL
+            # Insert new ADDITIVE adjustment entry directly into MySQL
             if diff > 0:
                 cursor.execute(
                     "INSERT INTO income_entries (category_id, date, amount, processed, is_auto_adjustment) VALUES (%s, %s, %s, 1, 1)",
                     (income_cat_id, target_date_str, abs(diff))
                 )
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created income adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
+                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE income adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
             else:
                 cursor.execute(
                     "INSERT INTO expense_entries (category_id, date, amount, processed, is_auto_adjustment) VALUES (%s, %s, %s, 1, 1)",
                     (expense_cat_id, target_date_str, abs(diff))
                 )
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created expense adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
+                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE expense adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
             
             conn.commit()
             cursor.close()
@@ -21939,8 +21908,9 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
 
 
 def _webhook_savings_adjustment(user_id, bank_balance, target_date_str, quiltt_account_id):
-    """Update savings adjustment to match bank balance.
-    Reads current savings from Redis (where recalculation just wrote it), falls back to MySQL.
+    """Create ADDITIVE savings adjustment to match bank balance.
+    Compares bank balance directly to savings_entries.amount for target date.
+    savings_entries.amount already includes any prior adjustments (from recalculation).
     Writes adjustment directly to MySQL. Caller handles dehydrate/rehydrate."""
     try:
         # Read current savings from Redis first (recalculation just updated it there)
@@ -21966,37 +21936,25 @@ def _webhook_savings_adjustment(user_id, bank_balance, target_date_str, quiltt_a
                 row = cursor.fetchone()
                 current_savings = float(row[0]) if row and row[0] is not None else 0.0
             
-            # Get existing adjustment for today
-            cursor.execute("SELECT id, amount FROM savings_adjustments WHERE user_id = %s AND date = %s", (user_id, target_date_str))
-            row = cursor.fetchone()
-            existing_adj_id = row[0] if row else None
-            existing_adjustment = float(row[1]) if row and row[1] is not None else 0.0
+            # ADDITIVE: Compare bank balance directly to current savings
+            # current_savings already includes any prior savings_adjustments from recalculation
+            diff = float(bank_balance) - current_savings
             
-            # Calculate delta: bank_balance - (current_savings - existing_adjustment)
-            base_savings = current_savings - existing_adjustment
-            delta = float(bank_balance) - base_savings
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Savings: Current=${current_savings:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
             
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Savings: Current=${current_savings:.2f}, Base=${base_savings:.2f}, Bank=${bank_balance:.2f}, Delta=${delta:.2f}")
-            
-            if abs(delta) < 0.01:
+            if abs(diff) < 0.01:
                 cursor.close()
                 return
             
-            # Upsert savings adjustment directly in MySQL
-            if existing_adj_id:
-                cursor.execute(
-                    "UPDATE savings_adjustments SET amount = %s, quiltt_account_id = %s WHERE id = %s",
-                    (delta, quiltt_account_id, existing_adj_id)
-                )
-            else:
-                cursor.execute(
-                    "INSERT INTO savings_adjustments (user_id, date, amount, description, quiltt_account_id) VALUES (%s, %s, %s, %s, %s)",
-                    (user_id, target_date_str, delta, 'Webhook sync from bank', quiltt_account_id)
-                )
+            # Create new ADDITIVE savings adjustment directly in MySQL
+            cursor.execute(
+                "INSERT INTO savings_adjustments (user_id, date, amount, description, quiltt_account_id) VALUES (%s, %s, %s, %s, %s)",
+                (user_id, target_date_str, diff, 'Webhook sync from bank', quiltt_account_id)
+            )
             
             conn.commit()
             cursor.close()
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Savings adjustment delta: ${delta:.2f}")
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE savings adjustment delta: ${diff:.2f}")
         
     except Exception as e:
         app.logger.error(f"[WEBHOOK-AUTOBALANCE] Savings adjustment error: {e}", exc_info=True)
@@ -22041,63 +21999,24 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
                 cursor.close()
                 return
             
-            # Get day-before balance from c_a_balances_d
-            cursor.execute("SELECT balance FROM c_a_balances_d WHERE account_id = %s AND date = %s", (account_id, day_before_str))
+            # ADDITIVE: Read current balance from c_a_balances_d for target date
+            # This already includes any previously-created auto-adjustments from prior syncs
+            cursor.execute("SELECT balance FROM c_a_balances_d WHERE account_id = %s AND date = %s", (account_id, target_date_str))
             row = cursor.fetchone()
-            day_before_balance = float(row['balance']) if row else starting_balance
+            current_balance = float(row['balance']) if row else None
             
-            # Get today's non-adjustment expenses for this account
-            if account_cat_ids - auto_adj_cat_ids:
-                non_adj_cat_placeholders = ','.join(['%s'] * len(account_cat_ids - auto_adj_cat_ids))
-                cursor.execute(f"""
-                    SELECT COALESCE(SUM(amount), 0) as total FROM c_expense_entries
-                    WHERE category_id IN ({non_adj_cat_placeholders}) AND date = %s
-                """, list(account_cat_ids - auto_adj_cat_ids) + [target_date_str])
-                target_expenses = float(cursor.fetchone()['total'])
-            else:
-                target_expenses = 0.0
+            if current_balance is None:
+                app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No c_a_balances_d balance for {account_name} on {target_date_str}, skipping")
+                cursor.close()
+                return
             
-            # Get today's non-adjustment payments for this account
-            cursor.execute("""
-                SELECT COALESCE(SUM(amount), 0) as total FROM c_payment_entries
-                WHERE account_id = %s AND date = %s AND (is_auto_adjustment = 0 OR is_auto_adjustment IS NULL)
-            """, (account_id, target_date_str))
-            target_payments = float(cursor.fetchone()['total'])
-            
-            natural_balance = day_before_balance + target_expenses - target_payments
             bank_float = abs(float(bank_balance))
-            diff = bank_float - natural_balance
+            diff = bank_float - current_balance
             
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Credit ({account_name}): Yesterday=${day_before_balance:.2f}, Natural=${natural_balance:.2f}, Bank=${bank_float:.2f}, Diff=${diff:.2f}")
-            
-            # Always clean up existing auto-adjustments from BOTH c_expense and c_payment
-            # Use ALL auto-adj category IDs in case account has duplicate categories
-            if len(auto_adj_cat_ids) == 1:
-                cursor.execute(
-                    "DELETE FROM c_expense_entries WHERE category_id = %s AND date = %s",
-                    (auto_adj_cat_id, target_date_str)
-                )
-            else:
-                adj_placeholders = ','.join(['%s'] * len(auto_adj_cat_ids))
-                cursor.execute(
-                    f"DELETE FROM c_expense_entries WHERE category_id IN ({adj_placeholders}) AND date = %s",
-                    list(auto_adj_cat_ids) + [target_date_str]
-                )
-            deleted_ce = cursor.rowcount
-            if deleted_ce > 0:
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Deleted {deleted_ce} credit expense adjustment(s) for {account_name} on {target_date_str}")
-            
-            cursor.execute(
-                "DELETE FROM c_payment_entries WHERE account_id = %s AND date = %s AND is_auto_adjustment = 1",
-                (account_id, target_date_str)
-            )
-            deleted_cp = cursor.rowcount
-            if deleted_cp > 0:
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Deleted {deleted_cp} credit payment adjustment(s) for {account_name} on {target_date_str}")
+            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Credit ({account_name}): Current balance=${current_balance:.2f}, Bank=${bank_float:.2f}, Diff=${diff:.2f}")
             
             if abs(diff) < 0.01:
                 app.logger.info(f"[WEBHOOK-AUTOBALANCE] No adjustment needed for {account_name} (delta < $0.01)")
-                conn.commit()
                 cursor.close()
                 return
             
@@ -22109,14 +22028,14 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
                     INSERT INTO c_expense_entries (category_id, date, amount, processed, is_auto_adjustment)
                     VALUES (%s, %s, %s, 1, 1)
                 """, (auto_adj_cat_id, target_date_str, adjustment_amount))
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created expense adjustment +${adjustment_amount:.2f} for {account_name} on {target_date_str}")
+                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE expense adjustment +${adjustment_amount:.2f} for {account_name} on {target_date_str}")
             else:
                 # Balance needs to go DOWN → create payment entry
                 cursor.execute("""
                     INSERT INTO c_payment_entries (account_id, date, amount, processed, is_auto_adjustment)
                     VALUES (%s, %s, %s, 1, 1)
                 """, (account_id, target_date_str, adjustment_amount))
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created payment adjustment -${adjustment_amount:.2f} for {account_name} on {target_date_str}")
+                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE payment adjustment -${adjustment_amount:.2f} for {account_name} on {target_date_str}")
             
             conn.commit()
             cursor.close()
@@ -22840,6 +22759,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         str(a.get('account_type', '')).upper() == 'DEPOSITORY'
                         for a in quiltt_account_map.values()
                     )
+                    app.logger.info(f"[BUCKET-PUSH] Starting for user {user_id}: last_txn_date={last_txn_date_str}, push_to_date={push_to_date}, has_depository={has_quiltt_depository}")
                     
                     if has_quiltt_depository:
                         # Find earliest bucket date that will be affected by push/delete
@@ -22851,7 +22771,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         """, (user_id, last_txn_date_str))
                         row = _sync_cursor.fetchone()
                         if row and row[0]:
-                            earliest_bucket_date = row[0] if isinstance(row[0], date) else datetime.strptime(str(row[0]), '%Y-%m-%d').date()
+                            earliest_bucket_date = row[0] if isinstance(row[0], datetime_date) else datetime.strptime(str(row[0]), '%Y-%m-%d').date()
                         
                         _sync_cursor.execute("""
                             SELECT MIN(ee.date) as min_date FROM expense_entries ee
@@ -22860,7 +22780,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         """, (user_id, last_txn_date_str))
                         row = _sync_cursor.fetchone()
                         if row and row[0]:
-                            exp_min = row[0] if isinstance(row[0], date) else datetime.strptime(str(row[0]), '%Y-%m-%d').date()
+                            exp_min = row[0] if isinstance(row[0], datetime_date) else datetime.strptime(str(row[0]), '%Y-%m-%d').date()
                             if earliest_bucket_date is None or exp_min < earliest_bucket_date:
                                 earliest_bucket_date = exp_min
                         
@@ -22975,16 +22895,15 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         except Exception:
             pass
         
-        # --- DEHYDRATE + REHYDRATE ---
-        # Now that all MySQL-direct writes are done, dehydrate + rehydrate ONCE
-        # to sync Redis with the final MySQL state. User is only briefly dehydrated here
-        # (not during the slow API/write phase above).
+        # --- DEHYDRATE + REHYDRATE (Step 5) ---
+        # Now that all MySQL-direct writes are done (transactions, entries, buckets),
+        # dehydrate + rehydrate to sync Redis with MySQL state.
         if _is_hydrated_check(user_id):
             _dehydrate_user_data(user_id)
         _hydrate_user_data(user_id)
-        app.logger.info(f"[WEBHOOK-SYNC] Dehydrated + rehydrated user {user_id} after MySQL-direct writes")
+        app.logger.info(f"[WEBHOOK-SYNC] Step 5: Dehydrated + rehydrated user {user_id} after MySQL-direct writes")
         
-        # --- CREATE NOTIFICATION FOR PENDING TRANSACTIONS ---
+        # --- CREATE NOTIFICATION FOR PENDING TRANSACTIONS (Step 4) ---
         # Must happen after rehydrate so Redis has the new pending entries for accurate count
         if total_imported > 0:
             try:
@@ -22993,11 +22912,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 app.logger.error(f"Error creating pending transactions notification: {notif_err}")
         # --- END NOTIFICATION ---
         
-        # --- RECALCULATE TOTALS & BALANCES + AUTOBALANCE ---
-        # Always run recalculation + autobalance, even if no new transactions were imported.
-        # Bank balances may have changed and need adjustment entries.
+        # --- FIRST RECALCULATION + AUTOBALANCE + SECOND RECALCULATION (Steps 6-10) ---
         try:
-            app.logger.info(f"[WEBHOOK-SYNC] Recalculating totals for user {user_id} (total_imported={total_imported}, total_synced={total_synced})")
+            app.logger.info(f"[WEBHOOK-SYNC] Starting recalculation pipeline for user {user_id} (total_imported={total_imported}, total_synced={total_synced})")
             
             # Read goofy_week_mode (Redis first, MySQL fallback)
             gwm = None
@@ -23018,10 +22935,15 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     gwm = bool(row[0]) if row else False
                     cursor.close()
             
-            # Use earliest imported transaction date as start, but go back further
-            # if bucket entries were pushed/deleted from earlier dates
+            # Determine recalc_start: earliest of new txn dates and bucket push dates
             recalc_start = None
-            if start_date:
+            if imported_dates:
+                try:
+                    earliest_imported = min(imported_dates)
+                    recalc_start = datetime.strptime(earliest_imported, '%Y-%m-%d').date() if isinstance(earliest_imported, str) else earliest_imported
+                except Exception:
+                    pass
+            if start_date and not recalc_start:
                 try:
                     recalc_start = datetime.strptime(start_date, '%Y-%m-%d').date() if isinstance(start_date, str) else start_date
                 except Exception:
@@ -23034,7 +22956,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 app.logger.info(f"[WEBHOOK-SYNC] Extending recalc_start from {recalc_start} to {earliest_bucket_date} (bucket push affected earlier dates)")
                 recalc_start = earliest_bucket_date
             
-            # STEP 1: First recalculation — accurate totals for autobalance comparison
+            # --- STEP 6: First recalculation — accurate totals for autobalance comparison ---
             date_to_remainder = {}
             update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
             update_daily_savings_for_savings_category(user_id, recalc_start)
@@ -23043,25 +22965,31 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             update_daily_ca_totals(user_id, recalc_start)
             update_weekly_ca_totals(user_id, recalc_start, gwm)
             update_monthly_ca_totals(user_id, recalc_start)
-            app.logger.info(f"[WEBHOOK-SYNC] First recalculation complete (pre-adjustment)")
+            app.logger.info(f"[WEBHOOK-SYNC] Step 6: First recalculation complete")
             
-            # STEP 2: Autobalance — compare to bank balances, create adjustment entries
-            # Autobalance writes directly to MySQL, so we need to rehydrate after.
+            # Force flush after first recalculation (Redis → MySQL)
+            from redis_manager import flush_dirty_tables_for_user
+            flush_dirty_tables_for_user(user_id)
+            app.logger.info(f"[WEBHOOK-SYNC] Step 6: Force flush complete")
+            
+            # --- STEP 7+8: Fetch bank balances + auto-adjustments ---
+            # _webhook_autobalance handles both: fetches balances (Step 7) and creates adjustments (Step 8)
             # Pass date_to_remainder so checking adjustment reads the fresh recalc values
-            # instead of stale MySQL (flush worker may not have synced Redis → MySQL yet).
-            # Invalidate cached last txn date so it recomputes from newly synced transactions
             if app.config.get('REDIS_OK'):
                 _redis_client.delete(f"quiltt_last_txn_date:v1:{user_id}")
             last_txn_date_for_autobalance = get_quiltt_last_transaction_date(user_id)
-            app.logger.info(f"[WEBHOOK-SYNC] Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
+            app.logger.info(f"[WEBHOOK-SYNC] Step 7+8: Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
             _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance, date_to_remainder=date_to_remainder)
+            app.logger.info(f"[WEBHOOK-SYNC] Step 8: Auto-adjustments complete")
             
-            # Dehydrate + rehydrate so Redis picks up MySQL-direct autobalance writes
-            _dehydrate_user_data(user_id)
+            # --- STEP 9: Dehydrate + Rehydrate (again) ---
+            # Autobalance wrote adjustments directly to MySQL, sync Redis
+            if _is_hydrated_check(user_id):
+                _dehydrate_user_data(user_id)
             _hydrate_user_data(user_id)
-            app.logger.info(f"[WEBHOOK-SYNC] Rehydrated after autobalance MySQL writes")
+            app.logger.info(f"[WEBHOOK-SYNC] Step 9: Rehydrated after autobalance MySQL writes")
             
-            # STEP 3: Second recalculation — incorporate adjustment entries into totals
+            # --- STEP 10: Second recalculation — incorporate adjustment entries into totals ---
             date_to_remainder = {}
             update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
             update_daily_savings_for_savings_category(user_id, recalc_start)
@@ -23070,10 +22998,14 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             update_daily_ca_totals(user_id, recalc_start)
             update_weekly_ca_totals(user_id, recalc_start, gwm)
             update_monthly_ca_totals(user_id, recalc_start)
+            app.logger.info(f"[WEBHOOK-SYNC] Step 10: Second recalculation complete")
             
-            app.logger.info(f"[WEBHOOK-SYNC] Recalculation + autobalance complete for user {user_id}")
+            # Force flush after second recalculation (Redis → MySQL)
+            flush_dirty_tables_for_user(user_id)
+            app.logger.info(f"[WEBHOOK-SYNC] Step 10: Force flush complete")
+            
         except Exception as recalc_err:
-            app.logger.error(f"[WEBHOOK-SYNC] Error recalculating totals for user {user_id}: {recalc_err}", exc_info=True)
+            app.logger.error(f"[WEBHOOK-SYNC] Error in recalculation pipeline for user {user_id}: {recalc_err}", exc_info=True)
         # --- END RECALCULATE + AUTOBALANCE ---
         
         # --- UPDATE RECURRENCE DATA FROM NTROPY ---
@@ -26150,35 +26082,59 @@ def quiltt_webhook():
                         # --- Connection Synced Successfully (ongoing periodic re-syncs) ---
                         if event_type == 'connection.synced.successful':
 
-                            # Use date range from webhook metadata if available
-                            start_date = metadata.get('startDate')
-                            end_date = metadata.get('endDate')
+                            # --- Per-user lock to prevent concurrent syncs ---
+                            lock_key = f"webhook_sync_lock:{user_id}"
+                            lock_acquired = False
+                            try:
+                                # Try to acquire lock with 5 min TTL (safety net if process crashes)
+                                for _attempt in range(60):  # Max ~5 min wait (60 * 5s)
+                                    if _redis_client.set(lock_key, "1", nx=True, ex=300):
+                                        lock_acquired = True
+                                        break
+                                    app.logger.info(f"[WEBHOOK] Waiting for sync lock for user {user_id} (attempt {_attempt + 1})")
+                                    import time as _time
+                                    _time.sleep(5)
+                                if not lock_acquired:
+                                    app.logger.warning(f"[WEBHOOK] Could not acquire sync lock for user {user_id} after 5 min, proceeding anyway")
+                            except Exception as lock_err:
+                                app.logger.warning(f"[WEBHOOK] Lock acquire error: {lock_err}")
 
-                            # Update connection status to SYNCED
-                            if connection_id:
+                            try:
+                                # Use date range from webhook metadata if available
+                                start_date = metadata.get('startDate')
+                                end_date = metadata.get('endDate')
+
+                                # Update connection status to SYNCED
+                                if connection_id:
+                                    try:
+                                        from quiltt_redis import upsert_quiltt_connection
+                                        upsert_quiltt_connection({
+                                            'connection_id': connection_id,
+                                            'status': 'SYNCED',
+                                            'last_synced_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                        }, user_id=user_id)
+                                    except Exception as e:
+                                        app.logger.warning(f"[WEBHOOK] Failed to update connection status: {e}")
+
+                                # Sync transactions for this user
+                                success, count, error = _sync_quiltt_transactions_for_user(
+                                    user_id,
+                                    start_date=start_date,
+                                    end_date=end_date
+                                )
+
+                                if success:
+                                    app.logger.info(f"[WEBHOOK] Synced {count} transactions for user {user_id}")
+                                    mark_webhook_event_processed(event_id)
+                                else:
+                                    app.logger.error(f"[WEBHOOK] Sync failed for user {user_id}: {error}")
+                                    mark_webhook_event_processed(event_id, error_message=error)
+                            finally:
+                                # Always release the per-user lock
                                 try:
-                                    from quiltt_redis import upsert_quiltt_connection
-                                    upsert_quiltt_connection({
-                                        'connection_id': connection_id,
-                                        'status': 'SYNCED',
-                                        'last_synced_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                    }, user_id=user_id)
-                                except Exception as e:
-                                    app.logger.warning(f"[WEBHOOK] Failed to update connection status: {e}")
-
-                            # Sync transactions for this user
-                            success, count, error = _sync_quiltt_transactions_for_user(
-                                user_id,
-                                start_date=start_date,
-                                end_date=end_date
-                            )
-
-                            if success:
-                                app.logger.info(f"[WEBHOOK] Synced {count} transactions for user {user_id}")
-                                mark_webhook_event_processed(event_id)
-                            else:
-                                app.logger.error(f"[WEBHOOK] Sync failed for user {user_id}: {error}")
-                                mark_webhook_event_processed(event_id, error_message=error)
+                                    _redis_client.delete(lock_key)
+                                except Exception:
+                                    pass
 
                         # --- Connection Errors (user needs to reconnect) ---
                         elif event_type == 'connection.synced.errored.repairable':
