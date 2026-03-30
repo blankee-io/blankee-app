@@ -22044,6 +22044,175 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
         app.logger.error(f"[WEBHOOK-AUTOBALANCE] Credit adjustment error for {account_name}: {e}", exc_info=True)
 
 
+def _auto_confirm_pending_entries(user_id):
+    """
+    Auto-confirm all pending entries for a user (Step 0 of webhook sync).
+    
+    Checks quiltt_transactions.custom_category_id for suggestions (from Ntropy or category memory).
+    If a valid suggestion exists, recategorizes the entry; otherwise confirms to Uncategorized.
+    Handles bucket reduction for recurring categories.
+    
+    All writes are MySQL-direct — Step 5 (dehydrate+rehydrate) will sync Redis.
+    
+    Returns: (confirmed_count, fallback_count)
+    """
+    from quiltt_redis import get_uncategorized_category_id
+    from datetime import date as date_type
+
+    confirmed_count = 0
+    fallback_count = 0
+
+    # Entry table configs: (table, entry_type, category_table, recurring_table, bucket_table, bucket_entry_table)
+    configs = [
+        ('income_entries', 'income', 'income_categories', 'recurring_income', 'recurring_income_buckets'),
+        ('expense_entries', 'expense', 'expense_categories', 'recurring_expense', 'recurring_expense_buckets'),
+        ('c_expense_entries', 'c_expense', 'c_expense_categories', 'recurring_c_expense', 'recurring_c_expense_buckets'),
+    ]
+
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+            for table_name, entry_type, cat_table, rec_table, bucket_table in configs:
+                # Fetch pending entries for this user
+                if entry_type == 'c_expense':
+                    cursor.execute("""
+                        SELECT cee.id, cee.category_id, cee.date, cee.amount
+                        FROM c_expense_entries cee
+                        JOIN c_expense_categories cec ON cee.category_id = cec.id
+                        JOIN credit_accounts ca ON cec.account_id = ca.id
+                        WHERE ca.user_id = %s AND cee.pending = 1
+                    """, (user_id,))
+                else:
+                    cursor.execute(f"""
+                        SELECT e.id, e.category_id, e.date, e.amount
+                        FROM {table_name} e
+                        JOIN {cat_table} c ON e.category_id = c.id
+                        WHERE c.user_id = %s AND e.pending = 1
+                    """, (user_id,))
+
+                pending_entries = cursor.fetchall()
+                if not pending_entries:
+                    continue
+
+                app.logger.info(f"[AUTO-CONFIRM] User {user_id}: {len(pending_entries)} pending {entry_type} entries")
+
+                for entry in pending_entries:
+                    entry_id = entry['id']
+                    entry_date = entry['date']
+                    entry_amount = float(entry['amount']) if entry['amount'] else 0
+
+                    # Look up Ntropy/memory suggestion from quiltt_transactions
+                    new_category_id = None
+                    cursor.execute("""
+                        SELECT custom_category_id, custom_category_suggestion
+                        FROM quiltt_transactions
+                        WHERE user_id = %s AND imported_to_entry_id = %s AND imported_entry_type = %s
+                    """, (user_id, entry_id, entry_type))
+                    suggestion = cursor.fetchone()
+
+                    if suggestion and suggestion.get('custom_category_id'):
+                        new_category_id = suggestion['custom_category_id']
+                        app.logger.info(
+                            f"[AUTO-CONFIRM] Entry {entry_id} ({entry_type}) -> suggested category "
+                            f"{new_category_id} ({suggestion.get('custom_category_suggestion', '?')})"
+                        )
+                    else:
+                        # Fall back to Uncategorized
+                        uncat_id = get_uncategorized_category_id(user_id, entry_type)
+                        if uncat_id:
+                            new_category_id = uncat_id
+                            fallback_count += 1
+                            app.logger.info(f"[AUTO-CONFIRM] Entry {entry_id} ({entry_type}) -> Uncategorized (no suggestion)")
+                        else:
+                            app.logger.warning(f"[AUTO-CONFIRM] Skipping entry {entry_id} — no Uncategorized category")
+                            continue
+
+                    # Update entry: set category, clear pending, mark auto_confirmed
+                    cursor.execute(f"""
+                        UPDATE {table_name}
+                        SET category_id = %s, pending = 0, auto_confirmed = 1
+                        WHERE id = %s
+                    """, (new_category_id, entry_id))
+
+                    # Check if new category is recurring -> reduce bucket
+                    try:
+                        cursor.execute(f"""
+                            SELECT id, amount, wage_bill
+                            FROM {rec_table}
+                            WHERE user_id = %s AND category_id = %s
+                            LIMIT 1
+                        """, (user_id, new_category_id))
+                        rec_row = cursor.fetchone()
+
+                        if rec_row:
+                            wage_bill = int(rec_row.get('wage_bill', 0) or 0)
+                            today = date_type.today()
+
+                            # Parse entry_date
+                            if isinstance(entry_date, str):
+                                entry_date_parsed = date_type.fromisoformat(str(entry_date)[:10])
+                            elif hasattr(entry_date, 'date'):
+                                entry_date_parsed = entry_date.date()
+                            else:
+                                entry_date_parsed = entry_date
+
+                            # Only reduce bucket if entry is not in the future
+                            if entry_date_parsed <= today:
+                                # Find next bucket entry (is_bucket=1, date >= today)
+                                cursor.execute(f"""
+                                    SELECT id, amount, date FROM {table_name}
+                                    WHERE category_id = %s AND is_bucket = 1 AND amount > 0 AND date >= %s
+                                    ORDER BY date ASC LIMIT 1
+                                """, (new_category_id, today))
+                                bucket_entry = cursor.fetchone()
+
+                                if bucket_entry:
+                                    bucket_id = bucket_entry['id']
+                                    bucket_amount = float(bucket_entry['amount'])
+                                    bucket_date = bucket_entry['date']
+
+                                    # wage_bill: remove entire bucket; variable: subtract entry amount
+                                    subtract = bucket_amount if wage_bill else abs(entry_amount)
+                                    new_amount = bucket_amount - subtract
+
+                                    if new_amount <= 0:
+                                        cursor.execute(f"DELETE FROM {table_name} WHERE id = %s AND is_bucket = 1", (bucket_id,))
+                                    else:
+                                        cursor.execute(f"UPDATE {table_name} SET amount = %s WHERE id = %s AND is_bucket = 1", (new_amount, bucket_id))
+
+                                    # Update bucket record in recurring_*_buckets
+                                    bucket_date_str = str(bucket_date)[:10] if bucket_date else str(entry_date)[:10]
+                                    cursor.execute(f"""
+                                        SELECT id, amount FROM {bucket_table}
+                                        WHERE user_id = %s AND category_id = %s AND bucket_date = %s
+                                    """, (user_id, new_category_id, bucket_date_str))
+                                    b_record = cursor.fetchone()
+                                    if b_record:
+                                        new_rec_amount = 0 if wage_bill else float(b_record['amount']) - abs(entry_amount)
+                                        cursor.execute(f"UPDATE {bucket_table} SET amount = %s WHERE id = %s", (new_rec_amount, b_record['id']))
+
+                                    app.logger.info(
+                                        f"[AUTO-CONFIRM] Bucket reduced for entry {entry_id}: "
+                                        f"bucket {bucket_id} {'removed' if new_amount <= 0 else f'reduced to {new_amount}'}"
+                                    )
+                    except Exception as bucket_err:
+                        app.logger.warning(f"[AUTO-CONFIRM] Bucket reduction error for entry {entry_id}: {bucket_err}")
+
+                    confirmed_count += 1
+
+            conn.commit()
+            cursor.close()
+
+    except Exception as e:
+        app.logger.error(f"[AUTO-CONFIRM] Error for user {user_id}: {e}", exc_info=True)
+
+    if confirmed_count > 0:
+        app.logger.info(f"[AUTO-CONFIRM] User {user_id}: confirmed {confirmed_count} entries ({fallback_count} to Uncategorized)")
+
+    return confirmed_count, fallback_count
+
+
 def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, specific_account_id=None, skip_auto_import=False):
     """
     Internal function to sync transactions for a specific user
@@ -26100,6 +26269,12 @@ def quiltt_webhook():
                                 app.logger.warning(f"[WEBHOOK] Lock acquire error: {lock_err}")
 
                             try:
+                                # Step 0: Auto-confirm previous pending entries before syncing new ones
+                                try:
+                                    ac_confirmed, ac_fallback = _auto_confirm_pending_entries(user_id)
+                                except Exception as ac_err:
+                                    app.logger.warning(f"[WEBHOOK] Auto-confirm error for user {user_id}: {ac_err}")
+
                                 # Use date range from webhook metadata if available
                                 start_date = metadata.get('startDate')
                                 end_date = metadata.get('endDate')
