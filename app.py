@@ -26152,6 +26152,18 @@ def quiltt_webhook():
                                 app.logger.info(f"[WEBHOOK] Skipping {event_type} for user {user_id} — connection {connection_id} was recently deleted")
                                 mark_webhook_event_processed(event_id)
                             else:
+                                # Proactively refresh session token if expired
+                                try:
+                                    with get_db_pool().get_connection() as conn:
+                                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                                        cursor.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+                                        urow = cursor.fetchone()
+                                        cursor.close()
+                                    if urow and urow.get('username'):
+                                        _refresh_quiltt_session_token(user_id, urow['username'])
+                                except Exception as e:
+                                    app.logger.warning(f"[WEBHOOK] Session refresh error for user {user_id}: {e}")
+
                                 # Update connection status
                                 if connection_id:
                                     try:
@@ -26179,14 +26191,58 @@ def quiltt_webhook():
                                 except Exception:
                                     pass
 
-                                # Create notification with reconnect link
+                                # Deduplicate: update existing unread notification instead of creating a new one
                                 notification_message = (
                                     f'Your {institution_name} connection needs to be reconnected. '
                                     f'<a href="/bank_accounts?reconnect={connection_id}" class="notification-link">'
                                     f'Click here to reconnect</a>.'
                                 )
-                                add_notification(user_id, notification_message)
-                                app.logger.info(f"[WEBHOOK] Created reconnect notification for user {user_id} ({institution_name})")
+                                existing_notif_id = None
+                                try:
+                                    with get_db_pool().get_connection() as conn:
+                                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                                        cursor.execute(
+                                            "SELECT id FROM notifications WHERE user_id = %s AND message LIKE %s AND is_read = 0",
+                                            (user_id, f'%reconnect={connection_id}%')
+                                        )
+                                        nrow = cursor.fetchone()
+                                        if nrow:
+                                            existing_notif_id = nrow['id']
+                                        cursor.close()
+                                except Exception:
+                                    pass
+
+                                if existing_notif_id:
+                                    # Update existing notification date to now
+                                    try:
+                                        with get_db_pool().get_connection() as conn:
+                                            cursor = conn.cursor()
+                                            cursor.execute(
+                                                "UPDATE notifications SET date = NOW() WHERE id = %s AND user_id = %s",
+                                                (existing_notif_id, user_id)
+                                            )
+                                            conn.commit()
+                                            cursor.close()
+                                        # Update in Redis if hydrated
+                                        try:
+                                            nkey = f"notifications:v1:{user_id}"
+                                            cached = _redis_client.get(nkey)
+                                            if cached:
+                                                notifs = json.loads(cached)
+                                                for n in notifs:
+                                                    if n.get('id') == existing_notif_id:
+                                                        n['date'] = datetime.now().isoformat()
+                                                        break
+                                                _redis_client.setex(nkey, 604800, json.dumps(notifs, cls=DecimalEncoder))
+                                        except Exception:
+                                            pass
+                                        app.logger.info(f"[WEBHOOK] Updated existing notification #{existing_notif_id} for user {user_id} ({institution_name})")
+                                    except Exception as e:
+                                        app.logger.warning(f"[WEBHOOK] Failed to update notification #{existing_notif_id}: {e}")
+                                        add_notification(user_id, notification_message)
+                                else:
+                                    add_notification(user_id, notification_message)
+                                    app.logger.info(f"[WEBHOOK] Created reconnect notification for user {user_id} ({institution_name})")
                                 mark_webhook_event_processed(event_id)
 
                         # --- Connection Disconnected ---
@@ -26205,6 +26261,18 @@ def quiltt_webhook():
                                 app.logger.info(f"[WEBHOOK] Skipping {event_type} for user {user_id} — connection {connection_id} was recently deleted")
                                 mark_webhook_event_processed(event_id)
                             else:
+                                # Proactively refresh session token if expired
+                                try:
+                                    with get_db_pool().get_connection() as conn:
+                                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                                        cursor.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+                                        urow = cursor.fetchone()
+                                        cursor.close()
+                                    if urow and urow.get('username'):
+                                        _refresh_quiltt_session_token(user_id, urow['username'])
+                                except Exception as e:
+                                    app.logger.warning(f"[WEBHOOK] Session refresh error for user {user_id}: {e}")
+
                                 # Update connection status
                                 if connection_id:
                                     try:
@@ -26231,13 +26299,57 @@ def quiltt_webhook():
                                 except Exception:
                                     pass
 
+                                # Deduplicate: update existing unread notification instead of creating a new one
                                 notification_message = (
                                     f'Your {institution_name} connection has been disconnected. '
                                     f'<a href="/bank_accounts?reconnect={connection_id}" class="notification-link">'
                                     f'Click here to reconnect</a>.'
                                 )
-                                add_notification(user_id, notification_message)
-                                app.logger.info(f"[WEBHOOK] Created disconnect notification for user {user_id} ({institution_name})")
+                                existing_notif_id = None
+                                try:
+                                    with get_db_pool().get_connection() as conn:
+                                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                                        cursor.execute(
+                                            "SELECT id FROM notifications WHERE user_id = %s AND message LIKE %s AND is_read = 0",
+                                            (user_id, f'%reconnect={connection_id}%')
+                                        )
+                                        nrow = cursor.fetchone()
+                                        if nrow:
+                                            existing_notif_id = nrow['id']
+                                        cursor.close()
+                                except Exception:
+                                    pass
+
+                                if existing_notif_id:
+                                    try:
+                                        with get_db_pool().get_connection() as conn:
+                                            cursor = conn.cursor()
+                                            cursor.execute(
+                                                "UPDATE notifications SET date = NOW() WHERE id = %s AND user_id = %s",
+                                                (existing_notif_id, user_id)
+                                            )
+                                            conn.commit()
+                                            cursor.close()
+                                        # Update in Redis if hydrated
+                                        try:
+                                            nkey = f"notifications:v1:{user_id}"
+                                            cached = _redis_client.get(nkey)
+                                            if cached:
+                                                notifs = json.loads(cached)
+                                                for n in notifs:
+                                                    if n.get('id') == existing_notif_id:
+                                                        n['date'] = datetime.now().isoformat()
+                                                        break
+                                                _redis_client.setex(nkey, 604800, json.dumps(notifs, cls=DecimalEncoder))
+                                        except Exception:
+                                            pass
+                                        app.logger.info(f"[WEBHOOK] Updated existing notification #{existing_notif_id} for user {user_id} ({institution_name})")
+                                    except Exception as e:
+                                        app.logger.warning(f"[WEBHOOK] Failed to update notification #{existing_notif_id}: {e}")
+                                        add_notification(user_id, notification_message)
+                                else:
+                                    add_notification(user_id, notification_message)
+                                    app.logger.info(f"[WEBHOOK] Created disconnect notification for user {user_id} ({institution_name})")
                                 mark_webhook_event_processed(event_id)
 
                         # --- Other error events (log only) ---
