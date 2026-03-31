@@ -5,12 +5,12 @@ Handles authentication, API calls, and data transformation for Quiltt
 
 import os
 import requests
-import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
+from log_config import get_logger, log_info, log_error, log_warning, log_exception
 
 # Set up logging
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class QuilttClient:
     """Client for interacting with Quiltt API"""
@@ -24,9 +24,9 @@ class QuilttClient:
         
         # Validate credentials
         if not self.api_key:
-            logger.warning("QUILTT_API_KEY not set in environment variables")
+            log_warning(logger, 'QUILTT', "QUILTT_API_KEY not set in environment variables")
         if not self.environment_id:
-            logger.warning("QUILTT_ENVIRONMENT_ID not set in environment variables")
+            log_warning(logger, 'QUILTT', "QUILTT_ENVIRONMENT_ID not set in environment variables")
         
     def _get_headers(self, session_token: Optional[str] = None) -> Dict[str, str]:
         """Get headers for API requests"""
@@ -56,7 +56,7 @@ class QuilttClient:
         """
         # Check if credentials are configured
         if not self.api_key or not self.environment_id:
-            logger.error("Quiltt credentials not configured. Set QUILTT_API_KEY and QUILTT_ENVIRONMENT_ID")
+            log_error(logger, 'QUILTT', "Quiltt credentials not configured. Set QUILTT_API_KEY and QUILTT_ENVIRONMENT_ID")
             return None
             
         try:
@@ -70,8 +70,8 @@ class QuilttClient:
             if metadata:
                 payload['metadata'] = metadata
             
-            logger.info(f"Creating new Quiltt profile session token for app user {user_id}")
-            logger.info(f"Request payload: {payload}")
+            log_info(logger, 'QUILTT', f"Creating new Quiltt profile session token for app user {user_id}")
+            log_info(logger, 'QUILTT', f"Request payload: {payload}")
             
             response = requests.post(
                 url,
@@ -80,13 +80,13 @@ class QuilttClient:
                 timeout=10
             )
             
-            logger.info(f"Response status: {response.status_code}")
-            logger.info(f"Response body: {response.text[:500]}")
+            log_info(logger, 'QUILTT', f"Response status: {response.status_code}")
+            log_info(logger, 'QUILTT', f"Response body: {response.text[:500]}")
             
             response.raise_for_status()
             
             data = response.json()
-            logger.info(f"Created Quiltt session token - Profile ID: {data.get('userId')}")
+            log_info(logger, 'QUILTT', f"Created Quiltt session token - Profile ID: {data.get('userId')}")
             
             return {
                 'token': data.get('token'),
@@ -95,10 +95,10 @@ class QuilttClient:
             }
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error creating Quiltt session token: {e}")
+            log_error(logger, 'QUILTT', f"Error creating Quiltt session token: {e}")
             if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-                logger.error(f"Response body: {e.response.text}")
+                log_error(logger, 'QUILTT', f"Response status: {e.response.status_code}")
+                log_error(logger, 'QUILTT', f"Response body: {e.response.text}")
             return None
     
     def refresh_session_token(self, quiltt_profile_id: str, metadata: Optional[Dict] = None) -> Optional[Dict]:
@@ -113,7 +113,7 @@ class QuilttClient:
             Dict with 'token' and 'profileId' or None on error
         """
         if not self.api_key or not self.environment_id:
-            logger.error("Quiltt credentials not configured")
+            log_error(logger, 'QUILTT', "Quiltt credentials not configured")
             return None
             
         try:
@@ -127,7 +127,7 @@ class QuilttClient:
             if metadata:
                 payload['metadata'] = metadata
             
-            logger.info(f"Refreshing session token for Quiltt Profile: {quiltt_profile_id}")
+            log_info(logger, 'QUILTT', f"Refreshing session token for Quiltt Profile: {quiltt_profile_id}")
             
             response = requests.post(
                 url,
@@ -136,12 +136,12 @@ class QuilttClient:
                 timeout=10
             )
             
-            logger.info(f"Response status: {response.status_code}")
+            log_info(logger, 'QUILTT', f"Response status: {response.status_code}")
             
             response.raise_for_status()
             
             data = response.json()
-            logger.info(f"Refreshed session token for Profile: {quiltt_profile_id}")
+            log_info(logger, 'QUILTT', f"Refreshed session token for Profile: {quiltt_profile_id}")
             
             return {
                 'token': data.get('token'),
@@ -150,9 +150,9 @@ class QuilttClient:
             }
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error refreshing session token: {e}")
+            log_error(logger, 'QUILTT', f"Error refreshing session token: {e}")
             if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response body: {e.response.text}")
+                log_error(logger, 'QUILTT', f"Response body: {e.response.text}")
             return None
     
     def update_profile_email(self, session_token: str, email: str) -> bool:
@@ -182,10 +182,10 @@ class QuilttClient:
         result = self.query_graphql(session_token, mutation, variables)
         
         if result and 'profileUpdate' in result:
-            logger.info(f"Successfully updated profile email")
+            log_info(logger, 'QUILTT', f"Successfully updated profile email")
             return True
         else:
-            logger.warning(f"Failed to update profile email")
+            log_warning(logger, 'QUILTT', f"Failed to update profile email")
             return False
     
     def revoke_session_token(self, session_token: str) -> bool:
@@ -200,11 +200,11 @@ class QuilttClient:
             )
             response.raise_for_status()
             
-            logger.info("Revoked Quiltt session token")
+            log_info(logger, 'QUILTT', "Revoked Quiltt session token")
             return True
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error revoking Quiltt session token: {e}")
+            log_error(logger, 'QUILTT', f"Error revoking Quiltt session token: {e}")
             return False
     
     def query_graphql(self, session_token: str, query: str, variables: Optional[Dict] = None) -> Optional[Dict]:
@@ -234,26 +234,26 @@ class QuilttClient:
             
             # Log raw response for debugging
             response_text = response.text
-            logger.debug(f"GraphQL response (first 500 chars): {response_text[:500]}")
+            log_info(logger, 'QUILTT', f"GraphQL response (first 500 chars): {response_text[:500]}")
             
             try:
                 data = response.json()
             except ValueError as json_err:
-                logger.error(f"JSON decode error: {json_err}")
-                logger.error(f"Response content: {response_text[:1000]}")
+                log_error(logger, 'QUILTT', f"JSON decode error: {json_err}")
+                log_error(logger, 'QUILTT', f"Response content: {response_text[:1000]}")
                 return None
             
             if 'errors' in data:
-                logger.error(f"GraphQL errors: {data['errors']}")
+                log_error(logger, 'QUILTT', f"GraphQL errors: {data['errors']}")
                 return None
                 
             return data.get('data')
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error executing GraphQL query: {e}")
+            log_error(logger, 'QUILTT', f"Error executing GraphQL query: {e}")
             if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-                logger.error(f"Response body: {e.response.text[:1000]}")
+                log_error(logger, 'QUILTT', f"Response status: {e.response.status_code}")
+                log_error(logger, 'QUILTT', f"Response body: {e.response.text[:1000]}")
             return None
     
     def get_connection(self, session_token: str, connection_id: str) -> Optional[Dict]:
@@ -359,7 +359,7 @@ class QuilttClient:
         Returns:
             List of transaction dicts or None on error
         """
-        logger.info(f"Fetching transactions: account_id={account_id}, start={start_date}, end={end_date}, limit={limit}")
+        log_info(logger, 'QUILTT', f"Fetching transactions: account_id={account_id}, start={start_date}, end={end_date}, limit={limit}")
         
         # Build filter for account and date range
         filter_parts = []
@@ -392,17 +392,17 @@ class QuilttClient:
         }}
         """
         
-        logger.info(f"GraphQL query: {query}")
+        log_info(logger, 'QUILTT', f"GraphQL query: {query}")
         result = self.query_graphql(session_token, query, None)
         
         if result and 'transactions' in result and 'nodes' in result['transactions']:
             transactions = result['transactions']['nodes']
-            logger.info(f"Retrieved {len(transactions)} transactions from Quiltt API")
+            log_info(logger, 'QUILTT', f"Retrieved {len(transactions)} transactions from Quiltt API")
             if transactions:
-                logger.info(f"First transaction sample: {transactions[0]}")
+                log_info(logger, 'QUILTT', f"First transaction sample: {transactions[0]}")
             return transactions
         else:
-            logger.warning(f"No transactions found in response. Result structure: {result}")
+            log_warning(logger, 'QUILTT', f"No transactions found in response. Result structure: {result}")
         
         return None
     
@@ -422,7 +422,7 @@ class QuilttClient:
         Returns:
             List of transaction dicts with Ntropy data or None on error
         """
-        logger.info(f"Fetching transactions with Ntropy enrichment: accounts={account_ids}, start={start_date}, end={end_date}, limit={limit}")
+        log_info(logger, 'QUILTT', f"Fetching transactions with Ntropy enrichment: accounts={account_ids}, start={start_date}, end={end_date}, limit={limit}")
         
         # Build filter with account IDs and date range
         filter_parts = []
@@ -432,9 +432,9 @@ class QuilttClient:
             # Format as GraphQL array of quoted strings
             account_ids_str = ', '.join([f'"{acc_id}"' for acc_id in account_ids])
             filter_parts.append(f'accountIds: [{account_ids_str}]')
-            logger.info(f"Filtering by account IDs: {account_ids_str}")
+            log_info(logger, 'QUILTT', f"Filtering by account IDs: {account_ids_str}")
         else:
-            logger.warning("No account IDs provided - will fetch all user transactions")
+            log_warning(logger, 'QUILTT', "No account IDs provided - will fetch all user transactions")
         
         if start_date:
             filter_parts.append(f'date_gte: "{start_date}"')
@@ -528,17 +528,17 @@ class QuilttClient:
             }}
             """
             
-            logger.info(f"[NTROPY] Fetching page {page_count} of transactions...")
-            logger.info(f"[NTROPY] Filter: {filter_arg}")
+            log_info(logger, 'NTROPY', f"Fetching page {page_count} of transactions...")
+            log_info(logger, 'NTROPY', f"Filter: {filter_arg}")
             result = self.query_graphql(session_token, query, None)
             
             if not result:
-                logger.warning(f"[NTROPY] Page {page_count}: GraphQL returned None")
+                log_warning(logger, 'NTROPY', f"Page {page_count}: GraphQL returned None")
                 break
             
             if 'transactions' not in result:
-                logger.warning(f"[NTROPY] Page {page_count}: No 'transactions' key in result. Keys: {result.keys() if result else 'None'}")
-                logger.warning(f"[NTROPY] Result: {str(result)[:500]}")
+                log_warning(logger, 'NTROPY', f"Page {page_count}: No 'transactions' key in result. Keys: {result.keys() if result else 'None'}")
+                log_warning(logger, 'NTROPY', f"Result: {str(result)[:500]}")
                 break
             
             transactions_data = result['transactions']
@@ -550,16 +550,16 @@ class QuilttClient:
             has_next_page = page_info.get('hasNextPage', False)
             after_cursor = page_info.get('endCursor')
             
-            logger.info(f"[NTROPY] Page {page_count}: {len(page_transactions)} transactions, hasNextPage={has_next_page}, total so far={len(all_transactions)}")
+            log_info(logger, 'NTROPY', f"Page {page_count}: {len(page_transactions)} transactions, hasNextPage={has_next_page}, total so far={len(all_transactions)}")
             
             # Stop if we've reached the limit
             if len(all_transactions) >= limit:
-                logger.info(f"[NTROPY] Reached limit of {limit} transactions")
+                log_info(logger, 'NTROPY', f"Reached limit of {limit} transactions")
                 all_transactions = all_transactions[:limit]
                 break
         
         if all_transactions:
-            logger.info(f"[NTROPY] Total transactions fetched: {len(all_transactions)}")
+            log_info(logger, 'NTROPY', f"Total transactions fetched: {len(all_transactions)}")
             
             # Log account type breakdown for visibility
             type_counts = {}
@@ -567,15 +567,15 @@ class QuilttClient:
                 acct = txn.get('account', {})
                 atype = acct.get('type', 'UNKNOWN').upper()
                 type_counts[atype] = type_counts.get(atype, 0) + 1
-            logger.info(f"[NTROPY] Account type breakdown: {type_counts}")
+            log_info(logger, 'NTROPY', f"Account type breakdown: {type_counts}")
             
             # Log first transaction as sample
             sample = all_transactions[0]
-            logger.info(f"Sample transaction: {sample.get('description')} - Amount: {sample.get('amount')}")
+            log_info(logger, 'QUILTT', f"Sample transaction: {sample.get('description')} - Amount: {sample.get('amount')}")
             
             return all_transactions
         else:
-            logger.info("[NTROPY] No transactions found in any page")
+            log_info(logger, 'NTROPY', "No transactions found in any page")
         
         return None
     
@@ -593,10 +593,10 @@ class QuilttClient:
         from statistics import median
         from collections import defaultdict
         
-        logger.info(f"Analyzing {len(transactions)} transactions for category recommendations")
+        log_info(logger, 'QUILTT', f"Analyzing {len(transactions)} transactions for category recommendations")
         
         if not transactions or len(transactions) == 0:
-            logger.warning("No transactions to analyze - returning fallback")
+            log_warning(logger, 'QUILTT', "No transactions to analyze - returning fallback")
             return {'fallback': True, 'income': [], 'expense': []}
         
         # Group transactions by category
@@ -625,7 +625,7 @@ class QuilttClient:
                 category_name = merchant
             
             if not category_name:
-                logger.debug(f"Skipping transaction - no category or merchant: {txn.get('description')}")
+                log_info(logger, 'QUILTT', f"Skipping transaction - no category or merchant: {txn.get('description')}")
                 continue
             
             # Filter out internal banking operations that aren't useful budget categories
@@ -639,7 +639,7 @@ class QuilttClient:
             }
             
             if category_name.lower() in skip_categories:
-                logger.debug(f"Skipping internal banking operation: {category_name}")
+                log_info(logger, 'QUILTT', f"Skipping internal banking operation: {category_name}")
                 continue
             
             # Get transaction details
@@ -663,7 +663,7 @@ class QuilttClient:
                 else:
                     expense_categories[category_name].append(transaction_data)
         
-        logger.info(f"Found {len(income_categories)} income categories, {len(expense_categories)} expense categories")
+        log_info(logger, 'QUILTT', f"Found {len(income_categories)} income categories, {len(expense_categories)} expense categories")
         
         # Analyze each category for recurring patterns
         income_recommendations = []
@@ -687,7 +687,7 @@ class QuilttClient:
         income_recommendations = income_recommendations[:10]
         expense_recommendations = expense_recommendations[:15]
         
-        logger.info(f"Generated {len(income_recommendations)} income recommendations, {len(expense_recommendations)} expense recommendations")
+        log_info(logger, 'QUILTT', f"Generated {len(income_recommendations)} income recommendations, {len(expense_recommendations)} expense recommendations")
         
         return {
             'fallback': False,
@@ -830,11 +830,11 @@ class QuilttClient:
             True if deletion request was successful, False otherwise
         """
         if not self.api_key:
-            logger.error("Quiltt API key not configured - cannot delete profile")
+            log_error(logger, 'QUILTT', "Quiltt API key not configured - cannot delete profile")
             return False
             
         if not profile_id:
-            logger.warning("No profile_id provided for deletion")
+            log_warning(logger, 'QUILTT', "No profile_id provided for deletion")
             return False
             
         try:
@@ -848,21 +848,21 @@ class QuilttClient:
             
             # 204 No Content means successful deletion
             if response.status_code == 204:
-                logger.info(f"Successfully requested deletion of Quiltt profile: {profile_id}")
+                log_info(logger, 'QUILTT', f"Successfully requested deletion of Quiltt profile: {profile_id}")
                 return True
             elif response.status_code == 404:
                 # Profile doesn't exist - consider this a success
-                logger.warning(f"Quiltt profile not found (may already be deleted): {profile_id}")
+                log_warning(logger, 'QUILTT', f"Quiltt profile not found (may already be deleted): {profile_id}")
                 return True
             else:
-                logger.error(f"Failed to delete Quiltt profile. Status: {response.status_code}, Body: {response.text}")
+                log_error(logger, 'QUILTT', f"Failed to delete Quiltt profile. Status: {response.status_code}, Body: {response.text}")
                 return False
                 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error deleting Quiltt profile {profile_id}: {e}")
+            log_error(logger, 'QUILTT', f"Error deleting Quiltt profile {profile_id}: {e}")
             if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-                logger.error(f"Response body: {e.response.text}")
+                log_error(logger, 'QUILTT', f"Response status: {e.response.status_code}")
+                log_error(logger, 'QUILTT', f"Response body: {e.response.text}")
             return False
 
 

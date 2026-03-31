@@ -12,11 +12,11 @@ user's budget categories.
 """
 
 import os
-import logging
 import requests
 from typing import List, Dict, Any, Optional
+from log_config import get_logger, log_info, log_error, log_warning, log_exception
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Ntropy API configuration
 NTROPY_API_BASE = "https://api.ntropy.com/v3"
@@ -54,7 +54,7 @@ def _get_categories_from_redis(table_name: str, user_id: int) -> Optional[List[D
         cached = r.get(redis_key)
         return json.loads(cached) if cached else None
     except Exception as e:
-        logger.error(f"Error getting categories from {table_name} in Redis: {e}")
+        log_error(logger, 'NTROPY', f"Error getting categories from {table_name} in Redis: {e}")
         return None
 
 
@@ -97,7 +97,7 @@ def _get_categories_from_mysql(table_name: str, user_id: int) -> Optional[List[D
         conn.close()
         return categories if categories else None
     except Exception as e:
-        logger.error(f"Error getting categories from {table_name} in MySQL: {e}")
+        log_error(logger, 'NTROPY', f"Error getting categories from {table_name} in MySQL: {e}")
         return None
 
 
@@ -166,14 +166,13 @@ def sync_user_categories_to_ntropy(user_id: int) -> bool:
     """
     try:
         if not NTROPY_API_KEY:
-            logger.error("NTROPY_API_KEY not configured - skipping category sync")
+            log_error(logger, 'NTROPY', "NTROPY_API_KEY not configured - skipping category sync")
             return False
         
         # Get user's categories organized for Ntropy
         categories = _get_user_categories(user_id)
         
-        logger.info(f"Syncing categories to Ntropy for user {user_id}: "
-                   f"{len(categories['incoming'])} incoming, {len(categories['outgoing'])} outgoing")
+        log_info(logger, 'NTROPY', f"Syncing categories to Ntropy for user {user_id}: " f"{len(categories['incoming'])} incoming, {len(categories['outgoing'])} outgoing")
         
         # Create/update custom category set
         category_set_id = f"blankee_user_{user_id}"
@@ -186,9 +185,9 @@ def sync_user_categories_to_ntropy(user_id: int) -> bool:
         )
         
         if response.status_code in (200, 201):
-            logger.info(f"Successfully synced categories to Ntropy for user {user_id}")
+            log_info(logger, 'NTROPY', f"Successfully synced categories to Ntropy for user {user_id}")
         else:
-            logger.error(f"Failed to sync categories to Ntropy: {response.status_code} - {response.text}")
+            log_error(logger, 'NTROPY', f"Failed to sync categories to Ntropy: {response.status_code} - {response.text}")
             return False
         
         # Create/update account holder with this category set
@@ -197,7 +196,7 @@ def sync_user_categories_to_ntropy(user_id: int) -> bool:
         return account_holder_created
         
     except Exception as e:
-        logger.error(f"Error syncing categories to Ntropy for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'NTROPY', f"Error syncing categories to Ntropy for user {user_id}: {e}")
         return False
 
 
@@ -230,22 +229,22 @@ def _ensure_account_holder(user_id: int, category_set_id: str) -> bool:
         
         # 201 = created, 200 = already exists (updated)
         if response.status_code in (200, 201):
-            logger.info(f"Ntropy account holder ready for user {user_id}")
+            log_info(logger, 'NTROPY', f"Ntropy account holder ready for user {user_id}")
             return True
         elif response.status_code == 409:
             # Account holder already exists - this is fine
-            logger.info(f"Ntropy account holder already exists for user {user_id}")
+            log_info(logger, 'NTROPY', f"Ntropy account holder already exists for user {user_id}")
             return True
         elif response.status_code == 400 and 'already exists' in response.text:
             # Ntropy returns 400 instead of 409 for "already exists"
-            logger.info(f"Ntropy account holder already exists for user {user_id}")
+            log_info(logger, 'NTROPY', f"Ntropy account holder already exists for user {user_id}")
             return True
         else:
-            logger.error(f"Failed to create Ntropy account holder: {response.status_code} - {response.text}")
+            log_error(logger, 'NTROPY', f"Failed to create Ntropy account holder: {response.status_code} - {response.text}")
             return False
             
     except Exception as e:
-        logger.error(f"Error creating Ntropy account holder for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'NTROPY', f"Error creating Ntropy account holder for user {user_id}: {e}")
         return False
 
 
@@ -273,11 +272,11 @@ def get_ntropy_category_set(user_id: int) -> Optional[Dict[str, List[str]]]:
         if response.status_code == 200:
             return response.json()
         else:
-            logger.warning(f"Could not fetch Ntropy categories for user {user_id}: {response.status_code}")
+            log_warning(logger, 'NTROPY', f"Could not fetch Ntropy categories for user {user_id}: {response.status_code}")
             return None
             
     except Exception as e:
-        logger.error(f"Error fetching Ntropy categories: {e}", exc_info=True)
+        log_exception(logger, 'NTROPY', f"Error fetching Ntropy categories: {e}")
         return None
 
 
@@ -311,7 +310,7 @@ def enrich_transaction_with_custom_categories(
     """
     try:
         if not NTROPY_API_KEY:
-            logger.warning("NTROPY_API_KEY not set, skipping enrichment")
+            log_warning(logger, 'NTROPY', "NTROPY_API_KEY not set, skipping enrichment")
             return None
             
         account_holder_id = f"blankee_user_{user_id}"
@@ -331,14 +330,14 @@ def enrich_transaction_with_custom_categories(
         
         if response.status_code == 200:
             result = response.json()
-            logger.info(f"Ntropy enrichment for txn {transaction_id}: categories={result.get('categories')}")
+            log_info(logger, 'NTROPY', f"Ntropy enrichment for txn {transaction_id}: categories={result.get('categories')}")
             return result
         else:
-            logger.warning(f"Ntropy enrichment failed for txn {transaction_id}: {response.status_code} - {response.text}")
+            log_warning(logger, 'NTROPY', f"Ntropy enrichment failed for txn {transaction_id}: {response.status_code} - {response.text}")
             return None
             
     except Exception as e:
-        logger.error(f"Error enriching transaction {transaction_id}: {e}", exc_info=True)
+        log_exception(logger, 'NTROPY', f"Error enriching transaction {transaction_id}: {e}")
         return None
 
 
@@ -466,7 +465,7 @@ def suggest_category_for_transaction(
         }
         
     except Exception as e:
-        logger.error(f"Error suggesting category for transaction: {e}", exc_info=True)
+        log_exception(logger, 'NTROPY', f"Error suggesting category for transaction: {e}")
         return {
             'suggested_category': 'Uncategorized',
             'suggested_category_id': None,
@@ -532,7 +531,7 @@ def get_recurring_groups(profile_id: str) -> Optional[List[Dict[str, Any]]]:
     """
     try:
         if not NTROPY_API_KEY:
-            logger.warning("NTROPY_API_KEY not set, skipping recurring groups")
+            log_warning(logger, 'NTROPY', "NTROPY_API_KEY not set, skipping recurring groups")
             return None
         
         url = f"{NTROPY_API_BASE}/account_holders/{profile_id}/recurring_groups"
@@ -540,14 +539,14 @@ def get_recurring_groups(profile_id: str) -> Optional[List[Dict[str, Any]]]:
         
         if response.status_code == 200:
             groups = response.json()
-            logger.info(f"Ntropy recurring groups for {profile_id}: {len(groups)} groups found")
+            log_info(logger, 'NTROPY', f"Ntropy recurring groups for {profile_id}: {len(groups)} groups found")
             return groups
         else:
-            logger.warning(f"Ntropy recurring_groups failed for {profile_id}: {response.status_code} - {response.text}")
+            log_warning(logger, 'NTROPY', f"Ntropy recurring_groups failed for {profile_id}: {response.status_code} - {response.text}")
             return None
             
     except Exception as e:
-        logger.error(f"Error fetching recurring groups for {profile_id}: {e}", exc_info=True)
+        log_exception(logger, 'NTROPY', f"Error fetching recurring groups for {profile_id}: {e}")
         return None
 
 
@@ -609,9 +608,9 @@ def delete_ntropy_user_data(user_id: int) -> bool:
         response = requests.post(url, headers=_get_api_headers())
         
         if response.status_code in (200, 204, 404):
-            logger.info(f"Deleted Ntropy category set for user {user_id}")
+            log_info(logger, 'NTROPY', f"Deleted Ntropy category set for user {user_id}")
         else:
-            logger.warning(f"Could not delete Ntropy category set: {response.status_code}")
+            log_warning(logger, 'NTROPY', f"Could not delete Ntropy category set: {response.status_code}")
         
         # Note: Account holders cannot be deleted via API per Ntropy docs
         # They will just become orphaned which is fine
@@ -619,5 +618,5 @@ def delete_ntropy_user_data(user_id: int) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"Error deleting Ntropy data for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'NTROPY', f"Error deleting Ntropy data for user {user_id}: {e}")
         return False

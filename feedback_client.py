@@ -1,11 +1,11 @@
 import json
-import logging
 import os
 from typing import Any, Dict, Optional
 
 import requests
+from log_config import get_logger, log_info, log_error, log_warning, log_exception
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _DEFAULT_TIMEOUT = 6
 _FIDER_CACHE_TTL = 7 * 24 * 60 * 60  # 7 days
@@ -30,10 +30,10 @@ class FiderClient:
                     body = response.text
                 except Exception:
                     pass
-                logger.error(f"[FIDER] {method} {path} returned {response.status_code}: {body}")
+                log_error(logger, 'FIDER', f"{method} {path} returned {response.status_code}: {body}")
             return response
         except Exception as exc:
-            logger.error(f"[FIDER] Request error {method} {url}: {exc}")
+            log_error(logger, 'FIDER', f"Request error {method} {url}: {exc}")
             raise
 
     def ensure_user(self, name: str, email: str, reference: str, redis_client=None) -> int:
