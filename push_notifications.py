@@ -1,4 +1,3 @@
-import logging
 import os
 import collections
 
@@ -20,8 +19,9 @@ from apns2.client import APNsClient
 from apns2.credentials import TokenCredentials
 from apns2.errors import BadDeviceToken, Unregistered
 from apns2.payload import Payload
+from log_config import get_logger, log_info, log_error, log_warning, log_exception
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _apns_client = None
 _apns_topic = None
@@ -42,7 +42,7 @@ def _get_client():
     use_sandbox = os.getenv("APNS_USE_SANDBOX", "true").lower() == "true"
 
     if not all([key_path, key_id, team_id, topic]):
-        logger.info("APNs not configured; missing required environment variables")
+        log_info(logger, 'PUSH', "APNs not configured; missing required environment variables")
         return None
 
     try:
@@ -58,7 +58,7 @@ def _get_client():
         )
         _apns_topic = topic
         _apns_sandbox = use_sandbox
-        logger.info("APNs client initialized (sandbox=%s)", use_sandbox)
+        log_info(logger, 'PUSH', "APNs client initialized (sandbox=%s)", use_sandbox)
     except Exception:
         logger.exception("Failed to initialize APNs client")
         _apns_client = None
@@ -124,5 +124,5 @@ def send_apns_notification(device_token, title, body, badge=None, sound="default
     except (Unregistered, BadDeviceToken):
         return {"sent": False, "reason": "invalid_token"}
     except Exception as exc:
-        logger.warning("APNs send failed: %s", exc)
+        log_warning(logger, 'PUSH', "APNs send failed: %s", exc)
         return {"sent": False, "reason": "apns_exception", "error": str(exc)}

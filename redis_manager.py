@@ -14,8 +14,6 @@ Architecture:
 - Connection pooling for optimal performance
 """
 
-import logging
-import sys
 import json
 import time
 import threading
@@ -24,19 +22,11 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any, Set
 from collections import defaultdict
 from db_connections import get_db_pool
+from log_config import JsonFormatter, get_logger, log_info, log_error, log_warning, log_exception
 import pymysql.cursors
 
-# Configure logger to output to stderr (which Apache captures)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# Add handler if not already present
-if not logger.handlers:
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+# Configure logger with JSON formatting
+logger = get_logger(__name__)
 
 # Global state for tracking user activity
 _user_activity_lock = threading.Lock()
@@ -123,18 +113,18 @@ def init_redis_manager(redis_client):
     if _flush_thread is None or not _flush_thread.is_alive():
         _flush_thread = threading.Thread(target=_flush_worker, daemon=True, name="RedisFlushWorker")
         _flush_thread.start()
-        logger.info("Redis flush worker thread started")
+        log_info(logger, 'REDIS', "Redis flush worker thread started")
     
     if _dehydration_thread is None or not _dehydration_thread.is_alive():
         _dehydration_thread = threading.Thread(target=_dehydration_worker, daemon=True, name="RedisDehydrationWorker")
         _dehydration_thread.start()
-        logger.info("Redis dehydration worker thread started")
+        log_info(logger, 'REDIS', "Redis dehydration worker thread started")
 
 
 def shutdown_redis_manager():
     """Gracefully shutdown background threads"""
     global _shutdown_event
-    logger.info("Shutting down Redis manager...")
+    log_info(logger, 'REDIS', "Shutting down Redis manager...")
     _shutdown_event.set()
     
     if _flush_thread and _flush_thread.is_alive():
@@ -142,7 +132,7 @@ def shutdown_redis_manager():
     if _dehydration_thread and _dehydration_thread.is_alive():
         _dehydration_thread.join(timeout=5)
     
-    logger.info("Redis manager shutdown complete")
+    log_info(logger, 'REDIS', "Redis manager shutdown complete")
 
 
 def track_user_activity(user_id: int):
@@ -156,7 +146,7 @@ def track_user_activity(user_id: int):
     global _user_last_activity, _hydrated_users
     
     if not _redis_client:
-        logger.warning("Redis client not initialized")
+        log_warning(logger, 'REDIS', "Redis client not initialized")
         return
     
     current_time = time.time()
@@ -168,7 +158,7 @@ def track_user_activity(user_id: int):
         if user_id not in _hydrated_users and user_id not in _hydrating_users:
             # Mark as hydrating to prevent duplicate threads
             _hydrating_users.add(user_id)
-            logger.info(f"User {user_id} needs hydration, triggering background hydration")
+            log_info(logger, 'REDIS', f"User {user_id} needs hydration, triggering background hydration")
             # Run hydration in background thread to avoid blocking request
             threading.Thread(
                 target=_hydrate_user_data,
@@ -177,7 +167,7 @@ def track_user_activity(user_id: int):
                 name=f"Hydrate-{user_id}"
             ).start()
         elif user_id in _hydrating_users:
-            logger.debug(f"User {user_id} hydration already in progress")
+            log_info(logger, 'REDIS', f"User {user_id} hydration already in progress")
         elif user_id in _hydrated_users:
             # User is already hydrated - refresh TTLs to prevent expiration during active use
             # Do this in background to avoid blocking the request
@@ -219,13 +209,13 @@ def _hydrate_user_data(user_id: int):
     global _hydrated_users, _hydrating_users
     
     start_time = time.time()
-    logger.info(f"[HYDRATION] Starting hydration for user {user_id}")
+    log_info(logger, 'HYDRATION', f"Starting hydration for user {user_id}")
     
     try:
         # Double-check if already hydrated (race condition check)
         with _user_activity_lock:
             if user_id in _hydrated_users:
-                logger.debug(f"User {user_id} already hydrated, skipping")
+                log_info(logger, 'REDIS', f"User {user_id} already hydrated, skipping")
                 _hydrating_users.discard(user_id)
                 return
         
@@ -252,7 +242,7 @@ def _hydrate_user_data(user_id: int):
             _hydrating_users.discard(user_id)
         
         elapsed = time.time() - start_time
-        logger.info(f"[HYDRATION] ✓ User {user_id} hydrated: {total_rows} total rows across {tables_hydrated} tables in {elapsed:.2f}s")
+        log_info(logger, 'HYDRATION', f"✓ User {user_id} hydrated: {total_rows} total rows across {tables_hydrated} tables in {elapsed:.2f}s")
         
         # Send frontend refresh signal
         _signal_frontend_refresh(user_id)
@@ -261,7 +251,7 @@ def _hydrate_user_data(user_id: int):
         # Remove from hydrating set on error
         with _user_activity_lock:
             _hydrating_users.discard(user_id)
-        logger.error(f"[HYDRATION] ✗ Error hydrating user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'HYDRATION', f"✗ Error hydrating user {user_id}: {e}")
 
 
 def _hydrate_user_profile(user_id: int):
@@ -281,9 +271,9 @@ def _hydrate_user_profile(user_id: int):
                     INACTIVITY_TIMEOUT + 60,  # Slightly longer TTL
                     json.dumps(user_data, cls=DecimalEncoder)
                 )
-                logger.debug(f"Hydrated user profile for user {user_id}")
+                log_info(logger, 'REDIS', f"Hydrated user profile for user {user_id}")
     except Exception as e:
-        logger.error(f"Error hydrating user profile for {user_id}: {e}")
+        log_error(logger, 'REDIS', f"Error hydrating user profile for {user_id}: {e}")
 
 
 def _hydrate_table(table: str, user_id: int):
@@ -375,7 +365,7 @@ def _hydrate_table(table: str, user_id: int):
                     INACTIVITY_TIMEOUT + 60,
                     json.dumps(rows, cls=DecimalEncoder)
                 )
-                logger.debug(f"Hydrated {len(rows)} rows from {table} for user {user_id}")
+                log_info(logger, 'REDIS', f"Hydrated {len(rows)} rows from {table} for user {user_id}")
                 return len(rows)
             else:
                 # Store empty array to indicate table was checked
@@ -384,7 +374,7 @@ def _hydrate_table(table: str, user_id: int):
                 return 0
                 
     except Exception as e:
-        logger.error(f"Error hydrating {table} for user {user_id}: {e}")
+        log_error(logger, 'REDIS', f"Error hydrating {table} for user {user_id}: {e}")
         return 0
 
 
@@ -416,11 +406,11 @@ def _hydrate_bud_items(user_id: int):
                 INACTIVITY_TIMEOUT + 60,
                 json.dumps(items, cls=DecimalEncoder)
             )
-            logger.debug(f"Hydrated {len(items)} bud_items for user {user_id}")
+            log_info(logger, 'REDIS', f"Hydrated {len(items)} bud_items for user {user_id}")
             return len(items)
                 
     except Exception as e:
-        logger.error(f"Error hydrating bud_items for user {user_id}: {e}")
+        log_error(logger, 'REDIS', f"Error hydrating bud_items for user {user_id}: {e}")
         return 0
 
 
@@ -444,7 +434,7 @@ def _refresh_user_ttls(user_id: int):
         # Set throttle flag (2 minute TTL)
         _redis_client.setex(throttle_key, 120, '1')
         
-        logger.debug(f"[TTL REFRESH] Refreshing TTLs for user {user_id}")
+        log_info(logger, 'TTL_REFRESH', f"Refreshing TTLs for user {user_id}")
         
         # Refresh TTL for user profile
         user_key = _get_redis_key('users', user_id)
@@ -464,7 +454,7 @@ def _refresh_user_ttls(user_id: int):
                 rows_count = _hydrate_table(table, user_id)
                 if rows_count > 0:
                     hydrated_count += 1
-                    logger.info(f"[TTL REFRESH] Hydrated missing table {table} for user {user_id}: {rows_count} rows")
+                    log_info(logger, 'TTL_REFRESH', f"Hydrated missing table {table} for user {user_id}: {rows_count} rows")
         
         # Refresh TTL for bud_items (stored by user_id)
         bud_items_key = f"bud_items:{REDIS_KEY_VERSION}:{user_id}"
@@ -473,12 +463,12 @@ def _refresh_user_ttls(user_id: int):
             refreshed_count += 1
         
         if hydrated_count > 0:
-            logger.info(f"[TTL REFRESH] ✓ Refreshed {refreshed_count} keys, hydrated {hydrated_count} missing tables for user {user_id}")
+            log_info(logger, 'TTL_REFRESH', f"✓ Refreshed {refreshed_count} keys, hydrated {hydrated_count} missing tables for user {user_id}")
         else:
-            logger.debug(f"[TTL REFRESH] ✓ Refreshed {refreshed_count} keys for user {user_id}")
+            log_info(logger, 'TTL_REFRESH', f"✓ Refreshed {refreshed_count} keys for user {user_id}")
         
     except Exception as e:
-        logger.error(f"[TTL REFRESH] Error refreshing TTLs for user {user_id}: {e}")
+        log_error(logger, 'TTL_REFRESH', f"Error refreshing TTLs for user {user_id}: {e}")
 
 
 def _dehydrate_user_data(user_id: int):
@@ -492,7 +482,7 @@ def _dehydrate_user_data(user_id: int):
     global _hydrated_users
     
     start_time = time.time()
-    logger.info(f"[DEHYDRATION] Starting dehydration for user {user_id}")
+    log_info(logger, 'DEHYDRATION', f"Starting dehydration for user {user_id}")
     
     try:
         # Flush dirty data to MySQL before dehydration
@@ -500,7 +490,7 @@ def _dehydrate_user_data(user_id: int):
         dirty_tables = _redis_client.smembers(dirty_tables_key)
         
         if dirty_tables:
-            logger.info(f"[DEHYDRATION] Flushing {len(dirty_tables)} dirty tables for user {user_id} before dehydration")
+            log_info(logger, 'DEHYDRATION', f"Flushing {len(dirty_tables)} dirty tables for user {user_id} before dehydration")
             
             tables_to_flush = [
                 'totals_remainders',
@@ -537,7 +527,7 @@ def _dehydrate_user_data(user_id: int):
                         _redis_client.srem(dirty_tables_key, table)
             
             if flushed_count > 0:
-                logger.info(f"[DEHYDRATION] Flushed {flushed_count} rows to MySQL for user {user_id}")
+                log_info(logger, 'DEHYDRATION', f"Flushed {flushed_count} rows to MySQL for user {user_id}")
         
         # Get all keys for this user
         keys_to_delete = []
@@ -565,16 +555,16 @@ def _dehydrate_user_data(user_id: int):
             # Clean up Quiltt-related keys
             
             elapsed = time.time() - start_time
-            logger.info(f"[DEHYDRATION] ✓ User {user_id} dehydrated: {len(keys_to_delete)} Redis keys deleted in {elapsed:.2f}s")
+            log_info(logger, 'DEHYDRATION', f"✓ User {user_id} dehydrated: {len(keys_to_delete)} Redis keys deleted in {elapsed:.2f}s")
         else:
-            logger.info(f"[DEHYDRATION] User {user_id} had no keys to delete")
+            log_info(logger, 'DEHYDRATION', f"User {user_id} had no keys to delete")
         
         # Remove from hydrated set
         with _user_activity_lock:
             _hydrated_users.discard(user_id)
         
     except Exception as e:
-        logger.error(f"[DEHYDRATION] ✗ Error dehydrating user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'DEHYDRATION', f"✗ Error dehydrating user {user_id}: {e}")
 
 
 def _dehydration_worker():
@@ -582,7 +572,7 @@ def _dehydration_worker():
     Background worker that checks for inactive users and dehydrates them.
     Runs continuously until shutdown.
     """
-    logger.info("Dehydration worker started")
+    log_info(logger, 'REDIS', "Dehydration worker started")
     
     while not _shutdown_event.is_set():
         try:
@@ -600,17 +590,17 @@ def _dehydration_worker():
             
             # Dehydrate inactive users
             for user_id in users_to_dehydrate:
-                logger.info(f"User {user_id} inactive for {INACTIVITY_TIMEOUT}s, dehydrating")
+                log_info(logger, 'REDIS', f"User {user_id} inactive for {INACTIVITY_TIMEOUT}s, dehydrating")
                 _dehydrate_user_data(user_id)
             
             # Sleep for 30 seconds before next check
             _shutdown_event.wait(30)
             
         except Exception as e:
-            logger.error(f"Error in dehydration worker: {e}", exc_info=True)
+            log_exception(logger, 'REDIS', f"Error in dehydration worker: {e}")
             _shutdown_event.wait(30)
     
-    logger.info("Dehydration worker stopped")
+    log_info(logger, 'REDIS', "Dehydration worker stopped")
 
 
 def _flush_redis_to_mysql():
@@ -627,10 +617,10 @@ def _flush_redis_to_mysql():
             users_to_flush = list(_hydrated_users)
         
         if not users_to_flush:
-            logger.debug("[FLUSH] No hydrated users to flush")
+            log_info(logger, 'FLUSH', "No hydrated users to flush")
             return
         
-        logger.info(f"[FLUSH] Starting flush for {len(users_to_flush)} hydrated user(s)")
+        log_info(logger, 'FLUSH', f"Starting flush for {len(users_to_flush)} hydrated user(s)")
         
         total_flushed = 0
         tables_to_flush = [
@@ -689,10 +679,10 @@ def _flush_redis_to_mysql():
                     dirty_tables.add(dt)
             
             if not dirty_tables:
-                logger.debug(f"[FLUSH] No dirty tables for user {user_id}")
+                log_info(logger, 'FLUSH', f"No dirty tables for user {user_id}")
                 continue
             
-            logger.debug(f"[FLUSH] User {user_id} has {len(dirty_tables)} dirty tables: {', '.join(dirty_tables)}")
+            log_info(logger, 'FLUSH', f"User {user_id} has {len(dirty_tables)} dirty tables: {', '.join(dirty_tables)}")
             
             # Flush only dirty tables
             for table in tables_to_flush:
@@ -700,22 +690,22 @@ def _flush_redis_to_mysql():
                 if table not in dirty_tables:
                     continue
                 
-                logger.info(f"[FLUSH] Processing dirty table: {table} for user {user_id}")
-                logger.debug(f"[FLUSH] Attempting to flush {table} for user {user_id}")
+                log_info(logger, 'FLUSH', f"Processing dirty table: {table} for user {user_id}")
+                log_info(logger, 'FLUSH', f"Attempting to flush {table} for user {user_id}")
                 flushed_count = _flush_table_to_mysql(table, user_id)
                 
                 # If flushed_count is -1, skip clearing dirty flag (deferred processing)
                 if flushed_count == -1:
-                    logger.info(f"[FLUSH] Deferred processing for {table} - not clearing dirty flag")
+                    log_info(logger, 'FLUSH', f"Deferred processing for {table} - not clearing dirty flag")
                     continue
                 
                 # Always clear the dirty flag after processing to prevent infinite retry loops
                 # The table will be marked dirty again if new changes occur
                 if flushed_count > 0:
                     table_stats[table] = flushed_count
-                    logger.info(f"[FLUSH] Cleared dirty flag for {table} (flushed={flushed_count})")
+                    log_info(logger, 'FLUSH', f"Cleared dirty flag for {table} (flushed={flushed_count})")
                 else:
-                    logger.debug(f"[FLUSH] Cleared dirty flag for {table} (no data to flush)")
+                    log_info(logger, 'FLUSH', f"Cleared dirty flag for {table} (no data to flush)")
                 
                 # Remove from dirty set after processing
                 _redis_client.srem(dirty_tables_key, table)
@@ -725,16 +715,16 @@ def _flush_redis_to_mysql():
             total_flushed += user_flushed
             if user_flushed > 0:
                 stats_str = ", ".join([f"{table}: {count}" for table, count in table_stats.items()])
-                logger.info(f"[FLUSH] User {user_id}: {user_flushed} rows ({stats_str})")
+                log_info(logger, 'FLUSH', f"User {user_id}: {user_flushed} rows ({stats_str})")
         
         elapsed = time.time() - start_time
         if total_flushed > 0:
-            logger.info(f"[FLUSH] ✓ Flush complete: {len(users_to_flush)} user(s), {total_flushed} rows written to MySQL in {elapsed:.2f}s")
+            log_info(logger, 'FLUSH', f"✓ Flush complete: {len(users_to_flush)} user(s), {total_flushed} rows written to MySQL in {elapsed:.2f}s")
         else:
-            logger.debug(f"[FLUSH] No dirty data to flush for {len(users_to_flush)} user(s)")
+            log_info(logger, 'FLUSH', f"No dirty data to flush for {len(users_to_flush)} user(s)")
         
     except Exception as e:
-        logger.error(f"[FLUSH] ✗ Error in Redis to MySQL flush: {e}", exc_info=True)
+        log_exception(logger, 'FLUSH', f"✗ Error in Redis to MySQL flush: {e}")
 
 
 def _flush_table_to_mysql(table: str, user_id: int):
@@ -748,13 +738,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
     Returns:
         Count of rows flushed
     """
-    logger.info(f"[FLUSH] _flush_table_to_mysql called for table={table}, user_id={user_id}")
+    log_info(logger, 'FLUSH', f"_flush_table_to_mysql called for table={table}, user_id={user_id}")
     
     try:
         # Handle special deletion tables first (they don't have Redis data)
         if table == 'quiltt_connections_deleted':
             # Handle deletion of Quiltt connections
-            logger.info(f"[FLUSH] Processing quiltt_connections_deleted for user {user_id}")
+            log_info(logger, 'FLUSH', f"Processing quiltt_connections_deleted for user {user_id}")
             
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
@@ -762,13 +752,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 delete_key = f"quiltt_connections_to_delete:{user_id}"
                 connection_ids = _redis_client.smembers(delete_key)
                 
-                logger.info(f"[FLUSH] Found {len(connection_ids) if connection_ids else 0} connections to delete")
+                log_info(logger, 'FLUSH', f"Found {len(connection_ids) if connection_ids else 0} connections to delete")
                 
                 if not connection_ids:
                     # No connections to delete, but clear the deletion set and return 0
                     # This allows the dirty flag to be removed
                     _redis_client.delete(delete_key)
-                    logger.info(f"[FLUSH] No connections to delete, cleared deletion set")
+                    log_info(logger, 'FLUSH', f"No connections to delete, cleared deletion set")
                     return 0
                 
                 deleted_count = 0
@@ -790,7 +780,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     """, (user_id, conn_id_str))
                     
                     deleted_count += cursor.rowcount
-                    logger.info(f"[FLUSH] Deleted Quiltt connection {conn_id_str} for user {user_id}")
+                    log_info(logger, 'FLUSH', f"Deleted Quiltt connection {conn_id_str} for user {user_id}")
                 
                 conn.commit()
                 
@@ -800,7 +790,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 # Also clear quiltt_connections dirty flag since deletes are now processed
                 dirty_key = f"dirty_tables:{user_id}"
                 _redis_client.srem(dirty_key, 'quiltt_connections')
-                logger.info(f"[FLUSH] Cleared quiltt_connections dirty flag after delete processing")
+                log_info(logger, 'FLUSH', f"Cleared quiltt_connections dirty flag after delete processing")
                 
                 cursor.close()
                 return deleted_count
@@ -817,7 +807,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
         
         # Regular table flush logic
         redis_key = _get_redis_key(table, user_id)
-        logger.info(f"[FLUSH] Looking for Redis key: {redis_key}")
+        log_info(logger, 'FLUSH', f"Looking for Redis key: {redis_key}")
         redis_data = _redis_client.get(redis_key)
         
         # Check for pending deletes even if Redis data doesn't exist
@@ -828,7 +818,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
         if not redis_data:
             # Even with no Redis data, we may have pending deletes to process
             if pending_deletes:
-                logger.info(f"[FLUSH] No Redis data but found {len(pending_deletes)} pending deletes for {table}")
+                log_info(logger, 'FLUSH', f"No Redis data but found {len(pending_deletes)} pending deletes for {table}")
                 delete_ids = [int(id_str) for id_str in pending_deletes]
                 
                 with get_db_pool().get_connection() as conn:
@@ -838,16 +828,16 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         DELETE FROM {table} WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
                     conn.commit()
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} {table} from MySQL via pending_deletes (no Redis data)")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} {table} from MySQL via pending_deletes (no Redis data)")
                 
                 # Clear the pending deletes set
                 _redis_client.delete(pending_key)
                 return len(delete_ids)
             else:
-                logger.info(f"[FLUSH] ⚠️ No Redis data found for key: {redis_key} - returning 0 (dirty flag will NOT be cleared)")
+                log_info(logger, 'FLUSH', f"⚠️ No Redis data found for key: {redis_key} - returning 0 (dirty flag will NOT be cleared)")
                 return 0
         
-        logger.info(f"[FLUSH] Found Redis data for {table}, length: {len(redis_data)} bytes")
+        log_info(logger, 'FLUSH', f"Found Redis data for {table}, length: {len(redis_data)} bytes")
         rows = json.loads(redis_data)
         
         # Don't return early when rows is an empty list - we still need to
@@ -855,7 +845,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
         # income_entries/expense_entries/c_expense_entries. The per-table
         # handlers below will correctly handle empty `rows` when performing
         # upserts. Keep a debug log for visibility.
-        logger.debug(f"[FLUSH] Found {len(rows)} rows in Redis for {table}")
+        log_info(logger, 'FLUSH', f"Found {len(rows)} rows in Redis for {table}")
         
         # Build UPSERT query based on table type
         with get_db_pool().get_connection() as conn:
@@ -894,7 +884,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → {table}: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ {table}: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'savings_entries':
@@ -915,7 +905,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → savings_entries: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ savings_entries: {len(batch_data)} rows")
                 return len(batch_data)
             
             elif table == 'savings_adjustments':
@@ -944,7 +934,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → savings_adjustments: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ savings_adjustments: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table in ['c_a_balances', 'c_a_balances_d', 'c_a_balances_m']:
@@ -969,7 +959,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     ))
                 
                 if skipped_temp_accounts > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_temp_accounts} {table} rows with temp account_id")
+                    log_info(logger, 'FLUSH', f"Skipped {skipped_temp_accounts} {table} rows with temp account_id")
                 
                 if batch_data:
                     cursor.executemany(f"""
@@ -983,7 +973,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → {table}: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ {table}: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'income_entries':
@@ -999,19 +989,19 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM income_entries WHERE id IN ({placeholders})
                     """, delete_ids)
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} income_entries from MySQL")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} income_entries from MySQL")
                     # Filter out pending deletes from rows to prevent re-upsert
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if r.get('id') not in delete_ids_set]
-                    logger.info(f"[FLUSH] Filtered out {len(delete_ids)} pending deletes from income_entries rows")
+                    log_info(logger, 'FLUSH', f"Filtered out {len(delete_ids)} pending deletes from income_entries rows")
                 
                 # Now UPSERT the current state from Redis
-                logger.info(f"[FLUSH DEBUG] Starting income_entries batch preparation for {len(rows)} rows")
+                log_info(logger, 'FLUSH_DEBUG', f"Starting income_entries batch preparation for {len(rows)} rows")
                 
                 # Get valid category IDs to filter out entries for deleted categories
                 cursor.execute("SELECT id FROM income_categories WHERE user_id = %s", (user_id,))
                 valid_category_ids = {row[0] for row in cursor.fetchall()}
-                logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid income categories for user {user_id}")
+                log_info(logger, 'FLUSH', f"Found {len(valid_category_ids)} valid income categories for user {user_id}")
                 
                 batch_data = []
                 temp_id_entries = []  # Entries with temp negative IDs that need INSERT
@@ -1031,22 +1021,22 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     # Skip entries for categories that don't exist (were deleted)
                     if category_id not in valid_category_ids:
                         skipped_count += 1
-                        logger.warning(f"[FLUSH] Skipping entry for deleted category {category_id}, entry_id={row.get('id')}")
+                        log_warning(logger, 'FLUSH', f"Skipping entry for deleted category {category_id}, entry_id={row.get('id')}")
                         continue
                     
                     recurring_id = row.get('recurring_id')
-                    logger.info(f"[FLUSH DEBUG] Row recurring_id RAW: {recurring_id}, type: {type(recurring_id)}")
+                    log_info(logger, 'FLUSH_DEBUG', f"Row recurring_id RAW: {recurring_id}, type: {type(recurring_id)}")
                     if recurring_id is not None:
                         try:
                             recurring_id = int(recurring_id)
                             # Validate it's within MySQL INT range
                             if recurring_id < -2147483648 or recurring_id > 2147483647:
-                                logger.warning(f"[FLUSH] recurring_id {recurring_id} out of range, setting to NULL")
+                                log_warning(logger, 'FLUSH', f"recurring_id {recurring_id} out of range, setting to NULL")
                                 recurring_id = None
                             else:
-                                logger.info(f"[FLUSH DEBUG] Row recurring_id CONVERTED: {recurring_id}")
+                                log_info(logger, 'FLUSH_DEBUG', f"Row recurring_id CONVERTED: {recurring_id}")
                         except (ValueError, TypeError) as e:
-                            logger.error(f"[FLUSH] Invalid recurring_id value: {recurring_id}, type: {type(recurring_id)}, row: {row}")
+                            log_error(logger, 'FLUSH', f"Invalid recurring_id value: {recurring_id}, type: {type(recurring_id)}, row: {row}")
                             recurring_id = None
                     
                     # Handle entries with no ID or temp negative ID - need to INSERT and get real ID
@@ -1083,14 +1073,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     ))
                 
                 if skipped_count > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_count} entries for deleted categories")
+                    log_info(logger, 'FLUSH', f"Skipped {skipped_count} entries for deleted categories")
                 
                 if skipped_temp_category > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_temp_category} income_entries with temp category_ids - will retry next flush")
+                    log_info(logger, 'FLUSH', f"Skipped {skipped_temp_category} income_entries with temp category_ids - will retry next flush")
                 
                 # Handle entries with no ID or temp negative IDs - INSERT them and update Redis with real IDs
                 if temp_id_entries:
-                    logger.info(f"[FLUSH] Processing {len(temp_id_entries)} income_entries with no ID or temp negative IDs")
+                    log_info(logger, 'FLUSH', f"Processing {len(temp_id_entries)} income_entries with no ID or temp negative IDs")
                     id_mapping = {}  # temp_id -> real_id (for negative IDs)
                     none_id_updates = []  # List of (category_id, date, new_id) for None ID entries
                     
@@ -1117,7 +1107,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             none_id_updates.append((entry['category_id'], entry['date'], new_id))
                         else:
                             id_mapping[entry['temp_id']] = new_id
-                        logger.info(f"[FLUSH] Inserted income_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
+                        log_info(logger, 'FLUSH', f"Inserted income_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
                     
                     # Update Redis entries with new real IDs
                     if id_mapping or none_id_updates:
@@ -1134,12 +1124,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                         none_id_updates.remove((cat_id, entry_date, new_id))
                                         break
                         redis_needs_update = True
-                        logger.info(f"[FLUSH] Updated entries in rows list with real IDs")
+                        log_info(logger, 'FLUSH', f"Updated entries in rows list with real IDs")
                 
                 if batch_data:
                     # Log the first few rows for debugging
                     for i, data in enumerate(batch_data[:5]):
-                        logger.info(f"[FLUSH DEBUG] income_entries row {i}: id={data[0]}, category={data[1]}, date={data[2]}, amount={data[3]}, recurring_id={data[4]} (type: {type(data[4])}), is_bucket={data[5]}, original_amount={data[6]}, processed={data[7]}, pending={data[8]}, auto_confirmed={data[9]}, is_auto_adjustment={data[10]}")
+                        log_info(logger, 'FLUSH_DEBUG', f"income_entries row {i}: id={data[0]}, category={data[1]}, date={data[2]}, amount={data[3]}, recurring_id={data[4]} (type: {type(data[4])}), is_bucket={data[5]}, original_amount={data[6]}, processed={data[7]}, pending={data[8]}, auto_confirmed={data[9]}, is_auto_adjustment={data[10]}")
                     
                     cursor.executemany("""
                         INSERT INTO income_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, pending, auto_confirmed, is_auto_adjustment)
@@ -1161,7 +1151,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 if redis_needs_update:
                     redis_key = f"income_entries:v1:{user_id}"
                     _redis_client.setex(redis_key, 604800, json.dumps(rows, cls=DecimalEncoder))
-                    logger.info(f"[FLUSH] Updated Redis with real IDs for income_entries")
+                    log_info(logger, 'FLUSH', f"Updated Redis with real IDs for income_entries")
                 
                 conn.commit()
                 cursor.close()
@@ -1169,7 +1159,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                logger.debug(f"[FLUSH] → income_entries: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ income_entries: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'expense_entries':
@@ -1185,17 +1175,17 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM expense_entries WHERE id IN ({placeholders})
                     """, delete_ids)
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} expense_entries from MySQL")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} expense_entries from MySQL")
                     # Filter out pending deletes from rows to prevent re-upsert
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if r.get('id') not in delete_ids_set]
-                    logger.info(f"[FLUSH] Filtered out {len(delete_ids)} pending deletes from expense_entries rows")
+                    log_info(logger, 'FLUSH', f"Filtered out {len(delete_ids)} pending deletes from expense_entries rows")
                 
                 # Now UPSERT the current state from Redis
                 # Get valid category IDs to filter out entries for deleted categories
                 cursor.execute("SELECT id FROM expense_categories WHERE user_id = %s", (user_id,))
                 valid_category_ids = {row[0] for row in cursor.fetchall()}
-                logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid expense categories for user {user_id}")
+                log_info(logger, 'FLUSH', f"Found {len(valid_category_ids)} valid expense categories for user {user_id}")
                 
                 batch_data = []
                 temp_id_entries = []  # Entries with temp negative IDs that need INSERT
@@ -1215,7 +1205,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     # Skip entries for categories that don't exist (were deleted)
                     if category_id not in valid_category_ids:
                         skipped_count += 1
-                        logger.warning(f"[FLUSH] Skipping expense entry for deleted category {category_id}, entry_id={row.get('id')}")
+                        log_warning(logger, 'FLUSH', f"Skipping expense entry for deleted category {category_id}, entry_id={row.get('id')}")
                         continue
                     
                     recurring_id = row.get('recurring_id')
@@ -1258,14 +1248,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     ))
                 
                 if skipped_count > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_count} expense entries for deleted categories")
+                    log_info(logger, 'FLUSH', f"Skipped {skipped_count} expense entries for deleted categories")
                 
                 if skipped_temp_category > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_temp_category} expense_entries with temp category_ids - will retry next flush")
+                    log_info(logger, 'FLUSH', f"Skipped {skipped_temp_category} expense_entries with temp category_ids - will retry next flush")
                 
                 # Handle entries with no ID or temp negative IDs - INSERT them and update Redis with real IDs
                 if temp_id_entries:
-                    logger.info(f"[FLUSH] Processing {len(temp_id_entries)} expense_entries with no ID or temp negative IDs")
+                    log_info(logger, 'FLUSH', f"Processing {len(temp_id_entries)} expense_entries with no ID or temp negative IDs")
                     id_mapping = {}  # temp_id -> real_id (for negative IDs)
                     none_id_updates = []  # List of (category_id, date, new_id) for None ID entries
                     
@@ -1292,7 +1282,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             none_id_updates.append((entry['category_id'], entry['date'], new_id))
                         else:
                             id_mapping[entry['temp_id']] = new_id
-                        logger.info(f"[FLUSH] Inserted expense_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
+                        log_info(logger, 'FLUSH', f"Inserted expense_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
                     
                     # Update Redis entries with new real IDs
                     if id_mapping or none_id_updates:
@@ -1308,7 +1298,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                         none_id_updates.remove((cat_id, entry_date, new_id))
                                         break
                         redis_needs_update = True
-                        logger.info(f"[FLUSH] Updated entries in rows list with real IDs")
+                        log_info(logger, 'FLUSH', f"Updated entries in rows list with real IDs")
                 
                 if batch_data:
                     cursor.executemany("""
@@ -1332,7 +1322,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 if redis_needs_update:
                     redis_key = f"expense_entries:v1:{user_id}"
                     _redis_client.setex(redis_key, 604800, json.dumps(rows, cls=DecimalEncoder))
-                    logger.info(f"[FLUSH] Updated Redis with real IDs for expense_entries")
+                    log_info(logger, 'FLUSH', f"Updated Redis with real IDs for expense_entries")
                 
                 conn.commit()
                 cursor.close()
@@ -1340,7 +1330,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                logger.debug(f"[FLUSH] → expense_entries: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ expense_entries: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'c_expense_entries':
@@ -1356,11 +1346,11 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM c_expense_entries WHERE id IN ({placeholders})
                     """, delete_ids)
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} c_expense_entries from MySQL")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} c_expense_entries from MySQL")
                     # Filter out pending deletes from rows to prevent re-upsert
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if r.get('id') not in delete_ids_set]
-                    logger.info(f"[FLUSH] Filtered out {len(delete_ids)} pending deletes from c_expense_entries rows")
+                    log_info(logger, 'FLUSH', f"Filtered out {len(delete_ids)} pending deletes from c_expense_entries rows")
                 
                 # Now UPSERT the current state from Redis
                 # Get valid category IDs to filter out entries for deleted categories
@@ -1371,7 +1361,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     WHERE ca.user_id = %s
                 """, (user_id,))
                 valid_category_ids = {row[0] for row in cursor.fetchall()}
-                logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid credit expense categories for user {user_id}")
+                log_info(logger, 'FLUSH', f"Found {len(valid_category_ids)} valid credit expense categories for user {user_id}")
                 
                 batch_data = []
                 temp_id_entries = []  # Entries with temp negative IDs that need INSERT
@@ -1391,7 +1381,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     # Skip entries for categories that don't exist (were deleted)
                     if category_id not in valid_category_ids:
                         skipped_count += 1
-                        logger.warning(f"[FLUSH] Skipping credit expense entry for deleted category {category_id}, entry_id={row.get('id')}")
+                        log_warning(logger, 'FLUSH', f"Skipping credit expense entry for deleted category {category_id}, entry_id={row.get('id')}")
                         continue
                     
                     recurring_id = row.get('recurring_id')
@@ -1434,14 +1424,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     ))
                 
                 if skipped_count > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_count} credit expense entries for deleted categories")
+                    log_info(logger, 'FLUSH', f"Skipped {skipped_count} credit expense entries for deleted categories")
                 
                 if skipped_temp_category > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_temp_category} c_expense_entries with temp category_ids - will retry next flush")
+                    log_info(logger, 'FLUSH', f"Skipped {skipped_temp_category} c_expense_entries with temp category_ids - will retry next flush")
                 
                 # Handle entries with no ID or temp negative IDs - INSERT them and update Redis with real IDs
                 if temp_id_entries:
-                    logger.info(f"[FLUSH] Processing {len(temp_id_entries)} c_expense_entries with no ID or temp negative IDs")
+                    log_info(logger, 'FLUSH', f"Processing {len(temp_id_entries)} c_expense_entries with no ID or temp negative IDs")
                     id_mapping = {}  # temp_id -> real_id (for negative IDs)
                     none_id_updates = []  # List of (category_id, date, new_id) for None ID entries
                     
@@ -1468,7 +1458,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             none_id_updates.append((entry['category_id'], entry['date'], new_id))
                         else:
                             id_mapping[entry['temp_id']] = new_id
-                        logger.info(f"[FLUSH] Inserted c_expense_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
+                        log_info(logger, 'FLUSH', f"Inserted c_expense_entry with temp_id {entry['temp_id']} -> new real_id {new_id}")
                     
                     # Update Redis entries with new real IDs
                     if id_mapping or none_id_updates:
@@ -1484,7 +1474,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                         none_id_updates.remove((cat_id, entry_date, new_id))
                                         break
                         redis_needs_update = True
-                        logger.info(f"[FLUSH] Updated entries in rows list with real IDs")
+                        log_info(logger, 'FLUSH', f"Updated entries in rows list with real IDs")
                 
                 if batch_data:
                     cursor.executemany("""
@@ -1508,7 +1498,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 if redis_needs_update:
                     redis_key = f"c_expense_entries:v1:{user_id}"
                     _redis_client.setex(redis_key, 604800, json.dumps(rows, cls=DecimalEncoder))
-                    logger.info(f"[FLUSH] Updated Redis with real IDs for c_expense_entries")
+                    log_info(logger, 'FLUSH', f"Updated Redis with real IDs for c_expense_entries")
                 
                 conn.commit()
                 cursor.close()
@@ -1516,7 +1506,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                logger.debug(f"[FLUSH] → c_expense_entries: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ c_expense_entries: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'c_payment_entries':
@@ -1540,7 +1530,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM c_payment_entries WHERE id IN ({placeholders})
                     """, list(ids_to_delete))
-                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} c_payment_entries orphans from MySQL")
+                    log_info(logger, 'FLUSH', f"Deleted {len(ids_to_delete)} c_payment_entries orphans from MySQL")
                 
                 # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:c_payment_entries:{user_id}"
@@ -1552,14 +1542,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM c_payment_entries WHERE id IN ({placeholders})
                     """, delete_ids)
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} c_payment_entries from pending set")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} c_payment_entries from pending set")
                     
                     # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
                     # Save filtered data back to Redis
                     _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
-                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted c_payment_entries from Redis")
+                    log_info(logger, 'FLUSH', f"Filtered {len(delete_ids)} deleted c_payment_entries from Redis")
                     # Clear the pending deletes set
                     _redis_client.delete(pending_key)
                 
@@ -1610,7 +1600,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                logger.debug(f"[FLUSH] → c_payment_entries: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ c_payment_entries: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'recurring_income':
@@ -1630,7 +1620,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_income WHERE id IN ({placeholders}) AND user_id = %s
                     """, list(ids_to_delete) + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_income from MySQL (removed from Redis)")
+                    log_info(logger, 'FLUSH', f"Deleted {len(ids_to_delete)} recurring_income from MySQL (removed from Redis)")
                 
                 # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:recurring_income:{user_id}"
@@ -1642,14 +1632,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_income WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_income from pending set")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} recurring_income from pending set")
                     
                     # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
                     # Save filtered data back to Redis
                     _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
-                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_income from Redis")
+                    log_info(logger, 'FLUSH', f"Filtered {len(delete_ids)} deleted recurring_income from Redis")
                     # Clear the pending deletes set
                     _redis_client.delete(pending_key)
                 
@@ -1718,7 +1708,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 # CRITICAL: Resolve temp IDs to real MySQL IDs
                 if temp_id_to_row:
-                    logger.info(f"[FLUSH] Resolving {len(temp_id_to_row)} temp recurring_income IDs")
+                    log_info(logger, 'FLUSH', f"Resolving {len(temp_id_to_row)} temp recurring_income IDs")
                     
                     # Query MySQL to find newly inserted records by matching category_id + start_date
                     for temp_id, row_data in temp_id_to_row.items():
@@ -1735,7 +1725,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         result = cursor.fetchone()
                         if result:
                             new_mysql_id = result[0]
-                            logger.info(f"[FLUSH] Resolved recurring_income temp_id {temp_id} -> MySQL id {new_mysql_id}")
+                            log_info(logger, 'FLUSH', f"Resolved recurring_income temp_id {temp_id} -> MySQL id {new_mysql_id}")
                             
                             # Update income_entries in Redis to use the new ID
                             entries_key = f"income_entries:v1:{user_id}"
@@ -1752,7 +1742,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                     # Mark income_entries as dirty so they get re-flushed with correct recurring_id
                                     _redis_client.sadd(f"dirty_tables:{user_id}", 'income_entries')
                                     _redis_client.expire(f"dirty_tables:{user_id}", 604800)
-                                    logger.info(f"[FLUSH] Updated {updated_count} income_entries with new recurring_id {new_mysql_id}")
+                                    log_info(logger, 'FLUSH', f"Updated {updated_count} income_entries with new recurring_id {new_mysql_id}")
                             
                             # Update recurring_income_buckets in Redis to use the new ID
                             buckets_key = f"recurring_income_buckets:v1:{user_id}"
@@ -1768,7 +1758,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                     _redis_client.setex(buckets_key, 604800, json.dumps(buckets))
                                     _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_income_buckets')
                                     _redis_client.expire(f"dirty_tables:{user_id}", 604800)
-                                    logger.info(f"[FLUSH] Updated {bucket_updated_count} recurring_income_buckets with new recurring_id {new_mysql_id}")
+                                    log_info(logger, 'FLUSH', f"Updated {bucket_updated_count} recurring_income_buckets with new recurring_id {new_mysql_id}")
                             
                             # Also update the recurring record in Redis with the new ID
                             recurring_key = f"recurring_income:v1:{user_id}"
@@ -1778,18 +1768,18 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 for rec in recurring_records:
                                     if rec.get('id') == temp_id:
                                         rec['id'] = new_mysql_id
-                                        logger.info(f"[FLUSH] Updated recurring_income record id from {temp_id} to {new_mysql_id}")
+                                        log_info(logger, 'FLUSH', f"Updated recurring_income record id from {temp_id} to {new_mysql_id}")
                                         break
                                 _redis_client.setex(recurring_key, 604800, json.dumps(recurring_records))
                         else:
-                            logger.warning(f"[FLUSH] Could not find MySQL id for temp recurring_income {temp_id}")
+                            log_warning(logger, 'FLUSH', f"Could not find MySQL id for temp recurring_income {temp_id}")
                 
                 cursor.close()
                 
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                logger.debug(f"[FLUSH] → recurring_income: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ recurring_income: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'recurring_expense':
@@ -1809,7 +1799,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_expense WHERE id IN ({placeholders}) AND user_id = %s
                     """, list(ids_to_delete) + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_expense from MySQL (removed from Redis)")
+                    log_info(logger, 'FLUSH', f"Deleted {len(ids_to_delete)} recurring_expense from MySQL (removed from Redis)")
                 
                 # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:recurring_expense:{user_id}"
@@ -1821,7 +1811,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_expense WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_expense from pending set")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} recurring_expense from pending set")
                     
                     # CRITICAL: Also remove from Redis rows (may have been rehydrated from MySQL)
                     delete_ids_set = set(delete_ids)
@@ -1834,7 +1824,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             _redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(rows, cls=DecimalEncoder))
                         else:
                             _redis_client.delete(redis_key)
-                        logger.info(f"[FLUSH] Also removed {original_count - len(rows)} pending-delete records from Redis")
+                        log_info(logger, 'FLUSH', f"Also removed {original_count - len(rows)} pending-delete records from Redis")
                 
                 # Now UPSERT the current state from Redis
                 # Track temp IDs for later resolution
@@ -1901,7 +1891,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 # CRITICAL: Resolve temp IDs to real MySQL IDs
                 if temp_id_to_row:
-                    logger.info(f"[FLUSH] Resolving {len(temp_id_to_row)} temp recurring_expense IDs")
+                    log_info(logger, 'FLUSH', f"Resolving {len(temp_id_to_row)} temp recurring_expense IDs")
                     
                     # Query MySQL to find newly inserted records by matching category_id + start_date
                     for temp_id, row_data in temp_id_to_row.items():
@@ -1918,7 +1908,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         result = cursor.fetchone()
                         if result:
                             new_mysql_id = result[0]
-                            logger.info(f"[FLUSH] Resolved recurring_expense temp_id {temp_id} -> MySQL id {new_mysql_id}")
+                            log_info(logger, 'FLUSH', f"Resolved recurring_expense temp_id {temp_id} -> MySQL id {new_mysql_id}")
                             
                             # Update expense_entries in Redis to use the new ID
                             entries_key = f"expense_entries:v1:{user_id}"
@@ -1935,7 +1925,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                     # Mark expense_entries as dirty so they get re-flushed with correct recurring_id
                                     _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_entries')
                                     _redis_client.expire(f"dirty_tables:{user_id}", 604800)
-                                    logger.info(f"[FLUSH] Updated {updated_count} expense_entries with new recurring_id {new_mysql_id}")
+                                    log_info(logger, 'FLUSH', f"Updated {updated_count} expense_entries with new recurring_id {new_mysql_id}")
                             
                             # Update recurring_expense_buckets in Redis to use the new ID
                             buckets_key = f"recurring_expense_buckets:v1:{user_id}"
@@ -1951,7 +1941,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                     _redis_client.setex(buckets_key, 604800, json.dumps(buckets))
                                     _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_expense_buckets')
                                     _redis_client.expire(f"dirty_tables:{user_id}", 604800)
-                                    logger.info(f"[FLUSH] Updated {bucket_updated_count} recurring_expense_buckets with new recurring_id {new_mysql_id}")
+                                    log_info(logger, 'FLUSH', f"Updated {bucket_updated_count} recurring_expense_buckets with new recurring_id {new_mysql_id}")
                             
                             # Update c_payment_entries in Redis to use the new recurring_id
                             payments_key = f"c_payment_entries:v1:{user_id}"
@@ -1967,7 +1957,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                     _redis_client.setex(payments_key, 604800, json.dumps(payments))
                                     _redis_client.sadd(f"dirty_tables:{user_id}", 'c_payment_entries')
                                     _redis_client.expire(f"dirty_tables:{user_id}", 604800)
-                                    logger.info(f"[FLUSH] Updated {payment_updated_count} c_payment_entries with new recurring_id {new_mysql_id}")
+                                    log_info(logger, 'FLUSH', f"Updated {payment_updated_count} c_payment_entries with new recurring_id {new_mysql_id}")
                             
                             # Also update the recurring record in Redis with the new ID
                             recurring_key = f"recurring_expense:v1:{user_id}"
@@ -1977,18 +1967,18 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 for rec in recurring_records:
                                     if rec.get('id') == temp_id:
                                         rec['id'] = new_mysql_id
-                                        logger.info(f"[FLUSH] Updated recurring_expense record id from {temp_id} to {new_mysql_id}")
+                                        log_info(logger, 'FLUSH', f"Updated recurring_expense record id from {temp_id} to {new_mysql_id}")
                                         break
                                 _redis_client.setex(recurring_key, 604800, json.dumps(recurring_records))
                         else:
-                            logger.warning(f"[FLUSH] Could not find MySQL id for temp recurring_expense {temp_id}")
+                            log_warning(logger, 'FLUSH', f"Could not find MySQL id for temp recurring_expense {temp_id}")
                 
                 cursor.close()
                 
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                logger.debug(f"[FLUSH] → recurring_expense: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ recurring_expense: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'recurring_c_expense':
@@ -2008,7 +1998,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_c_expense WHERE id IN ({placeholders}) AND user_id = %s
                     """, list(ids_to_delete) + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_c_expense from MySQL (removed from Redis)")
+                    log_info(logger, 'FLUSH', f"Deleted {len(ids_to_delete)} recurring_c_expense from MySQL (removed from Redis)")
                 
                 # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:recurring_c_expense:{user_id}"
@@ -2020,14 +2010,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_c_expense WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_c_expense from pending set")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} recurring_c_expense from pending set")
                     
                     # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
                     # Save filtered data back to Redis
                     _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
-                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_c_expense from Redis")
+                    log_info(logger, 'FLUSH', f"Filtered {len(delete_ids)} deleted recurring_c_expense from Redis")
                     # Clear the pending deletes set
                     _redis_client.delete(pending_key)
                 
@@ -2039,7 +2029,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     WHERE ca.user_id = %s
                 """, (user_id,))
                 valid_category_ids = set(row[0] for row in cursor.fetchall())
-                logger.info(f"[FLUSH] Found {len(valid_category_ids)} valid credit expense categories for user {user_id}")
+                log_info(logger, 'FLUSH', f"Found {len(valid_category_ids)} valid credit expense categories for user {user_id}")
 
                 # Track rows with negative IDs for later mapping
                 temp_id_to_row_idx = {}  # Map temp negative ID to row index
@@ -2060,7 +2050,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     # Skip rows with deleted category_id - category was deleted
                     if category_id and int(category_id) not in valid_category_ids:
                         skipped_deleted_category += 1
-                        logger.info(f"[FLUSH] Skipping recurring_c_expense for deleted category {category_id}, recurring_id={row_id}")
+                        log_info(logger, 'FLUSH', f"Skipping recurring_c_expense for deleted category {category_id}, recurring_id={row_id}")
                         continue
                     
                     # Track temp IDs for mapping later
@@ -2101,10 +2091,10 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                 
                 if skipped_temp_category > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_temp_category} recurring_c_expense with temp category_id")
+                    log_info(logger, 'FLUSH', f"Skipped {skipped_temp_category} recurring_c_expense with temp category_id")
                 
                 if skipped_deleted_category > 0:
-                    logger.info(f"[FLUSH] Skipped {skipped_deleted_category} recurring_c_expense with deleted category_id")
+                    log_info(logger, 'FLUSH', f"Skipped {skipped_deleted_category} recurring_c_expense with deleted category_id")
                 
                 if batch_data:
                     cursor.executemany("""
@@ -2149,7 +2139,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                     
                                     old_id = row.get('id')
                                     rows[row_idx]['id'] = mysql_id
-                                    logger.info(f"[FLUSH] Updated recurring_c_expense Redis ID: {old_id} -> {mysql_id}")
+                                    log_info(logger, 'FLUSH', f"Updated recurring_c_expense Redis ID: {old_id} -> {mysql_id}")
                                     break
                         
                         # Write updated rows back to Redis with real IDs
@@ -2159,7 +2149,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             INACTIVITY_TIMEOUT + 60,
                             json.dumps(rows, cls=DecimalEncoder)
                         )
-                        logger.info(f"[FLUSH] Updated Redis cache for recurring_c_expense with real MySQL IDs")
+                        log_info(logger, 'FLUSH', f"Updated Redis cache for recurring_c_expense with real MySQL IDs")
                         
                         # CRITICAL: Also update c_expense_entries with new recurring_id
                         entries_key = f"c_expense_entries:v1:{user_id}"
@@ -2178,7 +2168,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                             updated_count += 1
                                     if updated_count > 0:
                                         entries_updated = True
-                                        logger.info(f"[FLUSH] Updated {updated_count} c_expense_entries recurring_id from {temp_id} to {new_id}")
+                                        log_info(logger, 'FLUSH', f"Updated {updated_count} c_expense_entries recurring_id from {temp_id} to {new_id}")
                             _redis_client.setex(entries_key, 604800, json.dumps(entries))
                             if entries_updated:
                                 # Mark c_expense_entries as dirty so they get re-flushed with correct recurring_id
@@ -2201,7 +2191,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                             bucket_updated_count += 1
                                     if bucket_updated_count > 0:
                                         buckets_updated = True
-                                        logger.info(f"[FLUSH] Updated {bucket_updated_count} recurring_c_expense_buckets recurring_id from {temp_id} to {new_id}")
+                                        log_info(logger, 'FLUSH', f"Updated {bucket_updated_count} recurring_c_expense_buckets recurring_id from {temp_id} to {new_id}")
                             _redis_client.setex(buckets_key, 604800, json.dumps(buckets))
                             if buckets_updated:
                                 _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense_buckets')
@@ -2213,7 +2203,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                logger.debug(f"[FLUSH] → recurring_c_expense: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ recurring_c_expense: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'recurring_income_buckets':
@@ -2233,7 +2223,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_income_buckets WHERE id IN ({placeholders}) AND user_id = %s
                     """, list(ids_to_delete) + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_income_buckets from MySQL (removed from Redis)")
+                    log_info(logger, 'FLUSH', f"Deleted {len(ids_to_delete)} recurring_income_buckets from MySQL (removed from Redis)")
                 
                 # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:recurring_income_buckets:{user_id}"
@@ -2245,14 +2235,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_income_buckets WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_income_buckets from pending set")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} recurring_income_buckets from pending set")
                     
                     # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
                     # Save filtered data back to Redis
                     _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
-                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_income_buckets from Redis")
+                    log_info(logger, 'FLUSH', f"Filtered {len(delete_ids)} deleted recurring_income_buckets from Redis")
                     # Clear the pending deletes set
                     _redis_client.delete(pending_key)
                 
@@ -2292,7 +2282,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                 
                 if skipped_rows:
-                    logger.info(f"[FLUSH] Skipped {len(skipped_rows)} recurring_income_buckets with temp category_ids - will retry next flush")
+                    log_info(logger, 'FLUSH', f"Skipped {len(skipped_rows)} recurring_income_buckets with temp category_ids - will retry next flush")
                 
                 if update_data:
                     cursor.executemany("""
@@ -2319,7 +2309,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 _redis_client.delete(pending_key)
                 
                 total_rows = len(update_data) + len(insert_data)
-                logger.debug(f"[FLUSH] → recurring_income_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
+                log_info(logger, 'FLUSH', f"→ recurring_income_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
                 return total_rows
                 
             elif table == 'recurring_expense_buckets':
@@ -2339,7 +2329,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_expense_buckets WHERE id IN ({placeholders}) AND user_id = %s
                     """, list(ids_to_delete) + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_expense_buckets from MySQL (removed from Redis)")
+                    log_info(logger, 'FLUSH', f"Deleted {len(ids_to_delete)} recurring_expense_buckets from MySQL (removed from Redis)")
                 
                 # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:recurring_expense_buckets:{user_id}"
@@ -2351,14 +2341,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_expense_buckets WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_expense_buckets from pending set")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} recurring_expense_buckets from pending set")
                     
                     # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
                     # Save filtered data back to Redis
                     _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
-                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_expense_buckets from Redis")
+                    log_info(logger, 'FLUSH', f"Filtered {len(delete_ids)} deleted recurring_expense_buckets from Redis")
                     # Clear the pending deletes set
                     _redis_client.delete(pending_key)
                 
@@ -2398,7 +2388,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                 
                 if skipped_rows:
-                    logger.info(f"[FLUSH] Skipped {len(skipped_rows)} recurring_expense_buckets with temp category_ids - will retry next flush")
+                    log_info(logger, 'FLUSH', f"Skipped {len(skipped_rows)} recurring_expense_buckets with temp category_ids - will retry next flush")
                 
                 if update_data:
                     cursor.executemany("""
@@ -2425,7 +2415,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 _redis_client.delete(pending_key)
                 
                 total_rows = len(update_data) + len(insert_data)
-                logger.debug(f"[FLUSH] → recurring_expense_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
+                log_info(logger, 'FLUSH', f"→ recurring_expense_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
                 return total_rows
                 
             elif table == 'recurring_c_expense_buckets':
@@ -2445,7 +2435,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_c_expense_buckets WHERE id IN ({placeholders}) AND user_id = %s
                     """, list(ids_to_delete) + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(ids_to_delete)} recurring_c_expense_buckets from MySQL (removed from Redis)")
+                    log_info(logger, 'FLUSH', f"Deleted {len(ids_to_delete)} recurring_c_expense_buckets from MySQL (removed from Redis)")
                 
                 # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:recurring_c_expense_buckets:{user_id}"
@@ -2457,14 +2447,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM recurring_c_expense_buckets WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} recurring_c_expense_buckets from pending set")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} recurring_c_expense_buckets from pending set")
                     
                     # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
                     # Save filtered data back to Redis
                     _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
-                    logger.info(f"[FLUSH] Filtered {len(delete_ids)} deleted recurring_c_expense_buckets from Redis")
+                    log_info(logger, 'FLUSH', f"Filtered {len(delete_ids)} deleted recurring_c_expense_buckets from Redis")
                     # Clear the pending deletes set
                     _redis_client.delete(pending_key)
                 
@@ -2506,7 +2496,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                 
                 if skipped_rows:
-                    logger.info(f"[FLUSH] Skipped {len(skipped_rows)} recurring_c_expense_buckets with temp category_ids - will retry next flush")
+                    log_info(logger, 'FLUSH', f"Skipped {len(skipped_rows)} recurring_c_expense_buckets with temp category_ids - will retry next flush")
                 
                 if update_data:
                     cursor.executemany("""
@@ -2533,7 +2523,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 _redis_client.delete(pending_key)
                 
                 total_rows = len(update_data) + len(insert_data)
-                logger.debug(f"[FLUSH] → recurring_c_expense_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
+                log_info(logger, 'FLUSH', f"→ recurring_c_expense_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
                 return total_rows
                 
             elif table == 'buds':
@@ -2549,7 +2539,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM buds WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} buds from MySQL")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} buds from MySQL")
                 
                 # Track temp ID to real ID mappings for updating bud_items
                 temp_id_mappings = {}
@@ -2573,7 +2563,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
-                        logger.info(f"[FLUSH] Bud temp ID {old_id} → real ID {new_id}")
+                        log_info(logger, 'FLUSH', f"Bud temp ID {old_id} → real ID {new_id}")
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
@@ -2609,7 +2599,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INACTIVITY_TIMEOUT + 60,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
-                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} bud temp IDs in Redis")
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} bud temp IDs in Redis")
                     
                     # Update bud_items in Redis with new bud_ids
                     bud_items_key = _get_redis_key('bud_items', user_id)
@@ -2629,12 +2619,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 INACTIVITY_TIMEOUT + 60,
                                 json.dumps(bud_items, cls=DecimalEncoder)
                             )
-                            logger.info(f"[FLUSH] Updated {updated_count} bud_item bud_id references in Redis")
+                            log_info(logger, 'FLUSH', f"Updated {updated_count} bud_item bud_id references in Redis")
                 
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                logger.debug(f"[FLUSH] → buds: {len(rows)} rows")
+                log_info(logger, 'FLUSH', f"→ buds: {len(rows)} rows")
                 return len(rows)
                 
             elif table == 'bud_items':
@@ -2650,7 +2640,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute(f"""
                         DELETE FROM bud_items WHERE id IN ({placeholders})
                     """, delete_ids)
-                    logger.info(f"[FLUSH] Deleted {len(delete_ids)} bud_items from MySQL")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} bud_items from MySQL")
                 
                 # Track temp ID to real ID mappings for updating Redis
                 temp_id_mappings = {}
@@ -2660,7 +2650,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     # Skip if bud_id is negative (temp ID) - parent bud hasn't been flushed yet
                     bud_id_val = row.get('bud_id')
                     if bud_id_val and int(bud_id_val) < 0:
-                        logger.debug(f"[FLUSH] Skipping bud_item {row.get('id')} - bud_id {bud_id_val} is temp (negative)")
+                        log_info(logger, 'FLUSH', f"Skipping bud_item {row.get('id')} - bud_id {bud_id_val} is temp (negative)")
                         continue
                     
                     old_id = row.get('id')
@@ -2681,7 +2671,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
-                        logger.info(f"[FLUSH] Bud_item temp ID {old_id} → real ID {new_id}")
+                        log_info(logger, 'FLUSH', f"Bud_item temp ID {old_id} → real ID {new_id}")
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
@@ -2721,7 +2711,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INACTIVITY_TIMEOUT + 60,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
-                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} bud_item temp IDs in Redis")
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} bud_item temp IDs in Redis")
                     
                     # Update expense_entries and c_expense_entries with new bud_item_ids
                     for table in ['expense_entries', 'c_expense_entries']:
@@ -2742,12 +2732,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                     INACTIVITY_TIMEOUT + 60,
                                     json.dumps(entries, cls=DecimalEncoder)
                                 )
-                                logger.info(f"[FLUSH] Updated {updated_count} bud_item_id references in {table}")
+                                log_info(logger, 'FLUSH', f"Updated {updated_count} bud_item_id references in {table}")
                 
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                logger.debug(f"[FLUSH] → bud_items: {len(rows)} rows")
+                log_info(logger, 'FLUSH', f"→ bud_items: {len(rows)} rows")
                 return len(rows)
                 
             elif table == 'users':
@@ -2805,7 +2795,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     conn.commit()
                     cursor.close()
-                    logger.debug(f"[FLUSH] → users: Updated user {user_id} settings (including member_since, goofy_week_mode, landing_page, etc.)")
+                    log_info(logger, 'FLUSH', f"→ users: Updated user {user_id} settings (including member_since, goofy_week_mode, landing_page, etc.)")
                     return 1
                 
                 return 0
@@ -2832,7 +2822,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → quiltt_profiles: Updated profile for user {user_id}")
+                log_info(logger, 'FLUSH', f"→ quiltt_profiles: Updated profile for user {user_id}")
                 return 1
                 
             elif table == 'quiltt_connections':
@@ -2841,16 +2831,16 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 delete_key = f"quiltt_connections_to_delete:{user_id}"
                 pending_deletes = _redis_client.smembers(delete_key) if _redis_client else set()
                 if pending_deletes:
-                    logger.info(f"[FLUSH] quiltt_connections: Skipping flush - {len(pending_deletes)} pending deletes")
+                    log_info(logger, 'FLUSH', f"quiltt_connections: Skipping flush - {len(pending_deletes)} pending deletes")
                     # Don't clear the dirty flag - let the delete handler process first
                     return -1  # Return -1 to indicate skip, don't clear dirty flag
                 
                 # Quiltt connections table
                 if not rows:
-                    logger.info(f"[FLUSH] quiltt_connections: No rows in Redis for user {user_id}")
+                    log_info(logger, 'FLUSH', f"quiltt_connections: No rows in Redis for user {user_id}")
                     return 0
                 
-                logger.info(f"[FLUSH] quiltt_connections: Found {len(rows)} rows in Redis for user {user_id}")
+                log_info(logger, 'FLUSH', f"quiltt_connections: Found {len(rows)} rows in Redis for user {user_id}")
                 
                 batch_data = []
                 quiltt_id_to_row_idx = {}  # Map Quiltt connection_id to row index
@@ -2871,7 +2861,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     if temp_id and temp_id >= 100000:  # Looks like a temp ID
                         temp_id_to_quiltt_id[temp_id] = row.get('connection_id')
                 
-                logger.info(f"[FLUSH] quiltt_connections: Executing batch insert of {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"quiltt_connections: Executing batch insert of {len(batch_data)} rows")
                 
                 cursor.executemany("""
                     INSERT INTO quiltt_connections 
@@ -2884,7 +2874,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 """, batch_data)
                 
                 rows_affected = cursor.rowcount
-                logger.info(f"[FLUSH] quiltt_connections: MySQL rowcount = {rows_affected}")
+                log_info(logger, 'FLUSH', f"quiltt_connections: MySQL rowcount = {rows_affected}")
                 
                 # Get the real MySQL IDs and update Redis cache
                 cursor.execute(
@@ -2913,7 +2903,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 # Update accounts' connection_id fields if they have temp IDs
                 if temp_to_real_id:
-                    logger.info(f"[FLUSH] quiltt_connections: Found temp ID mappings: {temp_to_real_id}")
+                    log_info(logger, 'FLUSH', f"quiltt_connections: Found temp ID mappings: {temp_to_real_id}")
                     accounts_key = _get_redis_key('quiltt_accounts', user_id)
                     accounts_data = _redis_client.get(accounts_key)
                     
@@ -2926,7 +2916,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             if old_conn_id in temp_to_real_id:
                                 account['connection_id'] = temp_to_real_id[old_conn_id]
                                 updated = True
-                                logger.info(f"[FLUSH] Updated account {account.get('account_id')} connection_id: {old_conn_id} -> {temp_to_real_id[old_conn_id]}")
+                                log_info(logger, 'FLUSH', f"Updated account {account.get('account_id')} connection_id: {old_conn_id} -> {temp_to_real_id[old_conn_id]}")
                         
                         if updated:
                             _redis_client.setex(
@@ -2936,22 +2926,22 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             )
                             # Mark accounts as dirty so they get flushed with correct connection_id
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'quiltt_accounts')
-                            logger.info(f"[FLUSH] Updated {len(accounts)} accounts with real connection IDs, marked quiltt_accounts dirty")
+                            log_info(logger, 'FLUSH', f"Updated {len(accounts)} accounts with real connection IDs, marked quiltt_accounts dirty")
                 else:
-                    logger.info(f"[FLUSH] quiltt_connections: No temp ID mappings needed")
+                    log_info(logger, 'FLUSH', f"quiltt_connections: No temp ID mappings needed")
                 
                 conn.commit()
                 cursor.close()
-                logger.info(f"[FLUSH] → quiltt_connections: {len(batch_data)} rows flushed successfully")
+                log_info(logger, 'FLUSH', f"→ quiltt_connections: {len(batch_data)} rows flushed successfully")
                 return len(batch_data)
                 
             elif table == 'quiltt_accounts':
                 # Quiltt accounts table
                 if not rows:
-                    logger.info(f"[FLUSH] quiltt_accounts: No rows in Redis for user {user_id}")
+                    log_info(logger, 'FLUSH', f"quiltt_accounts: No rows in Redis for user {user_id}")
                     return 0
                 
-                logger.info(f"[FLUSH] quiltt_accounts: Found {len(rows)} rows in Redis for user {user_id}")
+                log_info(logger, 'FLUSH', f"quiltt_accounts: Found {len(rows)} rows in Redis for user {user_id}")
                 
                 # Get connection mapping from Redis (should have real MySQL IDs after connection flush)
                 connections_key = _get_redis_key('quiltt_connections', user_id)
@@ -2965,7 +2955,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         if conn_row.get('id'):
                             connection_map[conn_row.get('id')] = conn_row.get('id')
                 
-                logger.info(f"[FLUSH] quiltt_accounts connection_map has {len(connection_map)} entries")
+                log_info(logger, 'FLUSH', f"quiltt_accounts connection_map has {len(connection_map)} entries")
                 
                 batch_data = []
                 updated_rows = []
@@ -2982,7 +2972,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     # Skip if connection doesn't exist yet
                     if mysql_conn_id and mysql_conn_id >= 1000000:
-                        logger.warning(f"[FLUSH] Skipping account {row.get('account_id')} - connection not yet flushed (temp ID: {mysql_conn_id})")
+                        log_warning(logger, 'FLUSH', f"Skipping account {row.get('account_id')} - connection not yet flushed (temp ID: {mysql_conn_id})")
                         updated_rows.append(row)  # Keep in Redis unchanged
                         skipped_count += 1
                         continue
@@ -3041,16 +3031,16 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     updated_rows.append(row_copy)
                 
                 if skipped_count > 0:
-                    logger.info(f"[FLUSH] quiltt_accounts: Skipped {skipped_count} accounts waiting for connection flush")
+                    log_info(logger, 'FLUSH', f"quiltt_accounts: Skipped {skipped_count} accounts waiting for connection flush")
                 
                 if not batch_data:
-                    logger.info(f"[FLUSH] quiltt_accounts: No accounts ready to flush (all waiting for connections)")
+                    log_info(logger, 'FLUSH', f"quiltt_accounts: No accounts ready to flush (all waiting for connections)")
                     # Still return 0 so dirty flag stays (accounts need to wait for connections)
                     return 0
                 
                 # Debug: log connection IDs being used
                 conn_ids_used = set(item[1] for item in batch_data)
-                logger.info(f"[FLUSH] quiltt_accounts: Flushing {len(batch_data)} accounts with connection_ids: {conn_ids_used}")
+                log_info(logger, 'FLUSH', f"quiltt_accounts: Flushing {len(batch_data)} accounts with connection_ids: {conn_ids_used}")
                 
                 cursor.executemany("""
                     INSERT INTO quiltt_accounts
@@ -3082,7 +3072,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 """, batch_data)
                 
                 rows_affected = cursor.rowcount
-                logger.info(f"[FLUSH] quiltt_accounts: MySQL rowcount = {rows_affected}")
+                log_info(logger, 'FLUSH', f"quiltt_accounts: MySQL rowcount = {rows_affected}")
                 
                 # Update Redis with corrected connection_ids
                 redis_key = _get_redis_key(table, user_id)
@@ -3094,7 +3084,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.info(f"[FLUSH] → quiltt_accounts: {len(batch_data)} rows flushed successfully")
+                log_info(logger, 'FLUSH', f"→ quiltt_accounts: {len(batch_data)} rows flushed successfully")
                 return len(batch_data)
                 
             elif table == 'quiltt_transactions':
@@ -3199,7 +3189,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → quiltt_transactions: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ quiltt_transactions: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'quiltt_category_mappings':
@@ -3233,7 +3223,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → quiltt_category_mappings: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ quiltt_category_mappings: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'income_categories':
@@ -3250,7 +3240,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         DELETE FROM income_categories WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
                     deleted_count = cursor.rowcount
-                    logger.info(f"[FLUSH] Deleted {deleted_count} income_categories from MySQL (removed from Redis)")
+                    log_info(logger, 'FLUSH', f"Deleted {deleted_count} income_categories from MySQL (removed from Redis)")
                 
                 # Track temp ID to real ID mappings
                 temp_id_mappings = {}
@@ -3278,7 +3268,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
-                        logger.info(f"[FLUSH] Income category temp ID {old_id} → real ID {new_id}")
+                        log_info(logger, 'FLUSH', f"Income category temp ID {old_id} → real ID {new_id}")
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
@@ -3321,7 +3311,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INACTIVITY_TIMEOUT + 60,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
-                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} income_category temp IDs in Redis")
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} income_category temp IDs in Redis")
                     
                     # Also update category_id in income_entries that reference the temp IDs
                     entries_key = _get_redis_key('income_entries', user_id)
@@ -3342,7 +3332,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             )
                             # Mark as dirty so entries get flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'income_entries')
-                            logger.info(f"[FLUSH] Updated {entries_updated} income_entries with new category IDs")
+                            log_info(logger, 'FLUSH', f"Updated {entries_updated} income_entries with new category IDs")
                     
                     # Also update category_id in recurring_income_buckets
                     buckets_key = _get_redis_key('recurring_income_buckets', user_id)
@@ -3363,7 +3353,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             )
                             # Mark as dirty so buckets get flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_income_buckets')
-                            logger.info(f"[FLUSH] Updated {buckets_updated} recurring_income_buckets with new category IDs")
+                            log_info(logger, 'FLUSH', f"Updated {buckets_updated} recurring_income_buckets with new category IDs")
                     
                     # CRITICAL: Also update category_id in recurring_income records
                     recurring_key = _get_redis_key('recurring_income', user_id)
@@ -3384,13 +3374,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             )
                             # Mark as dirty so recurring_income gets flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_income')
-                            logger.info(f"[FLUSH] Updated {recurring_updated} recurring_income records with new category IDs")
+                            log_info(logger, 'FLUSH', f"Updated {recurring_updated} recurring_income records with new category IDs")
                 
                 # Clear pending deletions
                 _redis_client.delete(pending_key)
                 
                 cursor.close()
-                logger.debug(f"[FLUSH] → income_categories: {len(rows)} rows")
+                log_info(logger, 'FLUSH', f"→ income_categories: {len(rows)} rows")
                 return len(rows)
                 
             elif table == 'expense_categories':
@@ -3407,7 +3397,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         DELETE FROM expense_categories WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
                     deleted_count = cursor.rowcount
-                    logger.info(f"[FLUSH] Deleted {deleted_count} expense_categories from MySQL (removed from Redis)")
+                    log_info(logger, 'FLUSH', f"Deleted {deleted_count} expense_categories from MySQL (removed from Redis)")
                 
                 # Track temp ID to real ID mappings
                 temp_id_mappings = {}
@@ -3438,7 +3428,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
-                        logger.info(f"[FLUSH] Expense category temp ID {old_id} → real ID {new_id}")
+                        log_info(logger, 'FLUSH', f"Expense category temp ID {old_id} → real ID {new_id}")
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
@@ -3487,7 +3477,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INACTIVITY_TIMEOUT + 60,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
-                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} expense_category temp IDs in Redis")
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} expense_category temp IDs in Redis")
                     
                     # Also update category_id in expense_entries that reference the temp IDs
                     entries_key = _get_redis_key('expense_entries', user_id)
@@ -3508,7 +3498,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             )
                             # Mark as dirty so entries get flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_entries')
-                            logger.info(f"[FLUSH] Updated {entries_updated} expense_entries with new category IDs")
+                            log_info(logger, 'FLUSH', f"Updated {entries_updated} expense_entries with new category IDs")
                     
                     # Also update category_id in recurring_expense_buckets
                     buckets_key = _get_redis_key('recurring_expense_buckets', user_id)
@@ -3529,7 +3519,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             )
                             # Mark as dirty so buckets get flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_expense_buckets')
-                            logger.info(f"[FLUSH] Updated {buckets_updated} recurring_expense_buckets with new category IDs")
+                            log_info(logger, 'FLUSH', f"Updated {buckets_updated} recurring_expense_buckets with new category IDs")
                     
                     # CRITICAL: Also update category_id in recurring_expense records
                     recurring_key = _get_redis_key('recurring_expense', user_id)
@@ -3550,13 +3540,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             )
                             # Mark as dirty so recurring_expense gets flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_expense')
-                            logger.info(f"[FLUSH] Updated {recurring_updated} recurring_expense records with new category IDs")
+                            log_info(logger, 'FLUSH', f"Updated {recurring_updated} recurring_expense records with new category IDs")
                 
                 # Clear pending deletions
                 _redis_client.delete(pending_key)
                 
                 cursor.close()
-                logger.debug(f"[FLUSH] → expense_categories: {len(rows)} rows")
+                log_info(logger, 'FLUSH', f"→ expense_categories: {len(rows)} rows")
                 return len(rows)
                 
             elif table == 'c_expense_categories':
@@ -3582,7 +3572,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             WHERE cec.id IN ({placeholders}) AND ca.user_id = %s
                         """, delete_ids + [user_id])
                         deleted_count = cursor.rowcount
-                        logger.info(f"[FLUSH] Deleted {deleted_count} c_expense_categories for user {user_id} from MySQL")
+                        log_info(logger, 'FLUSH', f"Deleted {deleted_count} c_expense_categories for user {user_id} from MySQL")
                         conn.commit()
                     
                     _redis_client.delete(pending_key)
@@ -3603,7 +3593,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         WHERE cec.id IN ({placeholders}) AND ca.user_id = %s
                     """, delete_ids + [user_id])
                     deleted_count = cursor.rowcount
-                    logger.info(f"[FLUSH] Deleted {deleted_count} c_expense_categories for user {user_id} from MySQL")
+                    log_info(logger, 'FLUSH', f"Deleted {deleted_count} c_expense_categories for user {user_id} from MySQL")
                 
                 # Track temp ID to real ID mappings
                 temp_id_mappings = {}
@@ -3633,7 +3623,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
-                        logger.info(f"[FLUSH] C_expense category temp ID {old_id} → real ID {new_id} for user {user_id}")
+                        log_info(logger, 'FLUSH', f"C_expense category temp ID {old_id} → real ID {new_id} for user {user_id}")
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
@@ -3679,7 +3669,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INACTIVITY_TIMEOUT + 60,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
-                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} c_expense_category temp IDs in Redis for user {user_id}")
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} c_expense_category temp IDs in Redis for user {user_id}")
                     
                     # Also update c_expense_entries that reference these temp category IDs
                     entries_redis_key = f"c_expense_entries:v1:{user_id}"
@@ -3699,7 +3689,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 INACTIVITY_TIMEOUT + 60,
                                 json.dumps(entries, cls=DecimalEncoder)
                             )
-                            logger.info(f"[FLUSH] Updated {updated_count} c_expense_entries with new category IDs for user {user_id}")
+                            log_info(logger, 'FLUSH', f"Updated {updated_count} c_expense_entries with new category IDs for user {user_id}")
                             # Mark entries as dirty so they get flushed with real IDs
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_entries')
                             _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
@@ -3723,7 +3713,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 INACTIVITY_TIMEOUT + 60,
                                 json.dumps(buckets, cls=DecimalEncoder)
                             )
-                            logger.info(f"[FLUSH] Updated {updated_count} recurring_c_expense_buckets with new category IDs for user {user_id}")
+                            log_info(logger, 'FLUSH', f"Updated {updated_count} recurring_c_expense_buckets with new category IDs for user {user_id}")
                             # Mark buckets as dirty so they get flushed with real IDs
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense_buckets')
                             _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
@@ -3748,13 +3738,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             # Mark as dirty so recurring_c_expense gets flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense')
                             _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
-                            logger.info(f"[FLUSH] Updated {recurring_updated} recurring_c_expense records with new category IDs for user {user_id}")
+                            log_info(logger, 'FLUSH', f"Updated {recurring_updated} recurring_c_expense records with new category IDs for user {user_id}")
                 
                 # Clear pending deletions
                 _redis_client.delete(pending_key)
                 
                 cursor.close()
-                logger.debug(f"[FLUSH] → c_expense_categories: {len(rows)} rows for user {user_id}")
+                log_info(logger, 'FLUSH', f"→ c_expense_categories: {len(rows)} rows for user {user_id}")
                 return len(rows)
                 
             elif table in ['income_category_groups', 'expense_category_groups']:
@@ -3781,7 +3771,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → {table}: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ {table}: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'credit_accounts':
@@ -3800,7 +3790,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         )
                     conn.commit()
                     _redis_client.delete(pending_key)
-                    logger.info(f"[FLUSH] Deleted {len(pending_deletes)} credit accounts from MySQL")
+                    log_info(logger, 'FLUSH', f"Deleted {len(pending_deletes)} credit accounts from MySQL")
                 
                 # If no rows to insert/update, we're done
                 if not rows:
@@ -3834,7 +3824,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
-                        logger.info(f"[FLUSH] Credit account temp ID {old_id} → real ID {new_id}")
+                        log_info(logger, 'FLUSH', f"Credit account temp ID {old_id} → real ID {new_id}")
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
@@ -3880,7 +3870,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INACTIVITY_TIMEOUT + 60,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
-                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} credit_account temp IDs in Redis")
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} credit_account temp IDs in Redis")
                     
                     # c_expense_categories are now stored at c_expense_categories:v1:{user_id}
                     # We need to update the account_id field WITHIN the categories, not move to different key
@@ -3902,7 +3892,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 INACTIVITY_TIMEOUT + 60,
                                 json.dumps(categories, cls=DecimalEncoder)
                             )
-                            logger.info(f"[FLUSH] Updated account_id in {updated_count} c_expense_categories")
+                            log_info(logger, 'FLUSH', f"Updated account_id in {updated_count} c_expense_categories")
                             # Mark categories as dirty so they get flushed to MySQL
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
                             _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
@@ -3927,7 +3917,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 INACTIVITY_TIMEOUT + 60,
                                 json.dumps(payments, cls=DecimalEncoder)
                             )
-                            logger.info(f"[FLUSH] Updated account_id in {payment_updated_count} c_payment_entries")
+                            log_info(logger, 'FLUSH', f"Updated account_id in {payment_updated_count} c_payment_entries")
                             # Mark payments as dirty so they get flushed to MySQL
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_payment_entries')
                             _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
@@ -3949,7 +3939,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 INACTIVITY_TIMEOUT + 60,
                                 json.dumps(exp_categories, cls=DecimalEncoder)
                             )
-                            logger.info(f"[FLUSH] Updated credit_account_id in {exp_cat_updated} expense_categories")
+                            log_info(logger, 'FLUSH', f"Updated credit_account_id in {exp_cat_updated} expense_categories")
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_categories')
                             _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
                     
@@ -3974,7 +3964,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             )
                             # Delete old key
                             _redis_client.delete(old_entries_redis_key)
-                            logger.info(f"[FLUSH] Moved {len(entries)} c_expense_entries from account {old_account_id} to user {user_id}")
+                            log_info(logger, 'FLUSH', f"Moved {len(entries)} c_expense_entries from account {old_account_id} to user {user_id}")
                             # Mark entries as dirty
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_entries')
                             _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
@@ -3983,7 +3973,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         _initialize_ca_balances_for_account(cursor, conn, new_account_id)
                 
                 cursor.close()
-                logger.debug(f"[FLUSH] → credit_accounts: {len(rows)} rows")
+                log_info(logger, 'FLUSH', f"→ credit_accounts: {len(rows)} rows")
                 return len(rows)
                 
             elif table == 'starting_balance':
@@ -4007,7 +3997,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → starting_balance: 1 row")
+                log_info(logger, 'FLUSH', f"→ starting_balance: 1 row")
                 return 1
             
             elif table == 'setup_state':
@@ -4017,7 +4007,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     cursor.execute("DELETE FROM setup_state WHERE user_id = %s", (user_id,))
                     conn.commit()
                     cursor.close()
-                    logger.debug(f"[FLUSH] → setup_state: deleted (setup complete)")
+                    log_info(logger, 'FLUSH', f"→ setup_state: deleted (setup complete)")
                     return 0
                 
                 row = rows[0]
@@ -4038,7 +4028,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                logger.debug(f"[FLUSH] → setup_state: 1 row")
+                log_info(logger, 'FLUSH', f"→ setup_state: 1 row")
                 return 1
             
             elif table == 'notifications':
@@ -4054,7 +4044,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         DELETE FROM notifications WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
                     deleted_count = cursor.rowcount
-                    logger.info(f"[FLUSH] Deleted {deleted_count} notifications from MySQL (removed from Redis)")
+                    log_info(logger, 'FLUSH', f"Deleted {deleted_count} notifications from MySQL (removed from Redis)")
                     _redis_client.delete(pending_key)
                 
                 if not rows:
@@ -4090,7 +4080,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
-                        logger.info(f"[FLUSH] Notification temp ID {old_id} → real ID {new_id}")
+                        log_info(logger, 'FLUSH', f"Notification temp ID {old_id} → real ID {new_id}")
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
@@ -4124,10 +4114,10 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INACTIVITY_TIMEOUT + 60,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
-                    logger.info(f"[FLUSH] Updated {len(temp_id_mappings)} notification temp IDs in Redis")
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} notification temp IDs in Redis")
                 
                 cursor.close()
-                logger.debug(f"[FLUSH] → notifications: {len(rows)} rows")
+                log_info(logger, 'FLUSH', f"→ notifications: {len(rows)} rows")
                 return len(rows)
                 
             else:
@@ -4135,7 +4125,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 return 0
         
     except Exception as e:
-        logger.error(f"[FLUSH] Error flushing {table} to MySQL for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'FLUSH', f"Error flushing {table} to MySQL for user {user_id}: {e}")
         return 0
 
 
@@ -4193,10 +4183,10 @@ def _initialize_ca_balances_for_account(cursor, conn, account_id):
                 """, (account_id, last_day))
         
         conn.commit()
-        logger.info(f"[FLUSH] Initialized balance records for credit account {account_id}")
+        log_info(logger, 'FLUSH', f"Initialized balance records for credit account {account_id}")
         
     except Exception as e:
-        logger.error(f"[FLUSH] Error initializing balances for account {account_id}: {e}", exc_info=True)
+        log_exception(logger, 'FLUSH', f"Error initializing balances for account {account_id}: {e}")
 
 
 def _recalculate_ca_balances_for_user(user_id):
@@ -4219,7 +4209,7 @@ def _recalculate_ca_balances_for_user(user_id):
             account_rows = cursor.fetchall()
             
             if not account_rows:
-                logger.debug(f"[FLUSH] No credit accounts found for user {user_id}, skipping balance recalculation")
+                log_info(logger, 'FLUSH', f"No credit accounts found for user {user_id}, skipping balance recalculation")
                 return
             
             # Determine date range to recalculate (from earliest entry to latest balance record)
@@ -4240,10 +4230,10 @@ def _recalculate_ca_balances_for_user(user_id):
                 _recalculate_ca_balances_for_account(cursor, conn, account_id, start_date)
             
             cursor.close()
-            logger.info(f"[FLUSH] Recalculated CA balances for user {user_id}")
+            log_info(logger, 'FLUSH', f"Recalculated CA balances for user {user_id}")
             
     except Exception as e:
-        logger.error(f"[FLUSH] Error recalculating CA balances for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'FLUSH', f"Error recalculating CA balances for user {user_id}: {e}")
 
 
 def _recalculate_ca_balances_for_account(cursor, conn, account_id, start_date):
@@ -4401,10 +4391,10 @@ def _recalculate_ca_balances_for_account(cursor, conn, account_id, start_date):
                 """, updates)
         
         conn.commit()
-        logger.debug(f"[FLUSH] Recalculated balances for account {account_id}")
+        log_info(logger, 'FLUSH', f"Recalculated balances for account {account_id}")
         
     except Exception as e:
-        logger.error(f"[FLUSH] Error recalculating balances for account {account_id}: {e}", exc_info=True)
+        log_exception(logger, 'FLUSH', f"Error recalculating balances for account {account_id}: {e}")
 
 
 def flush_dirty_tables_for_user(user_id: int):
@@ -4421,7 +4411,7 @@ def flush_dirty_tables_for_user(user_id: int):
         Total number of rows flushed
     """
     try:
-        logger.info(f"[FLUSH] Forcing immediate flush for user {user_id}")
+        log_info(logger, 'FLUSH', f"Forcing immediate flush for user {user_id}")
         
         tables_to_flush = [
             'totals_remainders',
@@ -4464,10 +4454,10 @@ def flush_dirty_tables_for_user(user_id: int):
                 dirty_tables.add(dt)
         
         if not dirty_tables:
-            logger.info(f"[FLUSH] No dirty tables for user {user_id}")
+            log_info(logger, 'FLUSH', f"No dirty tables for user {user_id}")
             return 0
         
-        logger.info(f"[FLUSH] User {user_id} has {len(dirty_tables)} dirty tables: {', '.join(dirty_tables)}")
+        log_info(logger, 'FLUSH', f"User {user_id} has {len(dirty_tables)} dirty tables: {', '.join(dirty_tables)}")
         
         total_flushed = 0
         
@@ -4477,21 +4467,21 @@ def flush_dirty_tables_for_user(user_id: int):
             if table not in dirty_tables:
                 continue
             
-            logger.info(f"[FLUSH] Processing dirty table: {table} for user {user_id}")
+            log_info(logger, 'FLUSH', f"Processing dirty table: {table} for user {user_id}")
             flushed_count = _flush_table_to_mysql(table, user_id)
             
             if flushed_count > 0:
                 total_flushed += flushed_count
-                logger.info(f"[FLUSH] Cleared dirty flag for {table} (flushed={flushed_count})")
+                log_info(logger, 'FLUSH', f"Cleared dirty flag for {table} (flushed={flushed_count})")
             
             # Remove from dirty set after processing
             _redis_client.srem(dirty_tables_key, table)
         
-        logger.info(f"[FLUSH] Forced flush complete for user {user_id}: {total_flushed} rows")
+        log_info(logger, 'FLUSH', f"Forced flush complete for user {user_id}: {total_flushed} rows")
         return total_flushed
         
     except Exception as e:
-        logger.error(f"[FLUSH] Error in forced flush for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'FLUSH', f"Error in forced flush for user {user_id}: {e}")
         return 0
 
 
@@ -4500,7 +4490,7 @@ def _flush_worker():
     Background worker that periodically flushes Redis data to MySQL.
     Runs continuously until shutdown.
     """
-    logger.info("Flush worker started")
+    log_info(logger, 'REDIS', "Flush worker started")
     
     while not _shutdown_event.is_set():
         try:
@@ -4510,10 +4500,10 @@ def _flush_worker():
             _shutdown_event.wait(FLUSH_INTERVAL)
             
         except Exception as e:
-            logger.error(f"Error in flush worker: {e}", exc_info=True)
+            log_exception(logger, 'REDIS', f"Error in flush worker: {e}")
             _shutdown_event.wait(FLUSH_INTERVAL)
     
-    logger.info("Flush worker stopped")
+    log_info(logger, 'REDIS', "Flush worker stopped")
 
 
 def _signal_frontend_refresh(user_id: int):
@@ -4543,10 +4533,10 @@ def _signal_frontend_refresh(user_id: int):
         flag_key = f"user:{user_id}:refresh_needed"
         _redis_client.setex(flag_key, 10, '1')  # 10 second TTL
         
-        logger.info(f"Sent refresh signal for user {user_id}")
+        log_info(logger, 'REDIS', f"Sent refresh signal for user {user_id}")
         
     except Exception as e:
-        logger.error(f"Error signaling frontend refresh for user {user_id}: {e}")
+        log_error(logger, 'REDIS', f"Error signaling frontend refresh for user {user_id}: {e}")
 
 
 # Convenience functions for application use
@@ -4574,7 +4564,7 @@ def get_cached_data(table: str, user_id: int) -> Optional[List[Dict]]:
         return None
         
     except Exception as e:
-        logger.error(f"Error getting cached data for {table}, user {user_id}: {e}")
+        log_error(logger, 'REDIS', f"Error getting cached data for {table}, user {user_id}: {e}")
         return None
 
 
@@ -4598,10 +4588,10 @@ def set_cached_data(table: str, user_id: int, data: List[Dict], ttl: int = INACT
             ttl,
             json.dumps(data, cls=DecimalEncoder)
         )
-        logger.debug(f"Set cached data for {table}, user {user_id}: {len(data)} rows")
+        log_info(logger, 'REDIS', f"Set cached data for {table}, user {user_id}: {len(data)} rows")
         
     except Exception as e:
-        logger.error(f"Error setting cached data for {table}, user {user_id}: {e}")
+        log_error(logger, 'REDIS', f"Error setting cached data for {table}, user {user_id}: {e}")
 
 
 def invalidate_user_cache(user_id: int):
@@ -4612,5 +4602,5 @@ def invalidate_user_cache(user_id: int):
     Args:
         user_id: User ID
     """
-    logger.info(f"Manually invalidating cache for user {user_id}")
+    log_info(logger, 'REDIS', f"Manually invalidating cache for user {user_id}")
     _dehydrate_user_data(user_id)

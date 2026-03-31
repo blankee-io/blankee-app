@@ -5,7 +5,6 @@ This module provides Redis-first CRUD operations for Quiltt data (connections, a
 Data is written to Redis immediately and flushed to MySQL periodically by the Redis manager.
 """
 
-import logging
 import json
 import time
 import pymysql.cursors
@@ -21,8 +20,9 @@ from redis_manager import (
     INACTIVITY_TIMEOUT
 )
 from db_connections import get_db_pool
+from log_config import get_logger, log_info, log_error, log_warning, log_exception
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _get_redis_client():
@@ -68,10 +68,10 @@ def _get_all_quiltt_accounts_raw(user_id: int) -> List[Dict[str, Any]]:
         with get_db_pool().get_cursor(dictionary=True) as cursor:
             cursor.execute("SELECT * FROM quiltt_accounts WHERE user_id = %s", (user_id,))
             result = list(cursor.fetchall())
-            logger.info(f"_get_all_quiltt_accounts_raw: loaded {len(result)} accounts from MySQL for user {user_id}")
+            log_info(logger, 'QUILTT', f"_get_all_quiltt_accounts_raw: loaded {len(result)} accounts from MySQL for user {user_id}")
             return result
     except Exception as e:
-        logger.error(f"Error getting all quiltt accounts from MySQL: {e}")
+        log_error(logger, 'QUILTT', f"Error getting all quiltt accounts from MySQL: {e}")
         return []
 
 
@@ -79,12 +79,12 @@ def _set_to_redis(table: str, user_id: int, data: List[Dict[str, Any]]) -> bool:
     """Set Quiltt data to Redis and mark as dirty"""
     redis_client = _get_redis_client()
     if not redis_client:
-        logger.error(f"Redis client not available for {table}")
+        log_error(logger, 'QUILTT', f"Redis client not available for {table}")
         return False
     
     try:
         redis_key = _get_redis_key(table, user_id)
-        logger.info(f"Setting Redis key {redis_key} with {len(data)} records")
+        log_info(logger, 'QUILTT', f"Setting Redis key {redis_key} with {len(data)} records")
         redis_client.setex(
             redis_key,
             INACTIVITY_TIMEOUT + 60,
@@ -94,11 +94,11 @@ def _set_to_redis(table: str, user_id: int, data: List[Dict[str, Any]]) -> bool:
         # Mark table as dirty for periodic flush to MySQL
         dirty_key = f"dirty_tables:{user_id}"
         redis_client.sadd(dirty_key, table)
-        logger.info(f"Marked {table} as dirty for user {user_id}")
+        log_info(logger, 'QUILTT', f"Marked {table} as dirty for user {user_id}")
         
         return True
     except Exception as e:
-        logger.error(f"Error setting Redis data for {table}: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error setting Redis data for {table}: {e}")
         return False
 
 
@@ -106,12 +106,12 @@ def _set_to_redis_no_dirty(table: str, user_id: int, data: List[Dict[str, Any]])
     """Set Quiltt data to Redis WITHOUT marking as dirty (for deletion operations)"""
     redis_client = _get_redis_client()
     if not redis_client:
-        logger.error(f"Redis client not available for {table}")
+        log_error(logger, 'QUILTT', f"Redis client not available for {table}")
         return False
     
     try:
         redis_key = _get_redis_key(table, user_id)
-        logger.info(f"Setting Redis key {redis_key} with {len(data)} records (no dirty flag)")
+        log_info(logger, 'QUILTT', f"Setting Redis key {redis_key} with {len(data)} records (no dirty flag)")
         redis_client.setex(
             redis_key,
             INACTIVITY_TIMEOUT + 60,
@@ -119,7 +119,7 @@ def _set_to_redis_no_dirty(table: str, user_id: int, data: List[Dict[str, Any]])
         )
         return True
     except Exception as e:
-        logger.error(f"Error setting Redis data for {table}: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error setting Redis data for {table}: {e}")
         return False
 
 
@@ -150,7 +150,7 @@ def get_quiltt_profile(user_id: Optional[int] = None) -> Optional[Dict[str, Any]
             )
             return cursor.fetchone()
     except Exception as e:
-        logger.error(f"Error getting Quiltt profile from MySQL: {e}")
+        log_error(logger, 'QUILTT', f"Error getting Quiltt profile from MySQL: {e}")
         return None
 
 
@@ -173,7 +173,7 @@ def update_quiltt_profile(profile_data: Dict[str, Any], user_id: Optional[int] =
     try:
         # Write to Redis only - flush worker will sync to MySQL
         cached_data = _get_from_redis('quiltt_profiles', user_id)
-        logger.info(f"Got cached_data from Redis for user {user_id}: {cached_data}")
+        log_info(logger, 'QUILTT', f"Got cached_data from Redis for user {user_id}: {cached_data}")
         
         if cached_data is None:
             # Not in Redis yet - load from MySQL if exists
@@ -186,33 +186,33 @@ def update_quiltt_profile(profile_data: Dict[str, Any], user_id: Optional[int] =
                     existing = cursor.fetchone()
                     if existing:
                         cached_data = [existing]
-                        logger.info(f"Loaded existing profile from MySQL for user {user_id}")
+                        log_info(logger, 'QUILTT', f"Loaded existing profile from MySQL for user {user_id}")
                     else:
                         cached_data = []
-                        logger.info(f"No existing profile in MySQL for user {user_id}")
+                        log_info(logger, 'QUILTT', f"No existing profile in MySQL for user {user_id}")
             except Exception as e:
-                logger.error(f"Error loading profile from MySQL: {e}")
+                log_error(logger, 'QUILTT', f"Error loading profile from MySQL: {e}")
                 cached_data = []
         
         if len(cached_data) > 0:
             # Update existing entry
             cached_data[0].update(profile_data)
             cached_data[0]['user_id'] = user_id
-            logger.info(f"Updated existing profile for user {user_id}")
+            log_info(logger, 'QUILTT', f"Updated existing profile for user {user_id}")
         else:
             # Add new entry
             cached_data.append({'user_id': user_id, **profile_data})
-            logger.info(f"Created new profile for user {user_id}")
+            log_info(logger, 'QUILTT', f"Created new profile for user {user_id}")
         
-        logger.info(f"About to save to Redis: {cached_data}")
+        log_info(logger, 'QUILTT', f"About to save to Redis: {cached_data}")
         # Save to Redis and mark as dirty
         result = _set_to_redis('quiltt_profiles', user_id, cached_data)
-        logger.info(f"Redis save result: {result}")
+        log_info(logger, 'QUILTT', f"Redis save result: {result}")
         
         return True
         
     except Exception as e:
-        logger.error(f"Error updating Quiltt profile: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error updating Quiltt profile: {e}")
         return False
 
 
@@ -243,7 +243,7 @@ def get_quiltt_connections(user_id: Optional[int] = None) -> List[Dict[str, Any]
             )
             return cursor.fetchall()
     except Exception as e:
-        logger.error(f"Error getting Quiltt connections from MySQL: {e}")
+        log_error(logger, 'QUILTT', f"Error getting Quiltt connections from MySQL: {e}")
         return []
 
 
@@ -265,7 +265,7 @@ def upsert_quiltt_connection(connection_data: Dict[str, Any], user_id: Optional[
     
     connection_id = connection_data.get('connection_id')
     if not connection_id:
-        logger.error("connection_id is required")
+        log_error(logger, 'QUILTT', "connection_id is required")
         return None
     
     try:
@@ -312,7 +312,7 @@ def upsert_quiltt_connection(connection_data: Dict[str, Any], user_id: Optional[
         return db_id
         
     except Exception as e:
-        logger.error(f"Error upserting Quiltt connection: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error upserting Quiltt connection: {e}")
         return None
 
 
@@ -385,7 +385,7 @@ def get_quiltt_accounts(user_id: Optional[int] = None, connection_db_id: Optiona
                 """, (user_id,))
             return cursor.fetchall()
     except Exception as e:
-        logger.error(f"Error getting Quiltt accounts from MySQL: {e}")
+        log_error(logger, 'QUILTT', f"Error getting Quiltt accounts from MySQL: {e}")
         return []
 
 
@@ -409,11 +409,11 @@ def upsert_quiltt_account(account_data: Dict[str, Any], user_id: Optional[int] =
     account_id = account_data.get('account_id')
     mysql_connection_id = account_data.get('connection_id')  # MySQL ID from quiltt_connections
     if not account_id:
-        logger.error("account_id is required")
+        log_error(logger, 'QUILTT', "account_id is required")
         return None
     
     if not mysql_connection_id:
-        logger.error("connection_id is required")
+        log_error(logger, 'QUILTT', "connection_id is required")
         return None
     
     try:
@@ -468,7 +468,7 @@ def upsert_quiltt_account(account_data: Dict[str, Any], user_id: Optional[int] =
         return db_id
         
     except Exception as e:
-        logger.error(f"Error upserting Quiltt account: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error upserting Quiltt account: {e}")
         return None
 
 
@@ -507,17 +507,17 @@ def update_quiltt_account_field(account_id: str, field: str, value: Any, user_id
                 break
         
         if not found:
-            logger.warning(f"Account {account_id} not found in cached data for user {user_id}")
+            log_warning(logger, 'QUILTT', f"Account {account_id} not found in cached data for user {user_id}")
             return False
         
         # Save to Redis and mark as dirty
         _set_to_redis('quiltt_accounts', user_id, cached_data)
         
-        logger.info(f"Successfully updated {field}={value} for account {account_id}")
+        log_info(logger, 'QUILTT', f"Successfully updated {field}={value} for account {account_id}")
         return True
         
     except Exception as e:
-        logger.error(f"Error updating Quiltt account field: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error updating Quiltt account field: {e}")
         return False
 
 
@@ -554,7 +554,7 @@ def update_quiltt_account_fields(account_id: str, fields: dict, user_id: Optiona
             time.sleep(0.1)  # Wait 100ms between attempts
         
         if not lock_acquired:
-            logger.error(f"Failed to acquire lock for user {user_id} accounts")
+            log_error(logger, 'QUILTT', f"Failed to acquire lock for user {user_id} accounts")
             return False
         
         try:
@@ -576,13 +576,13 @@ def update_quiltt_account_fields(account_id: str, fields: dict, user_id: Optiona
                     break
             
             if not found:
-                logger.warning(f"Account {account_id} not found in cached data for user {user_id} ({len(cached_data)} accounts checked)")
+                log_warning(logger, 'QUILTT', f"Account {account_id} not found in cached data for user {user_id} ({len(cached_data)} accounts checked)")
                 return False
             
             # Save to Redis and mark as dirty
             _set_to_redis('quiltt_accounts', user_id, cached_data)
             
-            logger.info(f"Successfully updated {len(fields)} fields for account {account_id}: {fields}")
+            log_info(logger, 'QUILTT', f"Successfully updated {len(fields)} fields for account {account_id}: {fields}")
             return True
             
         finally:
@@ -590,7 +590,7 @@ def update_quiltt_account_fields(account_id: str, fields: dict, user_id: Optiona
             redis_client.delete(lock_key)
         
     except Exception as e:
-        logger.error(f"Error updating Quiltt account fields: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error updating Quiltt account fields: {e}")
         return False
 
 
@@ -605,26 +605,21 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
     Returns:
         True if successful
     """
-    # Use print for debugging since logger may not be configured
-    import sys
-    def debug_log(msg):
-        print(f"[DELETE_CONN] {msg}", file=sys.stderr, flush=True)
-    
-    debug_log(f"delete_quiltt_connection called for connection_id={connection_id}, user_id={user_id}")
+    log_info(logger, 'DELETE_CONN', f"delete_quiltt_connection called for connection_id={connection_id}, user_id={user_id}")
     
     if user_id is None:
         if not current_user.is_authenticated:
-            debug_log("user_id is None and no authenticated user")
+            log_info(logger, 'DELETE_CONN', "user_id is None and no authenticated user")
             return False
         user_id = current_user.id
     
-    debug_log(f"Processing delete for user {user_id}")
+    log_info(logger, 'DELETE_CONN', f"Processing delete for user {user_id}")
     
     try:
         redis_client = _get_redis_client()
-        debug_log(f"Got redis_client: {redis_client is not None}")
+        log_info(logger, 'DELETE_CONN', f"Got redis_client: {redis_client is not None}")
         if not redis_client:
-            debug_log("Redis client not available for delete, falling back to direct MySQL")
+            log_info(logger, 'DELETE_CONN', "Redis client not available for delete, falling back to direct MySQL")
             # Fallback to direct MySQL deletion
             from db_connections import get_db_pool
             with get_db_pool().get_connection() as conn:
@@ -646,33 +641,33 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
             return True
         
         # Get connection's db_id before deleting
-        debug_log(f"Getting connections for user {user_id}")
+        log_info(logger, 'DELETE_CONN', f"Getting connections for user {user_id}")
         connections = get_quiltt_connections(user_id)
-        debug_log(f"Got {len(connections)} connections")
+        log_info(logger, 'DELETE_CONN', f"Got {len(connections)} connections")
         conn_db_id = None
         for conn in connections:
             if conn.get('connection_id') == connection_id:
                 conn_db_id = conn.get('id')
                 break
         
-        debug_log(f"Found conn_db_id={conn_db_id} for connection_id={connection_id}")
+        log_info(logger, 'DELETE_CONN', f"Found conn_db_id={conn_db_id} for connection_id={connection_id}")
         
         # Remove connection from Redis (without marking dirty - deletion is handled separately)
         cached_connections = _get_from_redis('quiltt_connections', user_id)
-        debug_log(f"Got {len(cached_connections) if cached_connections else 0} cached connections from Redis")
+        log_info(logger, 'DELETE_CONN', f"Got {len(cached_connections) if cached_connections else 0} cached connections from Redis")
         if cached_connections is None:
             cached_connections = connections
         
         before_count = len(cached_connections)
         cached_connections = [c for c in cached_connections if c.get('connection_id') != connection_id]
         after_count = len(cached_connections)
-        debug_log(f"Filtered connections: {before_count} -> {after_count}")
+        log_info(logger, 'DELETE_CONN', f"Filtered connections: {before_count} -> {after_count}")
         
-        debug_log(f"About to call _set_to_redis_no_dirty for quiltt_connections")
+        log_info(logger, 'DELETE_CONN', f"About to call _set_to_redis_no_dirty for quiltt_connections")
         result = _set_to_redis_no_dirty('quiltt_connections', user_id, cached_connections)
-        debug_log(f"_set_to_redis_no_dirty returned: {result}")
+        log_info(logger, 'DELETE_CONN', f"_set_to_redis_no_dirty returned: {result}")
         
-        debug_log(f"After deletion, user {user_id} has {len(cached_connections)} connection(s) remaining")
+        log_info(logger, 'DELETE_CONN', f"After deletion, user {user_id} has {len(cached_connections)} connection(s) remaining")
         
         # Get account_ids to delete their transactions
         account_ids_to_delete = []
@@ -715,12 +710,12 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
         redis_client.sadd(delete_key, connection_id)
         redis_client.expire(delete_key, 300)  # Expire in 5 minutes
         
-        logger.info(f"Marked Quiltt connection {connection_id} for deletion (user {user_id})")
+        log_info(logger, 'QUILTT', f"Marked Quiltt connection {connection_id} for deletion (user {user_id})")
         
         # Check if this was the last connection - if so, delete the Quiltt profile
-        logger.info(f"Checking if last connection: len(cached_connections) = {len(cached_connections)}")
+        log_info(logger, 'QUILTT', f"Checking if last connection: len(cached_connections) = {len(cached_connections)}")
         if len(cached_connections) == 0:
-            logger.info(f"Last connection deleted for user {user_id}, deleting Quiltt profile")
+            log_info(logger, 'QUILTT', f"Last connection deleted for user {user_id}, deleting Quiltt profile")
             try:
                 from quiltt_utils import QuilttClient
                 from db_connections import get_db_pool
@@ -737,7 +732,7 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
                     quiltt_client = QuilttClient()
                     success = quiltt_client.delete_profile(profile['profile_id'])
                     if success:
-                        logger.info(f"Successfully deleted Quiltt profile {profile['profile_id']} for user {user_id}")
+                        log_info(logger, 'QUILTT', f"Successfully deleted Quiltt profile {profile['profile_id']} for user {user_id}")
                         
                         # Delete quiltt_profiles record from database
                         with get_db_pool().get_connection() as conn:
@@ -750,20 +745,20 @@ def delete_quiltt_connection(connection_id: str, user_id: Optional[int] = None) 
                         profiles_key = f"quiltt_profiles:v1:{user_id}"
                         redis_client.delete(profiles_key)
                         
-                        logger.info(f"Deleted quiltt_profiles record and Redis cache for user {user_id}")
+                        log_info(logger, 'QUILTT', f"Deleted quiltt_profiles record and Redis cache for user {user_id}")
                     else:
-                        logger.warning(f"Failed to delete Quiltt profile {profile['profile_id']} for user {user_id}")
+                        log_warning(logger, 'QUILTT', f"Failed to delete Quiltt profile {profile['profile_id']} for user {user_id}")
                 else:
-                    logger.warning(f"No Quiltt profile found in database for user {user_id}")
+                    log_warning(logger, 'QUILTT', f"No Quiltt profile found in database for user {user_id}")
             except Exception as e:
-                logger.error(f"Error deleting Quiltt profile: {e}", exc_info=True)
+                log_exception(logger, 'QUILTT', f"Error deleting Quiltt profile: {e}")
         else:
-            logger.info(f"User {user_id} still has {len(cached_connections)} connection(s), not deleting profile")
+            log_info(logger, 'QUILTT', f"User {user_id} still has {len(cached_connections)} connection(s), not deleting profile")
         
         return True
         
     except Exception as e:
-        logger.error(f"Error deleting Quiltt connection: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error deleting Quiltt connection: {e}")
         return False
 
 
@@ -811,7 +806,7 @@ def get_quiltt_transactions(user_id: Optional[int] = None, account_id: Optional[
         return cached_data or []
         
     except Exception as e:
-        logger.error(f"Error getting Quiltt transactions: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error getting Quiltt transactions: {e}")
         return []
 
 
@@ -833,7 +828,7 @@ def upsert_quiltt_transaction(transaction_data: Dict[str, Any], user_id: Optiona
     
     transaction_id = transaction_data.get('transaction_id')
     if not transaction_id:
-        logger.error("transaction_id is required")
+        log_error(logger, 'QUILTT', "transaction_id is required")
         return None
     
     try:
@@ -856,12 +851,12 @@ def upsert_quiltt_transaction(transaction_data: Dict[str, Any], user_id: Optiona
         for i, txn in enumerate(cached_data):
             if txn.get('transaction_id') == transaction_id:
                 # Update existing transaction
-                logger.info(f"BEFORE update: {transaction_id} has ntropy_enriched_at={cached_data[i].get('ntropy_enriched_at')}")
-                logger.info(f"NEW DATA: ntropy_enriched_at={transaction_data.get('ntropy_enriched_at')}")
+                log_info(logger, 'QUILTT', f"BEFORE update: {transaction_id} has ntropy_enriched_at={cached_data[i].get('ntropy_enriched_at')}")
+                log_info(logger, 'QUILTT', f"NEW DATA: ntropy_enriched_at={transaction_data.get('ntropy_enriched_at')}")
                 cached_data[i].update(transaction_data)
                 db_id = cached_data[i].get('id')
                 found = True
-                logger.info(f"AFTER update: {transaction_id} has ntropy_enriched_at={cached_data[i].get('ntropy_enriched_at')}")
+                log_info(logger, 'QUILTT', f"AFTER update: {transaction_id} has ntropy_enriched_at={cached_data[i].get('ntropy_enriched_at')}")
                 break
         
         if not found:
@@ -882,7 +877,7 @@ def upsert_quiltt_transaction(transaction_data: Dict[str, Any], user_id: Optiona
         return db_id
         
     except Exception as e:
-        logger.error(f"Error upserting Quiltt transaction: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error upserting Quiltt transaction: {e}")
         return None
 
 
@@ -927,12 +922,12 @@ def update_transaction_recurrence(recurrence_map: dict, user_id: int) -> int:
         
         if updated > 0:
             _set_to_redis('quiltt_transactions', user_id, cached_data)
-            logger.info(f"Updated recurrence for {updated} transactions for user {user_id}")
+            log_info(logger, 'QUILTT', f"Updated recurrence for {updated} transactions for user {user_id}")
         
         return updated
         
     except Exception as e:
-        logger.error(f"Error updating transaction recurrence for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error updating transaction recurrence for user {user_id}: {e}")
         return 0
 
 
@@ -972,7 +967,7 @@ def delete_quiltt_accounts_by_ids(account_ids: List[str], user_id: Optional[int]
             
             if removed_count > 0:
                 _set_to_redis('quiltt_accounts', user_id, cached_accounts)
-                logger.info(f"Removed {removed_count} accounts from Redis for user {user_id}")
+                log_info(logger, 'QUILTT', f"Removed {removed_count} accounts from Redis for user {user_id}")
         
         # Remove transactions for these accounts from Redis
         cached_transactions = _get_from_redis('quiltt_transactions', user_id)
@@ -1004,14 +999,14 @@ def delete_quiltt_accounts_by_ids(account_ids: List[str], user_id: Optional[int]
                 
                 conn.commit()
                 cursor.close()
-                logger.info(f"Deleted accounts {account_ids} from MySQL for user {user_id}")
+                log_info(logger, 'QUILTT', f"Deleted accounts {account_ids} from MySQL for user {user_id}")
         except Exception as db_error:
-            logger.error(f"Error deleting accounts from MySQL: {db_error}")
+            log_error(logger, 'QUILTT', f"Error deleting accounts from MySQL: {db_error}")
         
         return True
         
     except Exception as e:
-        logger.error(f"Error deleting accounts by IDs: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error deleting accounts by IDs: {e}")
         return False
 
 
@@ -1051,7 +1046,7 @@ def delete_quiltt_transactions_for_account(account_id: str, user_id: Optional[in
         deleted_count = original_count - len(cached_data)
         
         if deleted_count > 0:
-            logger.info(f"Deleted {deleted_count} transactions for account {account_id}")
+            log_info(logger, 'QUILTT', f"Deleted {deleted_count} transactions for account {account_id}")
             
             # Save filtered data back to Redis
             _set_to_redis('quiltt_transactions', user_id, cached_data)
@@ -1077,15 +1072,15 @@ def delete_quiltt_transactions_for_account(account_id: str, user_id: Optional[in
                     conn.commit()
                     cursor.close()
                     
-                    logger.info(f"Deleted transactions from MySQL for account {account_id}")
+                    log_info(logger, 'QUILTT', f"Deleted transactions from MySQL for account {account_id}")
             except Exception as db_error:
-                logger.error(f"Error deleting from MySQL: {db_error}")
+                log_error(logger, 'QUILTT', f"Error deleting from MySQL: {db_error}")
                 # Continue anyway - Redis update is primary
         
         return True
         
     except Exception as e:
-        logger.error(f"Error deleting transactions for account: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error deleting transactions for account: {e}")
         return False
 
 
@@ -1124,7 +1119,7 @@ def get_uncategorized_category_id(user_id: int, entry_type: str, account_id: int
                 if cat.get('name') == 'Uncategorized':
                     return cat.get('id')
             
-            logger.warning(f"Uncategorized income category not found for user {user_id}")
+            log_warning(logger, 'QUILTT', f"Uncategorized income category not found for user {user_id}")
             return None
             
         elif entry_type == 'expense':
@@ -1149,12 +1144,12 @@ def get_uncategorized_category_id(user_id: int, entry_type: str, account_id: int
                 if cat.get('name') == 'Uncategorized':
                     return cat.get('id')
             
-            logger.warning(f"Uncategorized expense category not found for user {user_id}")
+            log_warning(logger, 'QUILTT', f"Uncategorized expense category not found for user {user_id}")
             return None
             
         elif entry_type == 'c_expense':
             if not account_id:
-                logger.error("account_id is required for c_expense entry type")
+                log_error(logger, 'QUILTT', "account_id is required for c_expense entry type")
                 return None
             
             # Get c_expense_categories from Redis (keyed by user_id, filter by account_id)
@@ -1178,23 +1173,23 @@ def get_uncategorized_category_id(user_id: int, entry_type: str, account_id: int
                 if cat.get('name') == 'Uncategorized' and cat.get('account_id') == account_id:
                     return cat.get('id')
             
-            logger.warning(f"Uncategorized c_expense category not found for account {account_id}")
+            log_warning(logger, 'QUILTT', f"Uncategorized c_expense category not found for account {account_id}")
             return None
             
         elif entry_type == 'c_payment':
             # c_payment_entries don't have categories - they are tied directly to credit accounts
             # Return the account_id itself as it's used in the c_payment_entries table
             if not account_id:
-                logger.error("account_id is required for c_payment entry type")
+                log_error(logger, 'QUILTT', "account_id is required for c_payment entry type")
                 return None
             return account_id
             
         else:
-            logger.error(f"Unknown entry type: {entry_type}")
+            log_error(logger, 'QUILTT', f"Unknown entry type: {entry_type}")
             return None
             
     except Exception as e:
-        logger.error(f"Error getting Uncategorized category: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error getting Uncategorized category: {e}")
         return None
 
 
@@ -1233,7 +1228,7 @@ def get_blankee_credit_account_for_quiltt_account(user_id: int, quiltt_account_i
         # Strategy 1: Direct quiltt_account_id match (most reliable)
         for ca in credit_accounts:
             if ca.get('quiltt_account_id') == quiltt_account_id:
-                logger.info(f"Found credit account {ca.get('id')} via direct quiltt_account_id match")
+                log_info(logger, 'QUILTT', f"Found credit account {ca.get('id')} via direct quiltt_account_id match")
                 return ca
         
         # Strategy 2: Fallback to mask matching
@@ -1246,12 +1241,12 @@ def get_blankee_credit_account_for_quiltt_account(user_id: int, quiltt_account_i
                 break
         
         if not quiltt_account:
-            logger.warning(f"Quiltt account {quiltt_account_id} not found for user {user_id}")
+            log_warning(logger, 'QUILTT', f"Quiltt account {quiltt_account_id} not found for user {user_id}")
             return None
         
         mask = quiltt_account.get('mask')
         if not mask:
-            logger.warning(f"Quiltt account {quiltt_account_id} has no mask")
+            log_warning(logger, 'QUILTT', f"Quiltt account {quiltt_account_id} has no mask")
             return None
         
         # Find credit account with matching mask
@@ -1266,14 +1261,14 @@ def get_blankee_credit_account_for_quiltt_account(user_id: int, quiltt_account_i
             # Compare last 4 digits
             ca_last4 = ca_mask[-4:] if len(ca_mask) >= 4 else ca_mask
             if ca_last4 == quiltt_last4:
-                logger.info(f"Found credit account {ca.get('id')} via mask match (last4: {ca_last4})")
+                log_info(logger, 'QUILTT', f"Found credit account {ca.get('id')} via mask match (last4: {ca_last4})")
                 return ca
         
-        logger.warning(f"No Blankee credit account found with mask ending in {quiltt_last4} for user {user_id}")
+        log_warning(logger, 'QUILTT', f"No Blankee credit account found with mask ending in {quiltt_last4} for user {user_id}")
         return None
         
     except Exception as e:
-        logger.error(f"Error finding Blankee credit account: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error finding Blankee credit account: {e}")
         return None
 
 
@@ -1328,11 +1323,11 @@ def get_user_quiltt_account_flags(user_id: int) -> Dict[str, Any]:
         result['savings_income_category_id'] = savings_ids.get('income_savings_id')
         result['savings_expense_category_id'] = savings_ids.get('expense_savings_id')
         
-        logger.info(f"Quiltt account flags for user {user_id}: {result}")
+        log_info(logger, 'QUILTT', f"Quiltt account flags for user {user_id}: {result}")
         return result
         
     except Exception as e:
-        logger.error(f"Error getting Quiltt account flags for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error getting Quiltt account flags for user {user_id}: {e}")
         return result
 
 
@@ -1371,7 +1366,7 @@ def get_quiltt_credit_account_ids(user_id: int) -> List[int]:
         return quiltt_ids
         
     except Exception as e:
-        logger.error(f"Error getting Quiltt credit account IDs for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error getting Quiltt credit account IDs for user {user_id}: {e}")
         return []
 
 
@@ -1443,7 +1438,7 @@ def get_savings_category_ids(user_id: int) -> Dict[str, Optional[int]]:
         return result
         
     except Exception as e:
-        logger.error(f"Error getting Savings category IDs for user {user_id}: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error getting Savings category IDs for user {user_id}: {e}")
         return result
 
 
@@ -1476,7 +1471,7 @@ def insert_quiltt_webhook_event(event_id: str, event_type: str, profile_id: str 
             cursor.close()
             return inserted
     except Exception as e:
-        logger.error(f"Error inserting webhook event {event_id}: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error inserting webhook event {event_id}: {e}")
         return False
 
 
@@ -1494,7 +1489,7 @@ def mark_webhook_event_processed(event_id: str, error_message: str = None) -> bo
             cursor.close()
             return True
     except Exception as e:
-        logger.error(f"Error marking webhook event {event_id} as processed: {e}", exc_info=True)
+        log_exception(logger, 'QUILTT', f"Error marking webhook event {event_id} as processed: {e}")
         return False
 
 
@@ -1521,7 +1516,7 @@ def get_quiltt_last_transaction_date(user_id: int) -> Optional[str]:
             if cached:
                 return cached if isinstance(cached, str) else cached.decode('utf-8')
         except Exception as e:
-            logger.warning(f"Error reading quiltt_last_txn_date cache for user {user_id}: {e}")
+            log_warning(logger, 'QUILTT', f"Error reading quiltt_last_txn_date cache for user {user_id}: {e}")
     
     # Compute from quiltt_transactions in Redis
     last_date = None
@@ -1536,7 +1531,7 @@ def get_quiltt_last_transaction_date(user_id: int) -> Optional[str]:
                     if txn_date and (last_date is None or txn_date > last_date):
                         last_date = txn_date
         except Exception as e:
-            logger.warning(f"Error computing last txn date from Redis for user {user_id}: {e}")
+            log_warning(logger, 'QUILTT', f"Error computing last txn date from Redis for user {user_id}: {e}")
     
     # MySQL fallback
     if last_date is None:
@@ -1549,7 +1544,7 @@ def get_quiltt_last_transaction_date(user_id: int) -> Optional[str]:
                 if row and row[0]:
                     last_date = row[0].strftime('%Y-%m-%d') if hasattr(row[0], 'strftime') else str(row[0])
         except Exception as e:
-            logger.error(f"Error fetching last txn date from MySQL for user {user_id}: {e}")
+            log_error(logger, 'QUILTT', f"Error fetching last txn date from MySQL for user {user_id}: {e}")
     
     # Fallback: if no transactions at all, use earliest connection created_at date.
     # This locks entries from the day the bank was connected even before any sync.
@@ -1566,7 +1561,7 @@ def get_quiltt_last_transaction_date(user_id: int) -> Optional[str]:
             if earliest:
                 last_date = earliest
         except Exception as e:
-            logger.error(f"Error fetching connection created_at fallback for user {user_id}: {e}")
+            log_error(logger, 'QUILTT', f"Error fetching connection created_at fallback for user {user_id}: {e}")
     
     # Cache the result
     if last_date and redis_client:
@@ -1596,7 +1591,7 @@ def update_quiltt_last_transaction_date(user_id: int, date_str: str = None):
             try:
                 redis_client.setex(cache_key, INACTIVITY_TIMEOUT, date_str)
             except Exception as e:
-                logger.warning(f"Error caching quiltt_last_txn_date for user {user_id}: {e}")
+                log_warning(logger, 'QUILTT', f"Error caching quiltt_last_txn_date for user {user_id}: {e}")
         return
     
     # Invalidate cache so get_quiltt_last_transaction_date() recomputes
@@ -1665,7 +1660,7 @@ def upsert_category_memory(user_id, merchant_id, description, category_id, categ
             redis_client.sadd(dirty_key, 'quiltt_category_mappings')
             redis_client.expire(dirty_key, INACTIVITY_TIMEOUT)
     except Exception as e:
-        logger.error(f"Error upserting category memory for user {user_id}: {e}")
+        log_error(logger, 'QUILTT', f"Error upserting category memory for user {user_id}: {e}")
 
 
 def lookup_category_memory(user_id, merchant_id=None, description=None, category_type=None):
@@ -1724,5 +1719,5 @@ def lookup_category_memory(user_id, merchant_id=None, description=None, category
 
         return None
     except Exception as e:
-        logger.error(f"Error looking up category memory for user {user_id}: {e}")
+        log_error(logger, 'QUILTT', f"Error looking up category memory for user {user_id}: {e}")
         return None

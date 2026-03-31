@@ -189,7 +189,6 @@
     <script>
         // Catch and display any errors before page might reload
         window.onerror = function(msg, url, lineNo, columnNo, error) {
-            console.error('JS Error:', msg, 'at', url, 'line', lineNo);
             showToast('JS Error: ' + msg + ' (Line ' + lineNo + ')', 'error');
             return false;
         };

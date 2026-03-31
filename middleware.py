@@ -9,10 +9,11 @@ This module provides Flask-specific utilities for automatic Redis hydration:
 """
 
 import json
-import logging
+import time
 from functools import wraps
 from flask import request, session, jsonify, g, current_app, redirect, url_for
 from flask_login import current_user
+from log_config import generate_request_id, get_logger, log_info, log_error, log_warning, log_exception
 from redis_manager import (
     track_user_activity,
     is_user_hydrated,
@@ -20,7 +21,7 @@ from redis_manager import (
     invalidate_user_cache
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def init_redis_middleware(app):
@@ -31,6 +32,13 @@ def init_redis_middleware(app):
     Args:
         app: Flask application instance
     """
+    
+    @app.before_request
+    def set_request_context():
+        """Set request_id, user_id, and start time on Flask g for structured logging."""
+        g.request_id = generate_request_id()
+        g.log_user_id = current_user.id if current_user.is_authenticated else None
+        g.request_start_time = time.time()
     
     @app.before_request
     def track_activity():
@@ -57,10 +65,9 @@ def init_redis_middleware(app):
                 # If not hydrated, wait for hydration to complete before processing request
                 # This ensures data is available for immediate operations after dehydration
                 if not is_user_hydrated(user_id):
-                    logger.info(f"[MIDDLEWARE] User {user_id} not hydrated, waiting for hydration...")
+                    log_info(logger, 'MIDDLEWARE', f"User {user_id} not hydrated, waiting for hydration...")
                     
                     # Wait up to 5 seconds for hydration to complete
-                    import time
                     max_wait = 5.0
                     wait_interval = 0.1
                     elapsed = 0.0
@@ -70,17 +77,17 @@ def init_redis_middleware(app):
                         elapsed += wait_interval
                         
                         if is_user_hydrated(user_id):
-                            logger.info(f"[MIDDLEWARE] User {user_id} hydration complete after {elapsed:.2f}s")
+                            log_info(logger, 'MIDDLEWARE', f"User {user_id} hydration complete after {elapsed:.2f}s")
                             break
                     
                     if not is_user_hydrated(user_id):
-                        logger.warning(f"[MIDDLEWARE] User {user_id} hydration timeout after {elapsed:.2f}s, proceeding with MySQL fallback")
+                        log_warning(logger, 'MIDDLEWARE', f"User {user_id} hydration timeout after {elapsed:.2f}s, proceeding with MySQL fallback")
                 
                 # Store hydration status in g for use in templates
                 g.redis_hydrated = is_user_hydrated(user_id)
                 
             except Exception as e:
-                logger.error(f"Error tracking user activity: {e}")
+                log_error(logger, 'MIDDLEWARE', f"Error tracking user activity: {e}")
                 g.redis_hydrated = False
         else:
             g.redis_hydrated = False
@@ -153,16 +160,37 @@ def init_redis_middleware(app):
                         if row:
                             member_since = row.get('member_since')
                 except Exception as db_err:
-                    logger.error(f"[force_setup_profile] MySQL fallback error: {db_err}")
+                    log_error(logger, 'MIDDLEWARE', f"[force_setup_profile] MySQL fallback error: {db_err}")
             
             if not member_since:
-                logger.info(f"[force_setup_profile] User {user_id} has no member_since (value={member_since!r}), path={request.path}, redirecting to /setup_profile")
+                log_info(logger, 'MIDDLEWARE', f"[force_setup_profile] User {user_id} has no member_since (value={member_since!r}), path={request.path}, redirecting to /setup_profile")
                 return redirect('/setup_profile')
         
         except Exception as e:
-            logger.error(f"[force_setup_profile] Error checking member_since: {e}")
+            log_error(logger, 'MIDDLEWARE', f"[force_setup_profile] Error checking member_since: {e}")
             # Don't block on errors — let the request through
     
+    @app.after_request
+    def log_request_response(response):
+        """Log every request with method, path, status, and duration."""
+        # Skip static files to reduce noise
+        if request.path.startswith('/static/'):
+            return response
+        duration_ms = None
+        start = getattr(g, 'request_start_time', None)
+        if start is not None:
+            duration_ms = round((time.time() - start) * 1000, 1)
+        log_info(logger, 'REQUEST', f"{request.method} {request.path} {response.status_code}",
+                 status=response.status_code, duration_ms=duration_ms)
+        return response
+
+    @app.errorhandler(Exception)
+    def handle_unhandled_exception(e):
+        """Catch all unhandled exceptions and log them as structured JSON."""
+        log_exception(logger, 'UNHANDLED', f"{request.method} {request.path} raised {type(e).__name__}: {e}")
+        # Re-raise so Flask's default 500 handling still applies
+        return jsonify({'error': 'Internal server error'}), 500
+
     @app.after_request
     def bump_data_version_on_mutation(response):
         """
@@ -191,7 +219,7 @@ def init_redis_middleware(app):
             pass
         return response
 
-    logger.info("Redis middleware initialized")
+    log_info(logger, 'MIDDLEWARE', "Redis middleware initialized")
 
 
 def require_hydration(fallback_to_mysql=True):
@@ -222,7 +250,7 @@ def require_hydration(fallback_to_mysql=True):
             if not is_user_hydrated(user_id):
                 if fallback_to_mysql:
                     # Log that we're falling back to MySQL
-                    logger.info(f"User {user_id} not hydrated, falling back to MySQL")
+                    log_info(logger, 'MIDDLEWARE', f"User {user_id} not hydrated, falling back to MySQL")
                     g.using_mysql_fallback = True
                 else:
                     # Return loading state
@@ -297,7 +325,7 @@ def init_redis_routes(app):
             }), 200
             
         except Exception as e:
-            logger.error(f"Error invalidating cache: {e}")
+            log_error(logger, 'MIDDLEWARE', f"Error invalidating cache: {e}")
             return jsonify({
                 'success': False,
                 'error': str(e)
@@ -342,7 +370,7 @@ def init_redis_routes(app):
                 }), 200
                 
         except Exception as e:
-            logger.error(f"Error checking refresh status: {e}")
+            log_error(logger, 'MIDDLEWARE', f"Error checking refresh status: {e}")
             return jsonify({
                 'refresh_needed': False
             }), 200
@@ -374,11 +402,11 @@ def get_cached_or_query(table: str, user_id: int, fallback_query_func):
     cached_data = get_cached_data(table, user_id)
     
     if cached_data is not None:
-        logger.debug(f"Cache HIT for {table}, user {user_id}")
+        log_info(logger, 'MIDDLEWARE', f"Cache HIT for {table}, user {user_id}")
         return cached_data
     
     # Cache miss - query MySQL
-    logger.debug(f"Cache MISS for {table}, user {user_id}")
+    log_info(logger, 'MIDDLEWARE', f"Cache MISS for {table}, user {user_id}")
     data = fallback_query_func()
     
     # Optionally cache the result for next time
@@ -387,4 +415,3 @@ def get_cached_or_query(table: str, user_id: int, fallback_query_func):
     return data
 
 
-import time  # Add missing import

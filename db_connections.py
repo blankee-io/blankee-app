@@ -24,14 +24,14 @@ Usage:
 """
 
 import os
-import logging
 from contextlib import contextmanager
 from urllib.parse import quote_plus
 from sqlalchemy import create_engine, pool, event
 from sqlalchemy.pool import QueuePool
 import pymysql.cursors
+from log_config import get_logger, log_info, log_error, log_warning, log_exception
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Global pool instance
 _db_pool = None
@@ -96,19 +96,16 @@ class DatabaseConnectionPool:
         )
         
         # Log pool creation
-        logger.info(
-            f"Database pool initialized: pool_size={pool_size}, "
-            f"max_overflow={max_overflow}, pool_recycle={pool_recycle}s"
-        )
+        log_info(logger, 'DB',  f"Database pool initialized: pool_size={pool_size}, " f"max_overflow={max_overflow}, pool_recycle={pool_recycle}s" )
         
         # Set up connection event listeners for monitoring
         @event.listens_for(self.engine, "connect")
         def receive_connect(dbapi_conn, connection_record):
-            logger.debug("New database connection created")
+            log_info(logger, 'DB', "New database connection created")
         
         @event.listens_for(self.engine, "checkout")
         def receive_checkout(dbapi_conn, connection_record, connection_proxy):
-            logger.debug("Connection checked out from pool")
+            log_info(logger, 'DB', "Connection checked out from pool")
     
     @contextmanager
     def get_cursor(self, commit=False, dictionary=False, buffered=False):
@@ -149,7 +146,7 @@ class DatabaseConnectionPool:
                     raw_conn.commit()
             except Exception as e:
                 raw_conn.rollback()
-                logger.error(f"Database error, rolling back: {e}")
+                log_error(logger, 'DB', f"Database error, rolling back: {e}")
                 raise
             finally:
                 cursor.close()
@@ -186,7 +183,7 @@ class DatabaseConnectionPool:
             yield raw_conn
         except Exception as e:
             raw_conn.rollback()
-            logger.error(f"Database error in connection context: {e}")
+            log_error(logger, 'DB', f"Database error in connection context: {e}")
             raise
         finally:
             raw_conn.close()  # Returns connection to pool
@@ -213,7 +210,7 @@ class DatabaseConnectionPool:
         
         Call this on application shutdown to cleanly close all connections.
         """
-        logger.info("Disposing database connection pool")
+        log_info(logger, 'DB', "Disposing database connection pool")
         self.engine.dispose()
 
 
@@ -227,7 +224,7 @@ def init_db_pool():
     global _db_pool
     
     if _db_pool is not None:
-        logger.warning("Database pool already initialized, skipping")
+        log_warning(logger, 'DB', "Database pool already initialized, skipping")
         return
     
     try:
@@ -242,12 +239,12 @@ def init_db_pool():
             pool_recycle=1800,
             pool_pre_ping=True
         )
-        logger.info("Database connection pool initialized successfully")
+        log_info(logger, 'DB', "Database connection pool initialized successfully")
     except KeyError as e:
-        logger.error(f"Missing required environment variable: {e}")
+        log_error(logger, 'DB', f"Missing required environment variable: {e}")
         raise
     except Exception as e:
-        logger.error(f"Failed to initialize database pool: {e}")
+        log_error(logger, 'DB', f"Failed to initialize database pool: {e}")
         raise
 
 
@@ -278,4 +275,4 @@ def dispose_db_pool():
     if _db_pool is not None:
         _db_pool.dispose()
         _db_pool = None
-        logger.info("Database connection pool disposed")
+        log_info(logger, 'DB', "Database connection pool disposed")

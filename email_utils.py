@@ -7,6 +7,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 import secrets
+from log_config import get_logger, log_info, log_error
+
+logger = get_logger(__name__)
 
 # Email configuration - these should be set in environment variables
 SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
@@ -30,7 +33,7 @@ def send_email(to_email, subject, html_content, text_content=None):
         bool: True if email sent successfully, False otherwise
     """
     if not SMTP_USERNAME or not SMTP_PASSWORD:
-        print("ERROR: Email credentials not configured. Set SMTP_USERNAME and SMTP_PASSWORD environment variables.")
+        log_error(logger, 'EMAIL', 'Email credentials not configured. Set SMTP_USERNAME and SMTP_PASSWORD environment variables.')
         return False
     
     try:
@@ -55,11 +58,11 @@ def send_email(to_email, subject, html_content, text_content=None):
             server.login(SMTP_USERNAME, SMTP_PASSWORD)
             server.send_message(msg)
         
-        print(f"Email sent successfully to {to_email}")
+        log_info(logger, 'EMAIL', f'Email sent successfully to {to_email}')
         return True
         
     except Exception as e:
-        print(f"Failed to send email to {to_email}: {str(e)}")
+        log_error(logger, 'EMAIL', f'Failed to send email to {to_email}: {str(e)}')
         return False
 
 
