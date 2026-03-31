@@ -27,7 +27,6 @@
     function checkRefreshSignal() {
         // Don't check if we've exceeded max checks
         if (checkCount >= MAX_CHECKS) {
-            console.log('[Redis Refresh] Stopped polling after max checks');
             stopPolling();
             return;
         }
@@ -49,8 +48,6 @@
         })
         .then(data => {
             if (data.refresh === true) {
-                console.log('[Redis Refresh] Refresh signal received, reloading page...');
-                
                 // Stop polling
                 stopPolling();
                 
@@ -98,8 +95,6 @@
      * Start polling for refresh signals
      */
     function startPolling() {
-        console.log('[Redis Refresh] Started polling for refresh signals');
-        
         // Check immediately
         checkRefreshSignal();
         
@@ -114,7 +109,6 @@
         if (pollInterval) {
             clearInterval(pollInterval);
             pollInterval = null;
-            console.log('[Redis Refresh] Stopped polling');
         }
     }
     

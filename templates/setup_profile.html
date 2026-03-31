@@ -470,7 +470,6 @@
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 
     <script>
-        console.log('[SETUP] Script block START — if you see this, the script is parsing');
         // Disable data-version auto-reload on setup page — the POST calls during
         // setup (sync-profile, analyze-transactions) bump data_version, and the
         // 500 ms race window in script.js causes location.reload() mid-flow.
@@ -613,17 +612,14 @@
         function saveSetupStep(stepIndex, data) {
             var payload = { step: stepIndex };
             if (data) payload.data = data;
-            console.log('[saveSetupStep] Sending step=' + stepIndex, 'payload=', payload);
             $.ajax({
                 url: '/save_setup_step',
                 method: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify(payload),
                 success: function(resp) {
-                    console.log('[saveSetupStep] OK:', resp);
                 },
                 error: function(xhr, status, err) {
-                    console.error('[saveSetupStep] FAIL:', status, err, 'HTTP', xhr.status, xhr.responseText);
                 }
             });
         }
@@ -1529,11 +1525,7 @@
                 const name = category.name || '';
                 const rowClass = type === 'income' ? 'income' : 'expense';
                 
-                // Debug logging
-                console.log('Creating item:', name, 'isRecurring:', isRecurring, 'amount:', amount, 'wage_bill:', category.wage_bill);
-                
                 const wageBill = category.wage_bill !== undefined ? category.wage_bill : 1;
-                console.log('wageBill value for', name, ':', wageBill);
                 let typeDisplay = '—';
                 if (isRecurring) {
                     if (type === 'income') {
@@ -2161,8 +2153,6 @@
                 // Store the categories to be created later (after threshold page)
                 window.pendingCategoriesToCreate = JSON.parse(JSON.stringify(recommendedCategories));
                 
-                console.log('Storing categories for later creation:', window.pendingCategoriesToCreate);
-                
                 // Hide category recommendations modal and proceed to name modal
                 $('#category-recommendations-modal-setup').hide();
                 
@@ -2458,7 +2448,6 @@
                         }
                     },
                     error: function() {
-                        console.error('Error polling connections');
                         fetchBankBalancesForBalancePage();
                     }
                 });
@@ -2541,7 +2530,6 @@
                         $('#setup-profile-balance-threshold').focus();
                     },
                     error: function(xhr, status, error) {
-                        console.error('Error fetching balances:', status, error);
                         // Error fetching balances, show page anyway
                         document.getElementById('category-analysis-loading-modal').style.display = 'none';
                         $('#starting-balance-modal-setup').show();
@@ -2688,8 +2676,6 @@
                     (window.pendingCategoriesToCreate.income.length > 0 || 
                      window.pendingCategoriesToCreate.expense.length > 0)) {
                     
-                    console.log('Creating pending categories:', window.pendingCategoriesToCreate);
-                    
                     // Prepare the data with today's date for start_date and Dec 31st three years from now for end_date
                     const today = getTodayDateString();
                     const endDate = getThreeYearsEndDateString();
@@ -2712,22 +2698,18 @@
                         contentType: 'application/json',
                         data: JSON.stringify(categoriesToCreate),
                         success: function(response) {
-                            console.log('Categories created:', response);
                             if (response.status !== 'success') {
-                                console.error('Category creation had issues:', response.errors);
                             }
                             // Continue with the rest of setup regardless of category creation result
                             finishSetupAndRedirect();
                         },
                         error: function(xhr, status, error) {
-                            console.error('Error creating categories:', error);
                             // Continue with setup even if category creation fails
                             finishSetupAndRedirect();
                         }
                     });
                 } else {
                     // No pending categories, just finish setup
-                    console.log('No pending categories to create');
                     finishSetupAndRedirect();
                 }
             }

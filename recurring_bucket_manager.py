@@ -12,6 +12,9 @@ import json
 import pymysql
 from db_connections import get_db_pool
 import redis_manager
+from log_config import get_logger, log_info, log_error, log_warning, log_exception
+
+logger = get_logger(__name__)
 
 
 def get_bucket_table_for_entry_table(entry_table):
@@ -43,7 +46,7 @@ def create_bucket_record(entry_table, user_id, category_id, bucket_date, origina
     
     bucket_table = get_bucket_table_for_entry_table(entry_table)
     if not bucket_table:
-        current_app.logger.error(f"[CREATE BUCKET] Invalid entry table: {entry_table}")
+        log_error(logger, 'CREATE_BUCKET', f"Invalid entry table: {entry_table}")
         return None
     
     if isinstance(bucket_date, str):
@@ -52,22 +55,22 @@ def create_bucket_record(entry_table, user_id, category_id, bucket_date, origina
     try:
         # Check Redis availability
         if not redis_manager._redis_client:
-            current_app.logger.error(f"[CREATE BUCKET] Redis client not available")
+            log_error(logger, 'CREATE_BUCKET', f"Redis client not available")
             return None
         
         # Get or create buckets list in Redis
         # All bucket tables now use user_id consistently for Redis key
         redis_key = f"{bucket_table}:v1:{user_id}"
-        current_app.logger.info(f"[CREATE BUCKET] Redis key: {redis_key}, table={entry_table}, user_id={user_id}, category_id={category_id}, date={bucket_date}")
+        log_info(logger, 'CREATE_BUCKET', f"Redis key: {redis_key}, table={entry_table}, user_id={user_id}, category_id={category_id}, date={bucket_date}")
         
         redis_data = redis_manager._redis_client.get(redis_key)
         
         buckets = []
         if redis_data:
             buckets = json.loads(redis_data)
-            current_app.logger.info(f"[CREATE BUCKET] Found {len(buckets)} existing buckets in Redis")
+            log_info(logger, 'CREATE_BUCKET', f"Found {len(buckets)} existing buckets in Redis")
         else:
-            current_app.logger.info(f"[CREATE BUCKET] No existing buckets found, creating new list")
+            log_info(logger, 'CREATE_BUCKET', f"No existing buckets found, creating new list")
         
         # Check if bucket already exists
         bucket_id = None
@@ -75,7 +78,7 @@ def create_bucket_record(entry_table, user_id, category_id, bucket_date, origina
             if (bucket.get('category_id') == category_id and 
                 bucket.get('bucket_date') == bucket_date.isoformat()):
                 bucket_id = bucket.get('id')
-                current_app.logger.info(f"[CREATE BUCKET] Bucket already exists in Redis: id={bucket_id}")
+                log_info(logger, 'CREATE_BUCKET', f"Bucket already exists in Redis: id={bucket_id}")
                 return bucket_id
         
         # Generate a temporary negative ID for new bucket (will be replaced on flush)
@@ -87,7 +90,7 @@ def create_bucket_record(entry_table, user_id, category_id, bucket_date, origina
         else:
             bucket_id = -1
         
-        current_app.logger.info(f"[CREATE BUCKET] Generated temp bucket_id={bucket_id}")
+        log_info(logger, 'CREATE_BUCKET', f"Generated temp bucket_id={bucket_id}")
         
         # Create new bucket record in Redis
         new_bucket = {
@@ -103,19 +106,19 @@ def create_bucket_record(entry_table, user_id, category_id, bucket_date, origina
             new_bucket['account_id'] = account_id
         
         buckets.append(new_bucket)
-        current_app.logger.info(f"[CREATE BUCKET] Added bucket to list, now have {len(buckets)} buckets")
+        log_info(logger, 'CREATE_BUCKET', f"Added bucket to list, now have {len(buckets)} buckets")
         
         # Save to Redis
         redis_manager._redis_client.setex(redis_key, 604800, json.dumps(buckets))
         redis_manager._redis_client.sadd(f"dirty_tables:{user_id}", bucket_table)
         
-        current_app.logger.info(f"[CREATE BUCKET] ✓ Created bucket record in Redis: id={bucket_id}, table={bucket_table}, category={category_id}, date={bucket_date}, amount={original_amount}")
+        log_info(logger, 'CREATE_BUCKET', f"✓ Created bucket record in Redis: id={bucket_id}, table={bucket_table}, category={category_id}, date={bucket_date}, amount={original_amount}")
         return bucket_id
         
     except Exception as e:
         import traceback
-        current_app.logger.error(f"[CREATE BUCKET] Error creating bucket: {e}")
-        current_app.logger.error(f"[CREATE BUCKET] Traceback: {traceback.format_exc()}")
+        log_error(logger, 'CREATE_BUCKET', f"Error creating bucket: {e}")
+        log_error(logger, 'CREATE_BUCKET', f"Traceback: {traceback.format_exc()}")
         return None
 
 
@@ -160,7 +163,7 @@ def get_bucket_record_by_category_date(bucket_table, category_id, bucket_date, u
         return None
         
     except Exception as e:
-        current_app.logger.error(f"[GET BUCKET RECORD] Error: {e}")
+        log_error(logger, 'GET_BUCKET_RECORD', f"Error: {e}")
         return None
 
 
@@ -195,7 +198,7 @@ def get_bucket_records_for_category(bucket_table, category_id, user_id):
         return [record for record in bucket_list if record.get('category_id') == search_category_id]
         
     except Exception as e:
-        current_app.logger.error(f"[GET BUCKET RECORDS FOR CATEGORY] Error: {e}")
+        log_error(logger, 'GET_BUCKET_RECORDS_FOR_CATEGORY', f"Error: {e}")
         return []
 
 
@@ -221,7 +224,7 @@ def subtract_from_bucket_record(bucket_table, bucket_id, subtract_amount, user_i
     redis_data = redis_manager._redis_client.get(redis_key) if redis_manager._redis_client else None
     
     if not redis_data:
-        current_app.logger.warning(f"[SUBTRACT BUCKET RECORD] No Redis data for {redis_key}")
+        log_warning(logger, 'SUBTRACT_BUCKET_RECORD', f"No Redis data for {redis_key}")
         return False
     
     try:
@@ -237,14 +240,14 @@ def subtract_from_bucket_record(bucket_table, bucket_id, subtract_amount, user_i
                 break
         
         if not bucket_record:
-            current_app.logger.warning(f"[SUBTRACT BUCKET RECORD] Bucket ID {bucket_id} not found in Redis")
+            log_warning(logger, 'SUBTRACT_BUCKET_RECORD', f"Bucket ID {bucket_id} not found in Redis")
             return False
         
         # Calculate new amount (allow negative for overspending)
         current_amount = Decimal(str(bucket_record.get('amount', 0)))
         new_amount = current_amount - subtract_amount
         
-        current_app.logger.info(f"[SUBTRACT BUCKET RECORD] Bucket {bucket_id}: current={current_amount}, subtract={subtract_amount}, new={new_amount}")
+        log_info(logger, 'SUBTRACT_BUCKET_RECORD', f"Bucket {bucket_id}: current={current_amount}, subtract={subtract_amount}, new={new_amount}")
         
         # Update bucket record in Redis (ALLOW NEGATIVE AMOUNTS for overspending tracking)
         bucket_list[bucket_index]['amount'] = float(new_amount)
@@ -252,11 +255,11 @@ def subtract_from_bucket_record(bucket_table, bucket_id, subtract_amount, user_i
         redis_manager._redis_client.sadd(f"dirty_tables:{user_id}", bucket_table)
         redis_manager._redis_client.expire(f"dirty_tables:{user_id}", 604800)
         
-        current_app.logger.info(f"[SUBTRACT BUCKET RECORD] Updated in Redis with new amount: {new_amount} (negative allowed)")
+        log_info(logger, 'SUBTRACT_BUCKET_RECORD', f"Updated in Redis with new amount: {new_amount} (negative allowed)")
         return new_amount <= 0  # True if depleted
         
     except Exception as e:
-        current_app.logger.error(f"[SUBTRACT BUCKET RECORD] Error: {e}")
+        log_error(logger, 'SUBTRACT_BUCKET_RECORD', f"Error: {e}")
         return False
 
 
@@ -286,7 +289,7 @@ def subtract_from_bucket_record_by_category_date(bucket_table, category_id, buck
     redis_data = redis_manager._redis_client.get(redis_key) if redis_manager._redis_client else None
     
     if not redis_data:
-        current_app.logger.warning(f"[SUBTRACT BUCKET RECORD] No Redis data for {redis_key}")
+        log_warning(logger, 'SUBTRACT_BUCKET_RECORD', f"No Redis data for {redis_key}")
         return False
     
     try:
@@ -302,14 +305,14 @@ def subtract_from_bucket_record_by_category_date(bucket_table, category_id, buck
                 break
         
         if not bucket_record:
-            current_app.logger.warning(f"[SUBTRACT BUCKET RECORD] No bucket record found for category={category_id}, date={bucket_date}")
+            log_warning(logger, 'SUBTRACT_BUCKET_RECORD', f"No bucket record found for category={category_id}, date={bucket_date}")
             return False
         
         # Calculate new amount (allow negative for overspending)
         current_amount = Decimal(str(bucket_record.get('amount', 0)))
         new_amount = current_amount - subtract_amount
         
-        current_app.logger.info(f"[SUBTRACT BUCKET RECORD] Bucket record {bucket_record['id']}: current={current_amount}, subtract={subtract_amount}, new={new_amount}")
+        log_info(logger, 'SUBTRACT_BUCKET_RECORD', f"Bucket record {bucket_record['id']}: current={current_amount}, subtract={subtract_amount}, new={new_amount}")
         
         # Update bucket record in Redis (ALLOW NEGATIVE AMOUNTS for overspending tracking)
         bucket_list[bucket_index]['amount'] = float(new_amount)
@@ -317,11 +320,11 @@ def subtract_from_bucket_record_by_category_date(bucket_table, category_id, buck
         redis_manager._redis_client.sadd(f"dirty_tables:{user_id}", bucket_table)
         redis_manager._redis_client.expire(f"dirty_tables:{user_id}", 604800)
         
-        current_app.logger.info(f"[SUBTRACT BUCKET RECORD] Updated in Redis with new amount: {new_amount} (negative allowed)")
+        log_info(logger, 'SUBTRACT_BUCKET_RECORD', f"Updated in Redis with new amount: {new_amount} (negative allowed)")
         return new_amount <= 0  # True if depleted
         
     except Exception as e:
-        current_app.logger.error(f"[SUBTRACT BUCKET RECORD] Error: {e}")
+        log_error(logger, 'SUBTRACT_BUCKET_RECORD', f"Error: {e}")
         return False
 
 
@@ -347,7 +350,7 @@ def add_to_bucket_record(bucket_table, bucket_id, add_amount, user_id):
     redis_data = redis_manager._redis_client.get(redis_key) if redis_manager._redis_client else None
     
     if not redis_data:
-        current_app.logger.warning(f"[ADD BUCKET RECORD] No Redis data for {redis_key}")
+        log_warning(logger, 'ADD_BUCKET_RECORD', f"No Redis data for {redis_key}")
         return False
     
     try:
@@ -363,7 +366,7 @@ def add_to_bucket_record(bucket_table, bucket_id, add_amount, user_id):
                 break
         
         if not bucket_record:
-            current_app.logger.warning(f"[ADD BUCKET RECORD] Bucket ID {bucket_id} not found in Redis")
+            log_warning(logger, 'ADD_BUCKET_RECORD', f"Bucket ID {bucket_id} not found in Redis")
             return False
         
         # Calculate new amount
@@ -378,7 +381,7 @@ def add_to_bucket_record(bucket_table, bucket_id, add_amount, user_id):
         
         now_positive = new_amount > 0
         
-        current_app.logger.info(f"[ADD BUCKET RECORD] Bucket {bucket_id}: current={current_amount}, add={add_amount}, new={new_amount}, original={original_amount}, was_negative={was_negative_or_zero}, now_positive={now_positive}")
+        log_info(logger, 'ADD_BUCKET_RECORD', f"Bucket {bucket_id}: current={current_amount}, add={add_amount}, new={new_amount}, original={original_amount}, was_negative={was_negative_or_zero}, now_positive={now_positive}")
         
         # Update bucket record in Redis
         bucket_list[bucket_index]['amount'] = float(new_amount)
@@ -388,7 +391,7 @@ def add_to_bucket_record(bucket_table, bucket_id, add_amount, user_id):
         
         # CRITICAL: If bucket was negative/zero and now positive, recreate the bucket entry
         if was_negative_or_zero and now_positive:
-            current_app.logger.info(f"[ADD BUCKET RECORD] Bucket went from negative/zero to positive - need to recreate bucket entry")
+            log_info(logger, 'ADD_BUCKET_RECORD', f"Bucket went from negative/zero to positive - need to recreate bucket entry")
             # Get the entry table for this bucket table
             entry_table = None
             if bucket_table == 'recurring_income_buckets':
@@ -417,13 +420,13 @@ def add_to_bucket_record(bucket_table, bucket_id, add_amount, user_id):
                     original_amount=float(original_amount),
                     entry_id=bucket_id  # Use same ID as bucket record
                 )
-                current_app.logger.info(f"[ADD BUCKET RECORD] Recreated bucket entry {bucket_id} in {entry_table} with amount {new_amount}")
+                log_info(logger, 'ADD_BUCKET_RECORD', f"Recreated bucket entry {bucket_id} in {entry_table} with amount {new_amount}")
         
-        current_app.logger.info(f"[ADD BUCKET RECORD] Updated in Redis with new amount: {new_amount}")
+        log_info(logger, 'ADD_BUCKET_RECORD', f"Updated in Redis with new amount: {new_amount}")
         return True
         
     except Exception as e:
-        current_app.logger.error(f"[ADD BUCKET RECORD] Error: {e}")
+        log_error(logger, 'ADD_BUCKET_RECORD', f"Error: {e}")
         return False
 
 
@@ -453,15 +456,15 @@ def add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date
     redis_data = redis_manager._redis_client.get(redis_key) if redis_manager._redis_client else None
     
     if not redis_data:
-        current_app.logger.warning(f"[ADD BUCKET RECORD BY DATE] No Redis data for {redis_key}")
+        log_warning(logger, 'ADD_BUCKET_RECORD_BY_DATE', f"No Redis data for {redis_key}")
         return False
     
     try:
         bucket_list = json.loads(redis_data)
         
         # DEBUG: Log what we're searching for
-        current_app.logger.info(f"[ADD BUCKET RECORD BY DATE DEBUG] Searching for category={category_id}, date={bucket_date.isoformat()} in {len(bucket_list)} records")
-        current_app.logger.info(f"[ADD BUCKET RECORD BY DATE DEBUG] All bucket records: {json.dumps(bucket_list, indent=2)}")
+        log_info(logger, 'ADD_BUCKET_RECORD_BY_DATE_DEBUG', f"Searching for category={category_id}, date={bucket_date.isoformat()} in {len(bucket_list)} records")
+        log_info(logger, 'ADD_BUCKET_RECORD_BY_DATE_DEBUG', f"All bucket records: {json.dumps(bucket_list, indent=2)}")
         
         # Find the bucket record by category + date
         # Ensure category_id is an integer for comparison
@@ -477,11 +480,11 @@ def add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date
             if (record_cat_id == search_category_id and record_date == search_date):
                 bucket_record = record
                 bucket_index = i
-                current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] FOUND bucket record at index {i}: category={record_cat_id}, date={record_date}")
+                log_info(logger, 'ADD_BUCKET_RECORD_BY_DATE', f"FOUND bucket record at index {i}: category={record_cat_id}, date={record_date}")
                 break
         
         if not bucket_record:
-            current_app.logger.warning(f"[ADD BUCKET RECORD BY DATE] No bucket record found for category={category_id}, date={bucket_date}")
+            log_warning(logger, 'ADD_BUCKET_RECORD_BY_DATE', f"No bucket record found for category={category_id}, date={bucket_date}")
             return False
         
         # Calculate new amount
@@ -496,7 +499,7 @@ def add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date
         
         now_positive = new_amount > 0
         
-        current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Bucket record {bucket_record['id']}: current={current_amount}, add={add_amount}, new={new_amount}, original={original_amount}, was_negative={was_negative_or_zero}, now_positive={now_positive}")
+        log_info(logger, 'ADD_BUCKET_RECORD_BY_DATE', f"Bucket record {bucket_record['id']}: current={current_amount}, add={add_amount}, new={new_amount}, original={original_amount}, was_negative={was_negative_or_zero}, now_positive={now_positive}")
         
         # Update bucket record in Redis
         bucket_list[bucket_index]['amount'] = float(new_amount)
@@ -506,7 +509,7 @@ def add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date
         
         # CRITICAL: If bucket was negative/zero and now positive, recreate the bucket entry
         if was_negative_or_zero and now_positive:
-            current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Bucket went from negative/zero to positive - need to recreate bucket entry")
+            log_info(logger, 'ADD_BUCKET_RECORD_BY_DATE', f"Bucket went from negative/zero to positive - need to recreate bucket entry")
             # Get the entry table for this bucket table
             entry_table = None
             recurring_table = None
@@ -535,7 +538,7 @@ def add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date
                         for rec in recurring_list:
                             if int(rec.get('category_id', 0)) == int(category_id):
                                 recurring_id = rec.get('id')
-                                current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Found recurring_id={recurring_id} for category {category_id}")
+                                log_info(logger, 'ADD_BUCKET_RECORD_BY_DATE', f"Found recurring_id={recurring_id} for category {category_id}")
                                 break
                 
                 # Generate a new temporary ID for the recreated bucket entry
@@ -553,13 +556,13 @@ def add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date
                     original_amount=float(original_amount),
                     entry_id=bucket_entry_id
                 )
-                current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Recreated bucket entry {bucket_entry_id} in {entry_table} with amount {new_amount}, recurring_id={recurring_id}")
+                log_info(logger, 'ADD_BUCKET_RECORD_BY_DATE', f"Recreated bucket entry {bucket_entry_id} in {entry_table} with amount {new_amount}, recurring_id={recurring_id}")
         
-        current_app.logger.info(f"[ADD BUCKET RECORD BY DATE] Updated in Redis with new amount: {new_amount}")
+        log_info(logger, 'ADD_BUCKET_RECORD_BY_DATE', f"Updated in Redis with new amount: {new_amount}")
         return True
         
     except Exception as e:
-        current_app.logger.error(f"[ADD BUCKET RECORD BY DATE] Error: {e}")
+        log_error(logger, 'ADD_BUCKET_RECORD_BY_DATE', f"Error: {e}")
         return False
 
 
@@ -644,5 +647,5 @@ def get_bucket_for_entry(entry_table, user_id, category_id, entry_date, cadence_
         return None
         
     except Exception as e:
-        current_app.logger.error(f"[GET BUCKET] Error: {e}")
+        log_error(logger, 'GET_BUCKET', f"Error: {e}")
         return None

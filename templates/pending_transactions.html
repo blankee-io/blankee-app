@@ -186,13 +186,6 @@
                 const icon = '<i class="fa-solid fa-robot"></i>';
                 aiDiv.innerHTML = `${icon} ${suggestedCategory} <span class="ai-badge ${confidenceClass}">${confidenceLabel}</span>`;
                 aiDiv.addEventListener('click', function() {
-                    console.log(`[CATEGORY SELECT] AI suggestion clicked for txn input:`, {
-                        transactionId: input.dataset.transactionId,
-                        selectedCategory: suggestedCategory,
-                        selectedCategoryId: suggestedCategoryId,
-                        previousValue: input.value,
-                        previousHiddenValue: hiddenInput.value
-                    });
                     input.value = suggestedCategory;
                     hiddenInput.value = suggestedCategoryId;
                     dropdown.style.display = 'none';
@@ -219,13 +212,6 @@
                     div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${getCategoryIcon(cat)} ${cat.name}`;
                     div.className = 'pending-transactions-category-dropdown-item search-result';
                     div.addEventListener('click', function() {
-                        console.log(`[CATEGORY SELECT] Search result clicked for txn input:`, {
-                            transactionId: input.dataset.transactionId,
-                            selectedCategory: cat.name,
-                            selectedCategoryId: cat.id,
-                            previousValue: input.value,
-                            previousHiddenValue: hiddenInput.value
-                        });
                         input.value = cat.name;
                         hiddenInput.value = cat.id;
                         dropdown.style.display = 'none';
@@ -274,13 +260,6 @@
                     div.innerHTML = getCategoryIcon(cat) + ' ' + cat.name;
                     div.className = 'pending-transactions-category-dropdown-item';
                     div.addEventListener('click', function() {
-                        console.log(`[CATEGORY SELECT] Category clicked for txn input:`, {
-                            transactionId: input.dataset.transactionId,
-                            selectedCategory: cat.name,
-                            selectedCategoryId: cat.id,
-                            previousValue: input.value,
-                            previousHiddenValue: hiddenInput.value
-                        });
                         input.value = cat.name;
                         hiddenInput.value = cat.id;
                         dropdown.style.display = 'none';
@@ -479,36 +458,6 @@
             const categoryId = item.find('.category-hidden').val();
             const confirmBtn = item.find('.confirm-btn');
             
-            // === DEBUG LOGGING ===
-            console.group(`[CONFIRM] confirmTransaction called for txn: ${transactionId}`);
-            console.log('  entryId:', entryId, '(type:', typeof entryId, ')');
-            console.log('  entryType:', entryType);
-            console.log('  categoryId:', categoryId, '(type:', typeof categoryId, ')');
-            console.log('  item found:', item.length > 0);
-            console.log('  item data-attrs:', {
-                'transaction-id': item.data('transaction-id'),
-                'entry-id': item.data('entry-id'),
-                'entry-type': item.data('entry-type'),
-                'auto-confirmed': item.data('auto-confirmed')
-            });
-            // Log ALL visible pending items and their data
-            const allItems = $('.pending-transaction-item');
-            console.log('  Total pending items on page:', allItems.length);
-            allItems.each(function(i) {
-                const it = $(this);
-                console.log(`  Item[${i}]:`, {
-                    txnId: it.data('transaction-id'),
-                    entryId: it.data('entry-id'),
-                    entryType: it.data('entry-type'),
-                    categoryHiddenVal: it.find('.category-hidden').val(),
-                    categoryInputVal: it.find('.category-input').val(),
-                    isConfirmed: it.hasClass('confirmed'),
-                    isVisible: it.is(':visible')
-                });
-            });
-            console.groupEnd();
-            // === END DEBUG LOGGING ===
-            
             if (!categoryId) {
                 showToast('Please select a category', 'warning');
                 return;
@@ -524,7 +473,6 @@
                 entry_type: entryType,
                 category_id: categoryId
             };
-            console.log('[CONFIRM] Sending POST /quiltt/confirm-transaction with payload:', JSON.stringify(payload));
             
             $.ajax({
                 url: '/quiltt/confirm-transaction',
@@ -532,9 +480,7 @@
                 contentType: 'application/json',
                 data: JSON.stringify(payload),
                 success: function(response) {
-                    console.log('[CONFIRM] Response:', JSON.stringify(response));
                     if (response.status === 'success') {
-                        console.log(`[CONFIRM] SUCCESS for txn ${transactionId}, entry ${entryId}. About to animate out.`);
                         // Mark as confirmed with animation
                         item.addClass('confirmed');
                         confirmBtn.html('<i class="fa-solid fa-check"></i> Confirmed');
@@ -542,22 +488,18 @@
                         
                         // Fade out after a moment
                         setTimeout(function() {
-                            console.log(`[CONFIRM] Fading out item for txn ${transactionId}`);
                             item.fadeOut(300, function() {
-                                console.log(`[CONFIRM] Removed item for txn ${transactionId}. Remaining items:`, $('.pending-transaction-item').length - 1);
                                 $(this).remove();
                                 checkIfEmpty();
                             });
                         }, 1000);
                     } else {
-                        console.error('[CONFIRM] Server returned error:', response.message);
                         showToast('Error: ' + response.message, 'error');
                         confirmBtn.prop('disabled', false);
                         confirmBtn.html('<i class="fa-solid fa-check"></i> Confirm');
                     }
                 },
                 error: function(xhr, status, err) {
-                    console.error('[CONFIRM] AJAX error:', status, err, xhr.responseText);
                     showToast('Failed to confirm transaction. Please try again.', 'warning');
                     confirmBtn.prop('disabled', false);
                     confirmBtn.html('<i class="fa-solid fa-check"></i> Confirm');
@@ -681,9 +623,7 @@
                     applySuggestions(data.suggestions);
                 }
             })
-            .catch(error => {
-                console.log('Could not fetch Ntropy suggestions:', error);
-            });
+            .catch(error => {});
         }
         
         // Apply suggestions to the UI (kept for compatibility but suggestions now come pre-loaded from server)
@@ -711,32 +651,6 @@
         
         // Suggestions are now pre-loaded from server via cached Ntropy data
         // No need to call API on page load - instant page render!
-
-        // === DEBUG: Log all pending items on page load ===
-        (function() {
-            console.group('[PAGE LOAD] Pending Transactions Debug');
-            const items = document.querySelectorAll('.pending-transaction-item');
-            console.log('Total pending items:', items.length);
-            items.forEach((item, i) => {
-                const jItem = $(item);
-                console.log(`Item[${i}]:`, {
-                    txnId: item.dataset.transactionId,
-                    entryId: jItem.data('entry-id'),
-                    entryIdRaw: item.dataset.entryId,
-                    entryType: item.dataset.entryType,
-                    autoConfirmed: item.dataset.autoConfirmed,
-                    categoryInput: item.querySelector('.category-input')?.value,
-                    categoryHidden: item.querySelector('.category-hidden')?.value,
-                    suggestedCategory: item.querySelector('.category-input')?.dataset?.suggestedCategory,
-                    suggestedCategoryId: item.querySelector('.category-input')?.dataset?.suggestedCategoryId,
-                    suggestedConfidence: item.querySelector('.category-input')?.dataset?.suggestedConfidence,
-                    merchant: item.querySelector('.transaction-merchant')?.textContent?.trim(),
-                    amount: item.querySelector('.transaction-amount')?.textContent?.trim()
-                });
-            });
-            console.groupEnd();
-        })();
-        // === END DEBUG ===
     </script>
 </body>
 </html>

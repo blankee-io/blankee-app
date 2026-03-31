@@ -7,7 +7,6 @@ and queue MySQL updates for background processing.
 For migration from MySQL-only routes to Redis-first architecture.
 """
 
-import logging
 import json
 from typing import Optional, List, Dict, Any, Union
 from datetime import date, datetime
@@ -21,8 +20,9 @@ from redis_manager import (
     DecimalEncoder
 )
 from db_connections import get_db_pool
+from log_config import get_logger, log_info, log_error, log_warning, log_exception
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RedisDecoder(json.JSONDecoder):
@@ -70,7 +70,7 @@ def _set_to_redis(table: str, user_id: int, data: List[Dict[str, Any]]) -> bool:
         )
         return True
     except Exception as e:
-        logger.error(f"Error setting Redis data for {table}: {e}")
+        log_error(logger, 'REDIS', f"Error setting Redis data for {table}: {e}")
         return False
 
 
@@ -96,7 +96,7 @@ def add_entry(table: str, data: Dict[str, Any], user_id: Optional[int] = None) -
     """
     if user_id is None:
         if not current_user.is_authenticated:
-            logger.error("Cannot add entry: user not authenticated")
+            log_error(logger, 'REDIS', "Cannot add entry: user not authenticated")
             return None
         user_id = current_user.id
     
@@ -110,7 +110,7 @@ def add_entry(table: str, data: Dict[str, Any], user_id: Optional[int] = None) -
             cursor.execute(query, tuple(data.values()))
             new_id = cursor.lastrowid
             
-            logger.debug(f"Inserted into {table}: ID={new_id}")
+            log_info(logger, 'REDIS', f"Inserted into {table}: ID={new_id}")
         
         # Update Redis if user is hydrated
         if is_user_hydrated(user_id):
@@ -120,12 +120,12 @@ def add_entry(table: str, data: Dict[str, Any], user_id: Optional[int] = None) -
                 new_entry = {**data, 'id': new_id}
                 cached_data.append(new_entry)
                 _set_to_redis(table, user_id, cached_data)
-                logger.debug(f"Updated Redis cache for {table}")
+                log_info(logger, 'REDIS', f"Updated Redis cache for {table}")
         
         return new_id
         
     except Exception as e:
-        logger.error(f"Error adding entry to {table}: {e}", exc_info=True)
+        log_exception(logger, 'REDIS', f"Error adding entry to {table}: {e}")
         return None
 
 
@@ -162,7 +162,7 @@ def update_entry(table: str, entry_id: int, data: Dict[str, Any], user_id: Optio
             cursor.execute(query, (*data.values(), entry_id))
             affected = cursor.rowcount
             
-            logger.debug(f"Updated {table} ID={entry_id}: {affected} row(s)")
+            log_info(logger, 'REDIS', f"Updated {table} ID={entry_id}: {affected} row(s)")
         
         # Update Redis if user is hydrated
         if is_user_hydrated(user_id):
@@ -174,12 +174,12 @@ def update_entry(table: str, entry_id: int, data: Dict[str, Any], user_id: Optio
                         cached_data[i].update(data)
                         break
                 _set_to_redis(table, user_id, cached_data)
-                logger.debug(f"Updated Redis cache for {table}")
+                log_info(logger, 'REDIS', f"Updated Redis cache for {table}")
         
         return True
         
     except Exception as e:
-        logger.error(f"Error updating {table} ID={entry_id}: {e}", exc_info=True)
+        log_exception(logger, 'REDIS', f"Error updating {table} ID={entry_id}: {e}")
         return False
 
 
@@ -210,7 +210,7 @@ def delete_entry(table: str, entry_id: int, user_id: Optional[int] = None) -> bo
             cursor.execute(query, (entry_id,))
             affected = cursor.rowcount
             
-            logger.debug(f"Deleted from {table} ID={entry_id}: {affected} row(s)")
+            log_info(logger, 'REDIS', f"Deleted from {table} ID={entry_id}: {affected} row(s)")
         
         # Update Redis if user is hydrated
         if is_user_hydrated(user_id):
@@ -219,12 +219,12 @@ def delete_entry(table: str, entry_id: int, user_id: Optional[int] = None) -> bo
                 # Remove entry from cache
                 cached_data = [e for e in cached_data if e.get('id') != entry_id]
                 _set_to_redis(table, user_id, cached_data)
-                logger.debug(f"Updated Redis cache for {table}")
+                log_info(logger, 'REDIS', f"Updated Redis cache for {table}")
         
         return True
         
     except Exception as e:
-        logger.error(f"Error deleting {table} ID={entry_id}: {e}", exc_info=True)
+        log_exception(logger, 'REDIS', f"Error deleting {table} ID={entry_id}: {e}")
         return False
 
 
@@ -267,7 +267,7 @@ def bulk_add_entries(table: str, entries: List[Dict[str, Any]], user_id: Optiona
                 cursor.execute(query, tuple(entry.values()))
                 new_ids.append(cursor.lastrowid)
             
-            logger.debug(f"Bulk inserted {len(entries)} entries into {table}")
+            log_info(logger, 'REDIS', f"Bulk inserted {len(entries)} entries into {table}")
         
         # Update Redis if user is hydrated
         if is_user_hydrated(user_id):
@@ -278,12 +278,12 @@ def bulk_add_entries(table: str, entries: List[Dict[str, Any]], user_id: Optiona
                     new_entry = {**entry, 'id': new_ids[i]}
                     cached_data.append(new_entry)
                 _set_to_redis(table, user_id, cached_data)
-                logger.debug(f"Updated Redis cache for {table} with {len(entries)} entries")
+                log_info(logger, 'REDIS', f"Updated Redis cache for {table} with {len(entries)} entries")
         
         return new_ids
         
     except Exception as e:
-        logger.error(f"Error bulk adding to {table}: {e}", exc_info=True)
+        log_exception(logger, 'REDIS', f"Error bulk adding to {table}: {e}")
         return new_ids
 
 
@@ -328,7 +328,7 @@ def bulk_update_entries(table: str, updates: List[Dict[str, Any]], user_id: Opti
                 query = f"UPDATE {table} SET {set_clause} WHERE id = %s"
                 cursor.execute(query, (*update.values(), entry_id))
             
-            logger.debug(f"Bulk updated {len(updates)} entries in {table}")
+            log_info(logger, 'REDIS', f"Bulk updated {len(updates)} entries in {table}")
         
         # Update Redis if user is hydrated
         if is_user_hydrated(user_id):
@@ -343,12 +343,12 @@ def bulk_update_entries(table: str, updates: List[Dict[str, Any]], user_id: Opti
                         update_fields = {k: v for k, v in update_map[entry_id].items() if k != 'id'}
                         cached_data[i].update(update_fields)
                 _set_to_redis(table, user_id, cached_data)
-                logger.debug(f"Updated Redis cache for {table}")
+                log_info(logger, 'REDIS', f"Updated Redis cache for {table}")
         
         return True
         
     except Exception as e:
-        logger.error(f"Error bulk updating {table}: {e}", exc_info=True)
+        log_exception(logger, 'REDIS', f"Error bulk updating {table}: {e}")
         return False
 
 
@@ -432,7 +432,7 @@ def get_entries(table: str, filters: Optional[Dict[str, Any]] = None, user_id: O
             cursor.execute(query, tuple(params))
             return cursor.fetchall()
     except Exception as e:
-        logger.error(f"Error getting entries from {table}: {e}", exc_info=True)
+        log_exception(logger, 'REDIS', f"Error getting entries from {table}: {e}")
         return []
 
 
@@ -502,5 +502,5 @@ def update_user_profile(updates: Dict[str, Any], user_id: Optional[int] = None) 
         return True
         
     except Exception as e:
-        logger.error(f"Error updating user profile: {e}", exc_info=True)
+        log_exception(logger, 'REDIS', f"Error updating user profile: {e}")
         return False

@@ -1,6 +1,7 @@
 import mysql.connector
 import re  # Import the regular expression module
 import os
+import sys
 import calendar
 import pyotp
 import qrcode
@@ -11,6 +12,10 @@ import logging
 import json
 import time
 import pymysql.cursors
+from log_config import JsonFormatter, get_logger, log_info, log_error, log_warning, log_exception
+
+logger = get_logger(__name__)
+
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
 from flask_bcrypt import Bcrypt
 from flask import jsonify
@@ -71,7 +76,18 @@ app.jinja_env.filters['ordinal'] = ordinal_filter
 UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')  # Relative to application root
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Configure Flask app logger with JSON formatting
 app.logger.setLevel(logging.INFO)
+# Remove default Flask handlers and replace with JSON formatter
+for h in app.logger.handlers[:]:
+    app.logger.removeHandler(h)
+_json_handler = logging.StreamHandler(sys.stderr)
+_json_handler.setFormatter(JsonFormatter())
+_json_handler.setLevel(logging.INFO)
+app.logger.addHandler(_json_handler)
+# Prevent log propagation to werkzeug/root logger (avoids duplicate lines)
+app.logger.propagate = False
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -123,7 +139,7 @@ _redis_warmup_on_import()
 try:
     init_db_pool()
 except Exception as e:
-    app.logger.error(f"Failed to initialize database pool: {e}")
+    log_error(app.logger, 'REDIS', f"Failed to initialize database pool: {e}")
     raise
 
 # Initialize Redis manager with hydration/dehydration workers
@@ -316,7 +332,7 @@ def inject_unread_notifications():
                 last_name = user_data.get('last_name', '') or ''
                 
         except Exception as e:
-            app.logger.error(f"Error in context processor: {e}")
+            log_error(app.logger, 'NOTIFICATION', f"Error in context processor: {e}")
     
     # Check if user has any Quiltt-connected accounts (for nav visibility)
     has_quiltt_accounts = False
@@ -703,7 +719,7 @@ def register():
         email_sent = send_verification_email(username, username, verification_token)
         
         if not email_sent:
-            app.logger.error(f"Failed to send verification email to {username}")
+            log_error(app.logger, 'AUTH', f"Failed to send verification email to {username}")
 
         # Show registration success page
         return render_template('registration_success.html', email=username, email_sent=email_sent)
@@ -882,7 +898,7 @@ def resend_verification():
         if email_sent:
             return render_template('resend_verification.html', resend_success=True, user_email=email)
         else:
-            app.logger.error(f"Failed to resend verification email to {user['username']}")
+            log_error(app.logger, 'AUTH', f"Failed to resend verification email to {user['username']}")
             return render_template('resend_verification.html', error_message='Failed to send verification email. Please try again later or contact support.', user_email=email)
     
     # If we get here, something went wrong but don't reveal why
@@ -935,10 +951,10 @@ def setup_profile():
                 pass
         
         if member_since:
-            print(f"[setup_profile] User {user_id} already completed setup (member_since={member_since}), redirecting to dashboard")
+            log_info(logger, 'SETUP_PROFILE', f"User {user_id} already completed setup (member_since={member_since}), redirecting to dashboard")
             return redirect(url_for('dashboard_3m'))
     except Exception as e:
-        print(f"[setup_profile] Error checking member_since: {e}")
+        log_error(logger, 'SETUP_PROFILE', f"Error checking member_since: {e}")
         setup_step = 0
         mfa_enabled = False
         user_data = {}
@@ -964,14 +980,14 @@ def setup_profile():
             user_id = current_user.id
             connections = get_quiltt_connections(user_id)
             if connections:
-                print(f"[setup_profile] Cleaning up {len(connections)} abandoned connection(s) for user {user_id}")
+                log_info(logger, 'SETUP_PROFILE', f"Cleaning up {len(connections)} abandoned connection(s) for user {user_id}")
                 for conn in connections:
                     conn_id = conn.get('connection_id')
                     if conn_id:
                         delete_quiltt_connection(conn_id, user_id)
-                print(f"[setup_profile] Cleanup complete for user {user_id}")
+                log_info(logger, 'SETUP_PROFILE', f"Cleanup complete for user {user_id}")
         except Exception as e:
-            print(f"[setup_profile] Cleanup error (non-fatal): {e}")
+            log_error(logger, 'SETUP_PROFILE', f"Cleanup error (non-fatal): {e}")
 
     # Get Quiltt connector ID from environment
     connector_id = os.getenv('QUILTT_CONNECTOR_ID', '')
@@ -1061,7 +1077,7 @@ def check_has_categories():
                         'source': 'redis'
                     })
         except Exception as redis_error:
-            print(f"[check_has_categories] Redis error: {str(redis_error)}")
+            log_error(logger, 'SETUP_PROFILE', f"Redis error: {str(redis_error)}")
         
         # Fallback to MySQL if not in Redis
         with get_db_pool().get_cursor(dictionary=True) as cursor:
@@ -1090,7 +1106,7 @@ def check_has_categories():
         })
         
     except Exception as e:
-        print(f"[check_has_categories] Error: {str(e)}")
+        log_error(logger, 'SETUP_PROFILE', f"Error: {str(e)}")
         return jsonify({
             'status': 'error',
             'message': str(e),
@@ -1108,7 +1124,7 @@ def save_setup_name():
         first_name = request.json.get('first_name', '').strip()
         last_name = request.json.get('last_name', '').strip()
         
-        print(f"[save_setup_name] Received - first_name: '{first_name}', last_name: '{last_name}'")
+        log_info(logger, 'SETUP_PROFILE', f"Received - first_name: '{first_name}', last_name: '{last_name}'")
         
         if not first_name or not last_name:
             return jsonify({'status': 'error', 'message': 'First and last name are required'}), 400
@@ -1123,19 +1139,19 @@ def save_setup_name():
             'last_name': last_name
         })
         
-        print(f"[save_setup_name] Stored in Redis with key: {redis_key}")
+        log_info(logger, 'SETUP_PROFILE', f"Stored in Redis with key: {redis_key}")
         
         # Set expiration to 1 hour in case setup is abandoned
         r.expire(redis_key, 3600)
         
         # Verify it was saved
         saved_data = r.hgetall(redis_key)
-        print(f"[save_setup_name] Verification - data in Redis: {saved_data}")
+        log_info(logger, 'SETUP_PROFILE', f"Verification - data in Redis: {saved_data}")
         
         return jsonify({'status': 'success'}), 200
         
     except Exception as e:
-        print(f"[save_setup_name] Error: {e}")
+        log_error(logger, 'SETUP_PROFILE', f"Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -1168,7 +1184,7 @@ def save_setup_step():
     """Save which setup step the user has completed, plus any form data for that step."""
     step = request.json.get('step', 0)
     data = request.json.get('data', {})
-    print(f"[save_setup_step] Called with step={step}, data keys={list(data.keys()) if data else []}, user={current_user.id}")
+    log_info(logger, 'SETUP_PROFILE', f"Called with step={step}, data keys={list(data.keys()) if data else []}, user={current_user.id}")
     try:
         step = int(step)
     except (ValueError, TypeError):
@@ -1243,7 +1259,7 @@ def save_setup_step():
 
                 return jsonify({'status': 'success'})
         except Exception as e:
-            print(f"[save_setup_step] Redis error: {e}")
+            log_error(logger, 'SETUP_PROFILE', f"Redis error: {e}")
 
     # Fallback: write directly to MySQL (only permanent fields + setup_state)
     try:
@@ -1279,7 +1295,7 @@ def save_setup_step():
                     ON DUPLICATE KEY UPDATE state = VALUES(state), updated_at = NOW()
                 """, (user_id, json.dumps(state)))
     except Exception as e:
-        print(f"[save_setup_step] MySQL error: {e}")
+        log_error(logger, 'SETUP_PROFILE', f"MySQL error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
     return jsonify({'status': 'success'})
@@ -1346,13 +1362,13 @@ def complete_profile_setup():
             if setup_state:
                 selected_account_ids = setup_state.get('setup_selected_account_ids', [])
 
-        print(f"[complete_profile_setup] starting_balance: {starting_balance}")
-        print(f"[complete_profile_setup] starting_savings: {starting_savings}")
-        print(f"[complete_profile_setup] balance_threshold: {balance_threshold}")
-        print(f"[complete_profile_setup] income_entry_date: {income_entry_date}")
-        print(f"[complete_profile_setup] currency_type: {currency_type}")
-        print(f"[complete_profile_setup] first_name: '{first_name}', last_name: '{last_name}'")
-        print(f"[complete_profile_setup] selected_account_ids: {selected_account_ids}")
+        log_info(logger, 'SETUP_PROFILE', f"starting_balance: {starting_balance}")
+        log_info(logger, 'SETUP_PROFILE', f"starting_savings: {starting_savings}")
+        log_info(logger, 'SETUP_PROFILE', f"balance_threshold: {balance_threshold}")
+        log_info(logger, 'SETUP_PROFILE', f"income_entry_date: {income_entry_date}")
+        log_info(logger, 'SETUP_PROFILE', f"currency_type: {currency_type}")
+        log_info(logger, 'SETUP_PROFILE', f"first_name: '{first_name}', last_name: '{last_name}'")
+        log_info(logger, 'SETUP_PROFILE', f"selected_account_ids: {selected_account_ids}")
 
         try:
             starting_savings = float(starting_savings)
@@ -1370,7 +1386,7 @@ def complete_profile_setup():
 
         # Apply deferred account activation if accounts were selected during setup
         if selected_account_ids:
-            print(f"[complete_profile_setup] Activating {len(selected_account_ids)} selected accounts")
+            log_info(logger, 'SETUP_PROFILE', f"Activating {len(selected_account_ids)} selected accounts")
             from quiltt_redis import update_quiltt_account_fields
             # Get all quiltt accounts to deactivate unselected ones
             all_quiltt_accounts = get_quiltt_accounts(current_user.id) or []
@@ -1378,7 +1394,7 @@ def complete_profile_setup():
                 account_id = qa.get('account_id')
                 if account_id in selected_account_ids:
                     update_quiltt_account_fields(account_id, {'is_active': 1, 'sync_transactions': 1}, current_user.id)
-                    print(f"[complete_profile_setup] Activated account: {account_id}")
+                    log_info(logger, 'SETUP_PROFILE', f"Activated account: {account_id}")
                 else:
                     update_quiltt_account_fields(account_id, {'is_active': 0, 'sync_transactions': 0}, current_user.id)
 
@@ -1389,11 +1405,11 @@ def complete_profile_setup():
         
         # Set member_since to TODAY (when user completed setup)
         member_since_date = date.today().strftime('%Y-%m-%d')
-        print(f"[complete_profile_setup] Setting member_since to: {member_since_date}")
+        log_info(logger, 'SETUP_PROFILE', f"Setting member_since to: {member_since_date}")
         _update_user_setting_in_redis(current_user.id, 'member_since', member_since_date)
         
         # Update name fields
-        print(f"[complete_profile_setup] Updating names in Redis via _update_user_setting_in_redis")
+        log_info(logger, 'SETUP_PROFILE', f"Updating names in Redis via _update_user_setting_in_redis")
         _update_user_setting_in_redis(current_user.id, 'first_name', first_name)
         _update_user_setting_in_redis(current_user.id, 'last_name', last_name)
         if handle:
@@ -1423,14 +1439,14 @@ def complete_profile_setup():
             cursor.close()
             conn.commit()
         
-        print(f"[complete_profile_setup] Starting Balance category ID: {starting_balance_category_id}")
+        log_info(logger, 'SETUP_PROFILE', f"Starting Balance category ID: {starting_balance_category_id}")
 
         # Insert starting balance into Redis (Redis-first)
         income_entries = _get_entries_from_redis('income_entries', current_user.id)
         
         if income_entries is None:
             # Load from MySQL if not in Redis
-            print(f"[complete_profile_setup] Loading income_entries from MySQL for user {current_user.id}")
+            log_info(logger, 'SETUP_PROFILE', f"Loading income_entries from MySQL for user {current_user.id}")
             with get_db_pool().get_cursor() as cursor:
                 cursor.execute("""
                     SELECT ie.* FROM income_entries ie
@@ -1454,7 +1470,7 @@ def complete_profile_setup():
             existing_entry['amount'] = float(starting_balance)
             existing_entry['category_name'] = 'Starting Balance'  # Ensure category_name is set
             existing_entry['processed'] = 0  # Mark for re-processing
-            print(f"[complete_profile_setup] Updated existing starting balance entry for {income_entry_date}: {starting_balance}")
+            log_info(logger, 'SETUP_PROFILE', f"Updated existing starting balance entry for {income_entry_date}: {starting_balance}")
         else:
             # Add new starting balance entry
             income_entries.append({
@@ -1465,19 +1481,19 @@ def complete_profile_setup():
                 'recurring_id': None,
                 'processed': 0  # Will be flushed by flush worker
             })
-            print(f"[complete_profile_setup] Added new starting balance entry for {income_entry_date}: {starting_balance}")
+            log_info(logger, 'SETUP_PROFILE', f"Added new starting balance entry for {income_entry_date}: {starting_balance}")
         
         # Sort by date
         income_entries.sort(key=lambda x: x['date'] if isinstance(x['date'], str) else x['date'].isoformat())
         
         # Save to Redis
         _set_entries_to_redis('income_entries', current_user.id, income_entries)
-        print(f"[complete_profile_setup] Starting balance saved to Redis: {starting_balance}")
+        log_info(logger, 'SETUP_PROFILE', f"Starting balance saved to Redis: {starting_balance}")
         
         # Create a savings adjustment entry for starting savings (instead of direct savings_entry)
         # This persists through recalculations
         if starting_savings > 0:
-            print(f"[complete_profile_setup] Creating savings adjustment for starting savings: {starting_savings}")
+            log_info(logger, 'SETUP_PROFILE', f"Creating savings adjustment for starting savings: {starting_savings}")
             
             # Get or create savings adjustments
             savings_adjustments = _get_savings_adjustments_from_redis(current_user.id)
@@ -1512,7 +1528,7 @@ def complete_profile_setup():
                 # Update existing adjustment
                 existing_adj['amount'] = float(starting_savings)
                 existing_adj['description'] = 'Initial savings balance'
-                print(f"[complete_profile_setup] Updated existing savings adjustment for {income_entry_date}: {starting_savings}")
+                log_info(logger, 'SETUP_PROFILE', f"Updated existing savings adjustment for {income_entry_date}: {starting_savings}")
             else:
                 # Create new adjustment
                 existing_ids = [int(a.get('id', 0)) for a in savings_adjustments if a.get('id')]
@@ -1529,19 +1545,19 @@ def complete_profile_setup():
                 })
                 # Sort by date
                 savings_adjustments.sort(key=lambda x: x['date'])
-                print(f"[complete_profile_setup] Created new savings adjustment for {income_entry_date}: {starting_savings}")
+                log_info(logger, 'SETUP_PROFILE', f"Created new savings adjustment for {income_entry_date}: {starting_savings}")
             
             # Save to Redis
             _set_savings_adjustments_to_redis(current_user.id, savings_adjustments)
-            print(f"[complete_profile_setup] Starting savings adjustment saved to Redis: {starting_savings}")
+            log_info(logger, 'SETUP_PROFILE', f"Starting savings adjustment saved to Redis: {starting_savings}")
         
         # Trigger immediate flush to MySQL before totals calculation
         from redis_manager import _flush_redis_to_mysql
         _flush_redis_to_mysql()
-        print(f"[complete_profile_setup] Flushed Redis data to MySQL")
+        log_info(logger, 'SETUP_PROFILE', f"Flushed Redis data to MySQL")
 
         # Ensure all base records exist (in case email verification didn't create them)
-        print(f"[complete_profile_setup] Checking if totals_remainders records exist for user {current_user.id}")
+        log_info(logger, 'SETUP_PROFILE', f"Checking if totals_remainders records exist for user {current_user.id}")
         with get_db_pool().get_cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM totals_remainders WHERE user_id = %s", (current_user.id,))
             tr_count = cursor.fetchone()[0]
@@ -1550,20 +1566,20 @@ def complete_profile_setup():
             cursor.execute("SELECT COUNT(*) FROM totals_remainders_m WHERE user_id = %s", (current_user.id,))
             trm_count = cursor.fetchone()[0]
             
-            print(f"[complete_profile_setup] Record counts - weekly: {tr_count}, daily: {trd_count}, monthly: {trm_count}")
+            log_info(logger, 'SETUP_PROFILE', f"Record counts - weekly: {tr_count}, daily: {trd_count}, monthly: {trm_count}")
             
             # Only create if ALL tables are empty (first time setup)
             if tr_count == 0 and trd_count == 0 and trm_count == 0:
-                print(f"[complete_profile_setup] Creating initial totals_remainders records...")
+                log_info(logger, 'SETUP_PROFILE', f"Creating initial totals_remainders records...")
                 create_totals_remainders_for_new_user(current_user.id)
-                print(f"[complete_profile_setup] Initial records created")
+                log_info(logger, 'SETUP_PROFILE', f"Initial records created")
             else:
-                print(f"[complete_profile_setup] Records already exist, skipping creation")
+                log_info(logger, 'SETUP_PROFILE', f"Records already exist, skipping creation")
         
         # Now recalculate all totals with the starting balance entry
-        print(f"[complete_profile_setup] Recalculating all totals...")
+        log_info(logger, 'SETUP_PROFILE', f"Recalculating all totals...")
         save_totals_remainders_d()
-        print(f"[complete_profile_setup] Completed all totals_remainders population")
+        log_info(logger, 'SETUP_PROFILE', f"Completed all totals_remainders population")
 
         # Clear setup session flags
         session.pop('setup_verified_mfa_secret', None)
@@ -1687,13 +1703,13 @@ def login():
                 mfa_secret = mfa_row[0] if mfa_row else None
 
                 if mfa_secret:
-                    print(f"[LOGIN] MFA required for user {user[1]} (id={user[0]})")
+                    log_info(logger, 'AUTH', f"MFA required for user {user[1]} (id={user[0]})")
                     session['pre_mfa_user_id'] = user[0]
                     session['pre_mfa_remember'] = remember
                     cursor.close()
                     return render_template('login.html', mfa_step=True, username=user[1])
                 else:
-                    print(f"[LOGIN] No MFA required for user {user[1]} (id={user[0]})")
+                    log_info(logger, 'AUTH', f"No MFA required for user {user[1]} (id={user[0]})")
                     user_obj = User(id=user[0], username=user[1], password=user[2])
                     login_user(user_obj, remember=remember)
 
@@ -2387,7 +2403,7 @@ def dashboard_d():
                 if cached:
                     user_data = json.loads(cached)
             except Exception as e:
-                app.logger.error(f"[REDIS ERROR] dashboard_d user settings: {str(e)}")
+                log_error(app.logger, 'REDIS', f"dashboard_d user settings: {str(e)}")
         
         # Fallback to MySQL
         if not user_data:
@@ -2826,7 +2842,7 @@ def dashboard_d_add_entry():
         entry_is_bucket = entry_date_parsed >= today
         
         if entry_is_bucket:
-            app.logger.info(f"[BUCKET] Entry date {entry_date} >= today {today}, will create as bucket")
+            log_info(app.logger, 'BUCKET', f"Entry date {entry_date} >= today {today}, will create as bucket")
         else:
             # PHASE 2 (Feb 2026): Process bucket reduction for past entries
             # Works for BOTH recurring categories and non-recurring categories with manual buckets
@@ -2835,14 +2851,13 @@ def dashboard_d_add_entry():
             # Check if there's any bucket to reduce (regardless of whether category is recurring)
             next_bucket = find_next_bucket_for_category(table_name, category_id, current_user.id)
             if next_bucket:
-                app.logger.info(f"[BUCKET] Found bucket to reduce: date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
+                log_info(app.logger, 'BUCKET', f"Found bucket to reduce: date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
                 process_manual_entry_with_bucket(
                     table_name, category_id, entry_date, 
                     float(amount), current_user.id, recurring_info
                 )
     except Exception as e:
-        app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
-        app.logger.exception(e)
+        log_exception(logger, 'BUCKET', f"Error processing bucket depletion: {e}")
         # Continue with normal entry creation even if bucket processing fails
         entry_is_bucket = False  # Fallback to non-bucket on error
     
@@ -2872,10 +2887,9 @@ def dashboard_d_add_entry():
                     cursor.close()
             
             create_bucket_record(table_name, current_user.id, category_id, entry_date, float(amount), account_id=account_id)
-            app.logger.info(f"[BUCKET] Created bucket record for future entry: category={category_id}, date={entry_date}, amount={amount}")
+            log_info(app.logger, 'BUCKET', f"Created bucket record for future entry: category={category_id}, date={entry_date}, amount={amount}")
         except Exception as e:
-            app.logger.error(f"[BUCKET] Error creating bucket record: {e}")
-            app.logger.exception(e)
+            log_exception(logger, 'BUCKET', f"Error creating bucket record: {e}")
 
     # Check if this is a savings category - update savings if so
     is_savings_category = False
@@ -2969,7 +2983,7 @@ def get_categories():
         return jsonify({'status': 'success', 'categories': categories})
         
     except Exception as e:
-        app.logger.error(f"[GET CATEGORIES ERROR] User {current_user.id}: {str(e)}")
+        log_error(app.logger, 'CATEGORIES', f"User {current_user.id}: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -3158,7 +3172,7 @@ def update_processed_status_d_entry():
             return jsonify({'status': 'error', 'message': 'Failed to update processed status'}), 500
 
     except Exception as e:
-        app.logger.error(f"Error in update_processed_status_d_entry: {str(e)}", exc_info=True)
+        log_exception(app.logger, 'ENTRY', f"Error in update_processed_status_d_entry: {str(e)}")
         return jsonify({'status': 'error', 'message': 'Failed to update processed status'}), 500
 
 @app.route('/get_dashboard_d_data')
@@ -3621,7 +3635,7 @@ def _update_ca_balances_in_redis(table_name, user_id, account_id, entry_date, am
         
         
     except Exception as e:
-        app.logger.error(f"[REDIS][{table_name}] CA balance update error user={user_id}: {e}")
+        log_error(app.logger, 'REDIS', f"[{table_name}] CA balance update error user={user_id}: {e}")
 
 
 def _processed_flag_is_true(value):
@@ -3807,7 +3821,7 @@ def _get_savings_adjustments_from_redis(user_id):
             return json.loads(cached)
         return None
     except Exception as e:
-        app.logger.error(f"Error getting savings_adjustments from Redis: {e}")
+        log_error(app.logger, 'SAVINGS', f"Error getting savings_adjustments from Redis: {e}")
         return None
 
 
@@ -3840,7 +3854,7 @@ def _set_savings_adjustments_to_redis(user_id, data):
         _redis_client.sadd(dirty_key, "savings_adjustments")
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
-        app.logger.error(f"Error setting savings_adjustments to Redis: {e}")
+        log_error(app.logger, 'SAVINGS', f"Error setting savings_adjustments to Redis: {e}")
 
 
 # Redis helper functions for user settings
@@ -3903,7 +3917,7 @@ def _update_user_setting_in_redis(user_id, field, value):
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
     except Exception as e:
-        app.logger.error(f"[REDIS][user_settings] UPDATE ERROR user={user_id}, field={field}: {e}", exc_info=True)
+        log_exception(app.logger, 'REDIS', f"[user_settings] UPDATE ERROR user={user_id}, field={field}: {e}")
 
 # Redis helper functions for entry management (income/expense/c_expense)
 
@@ -4365,7 +4379,7 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
                         # Force a refresh by adding a dummy ID
                         updated_bucket_ids.add(-1)
                 except Exception as e:
-                    app.logger.error(f"[DELETE ENTRY] Error restoring bucket: {e}")
+                    log_error(app.logger, 'DELETE_ENTRY', f"Error restoring bucket: {e}")
         
         # PHASE 4 (Feb 2026): Delete bucket records for deleted bucket entries
         if deleted_bucket_entries:
@@ -4380,9 +4394,9 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
                         entry_date,
                         user_id
                     )
-                    app.logger.info(f"[DELETE ENTRY] Deleted bucket record for category {category_id}, date {entry_date}")
+                    log_info(app.logger, 'DELETE_ENTRY', f"Deleted bucket record for category {category_id}, date {entry_date}")
                 except Exception as e:
-                    app.logger.error(f"[DELETE ENTRY] Error deleting bucket record: {e}")
+                    log_error(app.logger, 'DELETE_ENTRY', f"Error deleting bucket record: {e}")
         
         # If buckets were updated, refresh the filtered_entries list from Redis to get updated bucket amounts
         if updated_bucket_ids:
@@ -4564,7 +4578,7 @@ def _get_payment_entries_from_redis(user_id):
             return json.loads(cached)
         return None
     except Exception as e:
-        app.logger.error(f"Error getting payment entries from Redis: {e}")
+        log_error(app.logger, 'REDIS', f"Error getting payment entries from Redis: {e}")
         return None
 
 # Redis helper functions for recurring tables
@@ -4590,7 +4604,7 @@ def _get_recurring_from_redis(table_name, user_id):
             return json.loads(cached)
         return None
     except Exception as e:
-        app.logger.error(f"Error getting {table_name} from Redis: {e}")
+        log_error(app.logger, 'RECURRING', f"Error getting {table_name} from Redis: {e}")
         return None
 
 def _set_recurring_to_redis(table_name, user_id, data):
@@ -4619,7 +4633,7 @@ def _set_recurring_to_redis(table_name, user_id, data):
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
     except Exception as e:
-        app.logger.error(f"Error setting {table_name} to Redis: {e}")
+        log_error(app.logger, 'RECURRING', f"Error setting {table_name} to Redis: {e}")
 
 def _update_recurring_in_redis(table_name, user_id, recurring_data):
     """
@@ -4680,7 +4694,7 @@ def _update_recurring_in_redis(table_name, user_id, recurring_data):
         
         
     except Exception as e:
-        app.logger.error(f"Error updating {table_name} in Redis: {e}")
+        log_error(app.logger, 'RECURRING', f"Error updating {table_name} in Redis: {e}")
 
 def _delete_recurring_in_redis(table_name, user_id, recurring_id):
     """
@@ -4727,7 +4741,7 @@ def _delete_recurring_in_redis(table_name, user_id, recurring_id):
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
     except Exception as e:
-        app.logger.error(f"Error deleting {table_name} in Redis: {e}")
+        log_error(app.logger, 'RECURRING', f"Error deleting {table_name} in Redis: {e}")
 
 def _delete_category_in_redis(table_name, user_id, category_id):
     """
@@ -4865,7 +4879,7 @@ def _delete_category_in_redis(table_name, user_id, category_id):
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         
     except Exception as e:
-        app.logger.error(f"Error deleting category from {table_name} in Redis: {e}")
+        log_error(app.logger, 'REDIS', f"Error deleting category from {table_name} in Redis: {e}")
 
 def _delete_buckets_in_redis(table_name, user_id, category_id):
     """
@@ -4921,7 +4935,7 @@ def _delete_buckets_in_redis(table_name, user_id, category_id):
                 
         
     except Exception as e:
-        app.logger.error(f"Error deleting buckets from {table_name} in Redis: {e}")
+        log_error(app.logger, 'BUCKET', f"Error deleting buckets from {table_name} in Redis: {e}")
 
 
 def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=None):
@@ -4998,7 +5012,7 @@ def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=
                 
         
     except Exception as e:
-        app.logger.error(f"Error deleting future buckets from {table_name} in Redis: {e}")
+        log_error(app.logger, 'BUCKET', f"Error deleting future buckets from {table_name} in Redis: {e}")
 
 
 def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None):
@@ -5159,7 +5173,7 @@ def _copy_expense_categories_to_new_credit_account(user_id, account_id):
         copied += 1
     
     if copied > 0:
-        app.logger.info(f"[CATEGORY SYNC] Copied {copied} expense categories to credit account {account_id} for user {user_id}")
+        log_info(app.logger, 'CATEGORY_SYNC', f"Copied {copied} expense categories to credit account {account_id} for user {user_id}")
     
     return copied
 
@@ -5191,7 +5205,7 @@ def _sync_rename_to_credit_accounts(user_id, old_name, new_name):
                     _redis_client.setex(redis_key, 604800, json.dumps(categories, cls=DecimalEncoder))
                     _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
         except Exception as e:
-            app.logger.error(f"Error syncing category rename to c_expense_categories in Redis: {e}")
+            log_error(app.logger, 'CREDIT', f"Error syncing category rename to c_expense_categories in Redis: {e}")
     
     # Also update MySQL directly for consistency
     with get_db_pool().get_connection() as conn:
@@ -5205,7 +5219,7 @@ def _sync_rename_to_credit_accounts(user_id, old_name, new_name):
         cursor.close()
     
     if renamed_count > 0:
-        app.logger.info(f"[CATEGORY SYNC] Renamed '{old_name}' -> '{new_name}' in {renamed_count} c_expense categories for user {user_id}")
+        log_info(app.logger, 'CATEGORY_SYNC', f"Renamed '{old_name}' -> '{new_name}' in {renamed_count} c_expense categories for user {user_id}")
 
 
 def _sync_delete_to_credit_accounts(user_id, category_name):
@@ -5325,10 +5339,10 @@ def _sync_delete_to_credit_accounts(user_id, category_name):
                         _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered, cls=DecimalEncoder))
                     _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense')
         except Exception as e:
-            app.logger.error(f"[CATEGORY SYNC] Error removing recurring_c_expense for deleted categories: {e}")
+            log_error(app.logger, 'CATEGORY_SYNC', f"Error removing recurring_c_expense for deleted categories: {e}")
     
     if deleted_count > 0:
-        app.logger.info(f"[CATEGORY SYNC] Deleted '{category_name}' from {deleted_count} c_expense categories for user {user_id}")
+        log_info(app.logger, 'CATEGORY_SYNC', f"Deleted '{category_name}' from {deleted_count} c_expense categories for user {user_id}")
 
 
 def _category_name_exists(table_name, user_id, name, exclude_id=None):
@@ -5424,7 +5438,7 @@ def _add_category_to_redis(table_name, user_id, category_data):
         return new_id
         
     except Exception as e:
-        app.logger.error(f"Error adding category to {table_name} in Redis: {e}")
+        log_error(app.logger, 'REDIS', f"Error adding category to {table_name} in Redis: {e}")
         return None
 
 def _add_categories_batch_to_redis(table_name, user_id, categories_list):
@@ -5479,7 +5493,7 @@ def _add_categories_batch_to_redis(table_name, user_id, categories_list):
         return new_ids
         
     except Exception as e:
-        app.logger.error(f"Error batch-adding categories to {table_name} in Redis: {e}")
+        log_error(app.logger, 'REDIS', f"Error batch-adding categories to {table_name} in Redis: {e}")
         return []
 
 
@@ -5535,7 +5549,7 @@ def _update_category_in_redis(table_name, user_id, category_id, updates):
         
         
     except Exception as e:
-        app.logger.error(f"Error updating category in {table_name} in Redis: {e}")
+        log_error(app.logger, 'REDIS', f"Error updating category in {table_name} in Redis: {e}")
 
 def _trigger_ntropy_sync(user_id):
     """
@@ -5548,11 +5562,11 @@ def _trigger_ntropy_sync(user_id):
         from ntropy_utils import sync_user_categories_to_ntropy
         result = sync_user_categories_to_ntropy(user_id)
         if result:
-            app.logger.info(f"[NTROPY] Synced categories to Ntropy for user {user_id}")
+            log_info(app.logger, 'NTROPY', f"Synced categories to Ntropy for user {user_id}")
         else:
-            app.logger.warning(f"[NTROPY] Sync returned False for user {user_id}")
+            log_warning(app.logger, 'NTROPY', f"Sync returned False for user {user_id}")
     except Exception as e:
-        app.logger.warning(f"[NTROPY] Failed to sync categories to Ntropy for user {user_id} (non-blocking): {e}")
+        log_warning(app.logger, 'NTROPY', f"Failed to sync categories to Ntropy for user {user_id} (non-blocking): {e}")
 
 
 def _get_categories_from_redis(table_name, user_id):
@@ -5574,7 +5588,7 @@ def _get_categories_from_redis(table_name, user_id):
         cached = _redis_client.get(redis_key)
         return json.loads(cached) if cached else None
     except Exception as e:
-        app.logger.error(f"Error getting categories from {table_name} in Redis: {e}")
+        log_error(app.logger, 'REDIS', f"Error getting categories from {table_name} in Redis: {e}")
         return None
 
 # Redis helper functions for buds and bud_items
@@ -5588,7 +5602,7 @@ def _get_buds_from_redis(user_id):
         cached = _redis_client.get(redis_key)
         return json.loads(cached) if cached else None
     except Exception as e:
-        app.logger.error(f"Error getting buds from Redis: {e}")
+        log_error(app.logger, 'BUD', f"Error getting buds from Redis: {e}")
         return None
 
 def _set_buds_to_redis(user_id, data):
@@ -5602,7 +5616,7 @@ def _set_buds_to_redis(user_id, data):
         _redis_client.sadd(dirty_key, 'buds')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
-        app.logger.error(f"Error setting buds to Redis: {e}")
+        log_error(app.logger, 'BUD', f"Error setting buds to Redis: {e}")
 
 def _update_bud_in_redis(user_id, bud_data):
     """Update or insert a single bud record in Redis cache."""
@@ -5634,7 +5648,7 @@ def _update_bud_in_redis(user_id, bud_data):
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         return bud_data['id']
     except Exception as e:
-        app.logger.error(f"Error updating bud in Redis: {e}")
+        log_error(app.logger, 'BUD', f"Error updating bud in Redis: {e}")
         return None
 
 def _delete_bud_in_redis(user_id, bud_id):
@@ -5656,7 +5670,7 @@ def _delete_bud_in_redis(user_id, bud_id):
         _redis_client.sadd(dirty_key, 'buds')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
-        app.logger.error(f"Error deleting bud from Redis: {e}")
+        log_error(app.logger, 'BUD', f"Error deleting bud from Redis: {e}")
 
 def _get_credit_accounts_from_redis(user_id):
     """Get credit accounts from Redis cache, sorted by display_order DESC."""
@@ -5671,7 +5685,7 @@ def _get_credit_accounts_from_redis(user_id):
             return accounts
         return None
     except Exception as e:
-        app.logger.error(f"Error getting credit accounts from Redis: {e}")
+        log_error(app.logger, 'CREDIT', f"Error getting credit accounts from Redis: {e}")
         return None
 
 def _add_credit_account_to_redis(user_id, account_data):
@@ -5727,7 +5741,7 @@ def _add_credit_account_to_redis(user_id, account_data):
         return new_id
         
     except Exception as e:
-        app.logger.error(f"Error adding credit account to Redis: {e}")
+        log_error(app.logger, 'CREDIT', f"Error adding credit account to Redis: {e}")
         return None
 
 def _get_credit_account_by_name(user_id, account_name):
@@ -5776,7 +5790,7 @@ def _get_bud_items_from_redis(user_id):
         cached = _redis_client.get(redis_key)
         return json.loads(cached) if cached else None
     except Exception as e:
-        app.logger.error(f"Error getting bud_items from Redis: {e}")
+        log_error(app.logger, 'BUD', f"Error getting bud_items from Redis: {e}")
         return None
 
 def _set_bud_items_to_redis(user_id, data):
@@ -5790,7 +5804,7 @@ def _set_bud_items_to_redis(user_id, data):
         _redis_client.sadd(dirty_key, 'bud_items')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
-        app.logger.error(f"Error setting bud_items to Redis: {e}")
+        log_error(app.logger, 'BUD', f"Error setting bud_items to Redis: {e}")
 
 def _update_bud_item_in_redis(user_id, bud_item_data):
     """Update or insert a single bud_item record in Redis cache."""
@@ -5822,7 +5836,7 @@ def _update_bud_item_in_redis(user_id, bud_item_data):
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         return bud_item_data['id']
     except Exception as e:
-        app.logger.error(f"Error updating bud_item in Redis: {e}")
+        log_error(app.logger, 'BUD', f"Error updating bud_item in Redis: {e}")
         return None
 
 def _delete_bud_item_in_redis(user_id, item_id):
@@ -5844,7 +5858,7 @@ def _delete_bud_item_in_redis(user_id, item_id):
         _redis_client.sadd(dirty_key, 'bud_items')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
-        app.logger.error(f"Error deleting bud_item from Redis: {e}")
+        log_error(app.logger, 'BUD', f"Error deleting bud_item from Redis: {e}")
 
 def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
     with get_db_pool().get_connection() as conn:
@@ -7850,7 +7864,7 @@ def delete_ca_category():
                             _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring, cls=DecimalEncoder))
                         _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_c_expense')
             except Exception as e:
-                app.logger.error(f"Error removing recurring_c_expense during convert-to-nonrecurring: {e}")
+                log_error(app.logger, 'CATEGORIES', f"Error removing recurring_c_expense during convert-to-nonrecurring: {e}")
         
         # 3. Remove bucket records for this category
         if app.config.get('REDIS_OK'):
@@ -7879,7 +7893,7 @@ def delete_ca_category():
                             _redis_client.expire(pending_key, 604800)
                         _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_c_expense_buckets')
             except Exception as e:
-                app.logger.error(f"Error removing recurring_c_expense_buckets during convert-to-nonrecurring: {e}")
+                log_error(app.logger, 'CATEGORIES', f"Error removing recurring_c_expense_buckets during convert-to-nonrecurring: {e}")
         
         # 4. Set category to non-recurring in Redis
         _update_category_in_redis('c_expense_categories', current_user.id, category_id, {
@@ -8041,7 +8055,7 @@ def update_income_category():
                 _redis_client.setex(redis_key, 604800, json.dumps(categories, cls=DecimalEncoder))
                 _redis_client.sadd(f"dirty_tables:{current_user.id}", 'income_categories')
         except Exception as e:
-            app.logger.error(f"Error updating income category in Redis: {e}")
+            log_error(app.logger, 'INCOME', f"Error updating income category in Redis: {e}")
 
     # Also update MySQL directly for consistency
     with get_db_pool().get_connection() as conn:
@@ -8107,7 +8121,7 @@ def update_expense_category():
                 _redis_client.setex(redis_key, 604800, json.dumps(categories, cls=DecimalEncoder))
                 _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
         except Exception as e:
-            app.logger.error(f"Error updating expense category in Redis: {e}")
+            log_error(app.logger, 'EXPENSE', f"Error updating expense category in Redis: {e}")
 
     # Also update MySQL directly for consistency
     with get_db_pool().get_connection() as conn:
@@ -8160,7 +8174,7 @@ def dashboard():
                 if cached:
                     user_data = json.loads(cached)
             except Exception as e:
-                app.logger.error(f"[REDIS ERROR] dashboard user settings: {str(e)}")
+                log_error(app.logger, 'REDIS', f"dashboard user settings: {str(e)}")
         
         # Fallback to MySQL
         if not user_data:
@@ -8180,7 +8194,7 @@ def dashboard():
                         json.dumps(user_data, default=str, cls=DecimalEncoder)
                     )
                 except Exception as e:
-                    app.logger.error(f"[REDIS ERROR] Failed to cache user data: {str(e)}")
+                    log_error(app.logger, 'REDIS', f"Failed to cache user data: {str(e)}")
 
         goofy_week_mode = bool(user_data.get('goofy_week_mode', False)) if user_data else False
 
@@ -8658,7 +8672,7 @@ def get_recurring_id_for_category():
         return jsonify({'status': 'error', 'message': 'Recurring record not found'}), 404
 
     except Exception as e:
-        app.logger.error(f"Error looking up recurring ID: {e}")
+        log_error(app.logger, 'RECURRING', f"Error looking up recurring ID: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -8770,7 +8784,7 @@ def get_ca_balance():
         balance = result['balance'] if result and result['balance'] is not None else 0
         return jsonify({'status': 'success', 'balance': balance})
     except Exception as e:
-        app.logger.error(f"[get_ca_balance] Error: {e}")
+        log_error(app.logger, 'CREDIT', f"[get_ca_balance] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
 
 @app.route('/get_last_remainder', methods=['GET'])
@@ -8951,7 +8965,7 @@ def get_week_totals_batch():
         return jsonify({'status': 'success', 'data': result_data})
         
     except Exception as e:
-        app.logger.error(f"[get_week_totals_batch] Error: {e}")
+        log_error(app.logger, 'DASHBOARD', f"[get_week_totals_batch] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
 
 
@@ -9044,7 +9058,7 @@ def get_ca_balances_batch():
         return jsonify({'status': 'success', 'data': result_data})
         
     except Exception as e:
-        app.logger.error(f"[get_ca_balances_batch] Error: {e}")
+        log_error(app.logger, 'CREDIT', f"[get_ca_balances_batch] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
 
 
@@ -9080,7 +9094,7 @@ def update_income_order():
                 conn.commit()
                 cursor.close()
     except Exception as e:
-        app.logger.error(f"[update_income_order] Error: {e}")
+        log_error(app.logger, 'INCOME', f"[update_income_order] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Failed to save order'}), 500
 
     return jsonify({'status': 'success'})
@@ -9150,7 +9164,7 @@ def update_expense_order():
                 conn.commit()
                 cursor.close()
     except Exception as e:
-        app.logger.error(f"[update_expense_order] Error: {e}")
+        log_error(app.logger, 'EXPENSE', f"[update_expense_order] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Failed to save order'}), 500
 
     return jsonify({'status': 'success'})
@@ -9192,7 +9206,7 @@ def update_ca_order():
                 conn.commit()
                 cursor.close()
     except Exception as e:
-        app.logger.error(f"[update_ca_order] Error: {e}")
+        log_error(app.logger, 'CREDIT', f"[update_ca_order] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Failed to save order'}), 500
 
     return jsonify({'status': 'success'})
@@ -9251,7 +9265,7 @@ def update_credit_account_order():
 
         return jsonify({'status': 'success'})
     except Exception as e:
-        app.logger.error(f"Error updating credit account order: {e}")
+        log_error(app.logger, 'CREDIT', f"Error updating credit account order: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregation='week', specific_date=None):
@@ -9416,8 +9430,7 @@ def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregatio
         return buckets
         
     except Exception as e:
-        app.logger.error(f"[GET BUCKETS] Error getting buckets: {e}")
-        app.logger.exception(e)
+        log_exception(logger, 'BUCKET', f"Error getting buckets: {e}")
     return []
 
 @app.route('/update-entry', methods=['POST'])
@@ -9576,8 +9589,7 @@ def update_entry():
                         current_user.id
                     )
             except Exception as e:
-                app.logger.error(f"[BUCKET RESTORE DELETE] Error restoring bucket: {e}")
-                app.logger.exception(e)
+                log_exception(logger, 'BUCKET', f"Error restoring bucket: {e}")
         
         _delete_entry_in_redis(table_name, current_user.id, category_id, date, date, specific_entry_id=entry_id)
     else:
@@ -9616,24 +9628,24 @@ def update_entry():
             existing_data = _filter_pending_deletions(table_name, current_user.id, existing_data)
         
         existing_entry = None
-        app.logger.info(f"[UPDATE-ENTRY DEBUG] Looking for existing entry: entry_id={entry_id}, category_id={category_id}, date={date}, type={entry_type}")
-        app.logger.info(f"[UPDATE-ENTRY DEBUG] existing_data has {len(existing_data)} entries")
+        log_info(app.logger, 'UPDATE_ENTRY', f"Looking for existing entry: entry_id={entry_id}, category_id={category_id}, date={date}, type={entry_type}")
+        log_info(app.logger, 'UPDATE_ENTRY', f"existing_data has {len(existing_data)} entries")
         for entry in existing_data:
             if entry_id is not None:
                 if entry.get('id') is not None and str(entry.get('id')) == str(entry_id):
                     existing_entry = entry
-                    app.logger.info(f"[UPDATE-ENTRY DEBUG] Found by entry_id={entry_id}: is_bucket={entry.get('is_bucket')}, amount={entry.get('amount')}, original_amount={entry.get('original_amount')}")
+                    log_info(app.logger, 'UPDATE_ENTRY', f"Found by entry_id={entry_id}: is_bucket={entry.get('is_bucket')}, amount={entry.get('amount')}, original_amount={entry.get('original_amount')}")
                     break
             elif str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == str(date):
                 existing_entry = entry
-                app.logger.info(f"[UPDATE-ENTRY DEBUG] Found by cat+date: id={entry.get('id')}, is_bucket={entry.get('is_bucket')}, amount={entry.get('amount')}")
+                log_info(app.logger, 'UPDATE_ENTRY', f"Found by cat+date: id={entry.get('id')}, is_bucket={entry.get('is_bucket')}, amount={entry.get('amount')}")
                 break
         
         if existing_entry is None:
-            app.logger.info(f"[UPDATE-ENTRY DEBUG] NO existing entry found! entry_id={entry_id}")
+            log_info(app.logger, 'UPDATE_ENTRY', f"NO existing entry found! entry_id={entry_id}")
             # Log first few entries for debugging
             for i, e in enumerate(existing_data[:5]):
-                app.logger.info(f"[UPDATE-ENTRY DEBUG] entry[{i}]: id={e.get('id')} (type={type(e.get('id')).__name__}), cat={e.get('category_id')}, date={e.get('date')}, is_bucket={e.get('is_bucket')}")
+                log_info(app.logger, 'UPDATE_ENTRY', f"entry[{i}]: id={e.get('id')} (type={type(e.get('id')).__name__}), cat={e.get('category_id')}, date={e.get('date')}, is_bucket={e.get('is_bucket')}")
         
         # Check for bucket entries and deplete them
         try:
@@ -9719,8 +9731,7 @@ def update_entry():
                     float(amount), current_user.id, recurring_info
                 )
         except Exception as e:
-            app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
-            app.logger.exception(e)
+            log_exception(logger, 'BUCKET', f"Error processing bucket depletion: {e}")
             # Continue with normal entry creation even if bucket processing fails
         
         is_editing_bucket = existing_entry and existing_entry.get('is_bucket')
@@ -9797,10 +9808,10 @@ def delete_entry():
         if cats:
             cat_data = next((cat for cat in cats if cat.get('id') == category_id), None)
             if not cat_data:
-                app.logger.error(f"[DELETE ENTRY] Temp category {category_id} not found")
+                log_error(app.logger, 'DELETE_ENTRY', f"Temp category {category_id} not found")
                 return jsonify({'status': 'error', 'message': 'Invalid category_id for this entry type'}), 400
         else:
-            app.logger.error(f"[DELETE ENTRY] No categories in Redis")
+            log_error(app.logger, 'DELETE_ENTRY', f"No categories in Redis")
             return jsonify({'status': 'error', 'message': 'Invalid category_id for this entry type'}), 400
     else:
         # Real ID - check MySQL
@@ -9984,7 +9995,7 @@ def update_processed_status_week_range():
             return jsonify({'status': 'error', 'message': 'Failed to update entries'}), 500
 
     except Exception as e:
-        app.logger.error(f"Error in update_processed_status_week_range: {str(e)}", exc_info=True)
+        log_exception(app.logger, 'ENTRY', f"Error in update_processed_status_week_range: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
 @app.route('/hide_income_category', methods=['POST'])
@@ -10135,7 +10146,7 @@ def update_week_entry():
         if not entry_type: missing.append('type')
         if not start_date: missing.append('start_date')
         if not end_date: missing.append('end_date')
-        app.logger.error(f"[UPDATE WEEK ENTRY] Missing parameters: {', '.join(missing)}")
+        log_error(app.logger, 'UPDATE_WEEK_ENTRY', f"Missing parameters: {', '.join(missing)}")
         return jsonify({"status": "error", "message": f"Missing required parameters: {', '.join(missing)}"}), 400
 
     # Choose the correct table
@@ -10181,7 +10192,7 @@ def update_week_entry():
                     category_found = True
             
             if not category_found:
-                app.logger.error(f"[UPDATE WEEK ENTRY] Invalid temp category_id {category_id} for CA - not found")
+                log_error(app.logger, 'UPDATE_WEEK_ENTRY', f"Invalid temp category_id {category_id} for CA - not found")
                 return jsonify({"status": "error", "message": "Invalid category_id - category not found"}), 400
         else:
             # For income/expense, check Redis
@@ -10190,10 +10201,10 @@ def update_week_entry():
             if cats:
                 cat_data = next((cat for cat in cats if cat.get('id') == category_id), None)
                 if not cat_data:
-                    app.logger.error(f"[UPDATE WEEK ENTRY] Category {category_id} not found in {len(cats)} categories")
+                    log_error(app.logger, 'UPDATE_WEEK_ENTRY', f"Category {category_id} not found in {len(cats)} categories")
                     return jsonify({"status": "error", "message": "Invalid category_id for this entry type"}), 400
             else:
-                app.logger.error(f"[UPDATE WEEK ENTRY] No categories found in Redis for {category_table}")
+                log_error(app.logger, 'UPDATE_WEEK_ENTRY', f"No categories found in Redis for {category_table}")
                 return jsonify({"status": "error", "message": "Invalid category_id for this entry type"}), 400
     else:
         # Real ID - check MySQL
@@ -10292,14 +10303,13 @@ def update_week_entry():
             from bucket_utils import find_next_bucket_for_category
             next_bucket = find_next_bucket_for_category(table_name, category_id, current_user.id)
             if next_bucket:
-                app.logger.info(f"[BUCKET] /update-week-entry: Found bucket to reduce: date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
+                log_info(app.logger, 'BUCKET', f"/update-week-entry: Found bucket to reduce: date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
                 process_manual_entry_with_bucket(
                     table_name, category_id, friday_date, 
                     delta_amount, current_user.id, recurring_info
                 )
         except Exception as e:
-            app.logger.error(f"[BUCKET] Error processing bucket depletion: {e}")
-            app.logger.exception(e)
+            log_exception(logger, 'BUCKET', f"Error processing bucket depletion: {e}")
             # Continue with normal entry creation even if bucket processing fails
     
     # Update CA balances in Redis immediately if this is a credit account entry
@@ -10376,10 +10386,9 @@ def update_week_entry():
                             cursor.close()
                 
                 create_bucket_record(table_name, current_user.id, category_id, entry_date, float(amount), account_id=account_id_for_bucket)
-                app.logger.info(f"[BUCKET] /update-week-entry: Created bucket record for future entry: category={category_id}, date={entry_date}, amount={amount}")
+                log_info(app.logger, 'BUCKET', f"/update-week-entry: Created bucket record for future entry: category={category_id}, date={entry_date}, amount={amount}")
             except Exception as e:
-                app.logger.error(f"[BUCKET] Error creating bucket record: {e}")
-                app.logger.exception(e)
+                log_exception(logger, 'BUCKET', f"Error creating bucket record: {e}")
     else:
         pass
 
@@ -10437,7 +10446,7 @@ def dashboard_3m():
                 if cached:
                     user_data = json.loads(cached)
             except Exception as e:
-                app.logger.error(f"[REDIS ERROR] dashboard_3m user settings: {str(e)}")
+                log_error(app.logger, 'REDIS', f"dashboard_3m user settings: {str(e)}")
         
         # Fallback to MySQL
         if not user_data:
@@ -10890,7 +10899,7 @@ def get_ca_balance_3m():
         balance = result['balance'] if result and result['balance'] is not None else 0
         return jsonify({'status': 'success', 'balance': balance})
     except Exception as e:
-        app.logger.error(f"[get_ca_balance_3m] Error: {e}")
+        log_error(app.logger, 'CREDIT', f"[get_ca_balance_3m] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
 
 @app.route('/get_total_income_3m', methods=['GET'])
@@ -11137,7 +11146,7 @@ def get_month_totals_batch():
         return jsonify({'status': 'success', 'data': result_data})
         
     except Exception as e:
-        app.logger.error(f"[get_month_totals_batch] Error: {e}")
+        log_error(app.logger, 'EXPENSE', f"[get_month_totals_batch] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
 
 
@@ -11219,7 +11228,7 @@ def get_ca_balances_3m_batch():
         return jsonify({'status': 'success', 'data': result_data})
         
     except Exception as e:
-        app.logger.error(f"[get_ca_balances_3m_batch] Error: {e}")
+        log_error(app.logger, 'CREDIT', f"[get_ca_balances_3m_batch] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
 
 
@@ -11303,7 +11312,7 @@ def update_processed_status_month_range():
             return jsonify({'status': 'error', 'message': 'Failed to update entries'}), 500
 
     except Exception as e:
-        app.logger.error(f"Error in update_processed_status_month_range: {str(e)}", exc_info=True)
+        log_exception(app.logger, 'ENTRY', f"Error in update_processed_status_month_range: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 ########################################################################################
@@ -11329,7 +11338,7 @@ def dashboard_m():
                 if cached:
                     user_data = json.loads(cached)
             except Exception as e:
-                app.logger.error(f"[REDIS ERROR] dashboard_m user settings: {str(e)}")
+                log_error(app.logger, 'REDIS', f"dashboard_m user settings: {str(e)}")
         
         # Fallback to MySQL
         if not user_data:
@@ -11688,7 +11697,7 @@ def dashboard_y():
                 if cached:
                     user_data = json.loads(cached)
             except Exception as e:
-                app.logger.error(f"[REDIS ERROR] dashboard_y user settings: {str(e)}")
+                log_error(app.logger, 'REDIS', f"dashboard_y user settings: {str(e)}")
         
         # Fallback to MySQL
         if not user_data:
@@ -12025,7 +12034,7 @@ def dashboard_summary():
             if cached:
                 user_data = json.loads(cached)
         except Exception as e:
-            app.logger.error(f"[REDIS ERROR] dashboard_summary user settings: {str(e)}")
+            log_error(app.logger, 'REDIS', f"dashboard_summary user settings: {str(e)}")
     
     if not user_data:
         with get_db_pool().get_connection() as conn:
@@ -12737,7 +12746,7 @@ def bank_accounts():
         currency_symbols = {'USD': '$', 'EUR': '\u20ac'}
         currency_symbol = currency_symbols.get(currency_type, currency_type)
     except Exception as e:
-        app.logger.error(f"Error loading Quiltt data for bank_accounts: {e}")
+        log_error(app.logger, 'PROFILE', f"Error loading Quiltt data for bank_accounts: {e}")
 
     last_txn_date = get_quiltt_last_transaction_date(current_user.id)
 
@@ -12769,7 +12778,7 @@ def register_device_token():
     try:
         upsert_device_token(current_user.id, device_token, platform, device_info)
     except Exception as exc:
-        app.logger.error(f"Failed to register device token for user {current_user.id}: {exc}")
+        log_error(app.logger, 'AUTH', f"Failed to register device token for user {current_user.id}: {exc}")
         return jsonify({'success': False, 'error': 'server_error'}), 500
 
     return jsonify({'success': True})
@@ -12788,7 +12797,7 @@ def unregister_device_token():
     try:
         remove_device_token(current_user.id, device_token)
     except Exception as exc:
-        app.logger.error(f"Failed to unregister device token for user {current_user.id}: {exc}")
+        log_error(app.logger, 'AUTH', f"Failed to unregister device token for user {current_user.id}: {exc}")
         return jsonify({'success': False, 'error': 'server_error'}), 500
 
     return jsonify({'success': True})
@@ -13112,17 +13121,17 @@ def confirm_transaction():
     entry_type = data.get('entry_type')
     category_id = data.get('category_id')
     
-    app.logger.info(f"[CONFIRM TXN] === START === txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}, user_id={current_user.id}")
+    log_info(app.logger, 'CONFIRM_TXN', f"=== START === txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}, user_id={current_user.id}")
     
     if not all([transaction_id, entry_id, entry_type, category_id]):
-        app.logger.warning(f"[CONFIRM TXN] Missing required fields: txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}")
+        log_warning(app.logger, 'CONFIRM_TXN', f"Missing required fields: txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}")
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
     
     try:
         entry_id = int(entry_id)
         category_id = int(category_id)
     except ValueError:
-        app.logger.warning(f"[CONFIRM TXN] Invalid ID format: entry_id={entry_id}, category_id={category_id}")
+        log_warning(app.logger, 'CONFIRM_TXN', f"Invalid ID format: entry_id={entry_id}, category_id={category_id}")
         return jsonify({'status': 'error', 'message': 'Invalid ID format'}), 400
     
     # Determine the Redis key based on entry type
@@ -13154,18 +13163,18 @@ def confirm_transaction():
         # Get entries from Redis
         cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
         if not cached:
-            app.logger.warning(f"[CONFIRM TXN] No cached data for key {redis_key}")
+            log_warning(app.logger, 'CONFIRM_TXN', f"No cached data for key {redis_key}")
             return jsonify({'status': 'error', 'message': 'No entries found'}), 404
         
         entries = json.loads(cached)
         
         # Log all pending entries before we modify anything
         pending_entries = [e for e in entries if e.get('pending') == 1]
-        app.logger.info(f"[CONFIRM TXN] Total entries in Redis: {len(entries)}, pending entries: {len(pending_entries)}")
+        log_info(app.logger, 'CONFIRM_TXN', f"Total entries in Redis: {len(entries)}, pending entries: {len(pending_entries)}")
         for pe in pending_entries:
-            app.logger.info(f"[CONFIRM TXN]   Pending entry: id={pe.get('id')} (type={type(pe.get('id')).__name__}), cat={pe.get('category_id')}, amount={pe.get('amount')}, date={pe.get('date')}, auto_confirmed={pe.get('auto_confirmed')}")
+            log_info(app.logger, 'CONFIRM_TXN', f"Pending entry: id={pe.get('id')} (type={type(pe.get('id')).__name__}), cat={pe.get('category_id')}, amount={pe.get('amount')}, date={pe.get('date')}, auto_confirmed={pe.get('auto_confirmed')}")
         
-        app.logger.info(f"[CONFIRM TXN] Looking for entry_id={entry_id} (type={type(entry_id).__name__})")
+        log_info(app.logger, 'CONFIRM_TXN', f"Looking for entry_id={entry_id} (type={type(entry_id).__name__})")
         
         # Find and update the entry
         found = False
@@ -13178,7 +13187,7 @@ def confirm_transaction():
         for entry in entries:
             if entry.get('id') == entry_id:
                 match_count += 1
-                app.logger.info(f"[CONFIRM TXN] MATCH #{match_count}: entry id={entry.get('id')}, cat={entry.get('category_id')}, amount={entry.get('amount')}, pending={entry.get('pending')}")
+                log_info(app.logger, 'CONFIRM_TXN', f"MATCH #{match_count}: entry id={entry.get('id')}, cat={entry.get('category_id')}, amount={entry.get('amount')}, pending={entry.get('pending')}")
                 old_category_id = entry.get('category_id')
                 was_auto_confirmed = entry.get('auto_confirmed', 0) == 1
                 entry['category_id'] = category_id
@@ -13190,21 +13199,21 @@ def confirm_transaction():
                 found = True
                 break
         
-        app.logger.info(f"[CONFIRM TXN] Match result: found={found}, match_count={match_count}, old_cat={old_category_id}, new_cat={category_id}")
+        log_info(app.logger, 'CONFIRM_TXN', f"Match result: found={found}, match_count={match_count}, old_cat={old_category_id}, new_cat={category_id}")
         
         if not found:
-            app.logger.warning(f"[CONFIRM TXN] Entry {entry_id} NOT FOUND in {len(entries)} entries")
+            log_warning(app.logger, 'CONFIRM_TXN', f"Entry {entry_id} NOT FOUND in {len(entries)} entries")
             return jsonify({'status': 'error', 'message': 'Entry not found'}), 404
         
         # Log pending entries AFTER the update
         pending_after = [e for e in entries if e.get('pending') == 1]
-        app.logger.info(f"[CONFIRM TXN] After update: pending entries remaining: {len(pending_after)}")
+        log_info(app.logger, 'CONFIRM_TXN', f"After update: pending entries remaining: {len(pending_after)}")
         for pe in pending_after:
-            app.logger.info(f"[CONFIRM TXN]   Still pending: id={pe.get('id')}, cat={pe.get('category_id')}, amount={pe.get('amount')}")
+            log_info(app.logger, 'CONFIRM_TXN', f"Still pending: id={pe.get('id')}, cat={pe.get('category_id')}, amount={pe.get('amount')}")
         
         # Save back to Redis
         _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-        app.logger.info(f"[CONFIRM TXN] Saved {len(entries)} entries back to Redis key {redis_key}")
+        log_info(app.logger, 'CONFIRM_TXN', f"Saved {len(entries)} entries back to Redis key {redis_key}")
         
         # Mark as dirty
         dirty_key = f"dirty_tables:{current_user.id}"
@@ -13221,7 +13230,7 @@ def confirm_transaction():
                 if was_auto_confirmed and old_category_id and old_category_id != category_id:
                     old_recurring_info = _get_recurring_info_from_redis(recurring_table, current_user.id, old_category_id)
                     if old_recurring_info:
-                        app.logger.info(f"[CONFIRM TXN] Restoring bucket for old category {old_category_id}")
+                        log_info(app.logger, 'CONFIRM_TXN', f"Restoring bucket for old category {old_category_id}")
                         # Restore bucket (add back the amount)
                         restore_bucket_for_category_change(
                             bucket_table, old_category_id, entry_date,
@@ -13232,13 +13241,13 @@ def confirm_transaction():
                 if not was_auto_confirmed or old_category_id != category_id:
                     new_recurring_info = _get_recurring_info_from_redis(recurring_table, current_user.id, category_id)
                     if new_recurring_info:
-                        app.logger.info(f"[CONFIRM TXN] Category {category_id} is recurring, processing bucket reduction")
+                        log_info(app.logger, 'CONFIRM_TXN', f"Category {category_id} is recurring, processing bucket reduction")
                         process_manual_entry_with_bucket(
                             table_name, category_id, entry_date,
                             entry_amount, current_user.id, new_recurring_info
                         )
         except Exception as e:
-            app.logger.error(f"[CONFIRM TXN] Error processing bucket reduction: {e}")
+            log_error(app.logger, 'CONFIRM_TXN', f"Error processing bucket reduction: {e}")
             # Continue even if bucket processing fails
         
         # Check if all pending transactions are now confirmed and clear notification
@@ -13259,9 +13268,9 @@ def confirm_transaction():
                     category_type=entry_type,
                     account_id=txn_record.get('account_id') if entry_type in ('c_expense', 'c_payment') else None
                 )
-                app.logger.info(f"[CONFIRM TXN] Saved category memory: merchant_id={txn_record.get('ntropy_merchant_id')}, desc={txn_record.get('description', '')[:50]}, cat={category_id}, type={entry_type}")
+                log_info(app.logger, 'CONFIRM_TXN', f"Saved category memory: merchant_id={txn_record.get('ntropy_merchant_id')}, desc={txn_record.get('description', '')[:50]}, cat={category_id}, type={entry_type}")
         except Exception as mem_err:
-            app.logger.warning(f"[CONFIRM TXN] Failed to save category memory: {mem_err}")
+            log_warning(app.logger, 'CONFIRM_TXN', f"Failed to save category memory: {mem_err}")
         # --- END SAVE CATEGORY MEMORY ---
         
         # Recalculate totals, remainders, savings, and credit balances
@@ -13271,14 +13280,14 @@ def confirm_transaction():
             if entry_type == 'c_expense':
                 save_ca_daily_balance()
         except Exception as e:
-            app.logger.error(f"[CONFIRM TXN] Error recalculating totals/balances: {e}")
+            log_error(app.logger, 'CONFIRM_TXN', f"Error recalculating totals/balances: {e}")
             # Continue even if recalc fails - the entry is already confirmed
         
-        app.logger.info(f"[CONFIRM TXN] === DONE === txn_id={transaction_id}, entry_id={entry_id}, category_id={category_id}")
+        log_info(app.logger, 'CONFIRM_TXN', f"=== DONE === txn_id={transaction_id}, entry_id={entry_id}, category_id={category_id}")
         return jsonify({'status': 'success'})
         
     except Exception as e:
-        app.logger.error(f"[CONFIRM TXN] Error confirming transaction: {e}", exc_info=True)
+        log_exception(app.logger, 'CONFIRM_TXN', f"Error confirming transaction: {e}")
         return jsonify({'status': 'error', 'message': 'Internal error'}), 500
 
 
@@ -13373,13 +13382,13 @@ def confirm_all_transactions():
                         recurring_table, current_user.id, reduction['category_id']
                     )
                     if recurring_info and reduction['date'] and reduction['amount']:
-                        app.logger.info(f"[CONFIRM ALL] Category {reduction['category_id']} is recurring, processing bucket")
+                        log_info(app.logger, 'CONFIRM_ALL', f"Category {reduction['category_id']} is recurring, processing bucket")
                         process_manual_entry_with_bucket(
                             table_name, reduction['category_id'], reduction['date'],
                             reduction['amount'], current_user.id, recurring_info
                         )
                 except Exception as e:
-                    app.logger.error(f"[CONFIRM ALL] Error processing bucket reduction: {e}")
+                    log_error(app.logger, 'CONFIRM_ALL', f"Error processing bucket reduction: {e}")
                     # Continue even if bucket processing fails
         
         # --- SAVE CATEGORY MEMORY FOR ALL CONFIRMED TRANSACTIONS ---
@@ -13399,7 +13408,7 @@ def confirm_all_transactions():
                         account_id=txn_record.get('account_id') if mapping['entry_type'] in ('c_expense', 'c_payment') else None
                     )
         except Exception as mem_err:
-            app.logger.warning(f"[CONFIRM ALL] Failed to save category memory: {mem_err}")
+            log_warning(app.logger, 'CONFIRM_ALL', f"Failed to save category memory: {mem_err}")
         # --- END SAVE CATEGORY MEMORY ---
         
         # Check if all pending transactions are now confirmed and clear notification
@@ -13414,13 +13423,13 @@ def confirm_all_transactions():
             if has_c_expense:
                 save_ca_daily_balance()
         except Exception as e:
-            app.logger.error(f"[CONFIRM ALL] Error recalculating totals/balances: {e}")
+            log_error(app.logger, 'CONFIRM_ALL', f"Error recalculating totals/balances: {e}")
             # Continue even if recalc fails - entries are already confirmed
         
         return jsonify({'status': 'success'})
         
     except Exception as e:
-        app.logger.error(f"Error confirming all transactions: {e}", exc_info=True)
+        log_exception(app.logger, 'CONFIRM_TXN', f"Error confirming all transactions: {e}")
         return jsonify({'status': 'error', 'message': 'Internal error'}), 500
 
 
@@ -13517,7 +13526,7 @@ def delete_reconnect_notifications():
         conn.commit()
         cursor.close()
     
-    app.logger.info(f"Deleted {deleted_count} reconnect notification(s) for connection {connection_id}, user {current_user.id}")
+    log_info(app.logger, 'NOTIFICATION', f"Deleted {deleted_count} reconnect notification(s) for connection {connection_id}, user {current_user.id}")
     
     # Invalidate Redis cache so reload reflects the deletion
     if app.config.get('REDIS_OK'):
@@ -13617,7 +13626,7 @@ def check_quiltt_reconnect():
             'connections': needs_reconnect
         })
     except Exception as e:
-        app.logger.error(f"Error checking Quiltt reconnect status: {e}")
+        log_error(app.logger, 'QUILTT', f"Error checking Quiltt reconnect status: {e}")
         return jsonify({'needs_reconnect': False, 'connections': []})
 
 
@@ -13664,7 +13673,7 @@ def manage_categories():
             if cached:
                 user_data = json.loads(cached)
         except Exception as e:
-            app.logger.error(f"[REDIS ERROR] manage_categories user data: {str(e)}")
+            log_error(app.logger, 'REDIS', f"manage_categories user data: {str(e)}")
 
     if not user_data:
         with get_db_pool().get_connection() as conn:
@@ -13712,7 +13721,7 @@ def settings():
                 if cached:
                     user_data = json.loads(cached)
             except Exception as e:
-                app.logger.error(f"[REDIS ERROR] settings user data: {str(e)}")
+                log_error(app.logger, 'REDIS', f"settings user data: {str(e)}")
         
         # Fallback to MySQL
         if not user_data:
@@ -13762,7 +13771,7 @@ def update_email_notifications():
         _update_user_setting_in_redis(current_user.id, 'email_notifications', email_notifications)
         return jsonify({'status': 'success'})
     except Exception as e:
-        app.logger.error(f"Error updating email notifications: {str(e)}")
+        log_error(app.logger, 'NOTIFICATION', f"Error updating email notifications: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/update_goofy_week_mode', methods=['POST'])
@@ -13803,7 +13812,7 @@ def update_profile_picture():
                 if cached:
                     user_data = json.loads(cached)
             except Exception as e:
-                app.logger.error(f"[REDIS ERROR] profile picture lookup: {str(e)}")
+                log_error(app.logger, 'REDIS', f"profile picture lookup: {str(e)}")
         
         # Fallback to MySQL if not in Redis
         if not user_data:
@@ -13855,7 +13864,7 @@ def update_profile_picture():
             # Save with optimization
             img.save(filepath, optimize=True, quality=85)
         except Exception as e:
-            app.logger.error(f"Error processing image: {str(e)}")
+            log_error(app.logger, 'PROFILE', f"Error processing image: {str(e)}")
             flash('Error processing image')
             return redirect(url_for('profile'))
 
@@ -13990,7 +13999,7 @@ def update_username():
     if email_sent:
         return redirect(url_for('profile', success='email_pending'))
     else:
-        app.logger.error(f"Failed to send verification email to {new_username}")
+        log_error(app.logger, 'PROFILE', f"Failed to send verification email to {new_username}")
         flash('Failed to send verification email. Please try again.')
         return redirect(url_for('profile'))
 
@@ -14042,7 +14051,7 @@ def resend_pending_email_verification():
         if email_sent:
             return redirect(url_for('profile', resend='success'))
         else:
-            app.logger.error(f"Failed to resend verification email to {pending_email}")
+            log_error(app.logger, 'EMAIL', f"Failed to resend verification email to {pending_email}")
             flash('Failed to resend verification email. Please try again later.')
             return redirect(url_for('profile'))
 
@@ -14076,7 +14085,7 @@ def cancel_pending_email_change():
             
         except Exception as e:
             conn.rollback()
-            app.logger.error(f"Error cancelling pending email change for user {current_user.id}: {e}")
+            log_error(app.logger, 'EMAIL', f"Error cancelling pending email change for user {current_user.id}: {e}")
             flash('Failed to cancel email change. Please try again.')
         
         finally:
@@ -14266,7 +14275,7 @@ def remove_profile_picture():
                 user_data = json.loads(cached)
                 profile_pic = user_data.get('profile_picture')
         except Exception as e:
-            app.logger.error(f"[REDIS ERROR] remove_profile_picture lookup: {str(e)}")
+            log_error(app.logger, 'REDIS', f"remove_profile_picture lookup: {str(e)}")
     
     # Fallback to MySQL if not in Redis
     if profile_pic is None:
@@ -14316,7 +14325,7 @@ def delete_user(username):
                 quiltt_client.delete_profile(quiltt_profile_id)
     except Exception as e:
         # Log but don't fail user deletion if Quiltt deletion fails
-        app.logger.error(f"Error deleting Quiltt profile for user {user_id}: {e}")
+        log_error(app.logger, 'PROFILE', f"Error deleting Quiltt profile for user {user_id}: {e}")
 
     # Dehydrate user data from Redis before deleting from MySQL
     if app.config.get('REDIS_OK'):
@@ -14901,7 +14910,7 @@ def delete_recurring_income():
         return jsonify({'status': 'success', 'message': 'Recurring income converted to regular category.'})
 
     except Exception as e:
-        app.logger.error(f"Error deleting recurring income: {e}")
+        log_error(app.logger, 'INCOME', f"Error deleting recurring income: {e}")
         return jsonify({'status': 'error', 'message': 'An error occurred while deleting the recurring income.'}), 500
 
 
@@ -14992,7 +15001,7 @@ def convert_to_recurring_income():
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Category converted to recurring successfully!'})
 
     except Exception as e:
-        app.logger.error(f"Error converting income to recurring: {e}")
+        log_error(app.logger, 'INCOME', f"Error converting income to recurring: {e}")
         return jsonify({'status': 'error', 'message': f'An error occurred: {str(e)}'}), 500
 
 
@@ -15498,7 +15507,7 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
     current_date = start_date
     end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
 
-    app.logger.info(f"[GEN_EXPENSE_ENTRIES] START: recurring_id={recurring_id}, cat_id={category_id}, amount={amount}, cadence={cadence_interval}/{cadence_unit}, start={start_date}, end={end_date}, monthly_days={monthly_days}, payment_account_id={payment_account_id}")
+    log_info(app.logger, 'GEN_EXPENSE_ENTRIES', f"START: recurring_id={recurring_id}, cat_id={category_id}, amount={amount}, cadence={cadence_interval}/{cadence_unit}, start={start_date}, end={end_date}, monthly_days={monthly_days}, payment_account_id={payment_account_id}")
     _gen_entries_count = 0
 
     while current_date <= end_date:
@@ -15540,7 +15549,7 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                     # Loop through each month from start_date to end_date
                     year = current_date.year
                     month = current_date.month
-                    app.logger.info(f"[GEN_EXPENSE_ENTRIES] Months loop start: year={year}, month={month}, monthly_days_cleaned={monthly_days_cleaned}")
+                    log_info(app.logger, 'GEN_EXPENSE_ENTRIES', f"Months loop start: year={year}, month={month}, monthly_days_cleaned={monthly_days_cleaned}")
                     while True:
                         for day in monthly_days_cleaned:
                             try:
@@ -15553,7 +15562,7 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                                         continue  # Skip invalid days
                                 entry_date = date(year=year, month=month, day=day_num)
                             except Exception as _ex:
-                                app.logger.error(f"[GEN_EXPENSE_ENTRIES] Exception in date creation: {_ex}")
+                                log_error(app.logger, 'GEN_EXPENSE_ENTRIES', f"Exception in date creation: {_ex}")
                                 continue
                             if entry_date < start_date:
                                 continue
@@ -15573,7 +15582,7 @@ def generate_expense_entries(recurring_id, category_id, amount, cadence_interval
                         # Stop if we've passed the end date's year and month
                         if (year > end_date.year) or (year == end_date.year and month > end_date.month):
                             break
-                    app.logger.info(f"[GEN_EXPENSE_ENTRIES] Months loop done: entries_created={_gen_entries_count}")
+                    log_info(app.logger, 'GEN_EXPENSE_ENTRIES', f"Months loop done: entries_created={_gen_entries_count}")
                 else:
                     # Default to the first day of each month
                     year = current_date.year
@@ -15745,7 +15754,7 @@ def delete_recurring_expense():
         return jsonify({'status': 'success', 'message': 'Recurring expense converted to regular category.'})
 
     except Exception as e:
-        app.logger.error(f"Error deleting recurring expense: {e}")
+        log_error(app.logger, 'EXPENSE', f"Error deleting recurring expense: {e}")
         return jsonify({'status': 'error', 'message': 'An error occurred while deleting the recurring expense.'}), 500
 
 
@@ -15842,7 +15851,7 @@ def convert_to_recurring_expense():
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Category converted to recurring successfully!'})
 
     except Exception as e:
-        app.logger.error(f"Error converting expense to recurring: {e}")
+        log_error(app.logger, 'EXPENSE', f"Error converting expense to recurring: {e}")
         return jsonify({'status': 'error', 'message': f'An error occurred: {str(e)}'}), 500
 
 
@@ -16646,7 +16655,7 @@ def delete_recurring_ca_expense():
         return jsonify({'status': 'success', 'message': 'Recurring category converted to regular category.'})
 
     except Exception as e:
-        app.logger.error(f"Error deleting recurring CA expense: {e}")
+        log_error(app.logger, 'EXPENSE', f"Error deleting recurring CA expense: {e}")
         return jsonify({'status': 'error', 'message': 'An error occurred while deleting the recurring CA expense.'}), 500
 
 
@@ -17203,7 +17212,7 @@ def add_notification(user_id, message, notification_date=None):
             user_name = user.get('first_name', 'User')
             send_notification_email(user['email'], user_name, message, notification_date)
         except Exception as e:
-            app.logger.error(f"Failed to send notification email to user {user_id}: {str(e)}")
+            log_error(app.logger, 'NOTIFICATION', f"Failed to send notification email to user {user_id}: {str(e)}")
 
     # Send APNs push notification if configured
     if apns_enabled():
@@ -17224,9 +17233,9 @@ def add_notification(user_id, message, notification_date=None):
                         try:
                             remove_device_token(user_id, token_value)
                         except Exception as cleanup_err:
-                            app.logger.warning(f"Failed to prune invalid token for user {user_id}: {cleanup_err}")
+                            log_warning(app.logger, 'NOTIFICATION', f"Failed to prune invalid token for user {user_id}: {cleanup_err}")
         except Exception as push_err:
-            app.logger.warning(f"APNs push failed for user {user_id}: {push_err}")
+            log_warning(app.logger, 'NOTIFICATION', f"APNs push failed for user {user_id}: {push_err}")
     
     # Invalidate Redis cache so new notification appears on reload
     if app.config.get('REDIS_OK'):
@@ -17273,7 +17282,7 @@ def _create_pending_transactions_notification(user_id, new_count):
                 entries = json.loads(cached)
                 total_pending += sum(1 for e in entries if e.get('pending') == 1)
     except Exception as e:
-        app.logger.error(f"Error counting pending transactions: {e}")
+        log_error(app.logger, 'NOTIFICATION', f"Error counting pending transactions: {e}")
         # Use the new_count as fallback
         total_pending = new_count
     
@@ -17292,7 +17301,7 @@ def _create_pending_transactions_notification(user_id, new_count):
         conn.commit()
         cursor.close()
         if deleted_count > 0:
-            app.logger.info(f"Deleted {deleted_count} old pending transaction notification(s) for user {user_id}")
+            log_info(app.logger, 'NOTIFICATION', f"Deleted {deleted_count} old pending transaction notification(s) for user {user_id}")
             # Invalidate Redis cache after deleting old notifications
             if app.config.get('REDIS_OK'):
                 try:
@@ -17307,7 +17316,7 @@ def _create_pending_transactions_notification(user_id, new_count):
     
     # Create new notification
     add_notification(user_id, message)
-    app.logger.info(f"Created pending transactions notification for user {user_id}: {total_pending} pending")
+    log_info(app.logger, 'NOTIFICATION', f"Created pending transactions notification for user {user_id}: {total_pending} pending")
 
 
 def _clear_pending_transactions_notification_if_none(user_id):
@@ -17346,7 +17355,7 @@ def _clear_pending_transactions_notification_if_none(user_id):
                 entries = json.loads(cached)
                 total_pending += sum(1 for e in entries if e.get('pending') == 1)
     except Exception as e:
-        app.logger.error(f"Error counting pending transactions for cleanup: {e}")
+        log_error(app.logger, 'NOTIFICATION', f"Error counting pending transactions for cleanup: {e}")
         return False
     
     if total_pending > 0:
@@ -17365,7 +17374,7 @@ def _clear_pending_transactions_notification_if_none(user_id):
             conn.commit()
             cursor.close()
             if deleted_count > 0:
-                app.logger.info(f"Cleared pending transaction notification for user {user_id} (no pending left)")
+                log_info(app.logger, 'NOTIFICATION', f"Cleared pending transaction notification for user {user_id} (no pending left)")
                 # Invalidate Redis cache after deleting notification
                 if app.config.get('REDIS_OK'):
                     try:
@@ -17374,7 +17383,7 @@ def _clear_pending_transactions_notification_if_none(user_id):
                         pass
                 return True
     except Exception as e:
-        app.logger.error(f"Error deleting pending transaction notification: {e}")
+        log_error(app.logger, 'NOTIFICATION', f"Error deleting pending transaction notification: {e}")
     
     return False
 
@@ -17444,7 +17453,7 @@ def check_negative_remainders(user_id):
         conn.commit()
         cursor.close()
         if deleted_count > 0:
-            app.logger.info(f"Deleted {deleted_count} old negative remainder notification(s) for user {user_id}")
+            log_info(app.logger, 'NOTIFICATION', f"Deleted {deleted_count} old negative remainder notification(s) for user {user_id}")
             # Invalidate Redis cache after deleting old notifications
             if app.config.get('REDIS_OK'):
                 try:
@@ -17457,9 +17466,9 @@ def check_negative_remainders(user_id):
     message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
     try:
         notification_id = add_notification(user_id, message)
-        app.logger.info(f"Created negative remainder notification for user {user_id}: {formatted_date}")
+        log_info(app.logger, 'NOTIFICATION', f"Created negative remainder notification for user {user_id}: {formatted_date}")
     except Exception as e:
-        app.logger.error(f"[NOTIFICATIONS] Error creating notification: {e}")
+        log_error(app.logger, 'NOTIFICATION', f"Error creating notification: {e}")
 
 def check_and_hide_bud_category(bud_id):
     """
@@ -18743,7 +18752,7 @@ def add_credit_account():
     
     temp_account_id = _add_credit_account_to_redis(current_user.id, account_data)
     if temp_account_id is None:
-        app.logger.error("[REDIS ERROR] Failed to add credit account to Redis, falling back to MySQL")
+        log_error(app.logger, 'REDIS', "Failed to add credit account to Redis, falling back to MySQL")
         # Fallback to MySQL if Redis fails
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -19012,10 +19021,10 @@ def add_credit_account():
                         
                         
                 except Exception as payment_err:
-                    app.logger.error(f"[ADD CREDIT ACCOUNT] Error generating c_payment_entries: {payment_err}")
+                    log_error(app.logger, 'ADD_CREDIT_ACCOUNT', f"Error generating c_payment_entries: {payment_err}")
             
         except Exception as e:
-            app.logger.error(f"[ADD CREDIT ACCOUNT] Error creating recurring payment: {e}")
+            log_error(app.logger, 'ADD_CREDIT_ACCOUNT', f"Error creating recurring payment: {e}")
     
     # Insert c_expense_entry for starting balance if provided
     if starting_balance and float(starting_balance) != 0.0:
@@ -19064,17 +19073,17 @@ def add_credit_account():
                 from redis_manager import flush_dirty_tables_for_user
                 flush_dirty_tables_for_user(current_user.id)
             except Exception as flush_err:
-                app.logger.error(f"Error during forced flush: {flush_err}")
+                log_error(app.logger, 'REDIS', f"Error during forced flush: {flush_err}")
             
             # Recalculate CA balances from scratch (same as when adding entries in dashboard)
             try:
                 pass
                 save_ca_daily_balance()
             except Exception as balance_err:
-                app.logger.error(f"Error recalculating CA balances for starting balance: {balance_err}")
+                log_error(app.logger, 'CREDIT', f"Error recalculating CA balances for starting balance: {balance_err}")
             
         except Exception as e:
-            app.logger.error(f"Error adding starting balance entry to Redis: {e}")
+            log_error(app.logger, 'REDIS', f"Error adding starting balance entry to Redis: {e}")
     
     # Recalculate totals and remainders for the new expense entries (if recurring payment was set up)
     if recurring_payment:
@@ -19082,7 +19091,7 @@ def add_credit_account():
             pass
             save_totals_remainders_d()
         except Exception as totals_err:
-            app.logger.error(f"Error recalculating totals for recurring payment: {totals_err}")
+            log_error(app.logger, 'CREDIT', f"Error recalculating totals for recurring payment: {totals_err}")
     
     # Note: We return the account_id after flush, so it should have the real MySQL ID now
     # The frontend can use this immediately
@@ -19239,7 +19248,7 @@ def update_credit_account():
             _update_recurring_in_redis('recurring_expense', current_user.id, recurring_data)
             
             recurring_id = recurring_data.get('id')
-            app.logger.info(f"[UPDATE_CREDIT_ACCT] recurring_id={recurring_id}, payment_category_id={payment_category_id}, account_id={account_id}, start_date={start_date}, end_date={end_date}, monthly_days={monthly_days}, payment_amount={payment_amount}")
+            log_info(app.logger, 'UPDATE_CREDIT_ACCT', f"recurring_id={recurring_id}, payment_category_id={payment_category_id}, account_id={account_id}, start_date={start_date}, end_date={end_date}, monthly_days={monthly_days}, payment_amount={payment_amount}")
             if recurring_id:
                 try:
                     generate_expense_entries(
@@ -19256,9 +19265,9 @@ def update_credit_account():
                         yearly_month=None,
                         user_id=current_user.id
                     )
-                    app.logger.info(f"[UPDATE_CREDIT_ACCT] generate_expense_entries completed successfully")
+                    log_info(app.logger, 'UPDATE_CREDIT_ACCT', f"generate_expense_entries completed successfully")
                 except Exception as gen_err:
-                    app.logger.error(f"[UPDATE_CREDIT_ACCT] generate_expense_entries FAILED: {gen_err}", exc_info=True)
+                    log_exception(app.logger, 'UPDATE_CREDIT_ACCT', f"generate_expense_entries FAILED: {gen_err}")
                 
                 # Also generate c_payment_entries for the same dates
                 try:
@@ -19291,11 +19300,11 @@ def update_credit_account():
                             break
                     
                     if payment_dates:
-                        app.logger.info(f"[UPDATE_CREDIT_ACCT] Creating {len(payment_dates)} c_payment_entries for account_id={account_id}, first_date={payment_dates[0]}, last_date={payment_dates[-1]}")
+                        log_info(app.logger, 'UPDATE_CREDIT_ACCT', f"Creating {len(payment_dates)} c_payment_entries for account_id={account_id}, first_date={payment_dates[0]}, last_date={payment_dates[-1]}")
                         payment_redis_key = f"c_payment_entries:v1:{current_user.id}"
                         cached = _redis_client.get(payment_redis_key)
                         payments = json.loads(cached) if cached else []
-                        app.logger.info(f"[UPDATE_CREDIT_ACCT] Existing c_payment_entries in Redis: {len(payments)}")
+                        log_info(app.logger, 'UPDATE_CREDIT_ACCT', f"Existing c_payment_entries in Redis: {len(payments)}")
                         
                         existing_ids = [int(p.get('id', 0)) for p in payments]
                         min_id = min(existing_ids) if existing_ids else 0
@@ -19321,13 +19330,13 @@ def update_credit_account():
                         dirty_key = f"dirty_tables:{current_user.id}"
                         _redis_client.sadd(dirty_key, 'c_payment_entries')
                         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-                        app.logger.info(f"[UPDATE_CREDIT_ACCT] Saved {len(payments)} total c_payment_entries to Redis")
+                        log_info(app.logger, 'UPDATE_CREDIT_ACCT', f"Saved {len(payments)} total c_payment_entries to Redis")
                         
                     else:
-                        app.logger.warning(f"[UPDATE_CREDIT_ACCT] payment_dates is EMPTY, no c_payment_entries created")
+                        log_warning(app.logger, 'UPDATE_CREDIT_ACCT', f"payment_dates is EMPTY, no c_payment_entries created")
                         
                 except Exception as payment_err:
-                    app.logger.error(f"[UPDATE CREDIT ACCOUNT] Error generating c_payment_entries: {payment_err}", exc_info=True)
+                    log_exception(app.logger, 'UPDATE_CREDIT_ACCOUNT', f"Error generating c_payment_entries: {payment_err}")
             
             save_totals_remainders_d()
             
@@ -19430,7 +19439,7 @@ def update_credit_account():
                             
                             
                 except Exception as payment_err:
-                    app.logger.error(f"[UPDATE CREDIT ACCOUNT] Error deleting future c_payment_entries: {payment_err}")
+                    log_error(app.logger, 'UPDATE_CREDIT_ACCOUNT', f"Error deleting future c_payment_entries: {payment_err}")
                 
                 # Update category to not be recurring
                 for cat in expense_categories:
@@ -19483,7 +19492,7 @@ def update_credit_account():
         return jsonify({'status': 'success', 'message': 'Credit account updated successfully'})
         
     except Exception as e:
-        app.logger.error(f"Error updating credit account: {e}")
+        log_error(app.logger, 'CREDIT', f"Error updating credit account: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -19551,7 +19560,7 @@ def delete_credit_account():
         account_name = None
         actual_id_to_delete = None
         
-        app.logger.info(f"[DELETE_CA] Deleting credit account id={account_id} for user {current_user.id}")
+        log_info(app.logger, 'DELETE_CA', f"Deleting credit account id={account_id} for user {current_user.id}")
         
         # Delete from Redis first
         if app.config.get('REDIS_OK'):
@@ -19560,7 +19569,7 @@ def delete_credit_account():
             
             if cached:
                 accounts = json.loads(cached)
-                app.logger.info(f"[DELETE_CA] Found {len(accounts)} credit accounts in Redis: {[a.get('id') for a in accounts]}")
+                log_info(app.logger, 'DELETE_CA', f"Found {len(accounts)} credit accounts in Redis: {[a.get('id') for a in accounts]}")
                 
                 # First, try to find exact ID match
                 account_to_delete = None
@@ -19572,7 +19581,7 @@ def delete_credit_account():
                 # If not found and account_id is negative (temp ID), find by position
                 # The account may have been flushed and now has a real ID
                 if not account_to_delete and account_id < 0:
-                    app.logger.info(f"[DELETE_CA] Account {account_id} not found, checking MySQL for temp ID mapping")
+                    log_info(app.logger, 'DELETE_CA', f"Account {account_id} not found, checking MySQL for temp ID mapping")
                     # Get the account name from MySQL if it exists there
                     with get_db_pool().get_connection() as conn:
                         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -19601,12 +19610,12 @@ def delete_credit_account():
                 # This was causing wrong account deletions
                 
                 if not account_to_delete:
-                    app.logger.warning(f"[DELETE_CA] Account {account_id} not found in Redis")
+                    log_warning(app.logger, 'DELETE_CA', f"Account {account_id} not found in Redis")
                 
                 if account_to_delete:
                     account_name = account_to_delete.get('name')
                     actual_id_to_delete = account_to_delete.get('id')
-                    app.logger.info(f"[DELETE_CA] Found account to delete: id={actual_id_to_delete}, name={account_name}")
+                    log_info(app.logger, 'DELETE_CA', f"Found account to delete: id={actual_id_to_delete}, name={account_name}")
                     
                     # Remove from Redis array
                     filtered_accounts = [acc for acc in accounts if acc.get('id') != actual_id_to_delete]
@@ -19678,7 +19687,7 @@ def delete_credit_account():
                         before_count = len(balances)
                         filtered_balances = [b for b in balances if b.get('account_id') != actual_id_to_delete]
                         after_count = len(filtered_balances)
-                        app.logger.info(f"[DELETE_CA] c_a_balances: {before_count} -> {after_count} (removed {before_count - after_count} for account_id={actual_id_to_delete})")
+                        log_info(app.logger, 'DELETE_CA', f"c_a_balances: {before_count} -> {after_count} (removed {before_count - after_count} for account_id={actual_id_to_delete})")
                         _redis_client.setex(balances_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_balances, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'c_a_balances')
                     
@@ -19690,7 +19699,7 @@ def delete_credit_account():
                         before_count = len(balances_d)
                         filtered_balances_d = [b for b in balances_d if b.get('account_id') != actual_id_to_delete]
                         after_count = len(filtered_balances_d)
-                        app.logger.info(f"[DELETE_CA] c_a_balances_d: {before_count} -> {after_count} (removed {before_count - after_count} for account_id={actual_id_to_delete})")
+                        log_info(app.logger, 'DELETE_CA', f"c_a_balances_d: {before_count} -> {after_count} (removed {before_count - after_count} for account_id={actual_id_to_delete})")
                         _redis_client.setex(balances_d_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_balances_d, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'c_a_balances_d')
                     
@@ -19702,7 +19711,7 @@ def delete_credit_account():
                         before_count = len(balances_m)
                         filtered_balances_m = [b for b in balances_m if b.get('account_id') != actual_id_to_delete]
                         after_count = len(filtered_balances_m)
-                        app.logger.info(f"[DELETE_CA] c_a_balances_m: {before_count} -> {after_count} (removed {before_count - after_count} for account_id={actual_id_to_delete})")
+                        log_info(app.logger, 'DELETE_CA', f"c_a_balances_m: {before_count} -> {after_count} (removed {before_count - after_count} for account_id={actual_id_to_delete})")
                         _redis_client.setex(balances_m_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_balances_m, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'c_a_balances_m')
                     
@@ -19865,7 +19874,7 @@ def delete_credit_account():
 
         return jsonify({'status': 'success'})
     except Exception as e:
-        app.logger.error(f"Error deleting credit account: {e}")
+        log_error(app.logger, 'CREDIT', f"Error deleting credit account: {e}")
         return jsonify({'status': 'error', 'message': str(e)})
 
 @app.route('/get-credit-account-status', methods=['POST'])
@@ -19896,7 +19905,7 @@ def get_credit_account_status():
         return jsonify({'flushed': True})
         
     except Exception as e:
-        app.logger.error(f"Error checking credit account status: {e}")
+        log_error(app.logger, 'CREDIT', f"Error checking credit account status: {e}")
         return jsonify({'flushed': True})  # Default to flushed to prevent infinite loop
 
 
@@ -19917,7 +19926,7 @@ def cleanup_on_exit():
         shutdown_redis_manager()
         dispose_db_pool()
     except Exception as e:
-        app.logger.error(f"Error during cleanup: {e}")
+        log_error(app.logger, 'REDIS', f"Error during cleanup: {e}")
 
 
 ##############################################################################
@@ -19950,7 +19959,7 @@ def quiltt_settings():
            (profile['session_expires_at'] and profile['session_expires_at'] < datetime.now()):
             
             # Create new session token
-            app.logger.info(f"[QUILTT-META] Sending user_id={current_user.id} in metadata (create_session_token)")
+            log_info(app.logger, 'QUILTT_META', f"Sending user_id={current_user.id} in metadata (create_session_token)")
             result = quiltt_client.create_session_token(
                 current_user.id,
                 metadata={
@@ -20087,7 +20096,7 @@ def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
         
         if not profile or not profile.get('profile_id'):
             # No profile - nothing to refresh
-            app.logger.debug(f"No Quiltt profile for user {user_id}, skipping session refresh")
+            log_info(app.logger, 'QUILTT', f"No Quiltt profile for user {user_id}, skipping session refresh")
             return True
         
         # Check if cached token is still valid (with 5-minute buffer)
@@ -20107,11 +20116,11 @@ def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
                 if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
                     expires_at = expires_at.replace(tzinfo=None)
                 if expires_at > now + timedelta(minutes=5):
-                    app.logger.debug(f"Reusing cached Quiltt session token for user {user_id} (expires {expires_at})")
+                    log_info(app.logger, 'QUILTT', f"Reusing cached Quiltt session token for user {user_id} (expires {expires_at})")
                     return True
         
         # Need a fresh token
-        app.logger.info(f"[QUILTT-META] Sending user_id={user_id} in metadata (refresh_session_token)")
+        log_info(app.logger, 'QUILTT_META', f"Sending user_id={user_id} in metadata (refresh_session_token)")
         result = quiltt_client.refresh_session_token(
             profile['profile_id'],
             metadata={
@@ -20122,7 +20131,7 @@ def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
         )
         
         if not result or not result.get('token'):
-            app.logger.warning(f"Failed to refresh Quiltt session token for user {user_id}")
+            log_warning(app.logger, 'QUILTT', f"Failed to refresh Quiltt session token for user {user_id}")
             return False
         
         session_token = result['token']
@@ -20143,11 +20152,11 @@ def _refresh_quiltt_session_token(user_id: int, username: str) -> bool:
         }
         update_quiltt_profile(profile_data, user_id)
         
-        app.logger.info(f"Refreshed Quiltt session token for user {user_id}")
+        log_info(app.logger, 'QUILTT', f"Refreshed Quiltt session token for user {user_id}")
         return True
         
     except Exception as e:
-        app.logger.error(f"Error refreshing Quiltt session token for user {user_id}: {e}")
+        log_error(app.logger, 'QUILTT', f"Error refreshing Quiltt session token for user {user_id}: {e}")
         return False
 
 
@@ -20181,7 +20190,7 @@ def get_quiltt_session_token():
                     expires_at = expires_at.replace(tzinfo=None)
                 # Reuse token if it has at least 5 minutes left
                 if expires_at > now + timedelta(minutes=5):
-                    app.logger.info(f"Reusing cached Quiltt session token for user {current_user.id} (expires {expires_at})")
+                    log_info(app.logger, 'QUILTT', f"Reusing cached Quiltt session token for user {current_user.id} (expires {expires_at})")
                     return jsonify({
                         'status': 'success',
                         'session_token': profile['session_token']
@@ -20190,7 +20199,7 @@ def get_quiltt_session_token():
         # Need a fresh token
         if profile and profile.get('profile_id'):
             # Existing profile - refresh token
-            app.logger.info(f"[QUILTT-META] Sending user_id={current_user.id} in metadata (refresh via get-session-token)")
+            log_info(app.logger, 'QUILTT_META', f"Sending user_id={current_user.id} in metadata (refresh via get-session-token)")
             result = quiltt_client.refresh_session_token(
                 profile['profile_id'],
                 metadata={
@@ -20201,7 +20210,7 @@ def get_quiltt_session_token():
             )
         else:
             # New profile - create token
-            app.logger.info(f"[QUILTT-META] Sending user_id={current_user.id} in metadata (create via get-session-token)")
+            log_info(app.logger, 'QUILTT_META', f"Sending user_id={current_user.id} in metadata (create via get-session-token)")
             result = quiltt_client.create_session_token(
                 current_user.id,
                 metadata={
@@ -20212,7 +20221,7 @@ def get_quiltt_session_token():
             )
         
         if not result or not result.get('token'):
-            app.logger.error("Failed to get Quiltt session token")
+            log_error(app.logger, 'QUILTT', "Failed to get Quiltt session token")
             return jsonify({
                 'status': 'error',
                 'message': 'Failed to generate session token'
@@ -20245,7 +20254,7 @@ def get_quiltt_session_token():
         })
             
     except Exception as e:
-        app.logger.error(f"Error generating Quiltt session token: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error generating Quiltt session token: {e}")
         return jsonify({
             'status': 'error',
             'message': 'Internal server error'
@@ -20344,7 +20353,7 @@ def quiltt_reconnect():
         return jsonify({'status': 'success'})
         
     except Exception as e:
-        app.logger.error(f"Error reconnecting Quiltt connection: {e}")
+        log_error(app.logger, 'QUILTT', f"Error reconnecting Quiltt connection: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -20400,7 +20409,7 @@ def quiltt_disconnect():
             return jsonify({'status': 'error', 'message': 'Failed to disconnect'}), 500
             
     except Exception as e:
-        app.logger.error(f"Error disconnecting Quiltt connection: {e}")
+        log_error(app.logger, 'QUILTT', f"Error disconnecting Quiltt connection: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -20426,17 +20435,17 @@ def quiltt_cancel_connector():
                         try:
                             quiltt_client.disconnect_connection(session_token, conn_id)
                         except Exception as e:
-                            app.logger.warning(f"[CANCEL_CONNECTOR] API disconnect failed for {conn_id}: {e}")
+                            log_warning(app.logger, 'CANCEL_CONNECTOR', f"API disconnect failed for {conn_id}: {e}")
                     delete_quiltt_connection(conn_id, user_id)
                     deleted += 1
-            app.logger.info(f"[CANCEL_CONNECTOR] Deleted {deleted} connections for user {user_id}")
+            log_info(app.logger, 'CANCEL_CONNECTOR', f"Deleted {deleted} connections for user {user_id}")
             # delete_quiltt_connection auto-deletes profile when last connection is removed
         else:
             # No connections — delete profile directly
             profile = get_quiltt_profile(user_id)
             if profile and profile.get('profile_id'):
                 profile_id = profile['profile_id']
-                app.logger.info(f"[CANCEL_CONNECTOR] Deleting Quiltt profile {profile_id} for user {user_id}")
+                log_info(app.logger, 'CANCEL_CONNECTOR', f"Deleting Quiltt profile {profile_id} for user {user_id}")
                 quiltt_client.delete_profile(profile_id)
 
                 with get_db_pool().get_connection() as conn:
@@ -20448,7 +20457,7 @@ def quiltt_cancel_connector():
                 profiles_key = f"quiltt_profiles:v1:{user_id}"
                 _redis_client.delete(profiles_key)
             else:
-                app.logger.info(f"[CANCEL_CONNECTOR] No profile found for user {user_id}")
+                log_info(app.logger, 'CANCEL_CONNECTOR', f"No profile found for user {user_id}")
 
         # Clean up any disconnect/reconnect notifications from webhooks
         try:
@@ -20468,13 +20477,13 @@ def quiltt_cancel_connector():
             from redis_manager import flush_dirty_tables_for_user
             flush_dirty_tables_for_user(user_id)
         except Exception as flush_err:
-            app.logger.warning(f"[CANCEL_CONNECTOR] Flush error (non-fatal): {flush_err}")
+            log_warning(app.logger, 'CANCEL_CONNECTOR', f"Flush error (non-fatal): {flush_err}")
 
-        app.logger.info(f"[CANCEL_CONNECTOR] Cleanup complete for user {user_id}")
+        log_info(app.logger, 'CANCEL_CONNECTOR', f"Cleanup complete for user {user_id}")
         return jsonify({'status': 'success'})
 
     except Exception as e:
-        app.logger.error(f"[CANCEL_CONNECTOR] Error: {e}", exc_info=True)
+        log_exception(app.logger, 'CANCEL_CONNECTOR', f"Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -20488,7 +20497,7 @@ def quiltt_delete():
     
     
     if not connection_id:
-        app.logger.error("DELETE FAILED - Missing connection_id in request")
+        log_error(app.logger, 'QUILTT', "DELETE FAILED - Missing connection_id in request")
         return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
     
     try:
@@ -20498,7 +20507,7 @@ def quiltt_delete():
         
         # If not in Redis, try direct MySQL
         if connections is None:
-            app.logger.info(f"Connections not in Redis cache, fetching from MySQL for user {current_user.id}")
+            log_info(app.logger, 'QUILTT', f"Connections not in Redis cache, fetching from MySQL for user {current_user.id}")
             connections = get_quiltt_connections(current_user.id)
         
         connection = None
@@ -20509,18 +20518,18 @@ def quiltt_delete():
         
         if not connection:
             # Connection might have already been deleted - return success to clean up UI
-            app.logger.warning(f"DELETE - Connection {connection_id} not found for user {current_user.id}, may already be deleted")
+            log_warning(app.logger, 'QUILTT', f"DELETE - Connection {connection_id} not found for user {current_user.id}, may already be deleted")
             return jsonify({'status': 'success', 'message': 'Connection already deleted'})
         
         # Disconnect from Quiltt API to prevent it from coming back on next sync
         profile = get_quiltt_profile(current_user.id)
         if profile and profile.get('session_token'):
             try:
-                app.logger.info(f"[DELETE] Disconnecting connection {connection_id} from Quiltt API")
+                log_info(app.logger, 'DELETE', f"Disconnecting connection {connection_id} from Quiltt API")
                 quiltt_client.disconnect_connection(profile['session_token'], connection_id)
-                app.logger.info(f"[DELETE] Successfully disconnected from Quiltt API")
+                log_info(app.logger, 'DELETE', f"Successfully disconnected from Quiltt API")
             except Exception as e:
-                app.logger.warning(f"[DELETE] Failed to disconnect from Quiltt API: {e}, continuing with local delete")
+                log_warning(app.logger, 'DELETE', f"Failed to disconnect from Quiltt API: {e}, continuing with local delete")
         
         # Before deleting, get all accounts for this connection to update credit accounts
         quiltt_accounts = get_quiltt_accounts(current_user.id)
@@ -20558,31 +20567,31 @@ def quiltt_delete():
                 _redis_client.sadd(dirty_key, 'credit_accounts')
                 _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                 
-                app.logger.info(f"Set is_quiltt=0 and cleared quiltt_account_id for {updated_count} credit accounts after deleting connection {connection_id}")
+                log_info(app.logger, 'QUILTT', f"Set is_quiltt=0 and cleared quiltt_account_id for {updated_count} credit accounts after deleting connection {connection_id}")
         
         # Check if there are any remaining connections (before deleting this one)
         remaining_connections = [c for c in (connections or []) if c.get('connection_id') != connection_id]
         is_last_connection = len(remaining_connections) == 0
         
-        app.logger.info(f"Deleting connection {connection_id} for user {current_user.id}, is_last={is_last_connection}, remaining={len(remaining_connections)}")
+        log_info(app.logger, 'QUILTT', f"Deleting connection {connection_id} for user {current_user.id}, is_last={is_last_connection}, remaining={len(remaining_connections)}")
         
         # Delete using Redis-first operation
-        app.logger.info(f"[APP_DELETE] About to call delete_quiltt_connection for {connection_id}")
+        log_info(app.logger, 'APP_DELETE', f"About to call delete_quiltt_connection for {connection_id}")
         success = delete_quiltt_connection(connection_id, current_user.id)
-        app.logger.info(f"[APP_DELETE] delete_quiltt_connection returned: {success}")
+        log_info(app.logger, 'APP_DELETE', f"delete_quiltt_connection returned: {success}")
         
         if success:
-            app.logger.info(f"Successfully deleted connection {connection_id} for user {current_user.id}")
+            log_info(app.logger, 'QUILTT', f"Successfully deleted connection {connection_id} for user {current_user.id}")
             return jsonify({
                 'status': 'success', 
                 'message': 'Connection deleted successfully'
             })
         else:
-            app.logger.error(f"delete_quiltt_connection returned False for {connection_id}")
+            log_error(app.logger, 'QUILTT', f"delete_quiltt_connection returned False for {connection_id}")
             return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
                 
     except Exception as e:
-        app.logger.error(f"DELETE ERROR - Exception deleting Quiltt connection: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"DELETE ERROR - Exception deleting Quiltt connection: {e}")
         return jsonify({'status': 'error', 'message': 'Failed to delete connection'}), 500
 
 
@@ -20611,12 +20620,12 @@ def quiltt_delete_all_setup_connections():
                     try:
                         quiltt_client.disconnect_connection(session_token, conn_id)
                     except Exception as e:
-                        app.logger.warning(f"[DELETE_ALL_SETUP] API disconnect failed for {conn_id}: {e}")
+                        log_warning(app.logger, 'DELETE_ALL_SETUP', f"API disconnect failed for {conn_id}: {e}")
                 # Delete from our database (Redis + MySQL)
                 delete_quiltt_connection(conn_id, user_id)
                 deleted += 1
         
-        app.logger.info(f"[DELETE_ALL_SETUP] Deleted {deleted} connections for user {user_id}")
+        log_info(app.logger, 'DELETE_ALL_SETUP', f"Deleted {deleted} connections for user {user_id}")
         
         # Remove any disconnect/reconnect notifications created by webhooks during setup
         try:
@@ -20630,21 +20639,21 @@ def quiltt_delete_all_setup_connections():
                 conn.commit()
                 cursor.close()
                 if notif_deleted:
-                    app.logger.info(f"[DELETE_ALL_SETUP] Removed {notif_deleted} disconnect/reconnect notifications for user {user_id}")
+                    log_info(app.logger, 'DELETE_ALL_SETUP', f"Removed {notif_deleted} disconnect/reconnect notifications for user {user_id}")
         except Exception as notif_err:
-            app.logger.warning(f"[DELETE_ALL_SETUP] Failed to clear notifications: {notif_err}")
+            log_warning(app.logger, 'DELETE_ALL_SETUP', f"Failed to clear notifications: {notif_err}")
         
         # Force flush to MySQL so stale records don't persist
         try:
             from redis_manager import flush_dirty_tables_for_user
             flush_dirty_tables_for_user(user_id)
-            app.logger.info(f"[DELETE_ALL_SETUP] Forced flush complete for user {user_id}")
+            log_info(app.logger, 'DELETE_ALL_SETUP', f"Forced flush complete for user {user_id}")
         except Exception as flush_err:
-            app.logger.warning(f"[DELETE_ALL_SETUP] Flush error (non-fatal): {flush_err}")
+            log_warning(app.logger, 'DELETE_ALL_SETUP', f"Flush error (non-fatal): {flush_err}")
         
         return jsonify({'status': 'success', 'deleted': deleted})
     except Exception as e:
-        app.logger.error(f"[DELETE_ALL_SETUP] Error: {e}")
+        log_error(app.logger, 'DELETE_ALL_SETUP', f"Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -20668,10 +20677,10 @@ def quiltt_delete_unconfirmed():
         connection_id = data.get('connection_id')
         
         if not connection_id:
-            app.logger.error("DELETE UNCONFIRMED FAILED - Missing connection_id")
+            log_error(app.logger, 'QUILTT', "DELETE UNCONFIRMED FAILED - Missing connection_id")
             return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
         
-        app.logger.info(f"[DELETE_UNCONFIRMED] Starting delete for connection {connection_id}, user {current_user.id}")
+        log_info(app.logger, 'DELETE_UNCONFIRMED', f"Starting delete for connection {connection_id}, user {current_user.id}")
         
         # Get the connection and profile from Redis/MySQL
         from quiltt_redis import _get_from_redis
@@ -20681,7 +20690,7 @@ def quiltt_delete_unconfirmed():
             connections = get_quiltt_connections(current_user.id)
         
         if not connections:
-            app.logger.warning(f"[DELETE_UNCONFIRMED] No connections found for user {current_user.id}")
+            log_warning(app.logger, 'DELETE_UNCONFIRMED', f"No connections found for user {current_user.id}")
             return jsonify({'status': 'success'})
         
         # Check if connection exists
@@ -20692,33 +20701,33 @@ def quiltt_delete_unconfirmed():
                 break
         
         if not connection:
-            app.logger.warning(f"[DELETE_UNCONFIRMED] Connection {connection_id} not found, may already be deleted")
+            log_warning(app.logger, 'DELETE_UNCONFIRMED', f"Connection {connection_id} not found, may already be deleted")
             return jsonify({'status': 'success'})
         
-        app.logger.info(f"[DELETE_UNCONFIRMED] Found connection {connection_id} with status {connection.get('status')}")
+        log_info(app.logger, 'DELETE_UNCONFIRMED', f"Found connection {connection_id} with status {connection.get('status')}")
         
         # IMPORTANT: Delete from Quiltt API first to prevent it from coming back on next sync
         profile = get_quiltt_profile(current_user.id)
         if profile and profile.get('session_token'):
             try:
-                app.logger.info(f"[DELETE_UNCONFIRMED] Disconnecting from Quiltt API: {connection_id}")
+                log_info(app.logger, 'DELETE_UNCONFIRMED', f"Disconnecting from Quiltt API: {connection_id}")
                 quiltt_client.disconnect_connection(profile['session_token'], connection_id)
-                app.logger.info(f"[DELETE_UNCONFIRMED] Successfully disconnected from Quiltt API")
+                log_info(app.logger, 'DELETE_UNCONFIRMED', f"Successfully disconnected from Quiltt API")
             except Exception as e:
-                app.logger.warning(f"[DELETE_UNCONFIRMED] Failed to disconnect from Quiltt API: {e}, continuing with local delete")
+                log_warning(app.logger, 'DELETE_UNCONFIRMED', f"Failed to disconnect from Quiltt API: {e}, continuing with local delete")
         
         # Delete the connection and all associated data from our database
         success = delete_quiltt_connection(connection_id, current_user.id)
         
         if success:
-            app.logger.info(f"[DELETE_UNCONFIRMED] Successfully deleted unconfirmed connection {connection_id}")
+            log_info(app.logger, 'DELETE_UNCONFIRMED', f"Successfully deleted unconfirmed connection {connection_id}")
             return jsonify({'status': 'success'})
         else:
-            app.logger.error(f"[DELETE_UNCONFIRMED] Failed to delete unconfirmed connection {connection_id}")
+            log_error(app.logger, 'DELETE_UNCONFIRMED', f"Failed to delete unconfirmed connection {connection_id}")
             return jsonify({'status': 'error', 'message': 'Failed to delete'}), 500
             
     except Exception as e:
-        app.logger.error(f"[DELETE_UNCONFIRMED] Error deleting unconfirmed connection: {e}", exc_info=True)
+        log_exception(app.logger, 'DELETE_UNCONFIRMED', f"Error deleting unconfirmed connection: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -20742,20 +20751,20 @@ def quiltt_delete_new_accounts():
         if not account_ids:
             return jsonify({'status': 'success', 'message': 'No accounts to delete'})
         
-        app.logger.info(f"[DELETE_NEW_ACCOUNTS] Deleting {len(account_ids)} new accounts for user {current_user.id}: {account_ids}")
+        log_info(app.logger, 'DELETE_NEW_ACCOUNTS', f"Deleting {len(account_ids)} new accounts for user {current_user.id}: {account_ids}")
         
         from quiltt_redis import delete_quiltt_accounts_by_ids
         success = delete_quiltt_accounts_by_ids(account_ids, current_user.id)
         
         if success:
-            app.logger.info(f"[DELETE_NEW_ACCOUNTS] Successfully deleted new accounts")
+            log_info(app.logger, 'DELETE_NEW_ACCOUNTS', f"Successfully deleted new accounts")
             return jsonify({'status': 'success'})
         else:
-            app.logger.error(f"[DELETE_NEW_ACCOUNTS] Failed to delete new accounts")
+            log_error(app.logger, 'DELETE_NEW_ACCOUNTS', f"Failed to delete new accounts")
             return jsonify({'status': 'error', 'message': 'Failed to delete accounts'}), 500
             
     except Exception as e:
-        app.logger.error(f"[DELETE_NEW_ACCOUNTS] Error: {e}", exc_info=True)
+        log_exception(app.logger, 'DELETE_NEW_ACCOUNTS', f"Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -20805,7 +20814,7 @@ def quiltt_sync_profile():
                     elif 'savings' in acc_name:
                         has_synced_savings = True
         
-        app.logger.info(f"User {current_user.id} sync-profile: has_synced_checking={has_synced_checking}, has_synced_savings={has_synced_savings}")
+        log_info(app.logger, 'QUILTT', f"User {current_user.id} sync-profile: has_synced_checking={has_synced_checking}, has_synced_savings={has_synced_savings}")
         
         # Save/update connections and accounts using Redis-first operations
         for connection in profile_data.get('connections', []):
@@ -20828,7 +20837,7 @@ def quiltt_sync_profile():
                     for ea in (get_quiltt_connections(current_user.id) or [])
                 )
                 if not already_exists:
-                    app.logger.info(f"Skipping DISCONNECTED connection {connection_id} ({institution_name}) - not in local DB (user likely deleted it)")
+                    log_info(app.logger, 'QUILTT', f"Skipping DISCONNECTED connection {connection_id} ({institution_name}) - not in local DB (user likely deleted it)")
                     continue
             
             
@@ -20841,7 +20850,7 @@ def quiltt_sync_profile():
             }, current_user.id)
             
             if not connection_db_id:
-                app.logger.error(f"Could not upsert connection {connection_id}")
+                log_error(app.logger, 'QUILTT', f"Could not upsert connection {connection_id}")
                 continue
             
             # Save accounts for this connection
@@ -20856,7 +20865,7 @@ def quiltt_sync_profile():
                 
                 # Skip CREDIT and LIABILITY accounts if exclude_liability is True (setup flow)
                 if exclude_liability and account_type in ['CREDIT', 'LIABILITY']:
-                    app.logger.info(f"Skipping {account_type} account during setup: {account.get('name')}")
+                    log_info(app.logger, 'QUILTT', f"Skipping {account_type} account during setup: {account.get('name')}")
                     continue
                 
                 # Only process compatible account types (depository and credit)
@@ -20893,19 +20902,19 @@ def quiltt_sync_profile():
                 remote_data = account.get('remoteData', {})
                 
                 # Debug: Log remoteData structure to see what's actually returned
-                app.logger.info(f"Account {account_id} ({account_name}) remoteData: {remote_data}")
+                log_info(app.logger, 'QUILTT', f"Account {account_id} ({account_name}) remoteData: {remote_data}")
                 
                 if remote_data:
                     finicity = remote_data.get('finicity', {})
                     if finicity:
-                        app.logger.info(f"Account {account_id} finicity data: {finicity}")
+                        log_info(app.logger, 'QUILTT', f"Account {account_id} finicity data: {finicity}")
                         account_data = finicity.get('account', {})
                         if account_data:
                             response = account_data.get('response', {})
                             if response:
                                 detail = response.get('detail', {})
                                 if detail:
-                                    app.logger.info(f"Account {account_id} detail fields: {detail}")
+                                    log_info(app.logger, 'QUILTT', f"Account {account_id} detail fields: {detail}")
                                     # Map Finicity fields to our database columns
                                     liability_data = {
                                         'interest_rate': detail.get('interestRate') or detail.get('originalInterestRate'),
@@ -20921,7 +20930,7 @@ def quiltt_sync_profile():
                                         'payment_frequency': None,  # Not directly available in Finicity detail
                                         'account_state': None  # Not directly available in Finicity detail
                                     }
-                                    app.logger.info(f"Account {account_id} extracted liability_data: {liability_data}")
+                                    log_info(app.logger, 'QUILTT', f"Account {account_id} extracted liability_data: {liability_data}")
                 
                 # Upsert account to Redis + MySQL
                 account_db_data = {
@@ -20955,9 +20964,9 @@ def quiltt_sync_profile():
                 # Debug logging for credit account matching
                 if account_type.upper() == 'CREDIT':
                     if quiltt_account:
-                        app.logger.info(f"[SYNC-PROFILE] CREDIT account {account_id} ({account_name}): is_active={quiltt_account.get('is_active')}, sync_transactions={quiltt_account.get('sync_transactions')}, mask={account.get('mask', '')}")
+                        log_info(app.logger, 'SYNC_PROFILE', f"CREDIT account {account_id} ({account_name}): is_active={quiltt_account.get('is_active')}, sync_transactions={quiltt_account.get('sync_transactions')}, mask={account.get('mask', '')}")
                     else:
-                        app.logger.warning(f"[SYNC-PROFILE] CREDIT account {account_id} ({account_name}) NOT FOUND in quiltt_accounts ({len(quiltt_accounts)} accounts in Redis)")
+                        log_warning(app.logger, 'SYNC_PROFILE', f"CREDIT account {account_id} ({account_name}) NOT FOUND in quiltt_accounts ({len(quiltt_accounts)} accounts in Redis)")
                 
                 # Only create credit account if it's active and sync is enabled
                 if (account_type.upper() == 'CREDIT' and 
@@ -21007,10 +21016,10 @@ def quiltt_sync_profile():
                     credit_account_display_name = (quiltt_account.get('alias') or account_name) if quiltt_account else account_name
                     
                     # Debug: Log credit accounts being searched and what we're looking for
-                    app.logger.info(f"[SYNC-PROFILE] Looking for credit account match: quiltt_account_id={account_id}, mask={account_mask}, display_name={credit_account_display_name}")
-                    app.logger.info(f"[SYNC-PROFILE] Credit accounts to search ({len(credit_accounts)}):")
+                    log_info(app.logger, 'SYNC_PROFILE', f"Looking for credit account match: quiltt_account_id={account_id}, mask={account_mask}, display_name={credit_account_display_name}")
+                    log_info(app.logger, 'SYNC_PROFILE', f"Credit accounts to search ({len(credit_accounts)}):")
                     for ca in credit_accounts:
-                        app.logger.info(f"[SYNC-PROFILE]   - id={ca.get('id')}, name={ca.get('name')}, mask={ca.get('mask')}, quiltt_account_id={ca.get('quiltt_account_id')}, is_quiltt={ca.get('is_quiltt')}")
+                        log_info(app.logger, 'SYNC_PROFILE', f"- id={ca.get('id')}, name={ca.get('name')}, mask={ca.get('mask')}, quiltt_account_id={ca.get('quiltt_account_id')}, is_quiltt={ca.get('is_quiltt')}")
                     
                     # Look for existing credit account with matching quiltt_account_id first, then mask
                     existing_account = None
@@ -21024,7 +21033,7 @@ def quiltt_sync_profile():
                             old_name = acc.get('name', '')
                             if old_name != credit_account_display_name:
                                 credit_accounts[i]['name'] = credit_account_display_name
-                                app.logger.info(f"[SYNC-PROFILE] Renamed credit account '{old_name}' -> '{credit_account_display_name}'")
+                                log_info(app.logger, 'SYNC_PROFILE', f"Renamed credit account '{old_name}' -> '{credit_account_display_name}'")
                                 
                                 # Also rename the payment category ("OldName payment" -> "NewName payment")
                                 expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -21034,7 +21043,7 @@ def quiltt_sync_profile():
                                     for ec in expense_categories:
                                         if ec.get('credit_account_id') == credit_account_db_id and ec.get('name') == old_payment_name:
                                             ec['name'] = f"{credit_account_display_name} payment"
-                                            app.logger.info(f"[SYNC-PROFILE] Renamed payment category '{old_payment_name}' -> '{ec['name']}'")
+                                            log_info(app.logger, 'SYNC_PROFILE', f"Renamed payment category '{old_payment_name}' -> '{ec['name']}'")
                                             break
                                     _redis_client.setex(
                                         f"expense_categories:v1:{current_user.id}",
@@ -21055,7 +21064,7 @@ def quiltt_sync_profile():
                             _redis_client.sadd(dirty_key, 'credit_accounts')
                             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                             
-                            app.logger.info(f"Found existing credit account with quiltt_account_id {account_id}, setting is_quiltt=1")
+                            log_info(app.logger, 'QUILTT', f"Found existing credit account with quiltt_account_id {account_id}, setting is_quiltt=1")
                             
                             # Create auto-adjustment entry to sync balance with bank (skip if called from reconnect flow)
                             if not skip_auto_adjust:
@@ -21066,11 +21075,11 @@ def quiltt_sync_profile():
                                     account_mask
                                 )
                                 if auto_success:
-                                    app.logger.info(f"[SYNC-PROFILE] Credit account auto-adjustment: {auto_msg}")
+                                    log_info(app.logger, 'SYNC_PROFILE', f"Credit account auto-adjustment: {auto_msg}")
                                 else:
-                                    app.logger.warning(f"[SYNC-PROFILE] Credit account auto-adjustment failed: {auto_msg}")
+                                    log_warning(app.logger, 'SYNC_PROFILE', f"Credit account auto-adjustment failed: {auto_msg}")
                             else:
-                                app.logger.info(f"[SYNC-PROFILE] Skipping credit account auto-adjustment (skip_auto_adjust=True)")
+                                log_info(app.logger, 'SYNC_PROFILE', f"Skipping credit account auto-adjustment (skip_auto_adjust=True)")
                             
                             break
                         # Then try mask match (fallback)
@@ -21084,7 +21093,7 @@ def quiltt_sync_profile():
                             old_name = acc.get('name', '')
                             if old_name != credit_account_display_name:
                                 credit_accounts[i]['name'] = credit_account_display_name
-                                app.logger.info(f"[SYNC-PROFILE] Renamed credit account '{old_name}' -> '{credit_account_display_name}' (mask match)")
+                                log_info(app.logger, 'SYNC_PROFILE', f"Renamed credit account '{old_name}' -> '{credit_account_display_name}' (mask match)")
                                 
                                 # Also rename the payment category
                                 expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -21094,7 +21103,7 @@ def quiltt_sync_profile():
                                     for ec in expense_categories:
                                         if ec.get('credit_account_id') == credit_account_db_id and ec.get('name') == old_payment_name:
                                             ec['name'] = f"{credit_account_display_name} payment"
-                                            app.logger.info(f"[SYNC-PROFILE] Renamed payment category '{old_payment_name}' -> '{ec['name']}' (mask match)")
+                                            log_info(app.logger, 'SYNC_PROFILE', f"Renamed payment category '{old_payment_name}' -> '{ec['name']}' (mask match)")
                                             break
                                     _redis_client.setex(
                                         f"expense_categories:v1:{current_user.id}",
@@ -21115,7 +21124,7 @@ def quiltt_sync_profile():
                             _redis_client.sadd(dirty_key, 'credit_accounts')
                             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                             
-                            app.logger.info(f"Found existing credit account with mask {account_mask}, setting is_quiltt=1 and quiltt_account_id={account_id}")
+                            log_info(app.logger, 'QUILTT', f"Found existing credit account with mask {account_mask}, setting is_quiltt=1 and quiltt_account_id={account_id}")
                             
                             # Create auto-adjustment entry to sync balance with bank (skip if called from reconnect flow)
                             if not skip_auto_adjust:
@@ -21126,11 +21135,11 @@ def quiltt_sync_profile():
                                     account_mask
                                 )
                                 if auto_success:
-                                    app.logger.info(f"[SYNC-PROFILE] Credit account auto-adjustment: {auto_msg}")
+                                    log_info(app.logger, 'SYNC_PROFILE', f"Credit account auto-adjustment: {auto_msg}")
                                 else:
-                                    app.logger.warning(f"[SYNC-PROFILE] Credit account auto-adjustment failed: {auto_msg}")
+                                    log_warning(app.logger, 'SYNC_PROFILE', f"Credit account auto-adjustment failed: {auto_msg}")
                             else:
-                                app.logger.info(f"[SYNC-PROFILE] Skipping credit account auto-adjustment (skip_auto_adjust=True)")
+                                log_info(app.logger, 'SYNC_PROFILE', f"Skipping credit account auto-adjustment (skip_auto_adjust=True)")
                             
                             break
                         elif not account_mask and acc.get('name') == account_name:
@@ -21140,7 +21149,7 @@ def quiltt_sync_profile():
                     # Only create if doesn't exist
                     if not existing_account:
                         # credit_account_display_name already set above (alias or bank name)
-                        app.logger.info(f"Creating credit account for Quiltt account: {credit_account_display_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${starting_balance}")
+                        log_info(app.logger, 'QUILTT', f"Creating credit account for Quiltt account: {credit_account_display_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${starting_balance}")
                         
                         # Determine if it's a card or line of credit based on name/type
                         is_card = 1 if 'card' in account_name.lower() else 0
@@ -21304,23 +21313,23 @@ def quiltt_sync_profile():
                                     _redis_client.sadd(dirty_key_entries, 'c_expense_entries')
                                     _redis_client.expire(dirty_key_entries, PERSISTENT_CACHE_TTL)
                                     
-                                    app.logger.info(f"Created starting balance entry for credit account {account_name}: ${starting_balance}")
+                                    log_info(app.logger, 'CREDIT', f"Created starting balance entry for credit account {account_name}: ${starting_balance}")
                                     
                                     # Force immediate flush to MySQL so balance records can be created
                                     try:
                                         from redis_manager import flush_dirty_tables_for_user
                                         flush_dirty_tables_for_user(current_user.id)
                                     except Exception as flush_err:
-                                        app.logger.error(f"Error during forced flush for Quiltt credit account: {flush_err}")
+                                        log_error(app.logger, 'QUILTT', f"Error during forced flush for Quiltt credit account: {flush_err}")
                                     
                                     # Recalculate CA balances from scratch
                                     try:
                                         save_ca_daily_balance()
                                     except Exception as balance_err:
-                                        app.logger.error(f"Error recalculating CA balances for Quiltt credit account: {balance_err}")
+                                        log_error(app.logger, 'QUILTT', f"Error recalculating CA balances for Quiltt credit account: {balance_err}")
                                     
                                 except Exception as entry_err:
-                                    app.logger.error(f"Error creating starting balance entry: {entry_err}")
+                                    log_error(app.logger, 'CREDIT', f"Error creating starting balance entry: {entry_err}")
         
         
         # Note: Transactions will not be synced automatically during initial setup
@@ -21329,14 +21338,14 @@ def quiltt_sync_profile():
         # Enable quiltt for this user (Redis-first, then mark dirty for MySQL flush)
         try:
             _update_user_setting_in_redis(current_user.id, 'quiltt_enabled', 1)
-            app.logger.info(f"Set quiltt_enabled=1 for user {current_user.id} via sync-profile")
+            log_info(app.logger, 'QUILTT', f"Set quiltt_enabled=1 for user {current_user.id} via sync-profile")
         except Exception as qe:
-            app.logger.error(f"Error setting quiltt_enabled for user {current_user.id}: {qe}")
+            log_error(app.logger, 'QUILTT', f"Error setting quiltt_enabled for user {current_user.id}: {qe}")
         
         return jsonify({'status': 'success'})
             
     except Exception as e:
-        app.logger.error(f"Error syncing Quiltt profile: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error syncing Quiltt profile: {e}")
         return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
@@ -21381,7 +21390,7 @@ def quiltt_sync():
                 return jsonify({'status': 'error', 'message': 'Failed to sync'}), 500
                 
     except Exception as e:
-        app.logger.error(f"Error syncing Quiltt connection: {e}")
+        log_error(app.logger, 'QUILTT', f"Error syncing Quiltt connection: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -21498,7 +21507,7 @@ def quiltt_check_sync_status():
         })
         
     except Exception as e:
-        app.logger.error(f"Error checking sync status: {e}")
+        log_error(app.logger, 'QUILTT', f"Error checking sync status: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -21583,7 +21592,7 @@ def quiltt_update_account_alias():
         })
 
     except Exception as e:
-        app.logger.error(f"Error updating account alias: {e}")
+        log_error(app.logger, 'QUILTT', f"Error updating account alias: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -21625,7 +21634,7 @@ def quiltt_get_accounts():
         })
         
     except Exception as e:
-        app.logger.error(f"Error getting accounts: {e}")
+        log_error(app.logger, 'QUILTT', f"Error getting accounts: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -21706,7 +21715,7 @@ def quiltt_get_connections():
         })
         
     except Exception as e:
-        app.logger.error(f"Error getting connections for user {current_user.id}: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error getting connections for user {current_user.id}: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -21728,7 +21737,7 @@ def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
         # Get session token
         profile = get_quiltt_profile(user_id)
         if not profile or not profile.get('session_token'):
-            app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No session token for user {user_id}")
+            log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"No session token for user {user_id}")
             return
         
         session_token = profile['session_token']
@@ -21736,7 +21745,7 @@ def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
         # Fetch current bank balances from Quiltt API
         balance_data = quiltt_client.get_profile(session_token)
         if not balance_data:
-            app.logger.warning(f"[WEBHOOK-AUTOBALANCE] Failed to fetch balances for user {user_id}")
+            log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"Failed to fetch balances for user {user_id}")
             return
         
         # Build account_id → balance map and update stored balances
@@ -21765,9 +21774,9 @@ def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
                         )
                     bal_conn.commit()
                     bal_cursor.close()
-                    app.logger.info(f"[WEBHOOK-AUTOBALANCE] Updated {len(account_balances)} account balances in MySQL for user {user_id}")
+                    log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Updated {len(account_balances)} account balances in MySQL for user {user_id}")
             except Exception as bal_err:
-                app.logger.error(f"[WEBHOOK-AUTOBALANCE] Error updating balances in MySQL: {bal_err}", exc_info=True)
+                log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Error updating balances in MySQL: {bal_err}")
             
             # Also update Redis for immediate reads
             if app.config.get('REDIS_OK'):
@@ -21817,10 +21826,10 @@ def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
             elif acct_type == 'credit':
                 _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_date_str, day_before_str, acct_name)
         
-        app.logger.info(f"[WEBHOOK-AUTOBALANCE] Completed for user {user_id}")
+        log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Completed for user {user_id}")
         
     except Exception as e:
-        app.logger.error(f"[WEBHOOK-AUTOBALANCE] Error for user {user_id}: {e}", exc_info=True)
+        log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Error for user {user_id}: {e}")
 
 
 def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account_name, date_to_remainder=None):
@@ -21871,7 +21880,7 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
                 current_remainder = float(row[0]) if row and row[0] is not None else None
             
             if current_remainder is None:
-                app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No remainder for {target_date_str}, skipping checking adjustment")
+                log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"No remainder for {target_date_str}, skipping checking adjustment")
                 cursor.close()
                 return
             
@@ -21879,10 +21888,10 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
             # current_remainder already includes any previously-created auto-adjustments
             diff = float(bank_balance) - current_remainder
             
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Checking ({account_name}): Remainder=${current_remainder:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
+            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Checking ({account_name}): Remainder=${current_remainder:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
             
             if abs(diff) < 0.01:
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] No adjustment needed for {account_name} (delta < $0.01)")
+                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"No adjustment needed for {account_name} (delta < $0.01)")
                 cursor.close()
                 return
             
@@ -21892,19 +21901,19 @@ def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account
                     "INSERT INTO income_entries (category_id, date, amount, processed, is_auto_adjustment) VALUES (%s, %s, %s, 1, 1)",
                     (income_cat_id, target_date_str, abs(diff))
                 )
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE income adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
+                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE income adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
             else:
                 cursor.execute(
                     "INSERT INTO expense_entries (category_id, date, amount, processed, is_auto_adjustment) VALUES (%s, %s, %s, 1, 1)",
                     (expense_cat_id, target_date_str, abs(diff))
                 )
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE expense adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
+                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE expense adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
             
             conn.commit()
             cursor.close()
         
     except Exception as e:
-        app.logger.error(f"[WEBHOOK-AUTOBALANCE] Checking adjustment error: {e}", exc_info=True)
+        log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Checking adjustment error: {e}")
 
 
 def _webhook_savings_adjustment(user_id, bank_balance, target_date_str, quiltt_account_id):
@@ -21940,7 +21949,7 @@ def _webhook_savings_adjustment(user_id, bank_balance, target_date_str, quiltt_a
             # current_savings already includes any prior savings_adjustments from recalculation
             diff = float(bank_balance) - current_savings
             
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Savings: Current=${current_savings:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
+            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Savings: Current=${current_savings:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
             
             if abs(diff) < 0.01:
                 cursor.close()
@@ -21954,10 +21963,10 @@ def _webhook_savings_adjustment(user_id, bank_balance, target_date_str, quiltt_a
             
             conn.commit()
             cursor.close()
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE savings adjustment delta: ${diff:.2f}")
+            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE savings adjustment delta: ${diff:.2f}")
         
     except Exception as e:
-        app.logger.error(f"[WEBHOOK-AUTOBALANCE] Savings adjustment error: {e}", exc_info=True)
+        log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Savings adjustment error: {e}")
 
 
 def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_date_str, day_before_str, account_name):
@@ -21969,7 +21978,7 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
         # Find blankee credit account
         ca = get_blankee_credit_account_for_quiltt_account(user_id, quiltt_account_id)
         if not ca:
-            app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No blankee credit account for {account_name}")
+            log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"No blankee credit account for {account_name}")
             return
         
         account_id = int(ca['id'])
@@ -21995,7 +22004,7 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
                     auto_adj_cat_ids.add(int(cat['id']))
             
             if not auto_adj_cat_id:
-                app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No auto-adjustment category for {account_name}")
+                log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"No auto-adjustment category for {account_name}")
                 cursor.close()
                 return
             
@@ -22006,17 +22015,17 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
             current_balance = float(row['balance']) if row else None
             
             if current_balance is None:
-                app.logger.warning(f"[WEBHOOK-AUTOBALANCE] No c_a_balances_d balance for {account_name} on {target_date_str}, skipping")
+                log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"No c_a_balances_d balance for {account_name} on {target_date_str}, skipping")
                 cursor.close()
                 return
             
             bank_float = abs(float(bank_balance))
             diff = bank_float - current_balance
             
-            app.logger.info(f"[WEBHOOK-AUTOBALANCE] Credit ({account_name}): Current balance=${current_balance:.2f}, Bank=${bank_float:.2f}, Diff=${diff:.2f}")
+            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Credit ({account_name}): Current balance=${current_balance:.2f}, Bank=${bank_float:.2f}, Diff=${diff:.2f}")
             
             if abs(diff) < 0.01:
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] No adjustment needed for {account_name} (delta < $0.01)")
+                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"No adjustment needed for {account_name} (delta < $0.01)")
                 cursor.close()
                 return
             
@@ -22028,20 +22037,20 @@ def _webhook_credit_adjustment(user_id, quiltt_account_id, bank_balance, target_
                     INSERT INTO c_expense_entries (category_id, date, amount, processed, is_auto_adjustment)
                     VALUES (%s, %s, %s, 1, 1)
                 """, (auto_adj_cat_id, target_date_str, adjustment_amount))
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE expense adjustment +${adjustment_amount:.2f} for {account_name} on {target_date_str}")
+                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE expense adjustment +${adjustment_amount:.2f} for {account_name} on {target_date_str}")
             else:
                 # Balance needs to go DOWN → create payment entry
                 cursor.execute("""
                     INSERT INTO c_payment_entries (account_id, date, amount, processed, is_auto_adjustment)
                     VALUES (%s, %s, %s, 1, 1)
                 """, (account_id, target_date_str, adjustment_amount))
-                app.logger.info(f"[WEBHOOK-AUTOBALANCE] Created ADDITIVE payment adjustment -${adjustment_amount:.2f} for {account_name} on {target_date_str}")
+                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE payment adjustment -${adjustment_amount:.2f} for {account_name} on {target_date_str}")
             
             conn.commit()
             cursor.close()
         
     except Exception as e:
-        app.logger.error(f"[WEBHOOK-AUTOBALANCE] Credit adjustment error for {account_name}: {e}", exc_info=True)
+        log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Credit adjustment error for {account_name}: {e}")
 
 
 def _auto_confirm_pending_entries(user_id):
@@ -22095,7 +22104,7 @@ def _auto_confirm_pending_entries(user_id):
                 if not pending_entries:
                     continue
 
-                app.logger.info(f"[AUTO-CONFIRM] User {user_id}: {len(pending_entries)} pending {entry_type} entries")
+                log_info(app.logger, 'AUTO_CONFIRM', f"User {user_id}: {len(pending_entries)} pending {entry_type} entries")
 
                 for entry in pending_entries:
                     entry_id = entry['id']
@@ -22113,19 +22122,16 @@ def _auto_confirm_pending_entries(user_id):
 
                     if suggestion and suggestion.get('custom_category_id'):
                         new_category_id = suggestion['custom_category_id']
-                        app.logger.info(
-                            f"[AUTO-CONFIRM] Entry {entry_id} ({entry_type}) -> suggested category "
-                            f"{new_category_id} ({suggestion.get('custom_category_suggestion', '?')})"
-                        )
+                        log_info(app.logger, 'AUTO_CONFIRM',  f"Entry {entry_id} ({entry_type}) -> suggested category " f"{new_category_id} ({suggestion.get('custom_category_suggestion', '?')})" )
                     else:
                         # Fall back to Uncategorized
                         uncat_id = get_uncategorized_category_id(user_id, entry_type)
                         if uncat_id:
                             new_category_id = uncat_id
                             fallback_count += 1
-                            app.logger.info(f"[AUTO-CONFIRM] Entry {entry_id} ({entry_type}) -> Uncategorized (no suggestion)")
+                            log_info(app.logger, 'AUTO_CONFIRM', f"Entry {entry_id} ({entry_type}) -> Uncategorized (no suggestion)")
                         else:
-                            app.logger.warning(f"[AUTO-CONFIRM] Skipping entry {entry_id} — no Uncategorized category")
+                            log_warning(app.logger, 'AUTO_CONFIRM', f"Skipping entry {entry_id} — no Uncategorized category")
                             continue
 
                     # Update entry: set category, clear pending, mark auto_confirmed
@@ -22192,12 +22198,9 @@ def _auto_confirm_pending_entries(user_id):
                                         new_rec_amount = 0 if wage_bill else float(b_record['amount']) - abs(entry_amount)
                                         cursor.execute(f"UPDATE {bucket_table} SET amount = %s WHERE id = %s", (new_rec_amount, b_record['id']))
 
-                                    app.logger.info(
-                                        f"[AUTO-CONFIRM] Bucket reduced for entry {entry_id}: "
-                                        f"bucket {bucket_id} {'removed' if new_amount <= 0 else f'reduced to {new_amount}'}"
-                                    )
+                                    log_info(app.logger, 'AUTO_CONFIRM',  f"Bucket reduced for entry {entry_id}: " f"bucket {bucket_id} {'removed' if new_amount <= 0 else f'reduced to {new_amount}'}" )
                     except Exception as bucket_err:
-                        app.logger.warning(f"[AUTO-CONFIRM] Bucket reduction error for entry {entry_id}: {bucket_err}")
+                        log_warning(app.logger, 'AUTO_CONFIRM', f"Bucket reduction error for entry {entry_id}: {bucket_err}")
 
                     confirmed_count += 1
 
@@ -22205,10 +22208,10 @@ def _auto_confirm_pending_entries(user_id):
             cursor.close()
 
     except Exception as e:
-        app.logger.error(f"[AUTO-CONFIRM] Error for user {user_id}: {e}", exc_info=True)
+        log_exception(app.logger, 'AUTO_CONFIRM', f"Error for user {user_id}: {e}")
 
     if confirmed_count > 0:
-        app.logger.info(f"[AUTO-CONFIRM] User {user_id}: confirmed {confirmed_count} entries ({fallback_count} to Uncategorized)")
+        log_info(app.logger, 'AUTO_CONFIRM', f"User {user_id}: confirmed {confirmed_count} entries ({fallback_count} to Uncategorized)")
 
     return confirmed_count, fallback_count
 
@@ -22254,7 +22257,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             
             # If token expires within 5 minutes, refresh it
             if expires_at <= datetime.now():
-                app.logger.info(f"Session token expired for user {user_id} (expired at {session_expires_at}), refreshing...")
+                log_info(app.logger, 'QUILTT', f"Session token expired for user {user_id} (expired at {session_expires_at}), refreshing...")
                 
                 # Get user's username for refresh - we need to look it up since this may be called externally
                 with get_db_pool().get_connection() as conn:
@@ -22269,12 +22272,12 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         # Re-fetch profile to get new token
                         profile = get_quiltt_profile(user_id)
                         session_token = profile.get('session_token')
-                        app.logger.info(f"Successfully refreshed session token for user {user_id}")
+                        log_info(app.logger, 'QUILTT', f"Successfully refreshed session token for user {user_id}")
                     else:
-                        app.logger.error(f"Failed to refresh expired session token for user {user_id}")
+                        log_error(app.logger, 'QUILTT', f"Failed to refresh expired session token for user {user_id}")
                         return (False, 0, 'Session token expired and refresh failed')
                 else:
-                    app.logger.error(f"Could not find username for user {user_id} to refresh token")
+                    log_error(app.logger, 'QUILTT', f"Could not find username for user {user_id} to refresh token")
                     return (False, 0, 'Session token expired and could not refresh')
         
         # Get accounts with sync enabled from Redis
@@ -22372,17 +22375,17 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         earliest_sync = min(synced_dates)
                         start_date = earliest_sync.strftime('%Y-%m-%d')
                         end_date = datetime.now().strftime('%Y-%m-%d')
-                        app.logger.info(f"Using last_synced_at fallback: {start_date} to {end_date}")
+                        log_info(app.logger, 'QUILTT', f"Using last_synced_at fallback: {start_date} to {end_date}")
             except Exception as e:
-                app.logger.warning(f"Failed to get last_synced_at for date range: {e}")
+                log_warning(app.logger, 'QUILTT', f"Failed to get last_synced_at for date range: {e}")
             
             # Ultimate fallback if last_synced_at lookup failed
             if not start_date or not end_date:
                 start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
                 end_date = datetime.now().strftime('%Y-%m-%d')
-                app.logger.info(f"No date range or last_synced_at available, using 1-day default: {start_date} to {end_date}")
+                log_info(app.logger, 'QUILTT', f"No date range or last_synced_at available, using 1-day default: {start_date} to {end_date}")
         else:
-            app.logger.info(f"Using provided date range: {start_date} to {end_date}")
+            log_info(app.logger, 'QUILTT', f"Using provided date range: {start_date} to {end_date}")
         
         # Get existing transactions from Redis to check for duplicates
         existing_transactions = get_quiltt_transactions(user_id)
@@ -22392,13 +22395,13 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         # This is used to determine which transactions are truly NEW vs already synced
         # Only truly NEW transactions should be auto-imported to budget entries
         pre_sync_txn_ids = set(existing_txn_ids)  # Copy the set before we modify it
-        app.logger.info(f"Pre-sync transaction count: {len(pre_sync_txn_ids)}, skip_auto_import={skip_auto_import}")
+        log_info(app.logger, 'QUILTT', f"Pre-sync transaction count: {len(pre_sync_txn_ids)}, skip_auto_import={skip_auto_import}")
         
         # Get all account IDs for batch fetch with Ntropy data
         account_ids = [acc['account_id'] for acc in sync_enabled_accounts]
         
         # Get transactions with Ntropy enrichment from Quiltt
-        app.logger.info(f"Fetching transactions with Ntropy enrichment for {len(account_ids)} accounts")
+        log_info(app.logger, 'QUILTT', f"Fetching transactions with Ntropy enrichment for {len(account_ids)} accounts")
         transactions = quiltt_client.get_transactions_with_ntropy(
             session_token=session_token,
             account_ids=account_ids,
@@ -22408,10 +22411,10 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         )
         
         if not transactions:
-            app.logger.info("No transactions returned from Quiltt")
+            log_info(app.logger, 'QUILTT', "No transactions returned from Quiltt")
             return (True, 0, 'No new transactions found')
         
-        app.logger.info(f"Retrieved {len(transactions)} transactions with Ntropy data")
+        log_info(app.logger, 'QUILTT', f"Retrieved {len(transactions)} transactions with Ntropy data")
         
         # Open a single MySQL connection for all direct writes
         _sync_conn = get_db_pool().engine.raw_connection()
@@ -22431,7 +22434,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             entry_type_raw = txn.get('entryType', '').upper()
             is_expense = (entry_type_raw != 'CREDIT')  # DEBIT or empty = expense
             
-            app.logger.info(f"Processing txn {txn_id}: amount={txn.get('amount')}, entryType={entry_type_raw}, is_expense={is_expense}")
+            log_info(app.logger, 'QUILTT', f"Processing txn {txn_id}: amount={txn.get('amount')}, entryType={entry_type_raw}, is_expense={is_expense}")
             
             # Skip transactions dated before the account was connected
             acct_created = account_created_map.get(account_id)
@@ -22442,7 +22445,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 except (ValueError, TypeError):
                     pass
                 if txn_date_obj and txn_date_obj < acct_created:
-                    app.logger.debug(f"Skipping {txn_id} - date {txn_date_obj} before account created {acct_created}")
+                    log_info(app.logger, 'QUILTT', f"Skipping {txn_id} - date {txn_date_obj} before account created {acct_created}")
                     continue
             
             # Check if transaction already exists in Redis
@@ -22472,17 +22475,17 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         existing_pending == new_pending and
                         existing_date == new_date and
                         not needs_import):
-                        app.logger.debug(f"Skipping {txn_id} - already enriched, no material changes")
+                        log_info(app.logger, 'QUILTT', f"Skipping {txn_id} - already enriched, no material changes")
                         continue
                     
                     if needs_import:
-                        app.logger.info(f"Re-processing {txn_id} - needs auto-import (no linked entry)")
+                        log_info(app.logger, 'QUILTT', f"Re-processing {txn_id} - needs auto-import (no linked entry)")
                     
-                    app.logger.info(f"Updating enriched txn {txn_id} - changes detected: amount {existing_amount}->{amount}, pending {existing_pending}->{new_pending}, date {existing_date}->{new_date}")
+                    log_info(app.logger, 'QUILTT', f"Updating enriched txn {txn_id} - changes detected: amount {existing_amount}->{amount}, pending {existing_pending}->{new_pending}, date {existing_date}->{new_date}")
                     updated_count += 1
             else:
                 # Brand new transaction
-                app.logger.info(f"New transaction {txn_id}")
+                log_info(app.logger, 'QUILTT', f"New transaction {txn_id}")
                 existing_txn_ids.add(txn_id)
             
             # Process both income and expense transactions
@@ -22635,9 +22638,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     transaction_data['custom_category_type'] = memory_match['category_type']
                     transaction_data['custom_category_confidence'] = 'memory'
                     transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    app.logger.info(f"Category memory match for {txn_id}: {memory_cat_name} (category_id={memory_match['category_id']}, confirmed {memory_match.get('times_confirmed', 1)}x)")
+                    log_info(app.logger, 'CATEGORIES', f"Category memory match for {txn_id}: {memory_cat_name} (category_id={memory_match['category_id']}, confirmed {memory_match.get('times_confirmed', 1)}x)")
             except Exception as mem_err:
-                app.logger.warning(f"Category memory lookup failed for {txn_id}: {mem_err}")
+                log_warning(app.logger, 'CATEGORIES', f"Category memory lookup failed for {txn_id}: {mem_err}")
             # --- END CATEGORY MEMORY LOOKUP ---
 
             # --- CUSTOM CATEGORY SUGGESTION + MERCHANT ENRICHMENT (Phase 3.2) ---
@@ -22680,9 +22683,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         transaction_data['custom_category_confidence'] = suggestion.get('confidence')
                         transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     
-                    app.logger.info(f"Ntropy enrichment for {txn_id}: category={suggestion.get('suggested_category')}, merchant={suggestion.get('ntropy_merchant_id')}, memory_match={'yes' if memory_match else 'no'}")
+                    log_info(app.logger, 'CATEGORIES', f"Ntropy enrichment for {txn_id}: category={suggestion.get('suggested_category')}, merchant={suggestion.get('ntropy_merchant_id')}, memory_match={'yes' if memory_match else 'no'}")
             except Exception as suggest_err:
-                app.logger.warning(f"Failed to get Ntropy enrichment for {txn_id}: {suggest_err}")
+                log_warning(app.logger, 'NTROPY', f"Failed to get Ntropy enrichment for {txn_id}: {suggest_err}")
             # --- END CUSTOM CATEGORY SUGGESTION + MERCHANT ENRICHMENT ---
             
 
@@ -22779,13 +22782,13 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 _sync_conn.commit()
                 txn_db_id = True
             except Exception as upsert_err:
-                app.logger.error(f"MySQL upsert failed for {txn_id}: {upsert_err}", exc_info=True)
+                log_exception(app.logger, 'TXN_SYNC', f"MySQL upsert failed for {txn_id}: {upsert_err}")
                 _sync_conn.rollback()
                 txn_db_id = None
             
             if txn_db_id:
                 total_synced += 1
-                app.logger.info(f"Successfully stored {txn_id}")
+                log_info(app.logger, 'TXN_SYNC', f"Successfully stored {txn_id}")
                 
                 # --- AUTO-IMPORT TO BUDGET ENTRIES (Phase 2.2) ---
                 # Only auto-import if:
@@ -22804,11 +22807,11 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 was_pending = False
                 if existing_txn and existing_txn.get('pending') == 1 and not is_pending:
                     was_pending = True
-                    app.logger.info(f"Transaction {txn_id} changed from PENDING to POSTED")
+                    log_info(app.logger, 'TXN_SYNC', f"Transaction {txn_id} changed from PENDING to POSTED")
                 
                 if not skip_auto_import and not is_pending and (is_new_transaction or was_pending or needs_import):
                     import_reason = 'NEEDS-IMPORT (previously skipped)' if needs_import else ('POSTED (was pending)' if was_pending else 'NEW')
-                    app.logger.info(f"Auto-importing {import_reason} transaction {txn_id}")
+                    log_info(app.logger, 'TXN_SYNC', f"Auto-importing {import_reason} transaction {txn_id}")
                     try:
                         # Determine account type and route to correct table
                         quiltt_account_info = quiltt_account_map.get(account_id, {})
@@ -22833,7 +22836,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                     # c_payment uses account_id, not category_id
                                     category_id = blankee_credit_account_id
                             else:
-                                app.logger.warning(f"No Blankee credit account found for Quiltt account {account_id}, skipping auto-import")
+                                log_warning(app.logger, 'QUILTT', f"No Blankee credit account found for Quiltt account {account_id}, skipping auto-import")
                         else:
                             # Depository account (checking/savings)
                             if is_expense:
@@ -22869,9 +22872,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                     """, (blankee_credit_account_id, date, amount))
                                 _sync_conn.commit()
                                 entry_id = _sync_cursor.lastrowid
-                                app.logger.info(f"Created {entry_type} entry {entry_id} for transaction {txn_id} (MySQL-direct)")
+                                log_info(app.logger, 'TXN_SYNC', f"Created {entry_type} entry {entry_id} for transaction {txn_id} (MySQL-direct)")
                             except Exception as entry_err:
-                                app.logger.error(f"MySQL entry creation failed for {txn_id}: {entry_err}", exc_info=True)
+                                log_exception(app.logger, 'TXN_SYNC', f"MySQL entry creation failed for {txn_id}: {entry_err}")
                                 _sync_conn.rollback()
                             
                             if entry_id:
@@ -22884,22 +22887,22 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                     """, (entry_id, entry_type, user_id, txn_id))
                                     _sync_conn.commit()
                                 except Exception as link_err:
-                                    app.logger.error(f"MySQL import link update failed for {txn_id}: {link_err}", exc_info=True)
+                                    log_exception(app.logger, 'TXN_SYNC', f"MySQL import link update failed for {txn_id}: {link_err}")
                                     _sync_conn.rollback()
                                 total_imported += 1
                                 imported_dates.add(str(date)[:10])
-                                app.logger.info(f"Auto-imported {txn_id} to {entry_type} entry {entry_id}")
+                                log_info(app.logger, 'TXN_SYNC', f"Auto-imported {txn_id} to {entry_type} entry {entry_id}")
                             else:
-                                app.logger.error(f"Failed to auto-import {txn_id} to {entry_type}")
+                                log_error(app.logger, 'TXN_SYNC', f"Failed to auto-import {txn_id} to {entry_type}")
                         else:
-                            app.logger.warning(f"Skipping auto-import for {txn_id}: entry_type={entry_type}, category_id={category_id}")
+                            log_warning(app.logger, 'CATEGORIES', f"Skipping auto-import for {txn_id}: entry_type={entry_type}, category_id={category_id}")
                     
                     except Exception as import_err:
-                        app.logger.error(f"Error auto-importing transaction {txn_id}: {import_err}", exc_info=True)
+                        log_exception(app.logger, 'TXN_SYNC', f"Error auto-importing transaction {txn_id}: {import_err}")
                         # Don't fail the whole sync if auto-import fails
                 # --- END AUTO-IMPORT ---
             else:
-                app.logger.error(f"Failed to store transaction {txn_id} in MySQL")
+                log_error(app.logger, 'TXN_SYNC', f"Failed to store transaction {txn_id} in MySQL")
         
         message = f'Synced {total_synced} transactions'
         if updated_count > 0:
@@ -22928,7 +22931,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         str(a.get('account_type', '')).upper() == 'DEPOSITORY'
                         for a in quiltt_account_map.values()
                     )
-                    app.logger.info(f"[BUCKET-PUSH] Starting for user {user_id}: last_txn_date={last_txn_date_str}, push_to_date={push_to_date}, has_depository={has_quiltt_depository}")
+                    log_info(app.logger, 'BUCKET_PUSH', f"Starting for user {user_id}: last_txn_date={last_txn_date_str}, push_to_date={push_to_date}, has_depository={has_quiltt_depository}")
                     
                     if has_quiltt_depository:
                         # Find earliest bucket date that will be affected by push/delete
@@ -22954,7 +22957,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                 earliest_bucket_date = exp_min
                         
                         if earliest_bucket_date:
-                            app.logger.info(f"[BUCKET-PUSH] Earliest affected bucket date: {earliest_bucket_date} for user {user_id}")
+                            log_info(app.logger, 'BUCKET_PUSH', f"Earliest affected bucket date: {earliest_bucket_date} for user {user_id}")
                         
                         # --- income_entries ---
                         # Delete buckets whose original date is > 5 days old
@@ -22966,7 +22969,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         """, (user_id, last_txn_date_str, five_days_ago_str))
                         deleted_inc = _sync_cursor.rowcount
                         if deleted_inc > 0:
-                            app.logger.info(f"[BUCKET-PUSH] Deleted {deleted_inc} income buckets > 5 days late for user {user_id}")
+                            log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_inc} income buckets > 5 days late for user {user_id}")
                         cleanup_count += deleted_inc
                         
                         # Push remaining income buckets to day after last transaction
@@ -22979,7 +22982,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         """, (push_to_date, user_id, last_txn_date_str))
                         pushed_inc = _sync_cursor.rowcount
                         if pushed_inc > 0:
-                            app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_inc} income buckets to {push_to_date} for user {user_id}")
+                            log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_inc} income buckets to {push_to_date} for user {user_id}")
                         cleanup_count += pushed_inc
                         
                         # --- expense_entries ---
@@ -22992,7 +22995,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         """, (user_id, last_txn_date_str, five_days_ago_str))
                         deleted_exp = _sync_cursor.rowcount
                         if deleted_exp > 0:
-                            app.logger.info(f"[BUCKET-PUSH] Deleted {deleted_exp} expense buckets > 5 days late for user {user_id}")
+                            log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_exp} expense buckets > 5 days late for user {user_id}")
                         cleanup_count += deleted_exp
                         
                         # Push remaining expense buckets to day after last transaction
@@ -23005,7 +23008,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         """, (push_to_date, user_id, last_txn_date_str))
                         pushed_exp = _sync_cursor.rowcount
                         if pushed_exp > 0:
-                            app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_exp} expense buckets to {push_to_date} for user {user_id}")
+                            log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_exp} expense buckets to {push_to_date} for user {user_id}")
                         cleanup_count += pushed_exp
                     
                     # --- c_expense_entries (Quiltt-linked credit accounts) ---
@@ -23019,7 +23022,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     """, (user_id, last_txn_date_str, five_days_ago_str))
                     deleted_ce = _sync_cursor.rowcount
                     if deleted_ce > 0:
-                        app.logger.info(f"[BUCKET-PUSH] Deleted {deleted_ce} credit buckets > 5 days late for user {user_id}")
+                        log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_ce} credit buckets > 5 days late for user {user_id}")
                     cleanup_count += deleted_ce
                     
                     # Push remaining Quiltt credit buckets to day after last transaction
@@ -23033,7 +23036,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     """, (push_to_date, user_id, last_txn_date_str))
                     pushed_ce = _sync_cursor.rowcount
                     if pushed_ce > 0:
-                        app.logger.info(f"[BUCKET-PUSH] Pushed {pushed_ce} credit buckets to {push_to_date} for user {user_id}")
+                        log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_ce} credit buckets to {push_to_date} for user {user_id}")
                     cleanup_count += pushed_ce
                     
                     # Convert non-Quiltt credit expense buckets to regular entries (unchanged)
@@ -23048,9 +23051,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     
                     _sync_conn.commit()
                     if cleanup_count > 0:
-                        app.logger.info(f"[WEBHOOK-SYNC] Bucket push/cleanup: {cleanup_count} entries processed for user {user_id}")
+                        log_info(app.logger, 'WEBHOOK_SYNC', f"Bucket push/cleanup: {cleanup_count} entries processed for user {user_id}")
             except Exception as bucket_err:
-                app.logger.error(f"[WEBHOOK-SYNC] Error in bucket push/cleanup: {bucket_err}", exc_info=True)
+                log_exception(app.logger, 'WEBHOOK_SYNC', f"Error in bucket push/cleanup: {bucket_err}")
                 try:
                     _sync_conn.rollback()
                 except Exception:
@@ -23070,7 +23073,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         if _is_hydrated_check(user_id):
             _dehydrate_user_data(user_id)
         _hydrate_user_data(user_id)
-        app.logger.info(f"[WEBHOOK-SYNC] Step 5: Dehydrated + rehydrated user {user_id} after MySQL-direct writes")
+        log_info(app.logger, 'WEBHOOK_SYNC', f"Step 5: Dehydrated + rehydrated user {user_id} after MySQL-direct writes")
         
         # --- CREATE NOTIFICATION FOR PENDING TRANSACTIONS (Step 4) ---
         # Must happen after rehydrate so Redis has the new pending entries for accurate count
@@ -23078,12 +23081,12 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             try:
                 _create_pending_transactions_notification(user_id, total_imported)
             except Exception as notif_err:
-                app.logger.error(f"Error creating pending transactions notification: {notif_err}")
+                log_error(app.logger, 'TXN_SYNC', f"Error creating pending transactions notification: {notif_err}")
         # --- END NOTIFICATION ---
         
         # --- FIRST RECALCULATION + AUTOBALANCE + SECOND RECALCULATION (Steps 6-10) ---
         try:
-            app.logger.info(f"[WEBHOOK-SYNC] Starting recalculation pipeline for user {user_id} (total_imported={total_imported}, total_synced={total_synced})")
+            log_info(app.logger, 'WEBHOOK_SYNC', f"Starting recalculation pipeline for user {user_id} (total_imported={total_imported}, total_synced={total_synced})")
             
             # Read goofy_week_mode (Redis first, MySQL fallback)
             gwm = None
@@ -23122,7 +23125,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             
             # If buckets were pushed from earlier dates, recalc must cover those dates too
             if earliest_bucket_date and earliest_bucket_date < recalc_start:
-                app.logger.info(f"[WEBHOOK-SYNC] Extending recalc_start from {recalc_start} to {earliest_bucket_date} (bucket push affected earlier dates)")
+                log_info(app.logger, 'WEBHOOK_SYNC', f"Extending recalc_start from {recalc_start} to {earliest_bucket_date} (bucket push affected earlier dates)")
                 recalc_start = earliest_bucket_date
             
             # --- STEP 6: First recalculation — accurate totals for autobalance comparison ---
@@ -23134,12 +23137,12 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             update_daily_ca_totals(user_id, recalc_start)
             update_weekly_ca_totals(user_id, recalc_start, gwm)
             update_monthly_ca_totals(user_id, recalc_start)
-            app.logger.info(f"[WEBHOOK-SYNC] Step 6: First recalculation complete")
+            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 6: First recalculation complete")
             
             # Force flush after first recalculation (Redis → MySQL)
             from redis_manager import flush_dirty_tables_for_user
             flush_dirty_tables_for_user(user_id)
-            app.logger.info(f"[WEBHOOK-SYNC] Step 6: Force flush complete")
+            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 6: Force flush complete")
             
             # --- STEP 7+8: Fetch bank balances + auto-adjustments ---
             # _webhook_autobalance handles both: fetches balances (Step 7) and creates adjustments (Step 8)
@@ -23147,16 +23150,16 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             if app.config.get('REDIS_OK'):
                 _redis_client.delete(f"quiltt_last_txn_date:v1:{user_id}")
             last_txn_date_for_autobalance = get_quiltt_last_transaction_date(user_id)
-            app.logger.info(f"[WEBHOOK-SYNC] Step 7+8: Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
+            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 7+8: Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
             _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance, date_to_remainder=date_to_remainder)
-            app.logger.info(f"[WEBHOOK-SYNC] Step 8: Auto-adjustments complete")
+            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 8: Auto-adjustments complete")
             
             # --- STEP 9: Dehydrate + Rehydrate (again) ---
             # Autobalance wrote adjustments directly to MySQL, sync Redis
             if _is_hydrated_check(user_id):
                 _dehydrate_user_data(user_id)
             _hydrate_user_data(user_id)
-            app.logger.info(f"[WEBHOOK-SYNC] Step 9: Rehydrated after autobalance MySQL writes")
+            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 9: Rehydrated after autobalance MySQL writes")
             
             # --- STEP 10: Second recalculation — incorporate adjustment entries into totals ---
             date_to_remainder = {}
@@ -23167,14 +23170,14 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             update_daily_ca_totals(user_id, recalc_start)
             update_weekly_ca_totals(user_id, recalc_start, gwm)
             update_monthly_ca_totals(user_id, recalc_start)
-            app.logger.info(f"[WEBHOOK-SYNC] Step 10: Second recalculation complete")
+            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 10: Second recalculation complete")
             
             # Force flush after second recalculation (Redis → MySQL)
             flush_dirty_tables_for_user(user_id)
-            app.logger.info(f"[WEBHOOK-SYNC] Step 10: Force flush complete")
+            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 10: Force flush complete")
             
         except Exception as recalc_err:
-            app.logger.error(f"[WEBHOOK-SYNC] Error in recalculation pipeline for user {user_id}: {recalc_err}", exc_info=True)
+            log_exception(app.logger, 'WEBHOOK_SYNC', f"Error in recalculation pipeline for user {user_id}: {recalc_err}")
         # --- END RECALCULATE + AUTOBALANCE ---
         
         # --- UPDATE RECURRENCE DATA FROM NTROPY ---
@@ -23235,10 +23238,10 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                                     """, [user_id] + recurring_ids)
                                     
                                     rec_conn.commit()
-                                    app.logger.info(f"[RECURRENCE] Updated {rec_updated} transactions via MySQL-direct for user {user_id}")
+                                    log_info(app.logger, 'RECURRENCE', f"Updated {rec_updated} transactions via MySQL-direct for user {user_id}")
                                 except Exception as rec_sql_err:
                                     rec_conn.rollback()
-                                    app.logger.error(f"[RECURRENCE] MySQL error: {rec_sql_err}", exc_info=True)
+                                    log_exception(app.logger, 'RECURRENCE', f"MySQL error: {rec_sql_err}")
                                 finally:
                                     rec_cursor.close()
                             
@@ -23246,7 +23249,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                             if rec_updated > 0 and app.config.get('REDIS_OK'):
                                 _redis_client.delete(f"quiltt_transactions:v1:{user_id}")
             except Exception as rec_err:
-                app.logger.error(f"[RECURRENCE] Error updating recurrence for user {user_id}: {rec_err}", exc_info=True)
+                log_exception(app.logger, 'RECURRENCE', f"Error updating recurrence for user {user_id}: {rec_err}")
         # --- END UPDATE RECURRENCE ---
         
         # Update cached last transaction date and signal UI refresh
@@ -23266,7 +23269,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             _sync_conn.close()
         except Exception:
             pass
-        app.logger.error(f"Error syncing Quiltt transactions for user {user_id}: {e}")
+        log_error(app.logger, 'QUILTT', f"Error syncing Quiltt transactions for user {user_id}: {e}")
         return (False, 0, str(e))
 
 
@@ -23353,7 +23356,7 @@ def quiltt_link_credit_account():
             redis_client.sadd(dirty_key, 'credit_accounts')
             redis_client.expire(dirty_key, 604800)
         
-        app.logger.info(f"Linked Quiltt account {quiltt_account_id} to credit account {credit_account_id} for user {current_user.id}")
+        log_info(app.logger, 'CREDIT', f"Linked Quiltt account {quiltt_account_id} to credit account {credit_account_id} for user {current_user.id}")
         
         return jsonify({
             'status': 'success',
@@ -23361,7 +23364,7 @@ def quiltt_link_credit_account():
         })
         
     except Exception as e:
-        app.logger.error(f"Error linking Quiltt account: {e}", exc_info=True)
+        log_exception(app.logger, 'CREDIT', f"Error linking Quiltt account: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -23449,7 +23452,7 @@ def quiltt_check_transaction_sync():
         account_ids = [acc['account_id'] for acc in sync_enabled_accounts]
         
         # Fetch transactions from Quiltt
-        app.logger.info(f"Fetching transactions from Quiltt for comparison: {len(account_ids)} accounts")
+        log_info(app.logger, 'QUILTT', f"Fetching transactions from Quiltt for comparison: {len(account_ids)} accounts")
         quiltt_transactions = quiltt_client.get_transactions_with_ntropy(
             session_token=session_token,
             account_ids=account_ids,
@@ -23504,7 +23507,7 @@ def quiltt_check_transaction_sync():
         })
         
     except Exception as e:
-        app.logger.error(f"Error checking transaction sync: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error checking transaction sync: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -23575,7 +23578,7 @@ def quiltt_transaction_diagnostics():
         })
         
     except Exception as e:
-        app.logger.error(f"Error in transaction diagnostics: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error in transaction diagnostics: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -23588,7 +23591,7 @@ def quiltt_check_ntropy_categories():
         result = get_ntropy_category_set(current_user.id)
         return jsonify(result)
     except Exception as e:
-        app.logger.error(f"Error checking Ntropy categories: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error checking Ntropy categories: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -23601,7 +23604,7 @@ def quiltt_sync_ntropy_categories():
         result = sync_user_categories_to_ntropy(current_user.id)
         return jsonify(result)
     except Exception as e:
-        app.logger.error(f"Error syncing Ntropy categories: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error syncing Ntropy categories: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -23666,7 +23669,7 @@ def quiltt_check_ntropy_data():
         })
         
     except Exception as e:
-        app.logger.error(f"Error checking Ntropy data: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error checking Ntropy data: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -23730,7 +23733,7 @@ def quiltt_test_ntropy_custom_enrichment():
             }), 400
         
     except Exception as e:
-        app.logger.error(f"Error testing Ntropy custom enrichment: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error testing Ntropy custom enrichment: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -23826,7 +23829,7 @@ def quiltt_suggest_category():
         })
         
     except Exception as e:
-        app.logger.error(f"Error suggesting category: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error suggesting category: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -23950,10 +23953,10 @@ def quiltt_backfill_suggestions():
                     
                     upsert_quiltt_transaction(txn, current_user.id)
                     backfilled += 1
-                    app.logger.info(f"Backfilled: {description[:30]} -> {suggestion.get('suggested_category')} (merchant={suggestion.get('ntropy_merchant_id')})")
+                    log_info(app.logger, 'QUILTT', f"Backfilled: {description[:30]} -> {suggestion.get('suggested_category')} (merchant={suggestion.get('ntropy_merchant_id')})")
                     
             except Exception as e:
-                app.logger.warning(f"Error backfilling {txn.get('transaction_id')}: {e}")
+                log_warning(app.logger, 'QUILTT', f"Error backfilling {txn.get('transaction_id')}: {e}")
                 continue
         
         remaining = total_remaining - backfilled
@@ -23966,7 +23969,7 @@ def quiltt_backfill_suggestions():
         })
         
     except Exception as e:
-        app.logger.error(f"Error backfilling suggestions: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error backfilling suggestions: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -24065,7 +24068,7 @@ def quiltt_suggest_categories_batch():
         })
         
     except Exception as e:
-        app.logger.error(f"Error suggesting categories batch: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error suggesting categories batch: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -24080,7 +24083,7 @@ def quiltt_clear_transaction_cache():
         cache_key = f'quiltt_transactions:v1:{current_user.id}'
         deleted = r.delete(cache_key)
         
-        app.logger.info(f"Cleared transaction cache for user {current_user.id}, deleted: {deleted}")
+        log_info(app.logger, 'QUILTT', f"Cleared transaction cache for user {current_user.id}, deleted: {deleted}")
         
         return jsonify({
             'status': 'success',
@@ -24089,7 +24092,7 @@ def quiltt_clear_transaction_cache():
         })
         
     except Exception as e:
-        app.logger.error(f"Error clearing transaction cache: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error clearing transaction cache: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -24178,7 +24181,7 @@ def quiltt_test_sync_debug():
         })
         
     except Exception as e:
-        app.logger.error(f"Error in sync debug: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error in sync debug: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -24232,7 +24235,7 @@ def quiltt_check_mysql_ntropy():
             })
         
     except Exception as e:
-        app.logger.error(f"Error checking MySQL ntropy data: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error checking MySQL ntropy data: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -24249,7 +24252,7 @@ def quiltt_force_flush_transactions():
         r.sadd(dirty_key, 'quiltt_transactions')
         r.expire(dirty_key, 604800)  # 7 days
         
-        app.logger.info(f"Marked quiltt_transactions as dirty for user {current_user.id}")
+        log_info(app.logger, 'QUILTT', f"Marked quiltt_transactions as dirty for user {current_user.id}")
         
         return jsonify({
             'status': 'success',
@@ -24258,7 +24261,7 @@ def quiltt_force_flush_transactions():
         })
         
     except Exception as e:
-        app.logger.error(f"Error forcing transaction flush: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error forcing transaction flush: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -24311,7 +24314,7 @@ def quiltt_check_redis_data():
         })
         
     except Exception as e:
-        app.logger.error(f"Error checking Redis data: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error checking Redis data: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -24375,7 +24378,7 @@ def quiltt_test_uncategorized_helper():
         })
         
     except Exception as e:
-        app.logger.error(f"Error testing uncategorized helper: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error testing uncategorized helper: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -24457,7 +24460,7 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
             cursor.close()
         
         if not auto_cat:
-            app.logger.error(f"[AUTO-ADJUSTMENT] User {user_id}: No Uncategorized category found for {entry_type}")
+            log_error(app.logger, 'AUTO_ADJUSTMENT', f"User {user_id}: No Uncategorized category found for {entry_type}")
             return False, f"No Uncategorized category found for {entry_type}"
         
         category_id = auto_cat['id']
@@ -24506,7 +24509,7 @@ def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name
         return True, f"Auto-adjustment created: {entry_type} of ${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
         
     except Exception as e:
-        app.logger.error(f"[AUTO-ADJUSTMENT] Error for user {user_id}: {e}", exc_info=True)
+        log_exception(app.logger, 'AUTO_ADJUSTMENT', f"Error for user {user_id}: {e}")
         return False, f"Error creating auto-adjustment: {str(e)}"
 
 
@@ -24529,7 +24532,7 @@ def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_acco
         yesterday = date_class.today() - td(days=1)
         today_str = yesterday.strftime('%Y-%m-%d')
         
-        app.logger.info(f"[SAVINGS-ADJUST] Creating adjustment for user {user_id}: bank balance ${bank_savings_balance}")
+        log_info(app.logger, 'SAVINGS_ADJUST', f"Creating adjustment for user {user_id}: bank balance ${bank_savings_balance}")
         
         # Get current calculated savings for today (before adjustment)
         current_calculated_savings = 0.0
@@ -24563,7 +24566,7 @@ def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_acco
         bank_balance_float = float(bank_savings_balance)
         adjustment_delta = bank_balance_float - current_calculated_savings
         
-        app.logger.info(f"[SAVINGS-ADJUST] Calculated savings: ${current_calculated_savings}, Bank: ${bank_balance_float}, Delta: ${adjustment_delta}")
+        log_info(app.logger, 'SAVINGS_ADJUST', f"Calculated savings: ${current_calculated_savings}, Bank: ${bank_balance_float}, Delta: ${adjustment_delta}")
         
         # Get current savings adjustments from Redis
         adjustments = _get_savings_adjustments_from_redis(user_id)
@@ -24606,7 +24609,7 @@ def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_acco
         })
         # Sort by date
         adjustments.sort(key=lambda x: x['date'])
-        app.logger.info(f"[SAVINGS-ADJUST] Created new bank sync adjustment for {today_str}: ${adjustment_delta}")
+        log_info(app.logger, 'SAVINGS_ADJUST', f"Created new bank sync adjustment for {today_str}: ${adjustment_delta}")
         
         # Save to Redis
         _set_savings_adjustments_to_redis(user_id, adjustments)
@@ -24618,7 +24621,7 @@ def _update_savings_balance_from_bank(user_id, bank_savings_balance, quiltt_acco
         return True, f"Savings adjustment created: delta ${adjustment_delta:.2f} (bank ${bank_balance_float:.2f})"
         
     except Exception as e:
-        app.logger.error(f"[SAVINGS-ADJUST] Error for user {user_id}: {e}", exc_info=True)
+        log_exception(app.logger, 'SAVINGS_ADJUST', f"Error for user {user_id}: {e}")
         return False, f"Error creating savings adjustment: {str(e)}"
 
 
@@ -24640,7 +24643,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
         yesterday = date_class.today() - td(days=1)
         today_str = yesterday.strftime('%Y-%m-%d')
         
-        app.logger.info(f"[CA-AUTO-ADJUST] Creating adjustment for user {user_id}, quiltt_id {quiltt_account_id}, mask {account_mask}: bank balance ${bank_balance}")
+        log_info(app.logger, 'CA_AUTO_ADJUST', f"Creating adjustment for user {user_id}, quiltt_id {quiltt_account_id}, mask {account_mask}: bank balance ${bank_balance}")
         
         # Find the credit account - first by quiltt_account_id, then by mask
         credit_accounts = None
@@ -24651,7 +24654,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                 if cached:
                     credit_accounts = json.loads(cached)
             except Exception as e:
-                app.logger.error(f"[CA-AUTO-ADJUST] Redis error: {e}")
+                log_error(app.logger, 'CA_AUTO_ADJUST', f"Redis error: {e}")
         
         if credit_accounts is None:
             with get_db_pool().get_connection() as conn:
@@ -24666,15 +24669,15 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
             # Primary: match by quiltt_account_id
             if ca.get('quiltt_account_id') == quiltt_account_id:
                 target_account = ca
-                app.logger.info(f"[CA-AUTO-ADJUST] Found credit account by quiltt_account_id {quiltt_account_id}")
+                log_info(app.logger, 'CA_AUTO_ADJUST', f"Found credit account by quiltt_account_id {quiltt_account_id}")
                 break
             # Fallback: match by mask
             elif ca.get('mask') == account_mask and not target_account:
                 target_account = ca
-                app.logger.info(f"[CA-AUTO-ADJUST] Found credit account by mask {account_mask}")
+                log_info(app.logger, 'CA_AUTO_ADJUST', f"Found credit account by mask {account_mask}")
         
         if not target_account:
-            app.logger.warning(f"[CA-AUTO-ADJUST] No credit account found for quiltt_id {quiltt_account_id} or mask {account_mask}")
+            log_warning(app.logger, 'CA_AUTO_ADJUST', f"No credit account found for quiltt_id {quiltt_account_id} or mask {account_mask}")
             return False, f"No credit account found for quiltt_id {quiltt_account_id} or mask {account_mask}"
         
         account_id = target_account.get('id')
@@ -24699,7 +24702,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                 if cached:
                     c_a_balances = json.loads(cached)
             except Exception as e:
-                app.logger.error(f"[CA-AUTO-ADJUST] Redis error getting balances: {e}")
+                log_error(app.logger, 'CA_AUTO_ADJUST', f"Redis error getting balances: {e}")
         
         current_calculated_balance = starting_balance  # Default to starting balance
         
@@ -24728,7 +24731,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
         # Bank shows what we owe, calculated balance shows what we think we owe
         diff = bank_balance_float - current_calculated_balance
         
-        app.logger.info(f"[CA-AUTO-ADJUST] Calculated balance: ${current_calculated_balance}, Bank: ${bank_balance_float}, Diff: ${diff}")
+        log_info(app.logger, 'CA_AUTO_ADJUST', f"Calculated balance: ${current_calculated_balance}, Bank: ${bank_balance_float}, Diff: ${diff}")
         
         # Skip if difference is negligible
         if abs(diff) < 0.01:
@@ -24749,7 +24752,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                     if cached:
                         c_expense_categories = json.loads(cached)
                 except Exception as e:
-                    app.logger.error(f"[CA-AUTO-ADJUST] Redis error getting categories: {e}")
+                    log_error(app.logger, 'CA_AUTO_ADJUST', f"Redis error getting categories: {e}")
             
             if c_expense_categories is None:
                 with get_db_pool().get_connection() as conn:
@@ -24770,7 +24773,7 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                     cat.get('name') == 'Starting Balance' and 
                     not cat.get('is_auto_adjustment')):
                     target_cat = cat
-                    app.logger.info(f"[CA-AUTO-ADJUST] Using Starting Balance category (id={cat.get('id')}) for adjustment")
+                    log_info(app.logger, 'CA_AUTO_ADJUST', f"Using Starting Balance category (id={cat.get('id')}) for adjustment")
                     break
             
             # Fall back to Uncategorized (auto-adjustment) category
@@ -24778,12 +24781,12 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                 for cat in (c_expense_categories or []):
                     if str(cat.get('account_id')) == str(account_id) and cat.get('is_auto_adjustment') == 1:
                         target_cat = cat
-                        app.logger.info(f"[CA-AUTO-ADJUST] No Starting Balance category found, using Uncategorized (id={cat.get('id')})")
+                        log_info(app.logger, 'CA_AUTO_ADJUST', f"No Starting Balance category found, using Uncategorized (id={cat.get('id')})")
                         break
             
             if not target_cat:
                 # Create the Uncategorized category if nothing exists
-                app.logger.info(f"[CA-AUTO-ADJUST] Creating missing Uncategorized category for account {account_id}")
+                log_info(app.logger, 'CA_AUTO_ADJUST', f"Creating missing Uncategorized category for account {account_id}")
                 new_cat_id = _add_category_to_redis('c_expense_categories', user_id, {
                     'account_id': account_id,
                     'name': 'Uncategorized',
@@ -24798,10 +24801,10 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                 })
                 
                 if new_cat_id:
-                    app.logger.info(f"[CA-AUTO-ADJUST] Created Uncategorized category with ID {new_cat_id}")
+                    log_info(app.logger, 'CA_AUTO_ADJUST', f"Created Uncategorized category with ID {new_cat_id}")
                     target_cat = {'id': new_cat_id, 'account_id': account_id, 'is_auto_adjustment': 1}
                 else:
-                    app.logger.error(f"[CA-AUTO-ADJUST] Failed to create Uncategorized category for account {account_id}")
+                    log_error(app.logger, 'CA_AUTO_ADJUST', f"Failed to create Uncategorized category for account {account_id}")
                     return False, f"Failed to create category for credit account adjustment"
             
             category_id = target_cat.get('id')
@@ -24837,12 +24840,12 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                     _redis_client.sadd(dirty_key, 'c_expense_entries')
                     _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                     
-                    app.logger.info(f"[CA-AUTO-ADJUST] Updated Starting Balance entry from ${old_amount} to ${new_amount}")
+                    log_info(app.logger, 'CA_AUTO_ADJUST', f"Updated Starting Balance entry from ${old_amount} to ${new_amount}")
                     return True, f"Starting Balance updated: ${old_amount:.2f} → ${new_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
             
             # Create new expense entry to increase balance
             _update_entry_in_redis('c_expense_entries', user_id, category_id, today_str, float(adjustment_amount), processed=1, is_auto_adjustment=True)
-            app.logger.info(f"[CA-AUTO-ADJUST] Created {'Starting Balance' if is_starting_balance else 'expense'} entry for ${adjustment_amount} to increase balance")
+            log_info(app.logger, 'CA_AUTO_ADJUST', f"Created {'Starting Balance' if is_starting_balance else 'expense'} entry for ${adjustment_amount} to increase balance")
             
             return True, f"Credit account expense adjustment: +${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
         
@@ -24897,12 +24900,12 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                 _redis_client.sadd(dirty_key, 'c_payment_entries')
                 _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
             
-            app.logger.info(f"[CA-AUTO-ADJUST] Created payment entry for ${adjustment_amount} to decrease balance")
+            log_info(app.logger, 'CA_AUTO_ADJUST', f"Created payment entry for ${adjustment_amount} to decrease balance")
             
             return True, f"Credit account payment adjustment: -${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
         
     except Exception as e:
-        app.logger.error(f"[CA-AUTO-ADJUST] Error for user {user_id}: {e}", exc_info=True)
+        log_exception(app.logger, 'CA_AUTO_ADJUST', f"Error for user {user_id}: {e}")
         return False, f"Error creating credit account auto-adjustment: {str(e)}"
 
 
@@ -24940,14 +24943,14 @@ def quiltt_toggle_sync():
                                         current_balance = abs(float(balance.get('current', 0) or 0))
                                         available_balance = abs(float(balance.get('available', 0) or 0))
                                         
-                                        app.logger.info(f"[TOGGLE-SYNC] Refreshed balance for {account_id}: current=${current_balance}, available=${available_balance}")
+                                        log_info(app.logger, 'TOGGLE_SYNC', f"Refreshed balance for {account_id}: current=${current_balance}, available=${available_balance}")
                                         
                                         # Update the account in Redis with fresh balance
                                         update_quiltt_account_field(account_id, 'current_balance', current_balance, current_user.id)
                                         update_quiltt_account_field(account_id, 'available_balance', available_balance, current_user.id)
                                         break
                 except Exception as e:
-                    app.logger.warning(f"[TOGGLE-SYNC] Could not refresh balance from Quiltt: {e}")
+                    log_warning(app.logger, 'TOGGLE_SYNC', f"Could not refresh balance from Quiltt: {e}")
                     # Continue anyway - we'll use cached balance
             
             # Enable: Set both sync_transactions and is_active to 1
@@ -25023,7 +25026,7 @@ def quiltt_toggle_sync():
                                 old_name = ca.get('name', '')
                                 if old_name != credit_account_display_name:
                                     credit_accounts[i]['name'] = credit_account_display_name
-                                    app.logger.info(f"[TOGGLE-SYNC] Renamed credit account '{old_name}' -> '{credit_account_display_name}'")
+                                    log_info(app.logger, 'TOGGLE_SYNC', f"Renamed credit account '{old_name}' -> '{credit_account_display_name}'")
                                     
                                     # Also rename the payment category
                                     expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -25033,7 +25036,7 @@ def quiltt_toggle_sync():
                                         for ec in expense_categories:
                                             if ec.get('credit_account_id') == credit_account_db_id and ec.get('name') == old_payment_name:
                                                 ec['name'] = f"{credit_account_display_name} payment"
-                                                app.logger.info(f"[TOGGLE-SYNC] Renamed payment category '{old_payment_name}' -> '{ec['name']}'")
+                                                log_info(app.logger, 'TOGGLE_SYNC', f"Renamed payment category '{old_payment_name}' -> '{ec['name']}'")
                                                 break
                                         _redis_client.setex(
                                             f"expense_categories:v1:{current_user.id}",
@@ -25042,7 +25045,7 @@ def quiltt_toggle_sync():
                                         )
                                         _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
                                 
-                                app.logger.info(f"Found credit account by quiltt_account_id {account_id} (toggle-sync enable)")
+                                log_info(app.logger, 'QUILTT', f"Found credit account by quiltt_account_id {account_id} (toggle-sync enable)")
                                 break
                             # Fallback to mask matching (and set quiltt_account_id for future)
                             elif ca.get('mask') == account_mask and not ca.get('quiltt_account_id'):
@@ -25055,7 +25058,7 @@ def quiltt_toggle_sync():
                                 old_name = ca.get('name', '')
                                 if old_name != credit_account_display_name:
                                     credit_accounts[i]['name'] = credit_account_display_name
-                                    app.logger.info(f"[TOGGLE-SYNC] Renamed credit account '{old_name}' -> '{credit_account_display_name}' (mask match)")
+                                    log_info(app.logger, 'TOGGLE_SYNC', f"Renamed credit account '{old_name}' -> '{credit_account_display_name}' (mask match)")
                                     
                                     # Also rename the payment category
                                     expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
@@ -25065,7 +25068,7 @@ def quiltt_toggle_sync():
                                         for ec in expense_categories:
                                             if ec.get('credit_account_id') == credit_account_db_id and ec.get('name') == old_payment_name:
                                                 ec['name'] = f"{credit_account_display_name} payment"
-                                                app.logger.info(f"[TOGGLE-SYNC] Renamed payment category '{old_payment_name}' -> '{ec['name']}' (mask match)")
+                                                log_info(app.logger, 'TOGGLE_SYNC', f"Renamed payment category '{old_payment_name}' -> '{ec['name']}' (mask match)")
                                                 break
                                         _redis_client.setex(
                                             f"expense_categories:v1:{current_user.id}",
@@ -25074,7 +25077,7 @@ def quiltt_toggle_sync():
                                         )
                                         _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
                                 
-                                app.logger.info(f"Found credit account by mask {account_mask}, linking quiltt_account_id {account_id}")
+                                log_info(app.logger, 'QUILTT', f"Found credit account by mask {account_mask}, linking quiltt_account_id {account_id}")
                                 break
                         
                         if updated:
@@ -25090,12 +25093,12 @@ def quiltt_toggle_sync():
                             _redis_client.sadd(dirty_key, 'credit_accounts')
                             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
                             
-                            app.logger.info(f"Set is_quiltt=1 for credit account (toggle-sync enable)")
+                            log_info(app.logger, 'QUILTT', f"Set is_quiltt=1 for credit account (toggle-sync enable)")
                         
                         elif not existing_account:
                             # Credit account doesn't exist - create it (mirror bank connection logic)
                             # credit_account_display_name already set above
-                            app.logger.info(f"Creating credit account for Quiltt account: {credit_account_display_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${current_balance}")
+                            log_info(app.logger, 'QUILTT', f"Creating credit account for Quiltt account: {credit_account_display_name} (mask: {account_mask}, quiltt_id: {account_id}) with balance ${current_balance}")
                             
                             # Determine if it's a card or line of credit based on name/type
                             is_card = 1 if 'card' in account_name.lower() else 0
@@ -25218,7 +25221,7 @@ def quiltt_toggle_sync():
                                     'credit_account_id': temp_account_id
                                 })
                                 
-                                app.logger.info(f"Created payment category '{payment_category_name}' for credit account (toggle-sync)")
+                                log_info(app.logger, 'CREDIT', f"Created payment category '{payment_category_name}' for credit account (toggle-sync)")
                                 
                                 # Create starting balance entry if starting_balance > 0
                                 if current_balance and float(current_balance) > 0.0:
@@ -25261,26 +25264,26 @@ def quiltt_toggle_sync():
                                         _redis_client.sadd(dirty_key_entries, 'c_expense_entries')
                                         _redis_client.expire(dirty_key_entries, PERSISTENT_CACHE_TTL)
                                         
-                                        app.logger.info(f"Created starting balance entry for credit account {account_name}: ${current_balance} (toggle-sync)")
+                                        log_info(app.logger, 'CREDIT', f"Created starting balance entry for credit account {account_name}: ${current_balance} (toggle-sync)")
                                         
                                         # Force immediate flush to MySQL so balance records can be created
                                         try:
                                             from redis_manager import flush_dirty_tables_for_user
                                             flush_dirty_tables_for_user(current_user.id)
                                         except Exception as flush_err:
-                                            app.logger.error(f"Error during forced flush for Quiltt credit account (toggle-sync): {flush_err}")
+                                            log_error(app.logger, 'QUILTT', f"Error during forced flush for Quiltt credit account (toggle-sync): {flush_err}")
                                         
                                         # Recalculate CA balances from scratch
                                         try:
                                             save_ca_daily_balance()
-                                            app.logger.info(f"Recalculated CA daily balances for credit account {account_name} (toggle-sync)")
+                                            log_info(app.logger, 'CREDIT', f"Recalculated CA daily balances for credit account {account_name} (toggle-sync)")
                                         except Exception as balance_err:
-                                            app.logger.error(f"Error recalculating CA balances for Quiltt credit account (toggle-sync): {balance_err}")
+                                            log_error(app.logger, 'QUILTT', f"Error recalculating CA balances for Quiltt credit account (toggle-sync): {balance_err}")
                                         
                                     except Exception as entry_err:
-                                        app.logger.error(f"Error creating starting balance entry (toggle-sync): {entry_err}")
+                                        log_error(app.logger, 'QUILTT', f"Error creating starting balance entry (toggle-sync): {entry_err}")
                                 
-                                app.logger.info(f"Created credit account {account_name} with ID {temp_account_id} and all default categories (toggle-sync)")
+                                log_info(app.logger, 'CREDIT', f"Created credit account {account_name} with ID {temp_account_id} and all default categories (toggle-sync)")
                                 credit_account_was_created = True  # Mark that we created it
                 
                 
@@ -25309,7 +25312,7 @@ def quiltt_toggle_sync():
                             # Differentiate between checking and savings accounts
                             if 'savings' in account_name:
                                 # Savings account - create savings adjustment
-                                app.logger.info(f"[AUTO-ADJUST] Creating savings adjustment for account '{account_name}' with balance {current_balance}")
+                                log_info(app.logger, 'AUTO_ADJUST', f"Creating savings adjustment for account '{account_name}' with balance {current_balance}")
                                 auto_success, auto_msg = _update_savings_balance_from_bank(
                                     current_user.id, 
                                     current_balance,
@@ -25317,12 +25320,12 @@ def quiltt_toggle_sync():
                                 )
                                 if auto_success:
                                     auto_adjustment_msg = f" | {auto_msg}"
-                                    app.logger.info(f"[AUTO-ADJUST-SAVINGS] Success: {auto_msg}")
+                                    log_info(app.logger, 'AUTO_ADJUST_SAVINGS', f"Success: {auto_msg}")
                                 else:
-                                    app.logger.warning(f"[AUTO-ADJUST-SAVINGS] Failed: {auto_msg}")
+                                    log_warning(app.logger, 'AUTO_ADJUST_SAVINGS', f"Failed: {auto_msg}")
                             else:
                                 # Checking account - create income/expense auto-adjustment
-                                app.logger.info(f"[AUTO-ADJUST] Creating auto-adjustment for checking account '{account_name}' with balance {current_balance}")
+                                log_info(app.logger, 'AUTO_ADJUST', f"Creating auto-adjustment for checking account '{account_name}' with balance {current_balance}")
                                 auto_success, auto_msg = _create_auto_adjustment_for_bank_balance(
                                     current_user.id, 
                                     current_balance,
@@ -25330,16 +25333,16 @@ def quiltt_toggle_sync():
                                 )
                                 if auto_success:
                                     auto_adjustment_msg = f" | {auto_msg}"
-                                    app.logger.info(f"[AUTO-ADJUST] Success: {auto_msg}")
+                                    log_info(app.logger, 'AUTO_ADJUST', f"Success: {auto_msg}")
                                 else:
-                                    app.logger.warning(f"[AUTO-ADJUST] Failed: {auto_msg}")
+                                    log_warning(app.logger, 'AUTO_ADJUST', f"Failed: {auto_msg}")
                         elif account_type == 'credit' and current_balance is not None and account_mask:
                             # Credit account - create credit account auto-adjustment
                             # Skip if we just created the account (already has starting balance entry)
                             if credit_account_was_created:
-                                app.logger.info(f"[AUTO-ADJUST-CREDIT] Skipping auto-adjustment - account was just created with starting balance")
+                                log_info(app.logger, 'AUTO_ADJUST_CREDIT', f"Skipping auto-adjustment - account was just created with starting balance")
                             else:
-                                app.logger.info(f"[AUTO-ADJUST] Creating credit account adjustment for '{account_name}' with balance {current_balance}")
+                                log_info(app.logger, 'AUTO_ADJUST', f"Creating credit account adjustment for '{account_name}' with balance {current_balance}")
                                 auto_success, auto_msg = _create_credit_account_auto_adjustment(
                                     current_user.id,
                                     account_id,
@@ -25348,9 +25351,9 @@ def quiltt_toggle_sync():
                                 )
                                 if auto_success:
                                     auto_adjustment_msg = f" | {auto_msg}"
-                                    app.logger.info(f"[AUTO-ADJUST-CREDIT] Success: {auto_msg}")
+                                    log_info(app.logger, 'AUTO_ADJUST_CREDIT', f"Success: {auto_msg}")
                                 else:
-                                    app.logger.warning(f"[AUTO-ADJUST-CREDIT] Failed: {auto_msg}")
+                                    log_warning(app.logger, 'AUTO_ADJUST_CREDIT', f"Failed: {auto_msg}")
                         else:
                             pass
                     
@@ -25365,7 +25368,7 @@ def quiltt_toggle_sync():
                             'message': f'Account enabled but sync had issues: {message}{auto_adjustment_msg}'
                         })
                 except Exception as tx_error:
-                    app.logger.error(f"Error re-syncing transactions: {tx_error}")
+                    log_error(app.logger, 'TXN_SYNC', f"Error re-syncing transactions: {tx_error}")
                     return jsonify({
                         'status': 'warning',
                         'message': 'Account enabled but transaction sync failed'
@@ -25414,7 +25417,7 @@ def quiltt_toggle_sync():
                             credit_accounts[i]['is_quiltt'] = 0
                             credit_accounts[i]['quiltt_account_id'] = None  # Clear the link
                             updated = True
-                            app.logger.info(f"Set is_quiltt=0 and cleared quiltt_account_id for credit account (toggle-sync off, quiltt_id={account_id})")
+                            log_info(app.logger, 'QUILTT', f"Set is_quiltt=0 and cleared quiltt_account_id for credit account (toggle-sync off, quiltt_id={account_id})")
                             break
                         # Fallback: match by last 4 digits of mask
                         ca_mask = ca.get('mask')
@@ -25422,7 +25425,7 @@ def quiltt_toggle_sync():
                         if quiltt_last4 and ca_last4 and ca_last4 == quiltt_last4:
                             credit_accounts[i]['is_quiltt'] = 0
                             updated = True
-                            app.logger.info(f"Set is_quiltt=0 for credit account by mask last4 {ca_last4} (toggle-sync off)")
+                            log_info(app.logger, 'QUILTT', f"Set is_quiltt=0 for credit account by mask last4 {ca_last4} (toggle-sync off)")
                             break
                     
                     if updated:
@@ -25443,14 +25446,14 @@ def quiltt_toggle_sync():
                     pass
                     delete_quiltt_transactions_for_account(account_id, current_user.id)
                 except Exception as del_error:
-                    app.logger.error(f"Error deleting transactions: {del_error}")
+                    log_error(app.logger, 'TXN_SYNC', f"Error deleting transactions: {del_error}")
                 
                 return jsonify({'status': 'success', 'message': 'Account disabled and transactions removed'})
             else:
                 return jsonify({'status': 'error', 'message': 'Failed to disable account'}), 500
         
     except Exception as e:
-        app.logger.error(f"Error toggling sync: {e}")
+        log_error(app.logger, 'QUILTT', f"Error toggling sync: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -25467,7 +25470,7 @@ def quiltt_update_account():
         return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
     
     try:
-        app.logger.info(f"[UPDATE-ACCOUNT] account_id={account_id}, is_active={is_active}, sync_transactions={sync_transactions}, user_id={current_user.id}")
+        log_info(app.logger, 'UPDATE_ACCOUNT', f"account_id={account_id}, is_active={is_active}, sync_transactions={sync_transactions}, user_id={current_user.id}")
         
         # Update both fields together to avoid race conditions
         from quiltt_redis import update_quiltt_account_fields
@@ -25481,7 +25484,7 @@ def quiltt_update_account():
         )
         
         if not success:
-            app.logger.error(f"[UPDATE-ACCOUNT] Failed to update account {account_id} - account not found in Redis or MySQL")
+            log_error(app.logger, 'UPDATE_ACCOUNT', f"Failed to update account {account_id} - account not found in Redis or MySQL")
             return jsonify({'status': 'error', 'message': 'Failed to update account'}), 500
         
         # If account is being toggled off (is_active=0 or sync_transactions=0), update credit account is_quiltt to 0
@@ -25511,7 +25514,7 @@ def quiltt_update_account():
                         credit_accounts[i]['is_quiltt'] = 0
                         credit_accounts[i]['quiltt_account_id'] = None  # Clear the link
                         updated = True
-                        app.logger.info(f"Set is_quiltt=0 and cleared quiltt_account_id (update-account, quiltt_id={account_id})")
+                        log_info(app.logger, 'QUILTT', f"Set is_quiltt=0 and cleared quiltt_account_id (update-account, quiltt_id={account_id})")
                         break
                     # Fallback: match by last 4 digits of mask
                     ca_mask = ca.get('mask')
@@ -25519,7 +25522,7 @@ def quiltt_update_account():
                     if quiltt_last4 and ca_last4 and ca_last4 == quiltt_last4:
                         credit_accounts[i]['is_quiltt'] = 0
                         updated = True
-                        app.logger.info(f"Set is_quiltt=0 for credit account by mask last4 {ca_last4} (update-account)")
+                        log_info(app.logger, 'QUILTT', f"Set is_quiltt=0 for credit account by mask last4 {ca_last4} (update-account)")
                         break
                 
                 if updated:
@@ -25538,7 +25541,7 @@ def quiltt_update_account():
         return jsonify({'status': 'success'})
         
     except Exception as e:
-        app.logger.error(f"Error updating account {account_id}: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error updating account {account_id}: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -25571,7 +25574,7 @@ def quiltt_sync_transactions_setup():
         })
         
     except Exception as e:
-        app.logger.error(f"Error syncing transactions during setup: {e}")
+        log_error(app.logger, 'QUILTT', f"Error syncing transactions during setup: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -25586,7 +25589,7 @@ def quiltt_analyze_transactions_for_categories():
     enhancements like transaction auto-categorization.
     """
     try:
-        app.logger.info(f"Returning static category recommendations for user_id={current_user.id}")
+        log_info(app.logger, 'QUILTT', f"Returning static category recommendations for user_id={current_user.id}")
         
         # Static starter categories - simple and universal
         static_recommendations = {
@@ -25613,7 +25616,7 @@ def quiltt_analyze_transactions_for_categories():
         })
         
     except Exception as e:
-        app.logger.error(f"Error in category recommendations: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error in category recommendations: {e}")
         return jsonify({
             'status': 'success',
             'recommendations': {'income': [], 'expense': []},
@@ -25656,8 +25659,7 @@ def quiltt_create_recommended_categories():
         income_categories = data.get('income', [])
         expense_categories = data.get('expense', [])
         
-        app.logger.info(f"Creating recommended categories for user_id={current_user.id}: "
-                       f"{len(income_categories)} income, {len(expense_categories)} expense")
+        log_exception(app.logger, 'QUILTT', f"Creating recommended categories for user_id={current_user.id}: " f"{len(income_categories)} income, {len(expense_categories)} expense")
         
         created_income = []
         created_expense = []
@@ -25680,7 +25682,7 @@ def quiltt_create_recommended_categories():
                 )
                 created_income.append(result)
             except Exception as e:
-                app.logger.error(f"Error creating income category '{cat.get('name')}': {e}")
+                log_error(app.logger, 'QUILTT', f"Error creating income category '{cat.get('name')}': {e}")
                 errors.append(f"Income '{cat.get('name')}': {str(e)}")
         
         # Process expense categories
@@ -25696,7 +25698,7 @@ def quiltt_create_recommended_categories():
                 )
                 created_expense.append(result)
             except Exception as e:
-                app.logger.error(f"Error creating expense category '{cat.get('name')}': {e}")
+                log_error(app.logger, 'QUILTT', f"Error creating expense category '{cat.get('name')}': {e}")
                 errors.append(f"Expense '{cat.get('name')}': {str(e)}")
         
         # Sync custom categories to Ntropy for transaction enrichment
@@ -25713,7 +25715,7 @@ def quiltt_create_recommended_categories():
         })
         
     except Exception as e:
-        app.logger.error(f"Error creating recommended categories: {e}", exc_info=True)
+        log_exception(app.logger, 'QUILTT', f"Error creating recommended categories: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -25895,10 +25897,10 @@ def quiltt_auto_adjust_checking():
         # Get all active accounts for this user
         accounts = get_quiltt_accounts(current_user.id)
         
-        app.logger.info(f"[AUTO-ADJUST-CHECKING] User {current_user.id}: Found {len(accounts) if accounts else 0} accounts")
+        log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"User {current_user.id}: Found {len(accounts) if accounts else 0} accounts")
         
         if not accounts:
-            app.logger.info(f"[AUTO-ADJUST-CHECKING] User {current_user.id}: No accounts found, returning early")
+            log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"User {current_user.id}: No accounts found, returning early")
             return jsonify({'status': 'success', 'message': 'No accounts found'})
         
         adjustments_made = []
@@ -25912,12 +25914,12 @@ def quiltt_auto_adjust_checking():
             account_name = account.get('account_name', '').lower()
             current_balance = account.get('current_balance', 0)
             
-            app.logger.info(f"[AUTO-ADJUST-CHECKING] Account: {account.get('account_name')} - type={account_type}, is_active={is_active}, sync_transactions={sync_transactions}, balance={current_balance}")
+            log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Account: {account.get('account_name')} - type={account_type}, is_active={is_active}, sync_transactions={sync_transactions}, balance={current_balance}")
             
             if is_active and sync_transactions and account_type == 'depository' and current_balance:
                 # Check if it's a CHECKING account - create auto-adjustment
                 if 'checking' in account_name:
-                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing CHECKING account '{account.get('account_name')}' with balance {current_balance}")
+                    log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Processing CHECKING account '{account.get('account_name')}' with balance {current_balance}")
                     
                     success, message = _create_auto_adjustment_for_bank_balance(
                         current_user.id,
@@ -25931,13 +25933,13 @@ def quiltt_auto_adjust_checking():
                             'balance': float(current_balance),
                             'message': message
                         })
-                        app.logger.info(f"[AUTO-ADJUST-CHECKING] Success for {account.get('account_name')}: {message}")
+                        log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Success for {account.get('account_name')}: {message}")
                     else:
-                        app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed for {account.get('account_name')}: {message}")
+                        log_warning(app.logger, 'AUTO_ADJUST_CHECKING', f"Failed for {account.get('account_name')}: {message}")
                 
                 # Check if it's a SAVINGS account - update savings balance
                 elif 'savings' in account_name:
-                    app.logger.info(f"[AUTO-ADJUST-CHECKING] Processing SAVINGS account '{account.get('account_name')}' with balance {current_balance}")
+                    log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Processing SAVINGS account '{account.get('account_name')}' with balance {current_balance}")
                     
                     success, message = _update_savings_balance_from_bank(
                         current_user.id,
@@ -25946,18 +25948,18 @@ def quiltt_auto_adjust_checking():
                     
                     if success:
                         savings_updated = True
-                        app.logger.info(f"[AUTO-ADJUST-CHECKING] Savings updated for {account.get('account_name')}: {message}")
+                        log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Savings updated for {account.get('account_name')}: {message}")
                     else:
-                        app.logger.warning(f"[AUTO-ADJUST-CHECKING] Failed to update savings for {account.get('account_name')}: {message}")
+                        log_warning(app.logger, 'AUTO_ADJUST_CHECKING', f"Failed to update savings for {account.get('account_name')}: {message}")
         
         # Recalculate totals and remainders if any changes were made
         if adjustments_made or savings_updated:
-            app.logger.info(f"[AUTO-ADJUST-CHECKING] Recalculating totals for user {current_user.id}")
+            log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Recalculating totals for user {current_user.id}")
             try:
                 save_totals_remainders_d()
-                app.logger.info(f"[AUTO-ADJUST-CHECKING] Totals recalculated successfully")
+                log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Totals recalculated successfully")
             except Exception as calc_err:
-                app.logger.error(f"[AUTO-ADJUST-CHECKING] Error recalculating totals: {calc_err}")
+                log_error(app.logger, 'AUTO_ADJUST_CHECKING', f"Error recalculating totals: {calc_err}")
         
         result_message = []
         if adjustments_made:
@@ -25979,7 +25981,7 @@ def quiltt_auto_adjust_checking():
             })
     
     except Exception as e:
-        app.logger.error(f"[AUTO-ADJUST-CHECKING] Error: {e}", exc_info=True)
+        log_exception(app.logger, 'AUTO_ADJUST_CHECKING', f"Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -26004,7 +26006,7 @@ def quiltt_toggle_auto_import():
         return jsonify({'status': 'success'})
         
     except Exception as e:
-        app.logger.error(f"Error toggling auto-import: {e}")
+        log_error(app.logger, 'QUILTT', f"Error toggling auto-import: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -26047,7 +26049,7 @@ def quiltt_simulate_webhook():
         institution = conn_info.get('institution_name', 'Unknown')
         fake_event_id = f"sim_{uuid.uuid4().hex[:12]}"
 
-        app.logger.info(f"[SIMULATE-WEBHOOK] Simulating connection.synced.successful for user {user_id}, connection {connection_id} ({institution})")
+        log_info(app.logger, 'SIMULATE_WEBHOOK', f"Simulating connection.synced.successful for user {user_id}, connection {connection_id} ({institution})")
 
         # 1. Log the simulated event
         try:
@@ -26060,7 +26062,7 @@ def quiltt_simulate_webhook():
                 user_id=user_id
             )
         except Exception as e:
-            app.logger.warning(f"[SIMULATE-WEBHOOK] Failed to log event: {e}")
+            log_warning(app.logger, 'SIMULATE_WEBHOOK', f"Failed to log event: {e}")
 
         # 2. Update connection status to SYNCED
         try:
@@ -26070,7 +26072,7 @@ def quiltt_simulate_webhook():
                 'last_synced_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }, user_id=user_id)
         except Exception as e:
-            app.logger.warning(f"[SIMULATE-WEBHOOK] Failed to update connection status: {e}")
+            log_warning(app.logger, 'SIMULATE_WEBHOOK', f"Failed to update connection status: {e}")
 
         # 3. Sync transactions (the main work)
         success, count, message = _sync_quiltt_transactions_for_user(
@@ -26084,7 +26086,7 @@ def quiltt_simulate_webhook():
             error_msg = message if not success else None
             mark_webhook_event_processed(fake_event_id, error_message=error_msg)
         except Exception as e:
-            app.logger.warning(f"[SIMULATE-WEBHOOK] Failed to mark event processed: {e}")
+            log_warning(app.logger, 'SIMULATE_WEBHOOK', f"Failed to mark event processed: {e}")
 
         results.append({
             'connection_id': connection_id,
@@ -26126,7 +26128,7 @@ def quiltt_webhook():
 
     if webhook_secret:
         if not signature or not timestamp:
-            app.logger.warning("[WEBHOOK] Missing signature or timestamp headers")
+            log_warning(app.logger, 'WEBHOOK', "Missing signature or timestamp headers")
             return jsonify({'error': 'Missing signature'}), 401
 
         # Verify timestamp is within 5 minutes
@@ -26136,10 +26138,10 @@ def quiltt_webhook():
             event_time = datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
             now = datetime.now(timezone.utc)
             if abs((now - event_time).total_seconds()) > 300:
-                app.logger.warning(f"[WEBHOOK] Timestamp too old: {timestamp}")
+                log_warning(app.logger, 'WEBHOOK', f"Timestamp too old: {timestamp}")
                 return jsonify({'error': 'Timestamp expired'}), 401
         except (ValueError, TypeError):
-            app.logger.warning(f"[WEBHOOK] Invalid timestamp format: {timestamp}")
+            log_warning(app.logger, 'WEBHOOK', f"Invalid timestamp format: {timestamp}")
             return jsonify({'error': 'Invalid timestamp'}), 401
 
         # Verify HMAC signature: HMAC-SHA256(secret, "1" + timestamp + body)
@@ -26148,24 +26150,24 @@ def quiltt_webhook():
             hmac.new(webhook_secret.encode(), message.encode(), hashlib.sha256).digest()
         ).decode()
         if not hmac.compare_digest(signature, expected):
-            app.logger.warning("[WEBHOOK] Invalid signature")
+            log_warning(app.logger, 'WEBHOOK', "Invalid signature")
             return jsonify({'error': 'Invalid signature'}), 401
     else:
-        app.logger.warning("[WEBHOOK] No QUILTT_WEBHOOK_SECRET configured — skipping verification")
+        log_warning(app.logger, 'WEBHOOK', "No QUILTT_WEBHOOK_SECRET configured — skipping verification")
 
     # --- Parse Payload ---
     try:
         payload = json.loads(raw_body)
     except (json.JSONDecodeError, TypeError):
-        app.logger.error("[WEBHOOK] Invalid JSON payload")
+        log_error(app.logger, 'WEBHOOK', "Invalid JSON payload")
         return jsonify({'error': 'Invalid JSON'}), 400
 
     events = payload.get('events', [])
     if not events:
-        app.logger.info("[WEBHOOK] Received payload with no events")
+        log_info(app.logger, 'WEBHOOK', "Received payload with no events")
         return jsonify({'status': 'ok', 'message': 'No events'}), 200
 
-    app.logger.info(f"[WEBHOOK] Received {len(events)} event(s): {[e.get('type') for e in events]}")
+    log_info(app.logger, 'WEBHOOK', f"Received {len(events)} event(s): {[e.get('type') for e in events]}")
 
     # --- Log Events & Deduplicate ---
     new_events = []
@@ -26193,7 +26195,7 @@ def quiltt_webhook():
                         user_id = row['user_id']
                     cursor.close()
             except Exception as e:
-                app.logger.error(f"[WEBHOOK] Error looking up user for profile {profile_id}: {e}")
+                log_error(app.logger, 'WEBHOOK', f"Error looking up user for profile {profile_id}: {e}")
 
         # Insert event (INSERT IGNORE handles deduplication)
         inserted = insert_quiltt_webhook_event(
@@ -26214,9 +26216,9 @@ def quiltt_webhook():
                 'user_id': user_id,
                 'event': event
             })
-            app.logger.info(f"[WEBHOOK] Logged event {event_id} ({event_type}) for user {user_id}")
+            log_info(app.logger, 'WEBHOOK', f"Logged event {event_id} ({event_type}) for user {user_id}")
         else:
-            app.logger.info(f"[WEBHOOK] Duplicate event {event_id} — skipped")
+            log_info(app.logger, 'WEBHOOK', f"Duplicate event {event_id} — skipped")
 
     # --- Async Processing ---
     if new_events:
@@ -26236,7 +26238,7 @@ def quiltt_webhook():
                             mark_webhook_event_processed(event_id, error_message="Could not resolve user_id")
                             continue
 
-                        app.logger.info(f"[WEBHOOK] Processing {event_type} for user {user_id}")
+                        log_info(app.logger, 'WEBHOOK', f"Processing {event_type} for user {user_id}")
 
                         # --- Events that don't need processing ---
                         # initial/historical: handled by frontend UI flow during bank connection
@@ -26244,7 +26246,7 @@ def quiltt_webhook():
                         if event_type in ('connection.synced.successful.initial',
                                           'connection.synced.successful.historical',
                                           'profile.ready'):
-                            app.logger.info(f"[WEBHOOK] Skipping {event_type} for user {user_id} — no action needed")
+                            log_info(app.logger, 'WEBHOOK', f"Skipping {event_type} for user {user_id} — no action needed")
                             mark_webhook_event_processed(event_id)
                             continue
 
@@ -26260,20 +26262,20 @@ def quiltt_webhook():
                                     if _redis_client.set(lock_key, "1", nx=True, ex=300):
                                         lock_acquired = True
                                         break
-                                    app.logger.info(f"[WEBHOOK] Waiting for sync lock for user {user_id} (attempt {_attempt + 1})")
+                                    log_info(app.logger, 'WEBHOOK', f"Waiting for sync lock for user {user_id} (attempt {_attempt + 1})")
                                     import time as _time
                                     _time.sleep(5)
                                 if not lock_acquired:
-                                    app.logger.warning(f"[WEBHOOK] Could not acquire sync lock for user {user_id} after 5 min, proceeding anyway")
+                                    log_warning(app.logger, 'WEBHOOK', f"Could not acquire sync lock for user {user_id} after 5 min, proceeding anyway")
                             except Exception as lock_err:
-                                app.logger.warning(f"[WEBHOOK] Lock acquire error: {lock_err}")
+                                log_warning(app.logger, 'WEBHOOK', f"Lock acquire error: {lock_err}")
 
                             try:
                                 # Step 0: Auto-confirm previous pending entries before syncing new ones
                                 try:
                                     ac_confirmed, ac_fallback = _auto_confirm_pending_entries(user_id)
                                 except Exception as ac_err:
-                                    app.logger.warning(f"[WEBHOOK] Auto-confirm error for user {user_id}: {ac_err}")
+                                    log_warning(app.logger, 'WEBHOOK', f"Auto-confirm error for user {user_id}: {ac_err}")
 
                                 # Use date range from webhook metadata if available
                                 start_date = metadata.get('startDate')
@@ -26289,7 +26291,7 @@ def quiltt_webhook():
                                             'last_synced_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                         }, user_id=user_id)
                                     except Exception as e:
-                                        app.logger.warning(f"[WEBHOOK] Failed to update connection status: {e}")
+                                        log_warning(app.logger, 'WEBHOOK', f"Failed to update connection status: {e}")
 
                                 # Sync transactions for this user
                                 success, count, error = _sync_quiltt_transactions_for_user(
@@ -26299,10 +26301,10 @@ def quiltt_webhook():
                                 )
 
                                 if success:
-                                    app.logger.info(f"[WEBHOOK] Synced {count} transactions for user {user_id}")
+                                    log_info(app.logger, 'WEBHOOK', f"Synced {count} transactions for user {user_id}")
                                     mark_webhook_event_processed(event_id)
                                 else:
-                                    app.logger.error(f"[WEBHOOK] Sync failed for user {user_id}: {error}")
+                                    log_error(app.logger, 'WEBHOOK', f"Sync failed for user {user_id}: {error}")
                                     mark_webhook_event_processed(event_id, error_message=error)
                             finally:
                                 # Always release the per-user lock
@@ -26324,7 +26326,7 @@ def quiltt_webhook():
                                     pass
 
                             if conn_was_deleted:
-                                app.logger.info(f"[WEBHOOK] Skipping {event_type} for user {user_id} — connection {connection_id} was recently deleted")
+                                log_info(app.logger, 'WEBHOOK', f"Skipping {event_type} for user {user_id} — connection {connection_id} was recently deleted")
                                 mark_webhook_event_processed(event_id)
                             else:
                                 # Proactively refresh session token if expired
@@ -26337,7 +26339,7 @@ def quiltt_webhook():
                                     if urow and urow.get('username'):
                                         _refresh_quiltt_session_token(user_id, urow['username'])
                                 except Exception as e:
-                                    app.logger.warning(f"[WEBHOOK] Session refresh error for user {user_id}: {e}")
+                                    log_warning(app.logger, 'WEBHOOK', f"Session refresh error for user {user_id}: {e}")
 
                                 # Update connection status
                                 if connection_id:
@@ -26348,7 +26350,7 @@ def quiltt_webhook():
                                             'status': 'ERROR_REPAIRABLE'
                                         }, user_id=user_id)
                                     except Exception as e:
-                                        app.logger.warning(f"[WEBHOOK] Failed to update connection status: {e}")
+                                        log_warning(app.logger, 'WEBHOOK', f"Failed to update connection status: {e}")
 
                                 # Get institution name for notification
                                 institution_name = 'your bank'
@@ -26411,13 +26413,13 @@ def quiltt_webhook():
                                                 _redis_client.setex(nkey, 604800, json.dumps(notifs, cls=DecimalEncoder))
                                         except Exception:
                                             pass
-                                        app.logger.info(f"[WEBHOOK] Updated existing notification #{existing_notif_id} for user {user_id} ({institution_name})")
+                                        log_info(app.logger, 'WEBHOOK', f"Updated existing notification #{existing_notif_id} for user {user_id} ({institution_name})")
                                     except Exception as e:
-                                        app.logger.warning(f"[WEBHOOK] Failed to update notification #{existing_notif_id}: {e}")
+                                        log_warning(app.logger, 'WEBHOOK', f"Failed to update notification #{existing_notif_id}: {e}")
                                         add_notification(user_id, notification_message)
                                 else:
                                     add_notification(user_id, notification_message)
-                                    app.logger.info(f"[WEBHOOK] Created reconnect notification for user {user_id} ({institution_name})")
+                                    log_info(app.logger, 'WEBHOOK', f"Created reconnect notification for user {user_id} ({institution_name})")
                                 mark_webhook_event_processed(event_id)
 
                         # --- Connection Disconnected ---
@@ -26433,7 +26435,7 @@ def quiltt_webhook():
                                     pass
 
                             if conn_was_deleted:
-                                app.logger.info(f"[WEBHOOK] Skipping {event_type} for user {user_id} — connection {connection_id} was recently deleted")
+                                log_info(app.logger, 'WEBHOOK', f"Skipping {event_type} for user {user_id} — connection {connection_id} was recently deleted")
                                 mark_webhook_event_processed(event_id)
                             else:
                                 # Proactively refresh session token if expired
@@ -26446,7 +26448,7 @@ def quiltt_webhook():
                                     if urow and urow.get('username'):
                                         _refresh_quiltt_session_token(user_id, urow['username'])
                                 except Exception as e:
-                                    app.logger.warning(f"[WEBHOOK] Session refresh error for user {user_id}: {e}")
+                                    log_warning(app.logger, 'WEBHOOK', f"Session refresh error for user {user_id}: {e}")
 
                                 # Update connection status
                                 if connection_id:
@@ -26457,7 +26459,7 @@ def quiltt_webhook():
                                             'status': 'DISCONNECTED'
                                         }, user_id=user_id)
                                     except Exception as e:
-                                        app.logger.warning(f"[WEBHOOK] Failed to update connection status: {e}")
+                                        log_warning(app.logger, 'WEBHOOK', f"Failed to update connection status: {e}")
 
                                 institution_name = 'your bank'
                                 try:
@@ -26518,29 +26520,29 @@ def quiltt_webhook():
                                                 _redis_client.setex(nkey, 604800, json.dumps(notifs, cls=DecimalEncoder))
                                         except Exception:
                                             pass
-                                        app.logger.info(f"[WEBHOOK] Updated existing notification #{existing_notif_id} for user {user_id} ({institution_name})")
+                                        log_info(app.logger, 'WEBHOOK', f"Updated existing notification #{existing_notif_id} for user {user_id} ({institution_name})")
                                     except Exception as e:
-                                        app.logger.warning(f"[WEBHOOK] Failed to update notification #{existing_notif_id}: {e}")
+                                        log_warning(app.logger, 'WEBHOOK', f"Failed to update notification #{existing_notif_id}: {e}")
                                         add_notification(user_id, notification_message)
                                 else:
                                     add_notification(user_id, notification_message)
-                                    app.logger.info(f"[WEBHOOK] Created disconnect notification for user {user_id} ({institution_name})")
+                                    log_info(app.logger, 'WEBHOOK', f"Created disconnect notification for user {user_id} ({institution_name})")
                                 mark_webhook_event_processed(event_id)
 
                         # --- Other error events (log only) ---
                         elif event_type in ('connection.synced.errored.institution',
                                             'connection.synced.errored.provider',
                                             'connection.synced.errored.service'):
-                            app.logger.warning(f"[WEBHOOK] Connection error ({event_type}) for user {user_id}, connection {connection_id}")
+                            log_warning(app.logger, 'WEBHOOK', f"Connection error ({event_type}) for user {user_id}, connection {connection_id}")
                             mark_webhook_event_processed(event_id)
 
                         # --- Unknown event type ---
                         else:
-                            app.logger.info(f"[WEBHOOK] Unhandled event type: {event_type}")
+                            log_info(app.logger, 'WEBHOOK', f"Unhandled event type: {event_type}")
                             mark_webhook_event_processed(event_id)
 
                     except Exception as e:
-                        app.logger.error(f"[WEBHOOK] Error processing event {evt.get('event_id')}: {e}", exc_info=True)
+                        log_exception(app.logger, 'WEBHOOK', f"Error processing event {evt.get('event_id')}: {e}")
                         mark_webhook_event_processed(evt.get('event_id', ''), error_message=str(e))
 
         thread = threading.Thread(target=process_webhook_events, args=(new_events,), daemon=True)
@@ -26668,7 +26670,7 @@ def feedback_list_posts():
         data = client.list_posts(params, fider_user_id)
         return jsonify(data)
     except Exception as e:
-        app.logger.error(f"[FIDER] list posts error: {e}")
+        log_error(app.logger, 'FIDER', f"list posts error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -26691,12 +26693,12 @@ def feedback_create_post():
                 try:
                     client.tag_post(post.get('number'), slug)
                 except Exception as tag_err:
-                    app.logger.warning(f"[FIDER] tag post failed: {tag_err}")
+                    log_warning(app.logger, 'FIDER', f"tag post failed: {tag_err}")
         return jsonify({'status': 'success', 'post': post})
     except ValueError as ve:
         return jsonify({'status': 'error', 'message': str(ve)}), 400
     except Exception as e:
-        app.logger.error(f"[FIDER] create post error: {e}")
+        log_error(app.logger, 'FIDER', f"create post error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -26708,7 +26710,7 @@ def feedback_get_post(number):
         post = client.get_post(number, fider_user_id)
         return jsonify(post)
     except Exception as e:
-        app.logger.error(f"[FIDER] get post error: {e}")
+        log_error(app.logger, 'FIDER', f"get post error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -26720,7 +26722,7 @@ def feedback_list_comments(number):
         comments = client.list_comments(number)
         return jsonify(comments)
     except Exception as e:
-        app.logger.error(f"[FIDER] list comments error: {e}")
+        log_error(app.logger, 'FIDER', f"list comments error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -26736,7 +26738,7 @@ def feedback_add_comment(number):
         comment = client.add_comment(fider_user_id, number, content)
         return jsonify({'status': 'success', 'comment': comment})
     except Exception as e:
-        app.logger.error(f"[FIDER] add comment error: {e}")
+        log_error(app.logger, 'FIDER', f"add comment error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -26751,7 +26753,7 @@ def feedback_vote(number):
             client.unvote(fider_user_id, number)
         return jsonify({'status': 'success'})
     except Exception as e:
-        app.logger.error(f"[FIDER] vote error: {e}")
+        log_error(app.logger, 'FIDER', f"vote error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -26763,7 +26765,7 @@ def feedback_tags():
         tags = client.list_tags()
         return jsonify(tags)
     except Exception as e:
-        app.logger.error(f"[FIDER] tags error: {e}")
+        log_error(app.logger, 'FIDER', f"tags error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -26789,7 +26791,7 @@ def feedback_webhook():
     if webhook_secret:
         header_secret = request.headers.get('X-Webhook-Secret', '')
         if not hmac.compare_digest(header_secret, webhook_secret):
-            app.logger.warning("[FIDER WEBHOOK] Invalid webhook secret")
+            log_warning(app.logger, 'FIDER_WEBHOOK', "Invalid webhook secret")
             return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
 
     payload = request.get_json(silent=True)
@@ -26805,7 +26807,7 @@ def feedback_webhook():
 
     redis_client = _redis_client if app.config.get('REDIS_OK') else None
     if not redis_client:
-        app.logger.warning("[FIDER WEBHOOK] Redis not available")
+        log_warning(app.logger, 'FIDER_WEBHOOK', "Redis not available")
         return jsonify({'status': 'error', 'message': 'Redis unavailable'}), 503
 
     try:
@@ -26827,7 +26829,7 @@ def feedback_webhook():
                 if voter_id:
                     interested_fider_ids.add(int(voter_id))
         except Exception as e:
-            app.logger.error(f"[FIDER WEBHOOK] Error fetching voters for post {post_number}: {e}")
+            log_error(app.logger, 'FIDER_WEBHOOK', f"Error fetching voters for post {post_number}: {e}")
 
         # Remove the comment author (they don't need a badge for their own comment)
         interested_fider_ids.discard(int(comment_author_id))
@@ -26849,11 +26851,11 @@ def feedback_webhook():
                     redis_client.expire(ckey, ttl)
                 notified += 1
 
-        app.logger.info(f"[FIDER WEBHOOK] Post #{post_number}: notified {notified} users")
+        log_info(app.logger, 'FIDER_WEBHOOK', f"Post #{post_number}: notified {notified} users")
         return jsonify({'status': 'ok', 'notified': notified})
 
     except Exception as e:
-        app.logger.error(f"[FIDER WEBHOOK] Error processing webhook: {e}")
+        log_error(app.logger, 'FIDER_WEBHOOK', f"Error processing webhook: {e}")
         return jsonify({'status': 'error', 'message': 'Internal error'}), 500
 
 
