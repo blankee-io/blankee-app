@@ -557,6 +557,9 @@
             });
         })();
         document.addEventListener("DOMContentLoaded", function() {
+            // Fetch and display recurring mismatch badges
+            initRecurringMismatchBadges('recurring_income');
+
             document.querySelectorAll('.r-currency-symbol').forEach(function(span) {
                 span.textContent = currencySymbol;
             });

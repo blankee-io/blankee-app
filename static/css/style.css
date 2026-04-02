@@ -14354,3 +14354,202 @@ transform: scale(1.2);
 #generic-cancel-btn:active {
     transform: translateY(0);
 }
+
+/* ===== Recurring Mismatch Badge ===== */
+.mismatch-badge-anchor {
+    position: relative;
+    display: inline-block;
+}
+
+.recurring-mismatch-badge {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background-color: var(--danger);
+    color: var(--text-light);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    z-index: 25;
+    pointer-events: auto;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    box-shadow: 0 2px 6px var(--shadow-md);
+    animation: pulse-mismatch 1.8s ease-in-out infinite;
+    top: -25px;
+    left: 50%;
+    margin-left: -11px;
+}
+
+.recurring-mismatch-badge-inner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: rotate(45deg);
+    width: 100%;
+    height: 100%;
+    margin-top: -1px;
+    margin-right: 0px;
+}
+
+.recurring-mismatch-badge:hover {
+    background-color: var(--danger-hover);
+    animation: none;
+    opacity: 1;
+}
+
+@keyframes pulse-mismatch {
+    0% { opacity: 0; }
+    50% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+/* ===== Mismatch Modal ===== */
+.mismatch-modal-content {
+    max-width: 480px;
+    padding: 28px 32px;
+}
+
+.mismatch-modal-content h2 {
+    color: var(--danger);
+    font-size: 20px;
+    margin-bottom: 10px;
+}
+
+.mismatch-desc {
+    color: var(--text-dark);
+    font-size: 14px;
+    margin-bottom: 18px;
+    line-height: 1.5;
+}
+
+.mismatch-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 12px;
+    font-size: 14px;
+}
+
+.mismatch-table th {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 2px solid var(--secondary-hover);
+    color: var(--secondary-dark);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.mismatch-table td {
+    padding: 10px 10px;
+    border-bottom: 1px solid var(--secondary-hover);
+}
+
+.mismatch-table tbody tr:nth-child(even) {
+    background-color: var(--secondary-lighter);
+}
+
+.mismatch-label {
+    font-weight: 600;
+    color: var(--text-dark);
+    white-space: nowrap;
+}
+
+.mismatch-current {
+    color: var(--secondary-dark);
+}
+
+.mismatch-detected {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.mismatch-payment-info {
+    font-size: 12px;
+    color: var(--secondary-dark);
+    margin-bottom: 12px;
+    font-style: italic;
+}
+
+.mismatch-warning {
+    font-size: 12px;
+    color: var(--danger);
+    margin-bottom: 18px;
+    font-weight: 500;
+}
+
+.mismatch-update-btn {
+    background-color: var(--primary);
+    color: var(--text-light);
+    border: none;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 12px var(--shadow-lg);
+    transition: background-color 0.2s, transform 0.15s, box-shadow 0.2s;
+}
+
+.mismatch-update-btn:hover {
+    background-color: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+}
+
+.mismatch-update-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 8px var(--shadow-lg);
+}
+
+.mismatch-update-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.mismatch-dismiss-btn {
+    background-color: var(--secondary);
+    color: var(--text-light);
+    border: none;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 12px var(--shadow-lg);
+    transition: background-color 0.2s, transform 0.15s, box-shadow 0.2s;
+}
+
+.mismatch-dismiss-btn:hover {
+    background-color: var(--secondary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+}
+
+.mismatch-dismiss-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 8px var(--shadow-lg);
+}
+
+.mismatch-dismiss-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+    .mismatch-modal-content {
+        max-width: 95vw;
+        padding: 20px 16px;
+    }
+    .mismatch-table {
+        font-size: 13px;
+    }
+    .mismatch-table td, .mismatch-table th {
+        padding: 7px 6px;
+    }
+}
