@@ -38,7 +38,9 @@ from quiltt_redis import (
     upsert_quiltt_connection, upsert_quiltt_account, update_quiltt_account_field, 
     delete_quiltt_connection, get_quiltt_transactions, upsert_quiltt_transaction,
     get_user_quiltt_account_flags, get_quiltt_last_transaction_date,
-    update_quiltt_last_transaction_date
+    update_quiltt_last_transaction_date,
+    get_recurring_mismatches as _get_recurring_mismatches_redis,
+    upsert_recurring_mismatch, dismiss_recurring_mismatch, delete_recurring_mismatch
 )
 from bucket_utils import process_manual_entry_with_bucket, restore_bucket_for_category_change
 from push_notifications import apns_enabled, send_apns_notification
@@ -3975,6 +3977,178 @@ def _get_recurring_info_from_redis(table_name, user_id, category_id):
     except Exception as e:
         pass
         return None
+
+
+# ============================================================
+# Recurring Mismatch Detection Helper
+# ============================================================
+
+# Ntropy periodicity → app cadence mapping
+_NTROPY_CADENCE_MAP = {
+    'daily':        (1, 'days'),
+    'weekly':       (1, 'weeks'),
+    'bi-weekly':    (2, 'weeks'),
+    'bi_weekly':    (2, 'weeks'),
+    'monthly':      (1, 'months'),
+    'bi-monthly':   (2, 'months'),
+    'bi_monthly':   (2, 'months'),
+    'quarterly':    (3, 'months'),
+    'semi-yearly':  (6, 'months'),
+    'semi_yearly':  (6, 'months'),
+    'yearly':       (1, 'years'),
+}
+
+# Fuzzy match ranges for 'other' periodicity (periodicity_days → cadence)
+_FUZZY_CADENCE_RANGES = [
+    (1, 1, 1, 'days'),        # 1 day
+    (5, 9, 1, 'weeks'),       # ~7 days
+    (11, 17, 2, 'weeks'),     # ~14 days
+    (28, 33, 1, 'months'),    # ~30 days
+    (57, 63, 2, 'months'),    # ~60 days
+    (87, 93, 3, 'months'),    # ~90 days
+    (177, 183, 6, 'months'),  # ~180 days
+    (362, 368, 1, 'years'),   # ~365 days
+]
+
+_DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+
+
+def _detect_recurring_mismatch(transaction_record, entry_type, category_id, user_id):
+    """
+    Check if a confirmed transaction's amount/cadence differs from the recurring entry.
+    Creates/updates/deletes mismatch records as needed.
+    
+    Args:
+        transaction_record: Dict from quiltt_transactions (must have amount, ntropy_recurrence, 
+                           ntropy_periodicity, ntropy_periodicity_days, date, transaction_id)
+        entry_type: 'income', 'expense', or 'c_expense'
+        category_id: The confirmed category ID
+        user_id: User ID
+    """
+    ntropy_recurrence = (transaction_record.get('ntropy_recurrence') or '').lower().strip()
+    if ntropy_recurrence not in ('recurring', 'subscription'):
+        return
+    
+    recurring_table_map = {
+        'income': 'recurring_income',
+        'expense': 'recurring_expense',
+        'c_expense': 'recurring_c_expense'
+    }
+    recurring_table = recurring_table_map.get(entry_type)
+    if not recurring_table:
+        return
+    
+    # Get ALL recurring entries for this category
+    try:
+        redis_key = f"{recurring_table}:v1:{user_id}"
+        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+        if not cached:
+            return
+        all_recurring = json.loads(cached)
+    except Exception as e:
+        log_error(app.logger, 'MISMATCH', f"Error reading recurring entries: {e}", user_id=user_id)
+        return
+    
+    # Filter to wage_bill=1 entries for this category
+    wage_bill_entries = [
+        r for r in all_recurring
+        if int(r.get('category_id', 0)) == int(category_id) and int(r.get('wage_bill', 0)) == 1
+    ]
+    
+    if not wage_bill_entries:
+        return
+    
+    txn_amount = float(transaction_record.get('amount', 0))
+    ntropy_periodicity = (transaction_record.get('ntropy_periodicity') or '').lower().strip().replace('_', '-')
+    ntropy_periodicity_days = transaction_record.get('ntropy_periodicity_days')
+    txn_date_str = transaction_record.get('date')
+    transaction_id = transaction_record.get('transaction_id')
+    
+    # Parse transaction date for day-of-week / day-of-month inference
+    txn_weekday_name = None
+    txn_day_of_month = None
+    if txn_date_str:
+        try:
+            if isinstance(txn_date_str, str):
+                txn_date = datetime.strptime(txn_date_str[:10], '%Y-%m-%d')
+            else:
+                txn_date = txn_date_str
+            txn_weekday_name = _DAY_NAMES[txn_date.weekday()]  # 0=monday
+            txn_day_of_month = txn_date.day
+        except Exception:
+            pass
+    
+    # Determine detected cadence from ntropy
+    detected_interval = None
+    detected_unit = None
+    
+    if ntropy_periodicity and ntropy_periodicity != 'other':
+        mapped = _NTROPY_CADENCE_MAP.get(ntropy_periodicity)
+        if mapped:
+            detected_interval, detected_unit = mapped
+    elif ntropy_periodicity == 'other' and ntropy_periodicity_days:
+        # Fuzzy match using ±3 day tolerance
+        try:
+            days = float(ntropy_periodicity_days)
+            for low, high, interval, unit in _FUZZY_CADENCE_RANGES:
+                if low <= days <= high:
+                    detected_interval, detected_unit = interval, unit
+                    break
+        except (ValueError, TypeError):
+            pass
+    
+    for rec_entry in wage_bill_entries:
+        recurring_id = rec_entry.get('id')
+        rec_amount = float(rec_entry.get('amount', 0))
+        rec_interval = int(rec_entry.get('cadence_interval', 0))
+        rec_unit = (rec_entry.get('cadence_unit') or '').lower().strip()
+        rec_weekdays = (rec_entry.get('weekdays') or '').lower().strip()
+        rec_monthly_days = (rec_entry.get('monthly_days') or '').strip()
+        
+        has_mismatch = False
+        
+        # Amount comparison: >$1 or >2%, whichever is greater
+        amount_diff = abs(txn_amount - rec_amount)
+        threshold = max(1.0, rec_amount * 0.02)
+        if amount_diff > threshold:
+            has_mismatch = True
+            log_info(app.logger, 'MISMATCH', f"Amount mismatch: txn={txn_amount}, rec={rec_amount}, diff={amount_diff:.2f}",
+                     recurring_id=recurring_id, user_id=user_id)
+        
+        # Cadence comparison (only if we have detected cadence)
+        if detected_interval is not None and detected_unit is not None:
+            # Compare interval + unit
+            if detected_interval != rec_interval or detected_unit != rec_unit:
+                has_mismatch = True
+                log_info(app.logger, 'MISMATCH', f"Cadence mismatch: detected={detected_interval}/{detected_unit}, rec={rec_interval}/{rec_unit}",
+                         recurring_id=recurring_id, user_id=user_id)
+            else:
+                # Cadence matches — check day-of-week/month
+                if detected_unit == 'weeks' and txn_weekday_name and rec_weekdays:
+                    rec_weekday_list = [w.strip() for w in rec_weekdays.split(',') if w.strip()]
+                    if txn_weekday_name not in rec_weekday_list:
+                        has_mismatch = True
+                        log_info(app.logger, 'MISMATCH', f"Weekday mismatch: txn={txn_weekday_name}, rec={rec_weekdays}",
+                                 recurring_id=recurring_id, user_id=user_id)
+                
+                if detected_unit == 'months' and txn_day_of_month and rec_monthly_days:
+                    rec_days_list = [int(d.strip()) for d in rec_monthly_days.split(',') if d.strip()]
+                    if txn_day_of_month not in rec_days_list:
+                        has_mismatch = True
+                        log_info(app.logger, 'MISMATCH', f"Monthly day mismatch: txn day={txn_day_of_month}, rec={rec_monthly_days}",
+                                 recurring_id=recurring_id, user_id=user_id)
+        
+        if has_mismatch:
+            upsert_recurring_mismatch({
+                'recurring_table': recurring_table,
+                'recurring_id': recurring_id,
+                'category_id': category_id,
+                'transaction_id': transaction_id,
+            }, user_id=user_id)
+        else:
+            # Self-healing: no mismatch, remove any existing record
+            delete_recurring_mismatch(recurring_table, recurring_id, user_id=user_id)
+
 
 def _filter_pending_deletions(table_name, user_id, entries):
     """
@@ -13273,6 +13447,14 @@ def confirm_transaction():
             log_warning(app.logger, 'CONFIRM_TXN', f"Failed to save category memory: {mem_err}")
         # --- END SAVE CATEGORY MEMORY ---
         
+        # --- RECURRING MISMATCH DETECTION ---
+        try:
+            if txn_record:
+                _detect_recurring_mismatch(txn_record, entry_type, category_id, current_user.id)
+        except Exception as mismatch_err:
+            log_warning(app.logger, 'MISMATCH', f"Mismatch detection failed (non-blocking): {mismatch_err}")
+        # --- END RECURRING MISMATCH DETECTION ---
+        
         # Recalculate totals, remainders, savings, and credit balances
         try:
             if entry_type in ('income', 'expense'):
@@ -13411,6 +13593,20 @@ def confirm_all_transactions():
             log_warning(app.logger, 'CONFIRM_ALL', f"Failed to save category memory: {mem_err}")
         # --- END SAVE CATEGORY MEMORY ---
         
+        # --- RECURRING MISMATCH DETECTION (BATCH) ---
+        try:
+            if not txn_lookup:
+                from quiltt_redis import get_quiltt_transactions
+                quiltt_txns = get_quiltt_transactions(user_id=current_user.id)
+                txn_lookup = {t.get('transaction_id'): t for t in quiltt_txns}
+            for mapping in all_txn_mappings:
+                txn_record = txn_lookup.get(mapping['transaction_id'])
+                if txn_record:
+                    _detect_recurring_mismatch(txn_record, mapping['entry_type'], mapping['category_id'], current_user.id)
+        except Exception as mismatch_err:
+            log_warning(app.logger, 'MISMATCH', f"Batch mismatch detection failed (non-blocking): {mismatch_err}")
+        # --- END RECURRING MISMATCH DETECTION ---
+        
         # Check if all pending transactions are now confirmed and clear notification
         _clear_pending_transactions_notification_if_none(current_user.id)
         
@@ -13431,6 +13627,223 @@ def confirm_all_transactions():
     except Exception as e:
         log_exception(app.logger, 'CONFIRM_TXN', f"Error confirming all transactions: {e}")
         return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+
+
+# ============================================================
+# Recurring Mismatch API Endpoints
+# ============================================================
+
+@app.route('/api/recurring-mismatches', methods=['GET'])
+@login_required
+def get_recurring_mismatches_api():
+    """Get active (non-dismissed) recurring mismatches, enriched with comparison data."""
+    from quiltt_redis import get_recurring_mismatches
+    
+    recurring_table_filter = request.args.get('recurring_table')
+    
+    try:
+        mismatches = get_recurring_mismatches(user_id=current_user.id, dismissed=False)
+        
+        if recurring_table_filter:
+            mismatches = [m for m in mismatches if m.get('recurring_table') == recurring_table_filter]
+        
+        if not mismatches:
+            return jsonify({'status': 'success', 'mismatches': []})
+        
+        # Enrich each mismatch with comparison data
+        enriched = []
+        
+        # Pre-load quiltt transactions for lookup
+        quiltt_txns = get_quiltt_transactions(user_id=current_user.id)
+        txn_lookup = {t.get('transaction_id'): t for t in quiltt_txns}
+        
+        # Pre-load recurring tables
+        recurring_cache = {}
+        for table in ('recurring_income', 'recurring_expense', 'recurring_c_expense'):
+            redis_key = f"{table}:v1:{current_user.id}"
+            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+            recurring_cache[table] = json.loads(cached) if cached else []
+        
+        for m in mismatches:
+            txn = txn_lookup.get(m.get('transaction_id'))
+            if not txn:
+                continue
+            
+            # Find the recurring entry
+            rec_table = m.get('recurring_table')
+            rec_id = int(m.get('recurring_id', 0))
+            rec_entry = None
+            for r in recurring_cache.get(rec_table, []):
+                if int(r.get('id', 0)) == rec_id:
+                    rec_entry = r
+                    break
+            
+            if not rec_entry:
+                continue
+            
+            # Build detected cadence string
+            ntropy_periodicity = (txn.get('ntropy_periodicity') or '').lower().strip().replace('_', '-')
+            detected_interval, detected_unit = None, None
+            if ntropy_periodicity and ntropy_periodicity != 'other':
+                mapped = _NTROPY_CADENCE_MAP.get(ntropy_periodicity)
+                if mapped:
+                    detected_interval, detected_unit = mapped
+            elif ntropy_periodicity == 'other' and txn.get('ntropy_periodicity_days'):
+                try:
+                    days = float(txn.get('ntropy_periodicity_days'))
+                    for low, high, interval, unit in _FUZZY_CADENCE_RANGES:
+                        if low <= days <= high:
+                            detected_interval, detected_unit = interval, unit
+                            break
+                except (ValueError, TypeError):
+                    pass
+            
+            # Infer day-of-week / day-of-month from transaction date
+            txn_weekday_name = None
+            txn_day_of_month = None
+            txn_date_str = txn.get('date')
+            if txn_date_str:
+                try:
+                    if isinstance(txn_date_str, str):
+                        txn_date = datetime.strptime(txn_date_str[:10], '%Y-%m-%d')
+                    else:
+                        txn_date = txn_date_str
+                    txn_weekday_name = _DAY_NAMES[txn_date.weekday()]
+                    txn_day_of_month = txn_date.day
+                except Exception:
+                    pass
+            
+            detected_cadence = _format_cadence_string(detected_interval, detected_unit, txn_weekday_name, txn_day_of_month)
+            current_cadence = _format_cadence_string(
+                int(rec_entry.get('cadence_interval', 0)),
+                (rec_entry.get('cadence_unit') or '').lower(),
+                (rec_entry.get('weekdays') or ''),
+                (rec_entry.get('monthly_days') or '')
+            )
+            
+            # Get category name
+            category_name = _get_category_name_for_mismatch(rec_table, int(m.get('category_id', 0)), current_user.id)
+            
+            enriched.append({
+                'id': m.get('id'),
+                'recurring_table': rec_table,
+                'recurring_id': rec_id,
+                'category_id': m.get('category_id'),
+                'category_name': category_name,
+                'transaction_id': m.get('transaction_id'),
+                'created_at': m.get('created_at'),
+                # Current recurring values
+                'current_amount': float(rec_entry.get('amount', 0)),
+                'current_cadence': current_cadence,
+                'current_cadence_interval': int(rec_entry.get('cadence_interval', 0)),
+                'current_cadence_unit': (rec_entry.get('cadence_unit') or ''),
+                'current_weekdays': (rec_entry.get('weekdays') or ''),
+                'current_monthly_days': (rec_entry.get('monthly_days') or ''),
+                'current_start_date': str(rec_entry.get('start_date', ''))[:10],
+                'current_end_date': str(rec_entry.get('end_date', ''))[:10],
+                'current_no_end_date': int(rec_entry.get('no_end_date', 0)),
+                # Detected values from bank transaction
+                'detected_amount': float(txn.get('amount', 0)),
+                'detected_cadence': detected_cadence,
+                'detected_cadence_interval': detected_interval,
+                'detected_cadence_unit': detected_unit,
+                'detected_weekday': txn_weekday_name,
+                'detected_day_of_month': txn_day_of_month,
+                # Informational
+                'ntropy_latest_payment_date': txn.get('ntropy_latest_payment_date'),
+                'ntropy_periodicity': txn.get('ntropy_periodicity'),
+                'ntropy_periodicity_days': txn.get('ntropy_periodicity_days'),
+            })
+        
+        return jsonify({'status': 'success', 'mismatches': enriched})
+        
+    except Exception as e:
+        log_exception(app.logger, 'MISMATCH', f"Error fetching mismatches: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+
+
+@app.route('/api/recurring-mismatches/<int:mismatch_id>/dismiss', methods=['POST'])
+@login_required
+def dismiss_recurring_mismatch_api(mismatch_id):
+    """Dismiss a recurring mismatch."""
+    from quiltt_redis import dismiss_recurring_mismatch
+    
+    try:
+        success = dismiss_recurring_mismatch(mismatch_id, user_id=current_user.id)
+        if success:
+            log_info(app.logger, 'MISMATCH', f"Mismatch {mismatch_id} dismissed", user_id=current_user.id)
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Mismatch not found'}), 404
+    except Exception as e:
+        log_exception(app.logger, 'MISMATCH', f"Error dismissing mismatch: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+
+
+def _format_cadence_string(interval, unit, weekday_or_weekdays, monthly_days_or_dom):
+    """Format a human-readable cadence string."""
+    if interval is None or unit is None or not interval:
+        return None
+    
+    # Normalize unit
+    unit = str(unit).lower().rstrip('s')  # 'months' → 'month'
+    unit_display = {'day': 'day', 'week': 'week', 'month': 'month', 'year': 'year'}.get(unit, unit)
+    
+    if interval == 1:
+        base = f"Every {unit_display}"
+    else:
+        base = f"Every {interval} {unit_display}s"
+    
+    # Add weekday info
+    if unit == 'week' and weekday_or_weekdays:
+        if isinstance(weekday_or_weekdays, str) and ',' in weekday_or_weekdays:
+            days = ', '.join(d.strip().capitalize() for d in weekday_or_weekdays.split(',') if d.strip())
+            return f"{base} on {days}"
+        elif isinstance(weekday_or_weekdays, str) and weekday_or_weekdays.strip():
+            return f"{base} on {weekday_or_weekdays.strip().capitalize()}s"
+    
+    # Add monthly day info
+    if unit == 'month' and monthly_days_or_dom:
+        if isinstance(monthly_days_or_dom, (int, float)):
+            return f"{base} on the {_ordinal(int(monthly_days_or_dom))}"
+        elif isinstance(monthly_days_or_dom, str) and monthly_days_or_dom.strip():
+            days = ', '.join(_ordinal(int(d.strip())) for d in monthly_days_or_dom.split(',') if d.strip())
+            return f"{base} on the {days}"
+    
+    return base
+
+
+def _ordinal(n):
+    """Return ordinal string for a number (1st, 2nd, 3rd, etc.)"""
+    if 11 <= (n % 100) <= 13:
+        suffix = 'th'
+    else:
+        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+    return f"{n}{suffix}"
+
+
+def _get_category_name_for_mismatch(recurring_table, category_id, user_id):
+    """Get the category name given a recurring table type and category_id."""
+    cat_table_map = {
+        'recurring_income': 'income_categories',
+        'recurring_expense': 'expense_categories',
+        'recurring_c_expense': 'c_expense_categories'
+    }
+    cat_table = cat_table_map.get(recurring_table)
+    if not cat_table:
+        return ''
+    
+    try:
+        redis_key = f"{cat_table}:v1:{user_id}"
+        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
+        if cached:
+            categories = json.loads(cached)
+            for cat in categories:
+                if int(cat.get('id', 0)) == category_id:
+                    return cat.get('name', '')
+    except Exception:
+        pass
+    return ''
 
 
 @app.route('/mark-notification-read', methods=['POST'])
@@ -14898,6 +15311,13 @@ def delete_recurring_income():
         # 3. Delete the recurring record from Redis (marks for deletion)
         _delete_recurring_in_redis('recurring_income', current_user.id, recurring_id)
         
+        # 3b. Clean up any associated mismatch record
+        try:
+            from quiltt_redis import delete_recurring_mismatch
+            delete_recurring_mismatch('recurring_income', recurring_id, user_id=current_user.id)
+        except Exception:
+            pass
+        
         # 4. Set category to non-recurring (keep the category itself)
         _update_category_in_redis('income_categories', current_user.id, category_id, {
             'is_recurring': 0,
@@ -15109,6 +15529,19 @@ def update_recurring_income_inner(data, user_id):
 
         # Sync updated categories to Ntropy (non-blocking) - category name may have changed
         _trigger_ntropy_sync(user_id)
+        
+        # Re-evaluate mismatch: auto-delete if values now match
+        try:
+            from quiltt_redis import get_recurring_mismatches, delete_recurring_mismatch
+            mismatches = get_recurring_mismatches(user_id=user_id, dismissed=True)
+            for m in mismatches:
+                if m.get('recurring_table') == 'recurring_income' and int(m.get('recurring_id', 0)) == int(recurring_id):
+                    # The user just edited this entry — re-check will happen on next confirm
+                    # For now, just delete the existing mismatch since the user is actively managing it
+                    delete_recurring_mismatch('recurring_income', recurring_id, user_id=user_id)
+                    break
+        except Exception:
+            pass
         
         return jsonify({'status': 'success', 'message': 'Recurring income updated successfully!'})
 
@@ -15738,6 +16171,13 @@ def delete_recurring_expense():
         # 3. Delete the recurring record from Redis (marks for deletion)
         _delete_recurring_in_redis('recurring_expense', current_user.id, recurring_id)
         
+        # 3b. Clean up any associated mismatch record
+        try:
+            from quiltt_redis import delete_recurring_mismatch
+            delete_recurring_mismatch('recurring_expense', recurring_id, user_id=current_user.id)
+        except Exception:
+            pass
+        
         # 4. Set category to non-recurring (keep the category itself)
         _update_category_in_redis('expense_categories', current_user.id, category_id, {
             'is_recurring': 0,
@@ -15994,6 +16434,13 @@ def update_recurring_expense_inner(data, user_id):
         # Recalculate credit account balances if payment entries were modified
         if payment_account_id:
             save_ca_daily_balance()
+        
+        # Re-evaluate mismatch: auto-delete if user is manually editing
+        try:
+            from quiltt_redis import delete_recurring_mismatch
+            delete_recurring_mismatch('recurring_expense', recurring_id, user_id=user_id)
+        except Exception:
+            pass
         
         return jsonify({'status': 'success', 'message': 'Recurring expense updated successfully!'})
 
@@ -16643,6 +17090,13 @@ def delete_recurring_ca_expense():
         # 3. Delete the recurring record from Redis (marks for deletion)
         _delete_recurring_in_redis('recurring_c_expense', current_user.id, recurring_id)
         
+        # 3b. Clean up any associated mismatch record
+        try:
+            from quiltt_redis import delete_recurring_mismatch
+            delete_recurring_mismatch('recurring_c_expense', recurring_id, user_id=current_user.id)
+        except Exception:
+            pass
+        
         # 4. Set category to non-recurring (keep the category itself)
         _update_category_in_redis('c_expense_categories', current_user.id, category_id, {
             'is_recurring': 0,
@@ -16765,6 +17219,13 @@ def update_recurring_ca_expense_inner(data, user_id):
 
         # Sync updated categories to Ntropy (non-blocking) - category name may have changed
         _trigger_ntropy_sync(user_id)
+        
+        # Re-evaluate mismatch: auto-delete if user is manually editing
+        try:
+            from quiltt_redis import delete_recurring_mismatch
+            delete_recurring_mismatch('recurring_c_expense', recurring_id, user_id=user_id)
+        except Exception:
+            pass
         
         return jsonify({'status': 'success', 'message': 'Recurring CA expense updated successfully!'})
 

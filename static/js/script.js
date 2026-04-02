@@ -933,3 +933,238 @@ document.addEventListener('DOMContentLoaded', function() {
         pollDataVersion();
     }
 })();
+
+// ===== Recurring Mismatch Detection =====
+
+/**
+ * Fetch and display mismatch badges on a recurring page.
+ * Call this from the recurring page's DOMContentLoaded handler.
+ * @param {string} recurringTable - 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+ */
+function initRecurringMismatchBadges(recurringTable) {
+    fetch('/api/recurring-mismatches?recurring_table=' + encodeURIComponent(recurringTable))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status !== 'success' || !data.mismatches || !data.mismatches.length) return;
+            data.mismatches.forEach(function(m) {
+                var row = document.querySelector('tr[data-recurring-id="' + m.recurring_id + '"]');
+                if (!row) return;
+                var nameCell = row.querySelector('td[data-column="category_name"]');
+                if (!nameCell) return;
+                // Don't add duplicate badge
+                if (nameCell.querySelector('.recurring-mismatch-badge')) return;
+                // Wrap the text node in an anchor span so badge centers on the word
+                var anchor = nameCell.querySelector('.mismatch-badge-anchor');
+                if (!anchor) {
+                    anchor = document.createElement('span');
+                    anchor.className = 'mismatch-badge-anchor';
+                    // Move the first text node into the anchor
+                    var textNode = null;
+                    for (var i = 0; i < nameCell.childNodes.length; i++) {
+                        if (nameCell.childNodes[i].nodeType === 3 && nameCell.childNodes[i].textContent.trim()) {
+                            textNode = nameCell.childNodes[i];
+                            break;
+                        }
+                    }
+                    if (textNode) {
+                        nameCell.insertBefore(anchor, textNode);
+                        anchor.appendChild(textNode);
+                    } else {
+                        nameCell.insertBefore(anchor, nameCell.firstChild);
+                    }
+                }
+                var badge = document.createElement('span');
+                badge.className = 'recurring-mismatch-badge';
+                var inner = document.createElement('span');
+                inner.className = 'recurring-mismatch-badge-inner';
+                inner.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
+                badge.appendChild(inner);
+                badge.setAttribute('data-mismatch-id', m.id);
+                badge.setAttribute('title', 'Detected change');
+                anchor.appendChild(badge);
+                badge.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    showMismatchModal(m, recurringTable);
+                });
+            });
+        })
+        .catch(function(err) { console.error('Mismatch fetch error:', err); });
+}
+
+/**
+ * Show the mismatch comparison modal.
+ * @param {Object} m - Enriched mismatch object from API
+ * @param {string} recurringTable - 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+ */
+function showMismatchModal(m, recurringTable) {
+    // Remove existing modal if any
+    var existing = document.getElementById('mismatch-modal');
+    if (existing) existing.remove();
+
+    var typeLabel = recurringTable === 'recurring_income' ? 'Income' : 'Bill/Wage';
+    var currencySymbol = (typeof window.currencySymbol !== 'undefined') ? window.currencySymbol : '$';
+
+    // Build comparison rows (only show rows that differ)
+    var rows = '';
+    var amountDiff = Math.abs(m.detected_amount - m.current_amount);
+    var threshold = Math.max(1.0, m.current_amount * 0.02);
+    if (amountDiff > threshold) {
+        rows += '<tr><td class="mismatch-label">Amount</td>' +
+            '<td class="mismatch-current">' + currencySymbol + m.current_amount.toFixed(2) + '</td>' +
+            '<td class="mismatch-detected">' + currencySymbol + m.detected_amount.toFixed(2) + '</td></tr>';
+    }
+    if (m.detected_cadence && m.current_cadence && m.detected_cadence !== m.current_cadence) {
+        rows += '<tr><td class="mismatch-label">Frequency</td>' +
+            '<td class="mismatch-current">' + _escHtml(m.current_cadence) + '</td>' +
+            '<td class="mismatch-detected">' + _escHtml(m.detected_cadence) + '</td></tr>';
+    }
+
+    var paymentInfo = '';
+    if (m.ntropy_latest_payment_date) {
+        paymentInfo = '<p class="mismatch-payment-info">Last detected payment: ' + _escHtml(m.ntropy_latest_payment_date) + '</p>';
+    }
+
+    var modal = document.createElement('div');
+    modal.id = 'mismatch-modal';
+    modal.className = 'modal';
+    modal.innerHTML =
+        '<div class="modal-content center-modal mismatch-modal-content">' +
+            '<span class="close-modal mismatch-close">&times;</span>' +
+            '<h2>' + typeLabel + ' Update Detected</h2>' +
+            '<p class="mismatch-desc">Blankee detected that your <strong>' + _escHtml(m.category_name) + '</strong> may have changed based on recent bank transactions.</p>' +
+            '<table class="mismatch-table">' +
+                '<thead><tr><th></th><th>Current</th><th>Detected</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody>' +
+            '</table>' +
+            paymentInfo +
+            '<p class="mismatch-warning">Updating will change your projected future amounts for this category.</p>' +
+            '<div class="modal-buttons">' +
+                '<button class="mismatch-update-btn" id="mismatch-update-btn">Update</button>' +
+                '<button class="mismatch-dismiss-btn" id="mismatch-dismiss-btn">Dismiss</button>' +
+            '</div>' +
+        '</div>';
+
+    document.body.appendChild(modal);
+    modal.style.display = 'flex';
+
+    var closeBtn = modal.querySelector('.mismatch-close');
+    var updateBtn = document.getElementById('mismatch-update-btn');
+    var dismissBtn = document.getElementById('mismatch-dismiss-btn');
+
+    function closeModal() {
+        modal.style.display = 'none';
+        modal.remove();
+    }
+
+    closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+
+    // Update button — call existing edit recurring endpoint, then dismiss
+    updateBtn.addEventListener('click', function() {
+        updateBtn.disabled = true;
+        updateBtn.textContent = 'Updating...';
+
+        // Build the update payload with detected values
+        var editUrl = {
+            'recurring_income': '/update-recurring-income',
+            'recurring_expense': '/update-recurring-expense',
+            'recurring_c_expense': '/update-recurring-ca-expense'
+        }[recurringTable];
+
+        var payload = { recurring_id: m.recurring_id };
+        // Always include all required fields from current values
+        payload.category_name = m.category_name || '';
+        payload.amount = (amountDiff > threshold) ? m.detected_amount : m.current_amount;
+        payload.cadence_interval = (m.detected_cadence_interval && m.detected_cadence_unit && m.detected_cadence !== m.current_cadence) ? m.detected_cadence_interval : m.current_cadence_interval;
+        payload.cadence_unit = (m.detected_cadence_interval && m.detected_cadence_unit && m.detected_cadence !== m.current_cadence) ? m.detected_cadence_unit : m.current_cadence_unit;
+        payload.start_date = new Date().toISOString().slice(0, 10);
+        payload.end_date = m.current_end_date || new Date().toISOString().slice(0, 10);
+        payload.no_end_date = m.current_no_end_date || 0;
+        payload.wage_bill = 1;
+        // Weekdays / monthly_days
+        if (m.detected_cadence_interval && m.detected_cadence_unit && m.detected_cadence !== m.current_cadence) {
+            if (m.detected_cadence_unit === 'weeks' && m.detected_weekday) {
+                payload.weekdays = [m.detected_weekday];
+            } else if (m.current_weekdays) {
+                payload.weekdays = m.current_weekdays.split(',');
+            }
+            if (m.detected_cadence_unit === 'months' && m.detected_day_of_month) {
+                payload.monthly_days = [String(m.detected_day_of_month)];
+            } else if (m.current_monthly_days) {
+                payload.monthly_days = m.current_monthly_days.split(',');
+            }
+        } else {
+            if (m.current_weekdays) payload.weekdays = m.current_weekdays.split(',');
+            if (m.current_monthly_days) payload.monthly_days = m.current_monthly_days.split(',');
+        }
+
+        fetch(editUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(result) {
+            if (result.status === 'success' || result.success) {
+                // Dismiss mismatch
+                return fetch('/api/recurring-mismatches/' + m.id + '/dismiss', { method: 'POST' })
+                    .then(function() {
+                        _removeBadge(m.recurring_id);
+                        _updateRowValues(m, recurringTable);
+                        showToast('Recurring entry updated!', 'success');
+                        closeModal();
+                    });
+            } else {
+                showToast(result.message || 'Failed to update recurring entry.', 'error');
+                updateBtn.disabled = false;
+                updateBtn.textContent = 'Update';
+            }
+        })
+        .catch(function(err) {
+            showToast('Error updating entry.', 'error');
+            updateBtn.disabled = false;
+            updateBtn.textContent = 'Update';
+        });
+    });
+
+    // Dismiss button
+    dismissBtn.addEventListener('click', function() {
+        dismissBtn.disabled = true;
+        fetch('/api/recurring-mismatches/' + m.id + '/dismiss', { method: 'POST' })
+            .then(function() {
+                _removeBadge(m.recurring_id);
+                showToast('Dismissed', 'info');
+                closeModal();
+            })
+            .catch(function() {
+                showToast('Error dismissing.', 'error');
+                dismissBtn.disabled = false;
+            });
+    });
+}
+
+function _removeBadge(recurringId) {
+    var row = document.querySelector('tr[data-recurring-id="' + recurringId + '"]');
+    if (row) {
+        var badge = row.querySelector('.recurring-mismatch-badge');
+        if (badge) badge.remove();
+    }
+}
+
+function _updateRowValues(m, recurringTable) {
+    var row = document.querySelector('tr[data-recurring-id="' + m.recurring_id + '"]');
+    if (!row) return;
+    // Update amount cell
+    var amountCell = row.querySelector('td[data-column="amount"]');
+    if (amountCell && m.detected_amount) {
+        var sym = (typeof window.currencySymbol !== 'undefined') ? window.currencySymbol : '$';
+        amountCell.textContent = sym + m.detected_amount.toFixed(2);
+    }
+}
+
+function _escHtml(str) {
+    if (!str) return '';
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}

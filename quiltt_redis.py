@@ -1721,3 +1721,232 @@ def lookup_category_memory(user_id, merchant_id=None, description=None, category
     except Exception as e:
         log_error(logger, 'QUILTT', f"Error looking up category memory for user {user_id}: {e}")
         return None
+
+
+# ============================================================
+# Recurring Mismatches CRUD (Redis-first)
+# ============================================================
+
+def get_recurring_mismatches(user_id=None, dismissed=False):
+    """
+    Get recurring mismatches for a user from Redis or MySQL.
+    
+    Args:
+        user_id: User ID (defaults to current_user.id)
+        dismissed: If False (default), only return non-dismissed mismatches
+        
+    Returns:
+        List of mismatch dicts
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return []
+        user_id = current_user.id
+    
+    # Try Redis first
+    if is_user_hydrated(user_id):
+        cached_data = _get_from_redis('recurring_mismatches', user_id)
+        if cached_data is not None:
+            if not dismissed:
+                return [m for m in cached_data if not int(m.get('dismissed', 0))]
+            return cached_data
+    
+    # Fallback to MySQL
+    try:
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
+            if dismissed:
+                cursor.execute("SELECT * FROM recurring_mismatches WHERE user_id = %s", (user_id,))
+            else:
+                cursor.execute("SELECT * FROM recurring_mismatches WHERE user_id = %s AND dismissed = 0", (user_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        log_error(logger, 'MISMATCH', f"Error getting recurring mismatches from MySQL: {e}", user_id=user_id)
+        return []
+
+
+def upsert_recurring_mismatch(mismatch_data, user_id=None):
+    """
+    Insert or update a recurring mismatch record (Redis-first).
+    Uses (recurring_table, recurring_id) as the unique key.
+    Always overwrites with latest — un-dismisses if previously dismissed.
+    
+    Args:
+        mismatch_data: Dict with: recurring_table, recurring_id, category_id, transaction_id
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        Mismatch ID or None
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return None
+        user_id = current_user.id
+    
+    recurring_table = mismatch_data.get('recurring_table')
+    recurring_id = mismatch_data.get('recurring_id')
+    if not recurring_table or not recurring_id:
+        log_error(logger, 'MISMATCH', "recurring_table and recurring_id are required")
+        return None
+    
+    try:
+        # Get current data from Redis or MySQL
+        cached_data = _get_from_redis('recurring_mismatches', user_id)
+        if cached_data is None:
+            cached_data = get_recurring_mismatches(user_id, dismissed=True)
+            if cached_data is None:
+                cached_data = []
+        
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
+        # Find existing by unique key (recurring_table + recurring_id)
+        db_id = None
+        found = False
+        for i, m in enumerate(cached_data):
+            if m.get('recurring_table') == recurring_table and int(m.get('recurring_id', 0)) == int(recurring_id):
+                # Update existing — always overwrite with latest, un-dismiss
+                cached_data[i]['category_id'] = mismatch_data.get('category_id', m.get('category_id'))
+                cached_data[i]['transaction_id'] = mismatch_data.get('transaction_id')
+                cached_data[i]['dismissed'] = 0
+                cached_data[i]['created_at'] = datetime.now().isoformat()
+                db_id = cached_data[i].get('id')
+                found = True
+                log_info(logger, 'MISMATCH', 'Updated existing mismatch', recurring_table=recurring_table, recurring_id=recurring_id, user_id=user_id)
+                break
+        
+        if not found:
+            # Generate temp negative ID
+            temp_id = -int(time.time() * 1000) % 1000000
+            if temp_id > 0:
+                temp_id = -temp_id
+            db_id = temp_id
+            new_mismatch = {
+                'id': db_id,
+                'user_id': user_id,
+                'recurring_table': recurring_table,
+                'recurring_id': int(recurring_id),
+                'category_id': int(mismatch_data.get('category_id', 0)),
+                'transaction_id': mismatch_data.get('transaction_id'),
+                'dismissed': 0,
+                'created_at': datetime.now().isoformat()
+            }
+            cached_data.append(new_mismatch)
+            log_info(logger, 'MISMATCH', 'Created new mismatch', recurring_table=recurring_table, recurring_id=recurring_id, user_id=user_id)
+        
+        # Save to Redis and mark dirty
+        _set_to_redis('recurring_mismatches', user_id, cached_data)
+        
+        return db_id
+        
+    except Exception as e:
+        log_exception(logger, 'MISMATCH', f"Error upserting recurring mismatch: {e}", user_id=user_id)
+        return None
+
+
+def dismiss_recurring_mismatch(mismatch_id, user_id=None):
+    """
+    Dismiss a recurring mismatch by ID.
+    
+    Args:
+        mismatch_id: The mismatch record ID
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        True if successful
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return False
+        user_id = current_user.id
+    
+    try:
+        cached_data = _get_from_redis('recurring_mismatches', user_id)
+        if cached_data is None:
+            cached_data = get_recurring_mismatches(user_id, dismissed=True)
+            if cached_data is None:
+                return False
+        
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
+        found = False
+        for i, m in enumerate(cached_data):
+            if int(m.get('id', 0)) == int(mismatch_id):
+                cached_data[i]['dismissed'] = 1
+                found = True
+                break
+        
+        if not found:
+            log_warning(logger, 'MISMATCH', f"Mismatch ID {mismatch_id} not found for dismiss", user_id=user_id)
+            return False
+        
+        _set_to_redis('recurring_mismatches', user_id, cached_data)
+        log_info(logger, 'MISMATCH', 'Mismatch dismissed', mismatch_id=mismatch_id, user_id=user_id)
+        return True
+        
+    except Exception as e:
+        log_exception(logger, 'MISMATCH', f"Error dismissing mismatch: {e}", user_id=user_id)
+        return False
+
+
+def delete_recurring_mismatch(recurring_table, recurring_id, user_id=None):
+    """
+    Delete a recurring mismatch by its unique key (recurring_table + recurring_id).
+    Used for self-healing when values now match.
+    
+    Args:
+        recurring_table: 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+        recurring_id: The recurring entry ID
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        True if a record was deleted
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return False
+        user_id = current_user.id
+    
+    try:
+        redis_client = _get_redis_client()
+        cached_data = _get_from_redis('recurring_mismatches', user_id)
+        if cached_data is None:
+            cached_data = get_recurring_mismatches(user_id, dismissed=True)
+            if cached_data is None:
+                return False
+        
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
+        # Find and remove the matching record
+        removed_id = None
+        new_data = []
+        for m in cached_data:
+            if m.get('recurring_table') == recurring_table and int(m.get('recurring_id', 0)) == int(recurring_id):
+                removed_id = m.get('id')
+            else:
+                new_data.append(m)
+        
+        if removed_id is None:
+            return False
+        
+        # Save updated list (without marking dirty — deletion handled separately)
+        _set_to_redis_no_dirty('recurring_mismatches', user_id, new_data)
+        
+        # Mark for pending delete in MySQL
+        if redis_client and removed_id and int(removed_id) > 0:
+            pending_key = f"pending_deletes:recurring_mismatches:{user_id}"
+            redis_client.sadd(pending_key, str(removed_id))
+            redis_client.expire(pending_key, 604800)
+            dirty_key = f"dirty_tables:{user_id}"
+            redis_client.sadd(dirty_key, 'recurring_mismatches')
+        elif redis_client:
+            # Temp ID (negative) — just remove from Redis, nothing in MySQL to delete
+            _set_to_redis('recurring_mismatches', user_id, new_data)
+        
+        log_info(logger, 'MISMATCH', 'Mismatch deleted (self-healing)', recurring_table=recurring_table, recurring_id=recurring_id, user_id=user_id)
+        return True
+        
+    except Exception as e:
+        log_exception(logger, 'MISMATCH', f"Error deleting mismatch: {e}", user_id=user_id)
+        return False
