@@ -1168,3 +1168,212 @@ function _escHtml(str) {
     div.textContent = str;
     return div.innerHTML;
 }
+
+
+// ─── Recurring Suggestions (Suggested Recurring Categories) ──────────────────
+
+/**
+ * Build a human-readable cadence string from raw fields (for confirm modal text).
+ */
+function _formatSuggestionCadence(interval, unit, weekday, monthlyDay) {
+    if (!interval || !unit) return '';
+    var unitSingular = unit.replace(/s$/, '');
+    var base = (interval == 1) ? 'Every ' + unitSingular : 'Every ' + interval + ' ' + unit;
+    if (unitSingular === 'week' && weekday) {
+        return base + ' on ' + weekday.charAt(0).toUpperCase() + weekday.slice(1) + 's';
+    }
+    if (unitSingular === 'month' && monthlyDay) {
+        var suffix = _ordinalSuffix(monthlyDay);
+        return base + ' on the ' + monthlyDay + suffix;
+    }
+    return base;
+}
+
+function _ordinalSuffix(n) {
+    n = parseInt(n, 10);
+    if (n >= 11 && n <= 13) return 'th';
+    switch (n % 10) {
+        case 1: return 'st';
+        case 2: return 'nd';
+        case 3: return 'rd';
+        default: return 'th';
+    }
+}
+
+/**
+ * Build the cadence icon class based on unit (matches recurring table icons).
+ */
+function _cadenceIcon(unit) {
+    var u = (unit || '').replace(/s$/, '');
+    if (u === 'year') return 'fa-solid fa-calendars';
+    if (u === 'month') return 'fa-solid fa-calendar-days';
+    if (u === 'week') return 'fa-solid fa-calendar-week';
+    return 'fa-solid fa-calendar-day';
+}
+
+/**
+ * Build the cadence detail string (day/weekday line under the icon).
+ */
+function _cadenceDetailStr(unit, weekday, monthlyDay) {
+    var u = (unit || '').replace(/s$/, '');
+    if (u === 'month' && monthlyDay) return monthlyDay + '<sup>' + _ordinalSuffix(monthlyDay) + '</sup>';
+    if (u === 'week' && weekday) {
+        var map = {monday:'Mo',tuesday:'Tu',wednesday:'We',thursday:'Th',friday:'Fr',saturday:'Sa',sunday:'Su'};
+        return map[weekday.toLowerCase()] || weekday;
+    }
+    return '';
+}
+
+/**
+ * Fetch and render the suggested recurring categories as notification-style bubbles.
+ * @param {string} suggestionType - 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+ */
+function initRecurringSuggestions(suggestionType) {
+    fetch('/api/recurring-suggestions?suggestion_type=' + encodeURIComponent(suggestionType))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status !== 'success' || !data.suggestions || !data.suggestions.length) return;
+
+            var section = document.getElementById('suggested-recurring-section');
+            var list = document.getElementById('suggested-recurring-list');
+            if (!section || !list) return;
+
+            var currSym = (typeof window.currencySymbol !== 'undefined') ? window.currencySymbol : '$';
+
+            var addUrlMap = {
+                'recurring_income': '/add-recurring-income',
+                'recurring_expense': '/add-recurring-expense',
+                'recurring_c_expense': '/add-recurring-ca-expense'
+            };
+
+            data.suggestions.forEach(function(s) {
+                var cadenceStr = _formatSuggestionCadence(
+                    s.detected_cadence_interval, s.detected_cadence_unit,
+                    s.detected_weekday, s.detected_monthly_day
+                );
+                var detail = _cadenceDetailStr(s.detected_cadence_unit, s.detected_weekday, s.detected_monthly_day);
+
+                var bubble = document.createElement('div');
+                bubble.className = 'suggestion-bubble';
+                bubble.setAttribute('data-suggestion-id', s.id);
+                bubble.innerHTML =
+                    '<div class="suggestion-bubble-info">' +
+                        '<span class="suggestion-category">' + _escHtml(s.category_name) + '</span>' +
+                        '<span class="suggestion-mobile-type">Bill</span>' +
+                    '</div>' +
+                    '<div class="suggestion-type">Bill</div>' +
+                    '<div class="suggestion-amount">' + currSym + parseFloat(s.detected_amount).toFixed(2) + '</div>' +
+                    '<div class="suggestion-bubble-cadence">' +
+                        '<span class="cadence-top">' + s.detected_cadence_interval + ' <i class="' + _cadenceIcon(s.detected_cadence_unit) + '"></i></span>' +
+                        (detail ? '<span class="cadence-detail">' + detail + '</span>' : '') +
+                    '</div>' +
+                    '<div class="suggestion-bubble-actions">' +
+                        '<button class="suggestion-action-btn suggestion-accept-btn" title="Create recurring entry"><i class="fa-solid fa-check"></i></button>' +
+                        '<button class="suggestion-action-btn suggestion-dismiss-btn" title="Dismiss suggestion"><i class="fa-solid fa-xmark"></i></button>' +
+                    '</div>';
+
+                bubble.querySelector('.suggestion-accept-btn').addEventListener('click', function() {
+                    _handleSuggestionAccept(s, suggestionType, addUrlMap[suggestionType], currSym, cadenceStr);
+                });
+                bubble.querySelector('.suggestion-dismiss-btn').addEventListener('click', function() {
+                    _handleSuggestionDismiss(s.id);
+                });
+
+                list.appendChild(bubble);
+            });
+
+            section.style.display = '';
+        })
+        .catch(function(err) { console.error('Suggestions fetch error:', err); });
+}
+
+/**
+ * Handle accepting a recurring suggestion: confirm modal → add recurring → dismiss suggestion.
+ */
+function _handleSuggestionAccept(s, suggestionType, addUrl, currSym, cadenceStr) {
+    var msg = 'Create a recurring <strong>' + _escHtml(s.category_name) + '</strong> entry for <strong>' +
+        currSym + parseFloat(s.detected_amount).toFixed(2) + '</strong> ' + _escHtml(cadenceStr) + '?';
+
+    showConfirmModal({
+        title: 'Add Recurring Entry',
+        message: msg,
+        confirmText: 'Create',
+        cancelText: 'Cancel',
+        danger: false
+    }).then(function(confirmed) {
+        if (!confirmed) return;
+
+        // Build payload
+        var today = new Date().toISOString().slice(0, 10);
+        var threeYears = new Date();
+        threeYears.setFullYear(threeYears.getFullYear() + 3);
+        var endDate = threeYears.toISOString().slice(0, 10);
+
+        var payload = {
+            category_id: s.category_id,
+            amount: s.detected_amount,
+            cadence_interval: s.detected_cadence_interval,
+            cadence_unit: s.detected_cadence_unit,
+            start_date: today,
+            end_date: endDate,
+            no_end_date: 1,
+            wage_bill: 1
+        };
+
+        if (s.detected_cadence_unit === 'weeks' && s.detected_weekday) {
+            payload.weekdays = [s.detected_weekday];
+        }
+        if (s.detected_cadence_unit === 'months' && s.detected_monthly_day) {
+            payload.monthly_days = [String(s.detected_monthly_day)];
+        }
+        if (suggestionType === 'recurring_c_expense' && s.account_id) {
+            payload.account_id = s.account_id;
+        }
+
+        fetch(addUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(result) {
+            if (result.status === 'success') {
+                // Dismiss the suggestion
+                return fetch('/api/recurring-suggestions/' + s.id + '/dismiss', { method: 'POST' })
+                    .then(function() {
+                        showToast('Recurring entry created!', 'success');
+                        // Reload to show new entry in main table
+                        setTimeout(function() { location.reload(); }, 600);
+                    });
+            } else {
+                showToast(result.message || 'Failed to create recurring entry.', 'error');
+            }
+        })
+        .catch(function(err) {
+            showToast('Error creating entry.', 'error');
+        });
+    });
+}
+
+/**
+ * Handle dismissing a recurring suggestion.
+ */
+function _handleSuggestionDismiss(suggestionId) {
+    fetch('/api/recurring-suggestions/' + suggestionId + '/dismiss', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'success') {
+                var bubble = document.querySelector('.suggestion-bubble[data-suggestion-id="' + suggestionId + '"]');
+                if (bubble) bubble.remove();
+                showToast('Suggestion dismissed', 'info');
+                var list = document.getElementById('suggested-recurring-list');
+                if (list && list.children.length === 0) {
+                    var section = document.getElementById('suggested-recurring-section');
+                    if (section) section.style.display = 'none';
+                }
+            }
+        })
+        .catch(function(err) {
+            showToast('Error dismissing suggestion.', 'error');
+        });
+}
