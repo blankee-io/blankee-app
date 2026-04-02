@@ -562,6 +562,9 @@
             });
         })();
         document.addEventListener("DOMContentLoaded", function() {
+            // Fetch and display recurring mismatch badges
+            initRecurringMismatchBadges('recurring_expense');
+
             document.querySelectorAll('.r-currency-symbol').forEach(function(span) {
                 span.textContent = currencySymbol;
             });

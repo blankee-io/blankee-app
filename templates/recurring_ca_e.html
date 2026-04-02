@@ -535,6 +535,9 @@
         const currencySymbols = { USD: "$", EUR: "€" };
         const currencySymbol = currencySymbols[currencyType] || currencyType;
         document.addEventListener("DOMContentLoaded", function() {
+            // Fetch and display recurring mismatch badges
+            initRecurringMismatchBadges('recurring_c_expense');
+
             document.querySelectorAll('.r-currency-symbol').forEach(function(span) {
                 span.textContent = currencySymbol;
             });

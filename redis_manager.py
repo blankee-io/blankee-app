@@ -83,6 +83,7 @@ USER_TABLES = [
     'notifications',
     'password_resets',
     'setup_state',
+    'recurring_mismatches',
 ]
 
 
@@ -4120,6 +4121,101 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 log_info(logger, 'FLUSH', f"→ notifications: {len(rows)} rows")
                 return len(rows)
                 
+            elif table == 'recurring_mismatches':
+                # Recurring mismatches table — tracks Ntropy-detected bill/wage changes
+                # First, handle pending deletes
+                pending_key = f"pending_deletes:recurring_mismatches:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    delete_ids = [int(id_str) for id_str in pending_deletes]
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_mismatches WHERE id IN ({placeholders}) AND user_id = %s
+                    """, delete_ids + [user_id])
+                    deleted_count = cursor.rowcount
+                    log_info(logger, 'FLUSH', f"Deleted {deleted_count} recurring_mismatches from MySQL")
+                    _redis_client.delete(pending_key)
+                
+                if not rows:
+                    conn.commit()
+                    cursor.close()
+                    return 0
+                
+                # Track temp ID to real ID mappings
+                temp_id_mappings = {}
+                
+                for row in rows:
+                    old_id = row.get('id')
+                    is_temp = old_id and int(old_id) < 0
+                    
+                    created_at_val = row.get('created_at')
+                    if isinstance(created_at_val, str) and 'T' in created_at_val:
+                        created_at_val = created_at_val.replace('T', ' ').split('.')[0]
+                    
+                    if is_temp:
+                        cursor.execute("""
+                            INSERT INTO recurring_mismatches (id, user_id, recurring_table, recurring_id, category_id, transaction_id, dismissed, created_at)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                category_id = VALUES(category_id),
+                                transaction_id = VALUES(transaction_id),
+                                dismissed = VALUES(dismissed),
+                                created_at = VALUES(created_at)
+                        """, (
+                            user_id,
+                            row.get('recurring_table'),
+                            int(row.get('recurring_id')),
+                            int(row.get('category_id')),
+                            row.get('transaction_id'),
+                            int(row.get('dismissed', 0)),
+                            created_at_val
+                        ))
+                        new_id = cursor.lastrowid
+                        if new_id:
+                            temp_id_mappings[int(old_id)] = new_id
+                            log_info(logger, 'FLUSH', f"recurring_mismatches temp ID {old_id} → real ID {new_id}")
+                    else:
+                        cursor.execute("""
+                            INSERT INTO recurring_mismatches (id, user_id, recurring_table, recurring_id, category_id, transaction_id, dismissed, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                category_id = VALUES(category_id),
+                                transaction_id = VALUES(transaction_id),
+                                dismissed = VALUES(dismissed),
+                                created_at = VALUES(created_at)
+                        """, (
+                            old_id,
+                            user_id,
+                            row.get('recurring_table'),
+                            int(row.get('recurring_id')),
+                            int(row.get('category_id')),
+                            row.get('transaction_id'),
+                            int(row.get('dismissed', 0)),
+                            created_at_val
+                        ))
+                
+                conn.commit()
+                
+                # Update Redis with real IDs if any temp IDs were replaced
+                if temp_id_mappings:
+                    for i, row in enumerate(rows):
+                        old_id = row.get('id')
+                        if old_id and int(old_id) in temp_id_mappings:
+                            rows[i]['id'] = temp_id_mappings[int(old_id)]
+                    
+                    redis_key = _get_redis_key('recurring_mismatches', user_id)
+                    _redis_client.setex(
+                        redis_key,
+                        INACTIVITY_TIMEOUT + 60,
+                        json.dumps(rows, cls=DecimalEncoder)
+                    )
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} recurring_mismatches temp IDs in Redis")
+                
+                cursor.close()
+                log_info(logger, 'FLUSH', f"→ recurring_mismatches: {len(rows)} rows")
+                return len(rows)
+            
             else:
                 # Table not configured for flushing
                 return 0
