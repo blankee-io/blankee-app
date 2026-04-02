@@ -517,6 +517,8 @@ def _dehydrate_user_data(user_id: int):
                 'users',  # User settings (goofy_week_mode, landing_page, etc.)
                 'notifications',  # User notifications
                 'setup_state',  # Setup wizard temporary state
+                'recurring_mismatches',  # Ntropy recurring mismatch detection
+                'recurring_suggestions',  # Ntropy suggested recurring entries
             ]
             
             flushed_count = 0
@@ -658,6 +660,8 @@ def _flush_redis_to_mysql():
             'quiltt_transactions',  # Quiltt transactions
             'quiltt_category_mappings',  # Quiltt category mappings
             'setup_state',  # Setup wizard temporary state
+            'recurring_mismatches',  # Ntropy recurring mismatch detection
+            'recurring_suggestions',  # Ntropy suggested recurring entries
             # Deletion handlers (must run after updates)
             'quiltt_connections_deleted',
             'quiltt_accounts_deleted',
@@ -4663,6 +4667,8 @@ def flush_dirty_tables_for_user(user_id: int):
             'users',  # User settings (balance_threshold, starting_savings)
             'notifications',  # User notifications
             'setup_state',  # Setup wizard temporary state
+            'recurring_mismatches',  # Ntropy recurring mismatch detection
+            'recurring_suggestions',  # Ntropy suggested recurring entries
         ]
         
         # Get dirty tables for this user
