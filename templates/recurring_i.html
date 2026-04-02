@@ -175,6 +175,13 @@
                     </p>
                 </div>
             {% endif %}
+
+            <!-- Suggested Recurring Categories (populated by JS) -->
+            <div id="suggested-recurring-section" class="suggested-recurring-section" style="display:none;">
+                <h3 class="suggested-recurring-heading"><i class="fa-solid fa-lightbulb"></i> Recurring Suggestions Based on Your Transactions</h3>
+                <div id="suggested-recurring-list" class="suggested-recurring-list"></div>
+            </div>
+
         </div>
     </div>    
 
@@ -559,6 +566,8 @@
         document.addEventListener("DOMContentLoaded", function() {
             // Fetch and display recurring mismatch badges
             initRecurringMismatchBadges('recurring_income');
+            // Fetch and display recurring suggestions table
+            initRecurringSuggestions('recurring_income');
 
             document.querySelectorAll('.r-currency-symbol').forEach(function(span) {
                 span.textContent = currencySymbol;

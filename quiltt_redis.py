@@ -1950,3 +1950,240 @@ def delete_recurring_mismatch(recurring_table, recurring_id, user_id=None):
     except Exception as e:
         log_exception(logger, 'MISMATCH', f"Error deleting mismatch: {e}", user_id=user_id)
         return False
+
+
+# ─── Recurring Suggestions (Suggested Recurring Categories) ───────────────────
+
+def get_recurring_suggestions(user_id=None, dismissed=False):
+    """
+    Get recurring suggestions for a user from Redis or MySQL.
+    
+    Args:
+        user_id: User ID (defaults to current_user.id)
+        dismissed: If False (default), only return non-dismissed suggestions
+        
+    Returns:
+        List of suggestion dicts
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return []
+        user_id = current_user.id
+    
+    # Try Redis first
+    if is_user_hydrated(user_id):
+        cached_data = _get_from_redis('recurring_suggestions', user_id)
+        if cached_data is not None:
+            if not dismissed:
+                return [s for s in cached_data if not int(s.get('dismissed', 0))]
+            return cached_data
+    
+    # Fallback to MySQL
+    try:
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
+            if dismissed:
+                cursor.execute("SELECT * FROM recurring_suggestions WHERE user_id = %s", (user_id,))
+            else:
+                cursor.execute("SELECT * FROM recurring_suggestions WHERE user_id = %s AND dismissed = 0", (user_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        log_error(logger, 'SUGGEST_REC', f"Error getting recurring suggestions from MySQL: {e}", user_id=user_id)
+        return []
+
+
+def upsert_recurring_suggestion(suggestion_data, user_id=None):
+    """
+    Insert or update a recurring suggestion record (Redis-first).
+    Uses (suggestion_type, category_id) as the unique key.
+    Always overwrites with latest — un-dismisses if previously dismissed.
+    
+    Args:
+        suggestion_data: Dict with: suggestion_type, category_id, transaction_id,
+                         detected_amount, detected_cadence_interval, detected_cadence_unit,
+                         detected_weekday, detected_monthly_day
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        Suggestion ID or None
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return None
+        user_id = current_user.id
+    
+    suggestion_type = suggestion_data.get('suggestion_type')
+    category_id = suggestion_data.get('category_id')
+    if not suggestion_type or not category_id:
+        log_error(logger, 'SUGGEST_REC', "suggestion_type and category_id are required")
+        return None
+    
+    try:
+        # Get current data from Redis or MySQL
+        cached_data = _get_from_redis('recurring_suggestions', user_id)
+        if cached_data is None:
+            cached_data = get_recurring_suggestions(user_id, dismissed=True)
+            if cached_data is None:
+                cached_data = []
+        
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
+        # Find existing by unique key (suggestion_type + category_id)
+        db_id = None
+        found = False
+        for i, s in enumerate(cached_data):
+            if s.get('suggestion_type') == suggestion_type and int(s.get('category_id', 0)) == int(category_id):
+                # Update existing — always overwrite with latest, un-dismiss
+                cached_data[i]['transaction_id'] = suggestion_data.get('transaction_id')
+                cached_data[i]['detected_amount'] = suggestion_data.get('detected_amount')
+                cached_data[i]['detected_cadence_interval'] = suggestion_data.get('detected_cadence_interval')
+                cached_data[i]['detected_cadence_unit'] = suggestion_data.get('detected_cadence_unit')
+                cached_data[i]['detected_weekday'] = suggestion_data.get('detected_weekday')
+                cached_data[i]['detected_monthly_day'] = suggestion_data.get('detected_monthly_day')
+                cached_data[i]['dismissed'] = 0
+                cached_data[i]['created_at'] = datetime.now().isoformat()
+                db_id = cached_data[i].get('id')
+                found = True
+                log_info(logger, 'SUGGEST_REC', 'Updated existing suggestion', suggestion_type=suggestion_type, category_id=category_id, user_id=user_id)
+                break
+        
+        if not found:
+            # Generate temp negative ID
+            temp_id = -int(time.time() * 1000) % 1000000
+            if temp_id > 0:
+                temp_id = -temp_id
+            db_id = temp_id
+            new_suggestion = {
+                'id': db_id,
+                'user_id': user_id,
+                'suggestion_type': suggestion_type,
+                'category_id': int(category_id),
+                'transaction_id': suggestion_data.get('transaction_id'),
+                'detected_amount': suggestion_data.get('detected_amount'),
+                'detected_cadence_interval': suggestion_data.get('detected_cadence_interval'),
+                'detected_cadence_unit': suggestion_data.get('detected_cadence_unit'),
+                'detected_weekday': suggestion_data.get('detected_weekday'),
+                'detected_monthly_day': suggestion_data.get('detected_monthly_day'),
+                'dismissed': 0,
+                'created_at': datetime.now().isoformat()
+            }
+            cached_data.append(new_suggestion)
+            log_info(logger, 'SUGGEST_REC', 'Created new suggestion', suggestion_type=suggestion_type, category_id=category_id, user_id=user_id)
+        
+        # Save to Redis and mark dirty
+        _set_to_redis('recurring_suggestions', user_id, cached_data)
+        
+        return db_id
+        
+    except Exception as e:
+        log_exception(logger, 'SUGGEST_REC', f"Error upserting recurring suggestion: {e}", user_id=user_id)
+        return None
+
+
+def dismiss_recurring_suggestion(suggestion_id, user_id=None):
+    """
+    Dismiss a recurring suggestion by ID.
+    
+    Args:
+        suggestion_id: The suggestion record ID
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        True if successful
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return False
+        user_id = current_user.id
+    
+    try:
+        cached_data = _get_from_redis('recurring_suggestions', user_id)
+        if cached_data is None:
+            cached_data = get_recurring_suggestions(user_id, dismissed=True)
+            if cached_data is None:
+                return False
+        
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
+        found = False
+        for i, s in enumerate(cached_data):
+            if int(s.get('id', 0)) == int(suggestion_id):
+                cached_data[i]['dismissed'] = 1
+                found = True
+                break
+        
+        if not found:
+            log_warning(logger, 'SUGGEST_REC', f"Suggestion ID {suggestion_id} not found for dismiss", user_id=user_id)
+            return False
+        
+        _set_to_redis('recurring_suggestions', user_id, cached_data)
+        log_info(logger, 'SUGGEST_REC', 'Suggestion dismissed', suggestion_id=suggestion_id, user_id=user_id)
+        return True
+        
+    except Exception as e:
+        log_exception(logger, 'SUGGEST_REC', f"Error dismissing suggestion: {e}", user_id=user_id)
+        return False
+
+
+def delete_recurring_suggestion(suggestion_type, category_id, user_id=None):
+    """
+    Delete a recurring suggestion by its unique key (suggestion_type + category_id).
+    Used for self-healing when user creates a recurring entry for the category.
+    
+    Args:
+        suggestion_type: 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+        category_id: The category ID
+        user_id: User ID (defaults to current_user.id)
+        
+    Returns:
+        True if a record was deleted
+    """
+    if user_id is None:
+        if not current_user.is_authenticated:
+            return False
+        user_id = current_user.id
+    
+    try:
+        redis_client = _get_redis_client()
+        cached_data = _get_from_redis('recurring_suggestions', user_id)
+        if cached_data is None:
+            cached_data = get_recurring_suggestions(user_id, dismissed=True)
+            if cached_data is None:
+                return False
+        
+        if not isinstance(cached_data, list):
+            cached_data = list(cached_data) if cached_data else []
+        
+        # Find and remove the matching record
+        removed_id = None
+        new_data = []
+        for s in cached_data:
+            if s.get('suggestion_type') == suggestion_type and int(s.get('category_id', 0)) == int(category_id):
+                removed_id = s.get('id')
+            else:
+                new_data.append(s)
+        
+        if removed_id is None:
+            return False
+        
+        # Save updated list (without marking dirty — deletion handled separately)
+        _set_to_redis_no_dirty('recurring_suggestions', user_id, new_data)
+        
+        # Mark for pending delete in MySQL
+        if redis_client and removed_id and int(removed_id) > 0:
+            pending_key = f"pending_deletes:recurring_suggestions:{user_id}"
+            redis_client.sadd(pending_key, str(removed_id))
+            redis_client.expire(pending_key, 604800)
+            dirty_key = f"dirty_tables:{user_id}"
+            redis_client.sadd(dirty_key, 'recurring_suggestions')
+        elif redis_client:
+            # Temp ID (negative) — just remove from Redis, nothing in MySQL to delete
+            _set_to_redis('recurring_suggestions', user_id, new_data)
+        
+        log_info(logger, 'SUGGEST_REC', 'Suggestion deleted (self-healing)', suggestion_type=suggestion_type, category_id=category_id, user_id=user_id)
+        return True
+        
+    except Exception as e:
+        log_exception(logger, 'SUGGEST_REC', f"Error deleting suggestion: {e}", user_id=user_id)
+        return False
