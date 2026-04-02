@@ -7869,7 +7869,7 @@ transform: scale(1.2);
 }    
 
 .income-actions {
-    padding-right: 2px !important;
+    padding-right: 12px !important;
     padding-left: 2px !important;
     text-align: right !important; 
 }   
@@ -9212,7 +9212,7 @@ form button[type="submit"] {
 }    
 
 .expense-actions {
-    padding-right: 2px !important;
+    padding-right: 12px !important;
     padding-left: 2px !important;
 
     /* Aligns content to the right */
@@ -14551,5 +14551,176 @@ transform: scale(1.2);
     }
     .mismatch-table td, .mismatch-table th {
         padding: 7px 6px;
+    }
+}
+
+/* ─── Recurring Suggestions ─────────────────────────────────────────────────── */
+
+.suggested-recurring-section {
+    margin-top: 28px;
+    width: 100%;
+}
+
+.suggested-recurring-heading {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--secondary-dark);
+    margin: 0 0 10px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.suggested-recurring-heading i {
+    color: var(--primary);
+    font-size: 16px;
+}
+
+.suggested-recurring-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.suggestion-bubble {
+    position: relative;
+    display: grid;
+    /* Proportions match actual rendered table widths (auto layout): Cat 19.7%, Type 9.9%, Amt 13.8%, Action 10.7%, Cadence fills rest */
+    grid-template-columns: 19.7% 9.9% 13.8% 1fr 10.7%;
+    align-items: center;
+    padding: 0px;
+    background-color: var(--text-light);
+    border-radius: 12px;
+    box-shadow: 0 -6px 8px var(--shadow-sm);
+    border-left: 3px solid var(--primary);
+    transition: background-color 0.2s;
+    height: 45px;
+    font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
+}
+
+.suggestion-bubble:hover {
+    background-color: var(--primary-lighter);
+}
+
+.suggestion-bubble > * {
+    padding: 4px 12px;
+}
+
+.suggestion-bubble-body {
+    display: contents;
+}
+
+.suggestion-bubble-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.suggestion-category {
+    font-weight: 600;
+    color: var(--text-dark);
+}
+
+.suggestion-mobile-type {
+    display: none;
+    font-size: 0.8em;
+    color: var(--secondary-dark);
+    margin-top: 1px;
+}
+
+.suggestion-amount {
+    color: var(--text-dark);
+}
+
+.suggestion-bubble-cadence {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 56px;
+}
+
+.suggestion-bubble-cadence .cadence-top {
+    color: var(--text-dark);
+    font-weight: 600;
+}
+
+.suggestion-bubble-cadence .cadence-detail {
+    display: block;
+    font-size: 0.85em;
+    color: var(--secondary-dark);
+    margin-top: 1px;
+}
+
+.suggestion-type {
+    color: var(--text-dark);
+}
+
+.suggestion-bubble-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-right: 12px !important;
+    padding-left: 2px !important;
+}
+
+.suggestion-action-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0px;
+    font-size: 16px;
+    line-height: 1;
+    transition: color 0.15s;
+}
+
+.suggestion-accept-btn {
+    color: var(--primary);
+}
+
+.suggestion-accept-btn:hover {
+    color: var(--primary-hover);
+    transform: scale(1.2);
+}
+
+.suggestion-dismiss-btn {
+    color: var(--danger);
+}
+
+.suggestion-dismiss-btn:hover {
+    color: var(--danger-hover);
+    transform: scale(1.2);
+}
+
+@media (width <= 900px) {
+    .suggestion-bubble {
+        /* Match table: Cat 17%, Type 5%, Amt 8%, Action 45px, Cadence fills rest */
+        grid-template-columns: 17% 5% 8% 1fr 45px;
+    }
+    .suggestion-bubble > * {
+        padding: 4px 6px;
+    }
+}
+
+@media (max-width: 600px) {
+    .suggestion-bubble {
+        /* Match table: Cat 22%, Amt 18%, Cadence fills (Cadence17+Bucket18+Start18=53), Action 7% */
+        grid-template-columns: 22% 18% 1fr 7%;
+    }
+    .suggestion-bubble > * {
+        padding: 4px 5px;
+    }
+    .suggestion-type {
+        display: none;
+    }
+    .suggestion-mobile-type {
+        display: block;
+    }
+}
+
+@media (width <= 507px) {
+    .suggestion-bubble {
+        height: 55px;
     }
 }

@@ -84,6 +84,7 @@ USER_TABLES = [
     'password_resets',
     'setup_state',
     'recurring_mismatches',
+    'recurring_suggestions',
 ]
 
 
@@ -4214,6 +4215,133 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 cursor.close()
                 log_info(logger, 'FLUSH', f"→ recurring_mismatches: {len(rows)} rows")
+                return len(rows)
+            
+            elif table == 'recurring_suggestions':
+                # Recurring suggestions table — Ntropy-detected suggested recurring entries
+                # First, handle pending deletes
+                pending_key = f"pending_deletes:recurring_suggestions:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                
+                if pending_deletes:
+                    delete_ids = [int(id_str) for id_str in pending_deletes]
+                    placeholders = ','.join(['%s'] * len(delete_ids))
+                    cursor.execute(f"""
+                        DELETE FROM recurring_suggestions WHERE id IN ({placeholders}) AND user_id = %s
+                    """, delete_ids + [user_id])
+                    deleted_count = cursor.rowcount
+                    log_info(logger, 'FLUSH', f"Deleted {deleted_count} recurring_suggestions from MySQL")
+                    _redis_client.delete(pending_key)
+                
+                if not rows:
+                    conn.commit()
+                    cursor.close()
+                    return 0
+                
+                # Track temp ID to real ID mappings
+                temp_id_mappings = {}
+                
+                for row in rows:
+                    old_id = row.get('id')
+                    is_temp = old_id and int(old_id) < 0
+                    
+                    created_at_val = row.get('created_at')
+                    if isinstance(created_at_val, str) and 'T' in created_at_val:
+                        created_at_val = created_at_val.replace('T', ' ').split('.')[0]
+                    
+                    detected_amount = row.get('detected_amount')
+                    if detected_amount is not None:
+                        detected_amount = float(detected_amount)
+                    
+                    detected_cadence_interval = row.get('detected_cadence_interval')
+                    if detected_cadence_interval is not None:
+                        detected_cadence_interval = int(detected_cadence_interval)
+                    
+                    detected_monthly_day = row.get('detected_monthly_day')
+                    if detected_monthly_day is not None:
+                        detected_monthly_day = int(detected_monthly_day)
+                    
+                    if is_temp:
+                        cursor.execute("""
+                            INSERT INTO recurring_suggestions (id, user_id, suggestion_type, category_id, transaction_id,
+                                detected_amount, detected_cadence_interval, detected_cadence_unit, detected_weekday,
+                                detected_monthly_day, dismissed, created_at)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                transaction_id = VALUES(transaction_id),
+                                detected_amount = VALUES(detected_amount),
+                                detected_cadence_interval = VALUES(detected_cadence_interval),
+                                detected_cadence_unit = VALUES(detected_cadence_unit),
+                                detected_weekday = VALUES(detected_weekday),
+                                detected_monthly_day = VALUES(detected_monthly_day),
+                                dismissed = VALUES(dismissed),
+                                created_at = VALUES(created_at)
+                        """, (
+                            user_id,
+                            row.get('suggestion_type'),
+                            int(row.get('category_id')),
+                            row.get('transaction_id'),
+                            detected_amount,
+                            detected_cadence_interval,
+                            row.get('detected_cadence_unit'),
+                            row.get('detected_weekday'),
+                            detected_monthly_day,
+                            int(row.get('dismissed', 0)),
+                            created_at_val
+                        ))
+                        new_id = cursor.lastrowid
+                        if new_id:
+                            temp_id_mappings[int(old_id)] = new_id
+                            log_info(logger, 'FLUSH', f"recurring_suggestions temp ID {old_id} → real ID {new_id}")
+                    else:
+                        cursor.execute("""
+                            INSERT INTO recurring_suggestions (id, user_id, suggestion_type, category_id, transaction_id,
+                                detected_amount, detected_cadence_interval, detected_cadence_unit, detected_weekday,
+                                detected_monthly_day, dismissed, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                transaction_id = VALUES(transaction_id),
+                                detected_amount = VALUES(detected_amount),
+                                detected_cadence_interval = VALUES(detected_cadence_interval),
+                                detected_cadence_unit = VALUES(detected_cadence_unit),
+                                detected_weekday = VALUES(detected_weekday),
+                                detected_monthly_day = VALUES(detected_monthly_day),
+                                dismissed = VALUES(dismissed),
+                                created_at = VALUES(created_at)
+                        """, (
+                            old_id,
+                            user_id,
+                            row.get('suggestion_type'),
+                            int(row.get('category_id')),
+                            row.get('transaction_id'),
+                            detected_amount,
+                            detected_cadence_interval,
+                            row.get('detected_cadence_unit'),
+                            row.get('detected_weekday'),
+                            detected_monthly_day,
+                            int(row.get('dismissed', 0)),
+                            created_at_val
+                        ))
+                
+                conn.commit()
+                
+                # Update Redis with real IDs if any temp IDs were replaced
+                if temp_id_mappings:
+                    for i, row in enumerate(rows):
+                        old_id = row.get('id')
+                        if old_id and int(old_id) in temp_id_mappings:
+                            rows[i]['id'] = temp_id_mappings[int(old_id)]
+                    
+                    redis_key = _get_redis_key('recurring_suggestions', user_id)
+                    _redis_client.setex(
+                        redis_key,
+                        INACTIVITY_TIMEOUT + 60,
+                        json.dumps(rows, cls=DecimalEncoder)
+                    )
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} recurring_suggestions temp IDs in Redis")
+                
+                cursor.close()
+                log_info(logger, 'FLUSH', f"→ recurring_suggestions: {len(rows)} rows")
                 return len(rows)
             
             else:

@@ -40,7 +40,8 @@ from quiltt_redis import (
     get_user_quiltt_account_flags, get_quiltt_last_transaction_date,
     update_quiltt_last_transaction_date,
     get_recurring_mismatches as _get_recurring_mismatches_redis,
-    upsert_recurring_mismatch, dismiss_recurring_mismatch, delete_recurring_mismatch
+    upsert_recurring_mismatch, dismiss_recurring_mismatch, delete_recurring_mismatch,
+    upsert_recurring_suggestion, delete_recurring_suggestion
 )
 from bucket_utils import process_manual_entry_with_bucket, restore_bucket_for_category_change
 from push_notifications import apns_enabled, send_apns_notification
@@ -4056,6 +4057,7 @@ def _detect_recurring_mismatch(transaction_record, entry_type, category_id, user
     ]
     
     if not wage_bill_entries:
+        _detect_recurring_suggestion(transaction_record, entry_type, category_id, user_id, all_recurring, recurring_table)
         return
     
     txn_amount = float(transaction_record.get('amount', 0))
@@ -4148,6 +4150,130 @@ def _detect_recurring_mismatch(transaction_record, entry_type, category_id, user
         else:
             # Self-healing: no mismatch, remove any existing record
             delete_recurring_mismatch(recurring_table, recurring_id, user_id=user_id)
+
+
+def _detect_recurring_suggestion(transaction_record, entry_type, category_id, user_id, all_recurring, recurring_table):
+    """
+    Check if a confirmed transaction should generate a "suggested recurring" entry.
+    Called when a transaction is confirmed to a non-recurring category (no wage_bill=1 entries).
+    
+    Qualification: category is_recurring=0, no recurring entries at all for this category,
+    transaction has ntropy recurring flag + non-NULL periodicity, category not hidden.
+    
+    Args:
+        transaction_record: Dict from quiltt_transactions
+        entry_type: 'income', 'expense', or 'c_expense'
+        category_id: The confirmed category ID
+        user_id: User ID
+        all_recurring: Already-fetched recurring entries list (avoids duplicate Redis read)
+        recurring_table: 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+    """
+    try:
+        # Check if ANY recurring entry exists for this category (not just wage_bill=1)
+        any_recurring_for_cat = any(
+            int(r.get('category_id', 0)) == int(category_id) for r in all_recurring
+        )
+        if any_recurring_for_cat:
+            return
+
+        # Check ntropy_periodicity is not NULL
+        ntropy_periodicity = (transaction_record.get('ntropy_periodicity') or '').lower().strip().replace('_', '-')
+        if not ntropy_periodicity:
+            return
+
+        # Look up the category to check is_recurring and hidden
+        cat_table_map = {
+            'income': 'income_categories',
+            'expense': 'expense_categories',
+            'c_expense': 'c_expense_categories'
+        }
+        cat_table = cat_table_map.get(entry_type)
+        if not cat_table:
+            return
+
+        categories = _get_categories_from_redis(cat_table, user_id)
+        if not categories:
+            return
+
+        category = next((c for c in categories if str(c.get('id')) == str(category_id)), None)
+        if not category:
+            return
+
+        if int(category.get('is_recurring', 0)) == 1:
+            return
+        if int(category.get('hidden', 0)) == 1:
+            return
+
+        # Compute detected cadence
+        detected_interval = None
+        detected_unit = None
+
+        if ntropy_periodicity and ntropy_periodicity != 'other':
+            mapped = _NTROPY_CADENCE_MAP.get(ntropy_periodicity)
+            if mapped:
+                detected_interval, detected_unit = mapped
+        elif ntropy_periodicity == 'other':
+            ntropy_periodicity_days = transaction_record.get('ntropy_periodicity_days')
+            if ntropy_periodicity_days:
+                try:
+                    days = float(ntropy_periodicity_days)
+                    for low, high, interval, unit in _FUZZY_CADENCE_RANGES:
+                        if low <= days <= high:
+                            detected_interval, detected_unit = interval, unit
+                            break
+                except (ValueError, TypeError):
+                    pass
+
+        # If we couldn't determine cadence, skip
+        if detected_interval is None or detected_unit is None:
+            return
+
+        # Infer weekday / day-of-month from transaction date
+        detected_weekday = None
+        detected_monthly_day = None
+        txn_date_str = transaction_record.get('date')
+        if txn_date_str:
+            try:
+                if isinstance(txn_date_str, str):
+                    txn_date = datetime.strptime(txn_date_str[:10], '%Y-%m-%d')
+                else:
+                    txn_date = txn_date_str
+                if detected_unit == 'weeks':
+                    detected_weekday = _DAY_NAMES[txn_date.weekday()]
+                if detected_unit == 'months':
+                    detected_monthly_day = txn_date.day
+            except Exception:
+                pass
+
+        suggestion_type_map = {
+            'income': 'recurring_income',
+            'expense': 'recurring_expense',
+            'c_expense': 'recurring_c_expense'
+        }
+        suggestion_type = suggestion_type_map.get(entry_type)
+
+        txn_amount = abs(float(transaction_record.get('amount', 0)))
+        transaction_id = transaction_record.get('transaction_id')
+
+        upsert_recurring_suggestion({
+            'suggestion_type': suggestion_type,
+            'category_id': int(category_id),
+            'transaction_id': transaction_id,
+            'detected_amount': txn_amount,
+            'detected_cadence_interval': detected_interval,
+            'detected_cadence_unit': detected_unit,
+            'detected_weekday': detected_weekday,
+            'detected_monthly_day': detected_monthly_day,
+        }, user_id=user_id)
+
+        log_info(app.logger, 'SUGGEST_REC', 'Recurring suggestion created',
+                 category_id=category_id, suggestion_type=suggestion_type,
+                 amount=txn_amount, cadence=f"{detected_interval}/{detected_unit}",
+                 user_id=user_id)
+
+    except Exception as e:
+        log_exception(app.logger, 'SUGGEST_REC', f"Error detecting recurring suggestion: {e}",
+                      category_id=category_id, user_id=user_id)
 
 
 def _filter_pending_deletions(table_name, user_id, entries):
@@ -13780,6 +13906,100 @@ def dismiss_recurring_mismatch_api(mismatch_id):
         return jsonify({'status': 'error', 'message': 'Internal error'}), 500
 
 
+# ============================================================
+# Recurring Suggestions API
+# ============================================================
+
+@app.route('/api/recurring-suggestions', methods=['GET'])
+@login_required
+def get_recurring_suggestions_api():
+    """Get active (non-dismissed) recurring suggestions, enriched with category name."""
+    from quiltt_redis import get_recurring_suggestions
+    
+    suggestion_type_filter = request.args.get('suggestion_type')
+    
+    try:
+        suggestions = get_recurring_suggestions(user_id=current_user.id, dismissed=False)
+        
+        if suggestion_type_filter:
+            suggestions = [s for s in suggestions if s.get('suggestion_type') == suggestion_type_filter]
+        
+        if not suggestions:
+            return jsonify({'status': 'success', 'suggestions': []})
+        
+        # Pre-load category tables for name lookup
+        cat_cache = {}
+        for cat_table in ('income_categories', 'expense_categories', 'c_expense_categories'):
+            cats = _get_categories_from_redis(cat_table, current_user.id)
+            if cats:
+                cat_cache[cat_table] = {int(c.get('id', 0)): c for c in cats}
+            else:
+                cat_cache[cat_table] = {}
+        
+        enriched = []
+        for s in suggestions:
+            stype = s.get('suggestion_type')
+            cat_id = int(s.get('category_id', 0))
+            
+            # Map suggestion_type to category table
+            cat_table_map = {
+                'recurring_income': 'income_categories',
+                'recurring_expense': 'expense_categories',
+                'recurring_c_expense': 'c_expense_categories'
+            }
+            cat_table = cat_table_map.get(stype, '')
+            cat = cat_cache.get(cat_table, {}).get(cat_id)
+            
+            if not cat:
+                continue
+            
+            category_name = cat.get('name', '')
+            
+            # For c_expense, include account_id
+            account_id = None
+            if stype == 'recurring_c_expense':
+                account_id = cat.get('account_id')
+            
+            enriched.append({
+                'id': s.get('id'),
+                'suggestion_type': stype,
+                'category_id': cat_id,
+                'category_name': category_name,
+                'account_id': account_id,
+                'transaction_id': s.get('transaction_id'),
+                'detected_amount': float(s.get('detected_amount', 0)),
+                'detected_cadence_interval': s.get('detected_cadence_interval'),
+                'detected_cadence_unit': s.get('detected_cadence_unit'),
+                'detected_weekday': s.get('detected_weekday'),
+                'detected_monthly_day': s.get('detected_monthly_day'),
+                'created_at': s.get('created_at'),
+            })
+        
+        return jsonify({'status': 'success', 'suggestions': enriched})
+        
+    except Exception as e:
+        log_exception(app.logger, 'SUGGEST_REC', f"Error fetching suggestions: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+
+
+@app.route('/api/recurring-suggestions/<int:suggestion_id>/dismiss', methods=['POST'])
+@login_required
+def dismiss_recurring_suggestion_api(suggestion_id):
+    """Dismiss a recurring suggestion."""
+    from quiltt_redis import dismiss_recurring_suggestion
+    
+    try:
+        success = dismiss_recurring_suggestion(suggestion_id, user_id=current_user.id)
+        if success:
+            log_info(app.logger, 'SUGGEST_REC', f"Suggestion {suggestion_id} dismissed", user_id=current_user.id)
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Suggestion not found'}), 404
+    except Exception as e:
+        log_exception(app.logger, 'SUGGEST_REC', f"Error dismissing suggestion: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+
+
 def _format_cadence_string(interval, unit, weekday_or_weekdays, monthly_days_or_dom):
     """Format a human-readable cadence string."""
     if interval is None or unit is None or not interval:
@@ -15095,6 +15315,12 @@ def add_recurring_income():
         # Sync updated categories to Ntropy (non-blocking)
         _trigger_ntropy_sync(current_user.id)
 
+        # Self-healing: remove any suggestion for this category
+        try:
+            delete_recurring_suggestion('recurring_income', category_id, user_id=current_user.id)
+        except Exception:
+            pass
+
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring income added successfully!'})
 
     except Exception as e:
@@ -15909,6 +16135,12 @@ def add_recurring_expense():
         
         # Sync updated categories to Ntropy (non-blocking)
         _trigger_ntropy_sync(current_user.id)
+        
+        # Self-healing: remove any suggestion for this category
+        try:
+            delete_recurring_suggestion('recurring_expense', category_id, user_id=current_user.id)
+        except Exception:
+            pass
         
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring expense added successfully!'})
 
@@ -16799,6 +17031,12 @@ def add_recurring_ca_expense():
 
         # Sync updated categories to Ntropy (non-blocking)
         _trigger_ntropy_sync(current_user.id)
+
+        # Self-healing: remove any suggestion for this category
+        try:
+            delete_recurring_suggestion('recurring_c_expense', category_id, user_id=current_user.id)
+        except Exception:
+            pass
 
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring CA expense added successfully!'})
 
@@ -22730,9 +22968,19 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 if user_row and user_row.get('username'):
                     refresh_success = _refresh_quiltt_session_token(user_id, user_row['username'])
                     if refresh_success:
-                        # Re-fetch profile to get new token
-                        profile = get_quiltt_profile(user_id)
-                        session_token = profile.get('session_token')
+                        # Read new token directly from Redis key (bypasses hydration check)
+                        # This avoids a race condition where get_quiltt_profile falls back to MySQL
+                        # (which still has the old token) when the user isn't hydrated
+                        _redis_key = f"quiltt_profiles:v1:{user_id}"
+                        _cached = _redis_client.get(_redis_key)
+                        if _cached:
+                            _profiles = json.loads(_cached)
+                            if _profiles and len(_profiles) > 0:
+                                session_token = _profiles[0].get('session_token', session_token)
+                        else:
+                            # Redis key not set — fall back to get_quiltt_profile
+                            profile = get_quiltt_profile(user_id)
+                            session_token = profile.get('session_token') if profile else session_token
                         log_info(app.logger, 'QUILTT', f"Successfully refreshed session token for user {user_id}")
                     else:
                         log_error(app.logger, 'QUILTT', f"Failed to refresh expired session token for user {user_id}")
