@@ -152,12 +152,13 @@ def get_interval_bounds(entry_date, cadence_unit, cadence_interval, start_date, 
 
 def find_next_bucket_for_category(table, category_id, user_id):
     """
-    Find the next bucket entry in a category from today's date.
+    Find the next reducible bucket entry in a category.
     
     This is the NEW bucket selection logic that replaces cadence-based selection.
-    Simply finds the bucket entry (is_bucket=1) with the earliest date >= today.
-    
-    A bucket dated TODAY can be reduced by entries dated today.
+    Finds the bucket entry (is_bucket=1) with the earliest date >= lookback_date,
+    where lookback_date is today minus 45 days. This ensures current-period buckets
+    are still found even when the bucket date is a few days before today (e.g., Rent
+    bucket on the 1st, payment on the 3rd).
     
     Args:
         table: 'income_entries', 'expense_entries', or 'c_expense_entries'
@@ -165,13 +166,16 @@ def find_next_bucket_for_category(table, category_id, user_id):
         user_id: The user ID
         
     Returns:
-        Dictionary with bucket entry data, or None if no future bucket exists
+        Dictionary with bucket entry data, or None if no reducible bucket exists
     """
     from flask import current_app
     
     today = date.today()
+    # Look back 45 days to catch current-period buckets whose date has passed
+    # (e.g., monthly billing on the 1st, payment arrives on the 3rd)
+    lookback_date = today - timedelta(days=45)
     
-    log_info(logger, 'FIND_NEXT_BUCKET', f"Looking for next bucket: table={table}, category_id={category_id}, user_id={user_id}, today={today}")
+    log_info(logger, 'FIND_NEXT_BUCKET', f"Looking for next bucket: table={table}, category_id={category_id}, user_id={user_id}, today={today}, lookback={lookback_date}")
     
     # Get all entries from Redis
     from app import _get_entries_from_redis
@@ -181,8 +185,8 @@ def find_next_bucket_for_category(table, category_id, user_id):
         log_info(logger, 'FIND_NEXT_BUCKET', f"No entries in Redis for user {user_id}, table {table}")
         return None
     
-    # Filter to get only bucket entries for this category with amount > 0 and date >= today
-    future_buckets = []
+    # Filter to get only bucket entries for this category with amount > 0 and date >= lookback
+    candidate_buckets = []
     for entry in entries:
         if (entry.get('category_id') == int(category_id) and
             entry.get('is_bucket') == 1 and
@@ -192,18 +196,18 @@ def find_next_bucket_for_category(table, category_id, user_id):
             if isinstance(entry_date, str):
                 entry_date = date.fromisoformat(entry_date)
             
-            # Include buckets with date >= today (same day bucket can be reduced)
-            if entry_date >= today:
-                future_buckets.append(entry)
+            # Include buckets within lookback window (covers current billing period)
+            if entry_date >= lookback_date:
+                candidate_buckets.append(entry)
     
-    if not future_buckets:
+    if not candidate_buckets:
         log_info(logger, 'FIND_NEXT_BUCKET', f"No current or future buckets found for category {category_id}")
         return None
     
     # Sort by date ascending and return the earliest one
-    future_buckets.sort(key=lambda x: x.get('date', ''))
+    candidate_buckets.sort(key=lambda x: x.get('date', ''))
     
-    next_bucket = future_buckets[0]
+    next_bucket = candidate_buckets[0]
     log_info(logger, 'FIND_NEXT_BUCKET', f"Found next bucket: id={next_bucket.get('id')}, date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
     
     return next_bucket
@@ -973,6 +977,73 @@ def _get_wage_bill_for_category(entry_table, category_id, user_id):
     return 0
 
 
+def _find_bucket_date_for_entry(entry_date, cadence_info):
+    """
+    Given an entry_date and cadence_info, determine which bucket_date (from
+    recurring_*_buckets) this entry falls within.
+    
+    For monthly recurring on day X: entry on April 3 with monthly_days=1
+    means the bucket_date is April 1 (the 1st of the entry's month, or the 
+    previous month's Xth if entry_date < X).
+    
+    Returns: date object for the bucket_date, or None if can't determine.
+    """
+    if isinstance(entry_date, str):
+        entry_date = date.fromisoformat(entry_date)
+    
+    cadence_unit = cadence_info.get('cadence_unit', 'months')
+    
+    if cadence_unit == 'months':
+        monthly_days = cadence_info.get('monthly_days')
+        if monthly_days:
+            # Parse first monthly day
+            if isinstance(monthly_days, str):
+                day = int(monthly_days.split(',')[0].strip())
+            else:
+                day = int(monthly_days)
+            
+            # Try current month first
+            last_day = calendar.monthrange(entry_date.year, entry_date.month)[1]
+            bucket_day = min(day, last_day)
+            candidate = date(entry_date.year, entry_date.month, bucket_day)
+            
+            if entry_date >= candidate:
+                # Entry is on or after this month's bucket day — use this month
+                return candidate
+            else:
+                # Entry is before this month's bucket day — use previous month
+                if entry_date.month == 1:
+                    prev_year, prev_month = entry_date.year - 1, 12
+                else:
+                    prev_year, prev_month = entry_date.year, entry_date.month - 1
+                prev_last_day = calendar.monthrange(prev_year, prev_month)[1]
+                return date(prev_year, prev_month, min(day, prev_last_day))
+    
+    elif cadence_unit == 'weeks':
+        # For weekly, look back up to 7 days for the most recent bucket date
+        weekdays = cadence_info.get('weekdays')
+        if weekdays:
+            weekday_list = [int(d.strip()) for d in str(weekdays).split(',')]
+            for days_back in range(7):
+                check_date = entry_date - timedelta(days=days_back)
+                if check_date.weekday() in weekday_list:
+                    return check_date
+    
+    elif cadence_unit == 'years':
+        yearly_day = cadence_info.get('yearly_day')
+        yearly_month = cadence_info.get('yearly_month')
+        if yearly_day and yearly_month:
+            yearly_day = int(yearly_day)
+            yearly_month = int(yearly_month)
+            candidate = date(entry_date.year, yearly_month, yearly_day)
+            if entry_date >= candidate:
+                return candidate
+            else:
+                return date(entry_date.year - 1, yearly_month, yearly_day)
+    
+    return None
+
+
 def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amount, user_id, cadence_info=None):
     """
     Process a manual entry by checking for and depleting bucket entries.
@@ -1030,8 +1101,6 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
         if isinstance(bucket_date, str):
             bucket_date = date_type.fromisoformat(bucket_date)
         
-        # All bucket tables now use user_id consistently for Redis key
-        
         # Get current bucket record amount BEFORE subtraction
         bucket_record_before = None
         if bucket_table:
@@ -1085,7 +1154,36 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
                     redis_manager._redis_client.expire(f"pending_deletes:{table}:{user_id}", 604800)
                     log_info(logger, 'BUCKET_DEBUG', f"Forced bucket entry deletion complete")
     else:
-        log_info(logger, 'BUCKET_DEBUG', f"No future bucket found for this entry")
+        # No bucket entry found — but there may be a bucket RECORD for the entry's period
+        # (e.g., bucket entry was cleaned up by nightly sync but record still shows full amount)
+        log_info(logger, 'BUCKET_DEBUG', f"No bucket entry found, checking for bucket record to reduce directly")
+        try:
+            from recurring_bucket_manager import subtract_from_bucket_record_by_category_date, get_bucket_table_for_entry_table, get_bucket_record_by_category_date
+            bucket_table = get_bucket_table_for_entry_table(table)
+            if bucket_table and cadence_info:
+                # Use cadence info to find the bucket record for this entry's period
+                cadence_unit = cadence_info.get('cadence_unit', 'months')
+                monthly_days = cadence_info.get('monthly_days')
+                start_date_raw = cadence_info.get('start_date')
+                
+                # Determine the bucket_date for the entry's billing period
+                bucket_date_for_record = _find_bucket_date_for_entry(entry_date, cadence_info)
+                
+                if bucket_date_for_record:
+                    record = get_bucket_record_by_category_date(bucket_table, category_id, bucket_date_for_record, user_id)
+                    if record and float(record.get('amount', 0)) > 0:
+                        if wage_bill:
+                            subtract_amount = Decimal(str(record.get('amount', 0)))
+                        else:
+                            subtract_amount = entry_amount
+                        log_info(logger, 'BUCKET_DEBUG', f"Found bucket record at {bucket_date_for_record}, reducing by {subtract_amount} (wage_bill={wage_bill})")
+                        subtract_from_bucket_record_by_category_date(bucket_table, category_id, bucket_date_for_record, float(subtract_amount), user_id)
+                    else:
+                        log_info(logger, 'BUCKET_DEBUG', f"No bucket record found at {bucket_date_for_record} or already at 0")
+                else:
+                    log_info(logger, 'BUCKET_DEBUG', f"Could not determine bucket_date for entry_date={entry_date}")
+        except Exception as record_err:
+            log_warning(logger, 'BUCKET_DEBUG', f"Error reducing bucket record directly: {record_err}")
 
 
 def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount, user_id):
@@ -1127,8 +1225,10 @@ def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount
     # FIRST: Check for depleted bucket records (amount < original_amount).
     # When there are multiple future buckets, the depleted one is the correct
     # target — not the next undepleted one that find_next_bucket_for_category returns.
+    # Use 45-day lookback to catch current-period records.
     if bucket_table:
         all_records = get_bucket_records_for_category(bucket_table, category_id, user_id)
+        lookback_date = today - timedelta(days=45)
         depleted_records = []
         for record in all_records:
             record_date = record.get('bucket_date')
@@ -1136,7 +1236,7 @@ def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount
                 record_date = date_type.fromisoformat(record_date)
             record_amount = float(record.get('amount', 0))
             record_original = float(record.get('original_amount', 0))
-            if record_date >= today and record_amount < record_original:
+            if record_date >= lookback_date and record_amount < record_original:
                 depleted_records.append((record_date, record))
         
         if depleted_records:
@@ -1243,12 +1343,13 @@ def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount
             log_info(logger, 'RESTORE_BUCKET_V2', f"No bucket records found")
             return (False, None)
         
+        lookback_date_fb = today - timedelta(days=45)
         future_records = []
         for record in all_records:
             record_date = record.get('bucket_date')
             if isinstance(record_date, str):
                 record_date = date_type.fromisoformat(record_date)
-            if record_date >= today:
+            if record_date >= lookback_date_fb:
                 future_records.append((record_date, record))
         
         if not future_records:
