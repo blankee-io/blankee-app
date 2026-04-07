@@ -23119,6 +23119,36 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             limit=1000
         )
         
+        # If no transactions returned, token may have been invalidated server-side
+        # even though the stored expiration time hasn't passed. Try refreshing once.
+        if not transactions:
+            log_warning(app.logger, 'QUILTT', f"No transactions returned for user {user_id}, attempting token refresh and retry")
+            try:
+                with get_db_pool().get_connection() as _retry_conn:
+                    _retry_cursor = _retry_conn.cursor(pymysql.cursors.DictCursor)
+                    _retry_cursor.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+                    _retry_user = _retry_cursor.fetchone()
+                    _retry_cursor.close()
+                if _retry_user and _retry_user.get('username'):
+                    _retry_success = _refresh_quiltt_session_token(user_id, _retry_user['username'])
+                    if _retry_success:
+                        _retry_redis_key = f"quiltt_profiles:v1:{user_id}"
+                        _retry_cached = _redis_client.get(_retry_redis_key)
+                        if _retry_cached:
+                            _retry_profiles = json.loads(_retry_cached)
+                            if _retry_profiles and len(_retry_profiles) > 0:
+                                session_token = _retry_profiles[0].get('session_token', session_token)
+                        log_info(app.logger, 'QUILTT', f"Token refreshed for user {user_id}, retrying transaction fetch")
+                        transactions = quiltt_client.get_transactions_with_ntropy(
+                            session_token=session_token,
+                            account_ids=account_ids,
+                            start_date=start_date,
+                            end_date=end_date,
+                            limit=1000
+                        )
+            except Exception as retry_err:
+                log_warning(app.logger, 'QUILTT', f"Token refresh retry failed for user {user_id}: {retry_err}")
+        
         if not transactions:
             log_info(app.logger, 'QUILTT', "No transactions returned from Quiltt")
             return (True, 0, 'No new transactions found')
