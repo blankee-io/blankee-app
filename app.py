@@ -22864,12 +22864,15 @@ def _auto_confirm_pending_entries(user_id):
 
                             # Only reduce bucket if entry is not in the future
                             if entry_date_parsed <= today:
-                                # Find next bucket entry (is_bucket=1, date >= today)
+                                # Find next bucket entry (is_bucket=1, date >= lookback)
+                                # Use 45-day lookback to catch current-period buckets whose date
+                                # has passed (e.g., Rent bucket on 1st, payment on 3rd)
+                                lookback_date = today - timedelta(days=45)
                                 cursor.execute(f"""
                                     SELECT id, amount, date FROM {table_name}
                                     WHERE category_id = %s AND is_bucket = 1 AND amount > 0 AND date >= %s
                                     ORDER BY date ASC LIMIT 1
-                                """, (new_category_id, today))
+                                """, (new_category_id, lookback_date))
                                 bucket_entry = cursor.fetchone()
 
                                 if bucket_entry:
@@ -22898,6 +22901,44 @@ def _auto_confirm_pending_entries(user_id):
                                         cursor.execute(f"UPDATE {bucket_table} SET amount = %s WHERE id = %s", (new_rec_amount, b_record['id']))
 
                                     log_info(app.logger, 'AUTO_CONFIRM',  f"Bucket reduced for entry {entry_id}: " f"bucket {bucket_id} {'removed' if new_amount <= 0 else f'reduced to {new_amount}'}" )
+                                else:
+                                    # No bucket entry found — try reducing bucket record directly
+                                    # (bucket entry may have been cleaned up by nightly sync)
+                                    rec_amount = float(rec_row.get('amount', 0))
+                                    monthly_days_val = rec_row.get('monthly_days')
+                                    cadence_unit_val = rec_row.get('cadence_unit', 'months') if 'cadence_unit' in rec_row else 'months'
+                                    
+                                    # Determine bucket_date for this entry's billing period
+                                    bucket_date_for_record = None
+                                    if cadence_unit_val == 'months' and monthly_days_val:
+                                        try:
+                                            mday = int(str(monthly_days_val).split(',')[0].strip())
+                                            import calendar as _cal
+                                            last_day = _cal.monthrange(entry_date_parsed.year, entry_date_parsed.month)[1]
+                                            bucket_day = min(mday, last_day)
+                                            candidate = date_type(entry_date_parsed.year, entry_date_parsed.month, bucket_day)
+                                            if entry_date_parsed >= candidate:
+                                                bucket_date_for_record = candidate
+                                            else:
+                                                if entry_date_parsed.month == 1:
+                                                    py, pm = entry_date_parsed.year - 1, 12
+                                                else:
+                                                    py, pm = entry_date_parsed.year, entry_date_parsed.month - 1
+                                                pld = _cal.monthrange(py, pm)[1]
+                                                bucket_date_for_record = date_type(py, pm, min(mday, pld))
+                                        except Exception:
+                                            pass
+                                    
+                                    if bucket_date_for_record:
+                                        cursor.execute(f"""
+                                            SELECT id, amount FROM {bucket_table}
+                                            WHERE user_id = %s AND category_id = %s AND bucket_date = %s
+                                        """, (user_id, new_category_id, str(bucket_date_for_record)))
+                                        b_record = cursor.fetchone()
+                                        if b_record and float(b_record['amount']) > 0:
+                                            new_rec_amount = 0 if wage_bill else float(b_record['amount']) - abs(entry_amount)
+                                            cursor.execute(f"UPDATE {bucket_table} SET amount = %s WHERE id = %s", (new_rec_amount, b_record['id']))
+                                            log_info(app.logger, 'AUTO_CONFIRM', f"Bucket record reduced directly for entry {entry_id}: record {b_record['id']} at {bucket_date_for_record} -> {new_rec_amount}")
                     except Exception as bucket_err:
                         log_warning(app.logger, 'AUTO_CONFIRM', f"Bucket reduction error for entry {entry_id}: {bucket_err}")
 
@@ -23722,6 +23763,23 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         pushed_inc = _sync_cursor.rowcount
                         if pushed_inc > 0:
                             log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_inc} income buckets to {push_to_date} for user {user_id}")
+                            # Also push corresponding bucket records to keep dates in sync
+                            # Only push records whose category+date match a pushed bucket entry
+                            _sync_cursor.execute("""
+                                UPDATE recurring_income_buckets rib
+                                INNER JOIN (
+                                    SELECT DISTINCT ie.category_id, ie.original_date
+                                    FROM income_entries ie
+                                    JOIN income_categories ic ON ie.category_id = ic.id
+                                    WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date = %s
+                                      AND ie.original_date IS NOT NULL
+                                ) pushed ON rib.category_id = pushed.category_id AND rib.bucket_date = pushed.original_date
+                                SET rib.bucket_date = %s
+                                WHERE rib.user_id = %s
+                            """, (user_id, push_to_date, push_to_date, user_id))
+                            pushed_inc_records = _sync_cursor.rowcount
+                            if pushed_inc_records > 0:
+                                log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_inc_records} income bucket records to {push_to_date} for user {user_id}")
                         cleanup_count += pushed_inc
                         
                         # --- expense_entries ---
@@ -23748,6 +23806,23 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         pushed_exp = _sync_cursor.rowcount
                         if pushed_exp > 0:
                             log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_exp} expense buckets to {push_to_date} for user {user_id}")
+                            # Also push corresponding bucket records to keep dates in sync
+                            # Only push records whose category+date match a pushed bucket entry
+                            _sync_cursor.execute("""
+                                UPDATE recurring_expense_buckets reb
+                                INNER JOIN (
+                                    SELECT DISTINCT ee.category_id, ee.original_date
+                                    FROM expense_entries ee
+                                    JOIN expense_categories ec ON ee.category_id = ec.id
+                                    WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date = %s
+                                      AND ee.original_date IS NOT NULL
+                                ) pushed ON reb.category_id = pushed.category_id AND reb.bucket_date = pushed.original_date
+                                SET reb.bucket_date = %s
+                                WHERE reb.user_id = %s
+                            """, (user_id, push_to_date, push_to_date, user_id))
+                            pushed_exp_records = _sync_cursor.rowcount
+                            if pushed_exp_records > 0:
+                                log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_exp_records} expense bucket records to {push_to_date} for user {user_id}")
                         cleanup_count += pushed_exp
                     
                     # --- c_expense_entries (Quiltt-linked credit accounts) ---
@@ -23776,6 +23851,24 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                     pushed_ce = _sync_cursor.rowcount
                     if pushed_ce > 0:
                         log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_ce} credit buckets to {push_to_date} for user {user_id}")
+                        # Also push corresponding bucket records to keep dates in sync
+                        # Only push records whose category+date match a pushed bucket entry
+                        _sync_cursor.execute("""
+                            UPDATE recurring_c_expense_buckets rcb
+                            INNER JOIN (
+                                SELECT DISTINCT ce.category_id, ce.original_date
+                                FROM c_expense_entries ce
+                                JOIN c_expense_categories cec ON ce.category_id = cec.id
+                                JOIN credit_accounts ca ON cec.account_id = ca.id
+                                WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date = %s
+                                  AND ce.original_date IS NOT NULL AND ca.is_quiltt = 1
+                            ) pushed ON rcb.category_id = pushed.category_id AND rcb.bucket_date = pushed.original_date
+                            SET rcb.bucket_date = %s
+                            WHERE rcb.user_id = %s
+                        """, (user_id, push_to_date, push_to_date, user_id))
+                        pushed_ce_records = _sync_cursor.rowcount
+                        if pushed_ce_records > 0:
+                            log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_ce_records} credit bucket records to {push_to_date} for user {user_id}")
                     cleanup_count += pushed_ce
                     
                     # Convert non-Quiltt credit expense buckets to regular entries (unchanged)
