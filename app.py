@@ -23962,7 +23962,9 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             
             # --- STEP 6: First recalculation — accurate totals for autobalance comparison ---
             date_to_remainder = {}
+            daily_date_to_remainder = {}  # Separate dict for daily remainders only (not overwritten by weekly/monthly)
             update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
+            daily_date_to_remainder.update(date_to_remainder)  # Snapshot daily values before weekly/monthly overwrite
             update_daily_savings_for_savings_category(user_id, recalc_start)
             update_weekly_totals(user_id, recalc_start, gwm, date_to_remainder)
             update_monthly_totals(user_id, recalc_start, date_to_remainder)
@@ -23978,12 +23980,12 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             
             # --- STEP 7+8: Fetch bank balances + auto-adjustments ---
             # _webhook_autobalance handles both: fetches balances (Step 7) and creates adjustments (Step 8)
-            # Pass date_to_remainder so checking adjustment reads the fresh recalc values
+            # Pass daily_date_to_remainder (not shared dict) so checking adjustment reads the true daily value
             if app.config.get('REDIS_OK'):
                 _redis_client.delete(f"quiltt_last_txn_date:v1:{user_id}")
             last_txn_date_for_autobalance = get_quiltt_last_transaction_date(user_id)
             log_info(app.logger, 'WEBHOOK_SYNC', f"Step 7+8: Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
-            _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance, date_to_remainder=date_to_remainder)
+            _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance, date_to_remainder=daily_date_to_remainder)
             log_info(app.logger, 'WEBHOOK_SYNC', f"Step 8: Auto-adjustments complete")
             
             # --- STEP 9: Dehydrate + Rehydrate (again) ---
@@ -26875,6 +26877,16 @@ def quiltt_simulate_webhook():
         if not connections:
             return jsonify({'status': 'error', 'message': f'Connection {target_connection_id} not found'}), 400
 
+    # Step 0: Auto-confirm previous pending entries before syncing new ones
+    ac_confirmed = 0
+    ac_fallback = 0
+    try:
+        ac_confirmed, ac_fallback = _auto_confirm_pending_entries(user_id)
+        if ac_confirmed or ac_fallback:
+            log_info(app.logger, 'SIMULATE_WEBHOOK', f"Auto-confirmed {ac_confirmed} entries ({ac_fallback} fallback) for user {user_id}")
+    except Exception as ac_err:
+        log_warning(app.logger, 'SIMULATE_WEBHOOK', f"Auto-confirm error for user {user_id}: {ac_err}")
+
     results = []
     for conn_info in connections:
         connection_id = conn_info.get('connection_id')
@@ -26906,7 +26918,7 @@ def quiltt_simulate_webhook():
         except Exception as e:
             log_warning(app.logger, 'SIMULATE_WEBHOOK', f"Failed to update connection status: {e}")
 
-        # 3. Sync transactions (the main work)
+        # 3. Sync transactions + full recalculation + autobalance pipeline
         success, count, message = _sync_quiltt_transactions_for_user(
             user_id,
             start_date=start_date,
@@ -26926,7 +26938,9 @@ def quiltt_simulate_webhook():
             'success': success,
             'transactions_synced': count,
             'message': message,
-            'event_id': fake_event_id
+            'event_id': fake_event_id,
+            'auto_confirmed': ac_confirmed,
+            'auto_confirmed_fallback': ac_fallback
         })
 
     total_synced = sum(r['transactions_synced'] for r in results)
