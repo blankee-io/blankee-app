@@ -475,7 +475,7 @@
     <!-- Modal for adding a new group -->
     <div id="addGroupModal" class="category-input-overlay">
         <div id="add-group-input-container" class="floating-input-container">
-            <input id="addGroupInput" type="text" maxlength="30" placeholder="Group Name" />
+            <input id="addGroupInput" type="text" maxlength="20" placeholder="Group Name" />
             <button id="confirmAddGroupBtn"><i class="fa-solid fa-check"></i></button>
         </div>
     </div>
@@ -483,7 +483,7 @@
     <!-- Modal for editing a group -->
     <div id="editGroupModal" class="category-edit-modal">
         <div class="category-edit-modal-content">
-            <input id="editGroupInput" type="text" maxlength="30" />
+            <input id="editGroupInput" type="text" maxlength="20" />
             <button id="confirmEditGroupBtn" class="confirm-edit-category-btn">Rename</button>
             <button id="deleteGroupBtn" class="delete-from-edit-category-btn" title="Delete Group"><i class="fa-solid fa-trash"></i></button>
         </div>
@@ -1149,6 +1149,7 @@
                 const CATEGORY_ITEMS = '> tr[data-category-id]:not(.system-category-row)';
                 const GROUP_ITEMS = '> tr.group-header-row:not(.ungrouped-header):not([data-group-id="_system"])';
                 let draggingGroup = false;
+                let lastDragTargetGroupId = '';
 
                 // Track which group header is being hovered during drag
                 function updateDropHighlight(event, ui) {
@@ -1156,21 +1157,26 @@
 
                     const $allHeaders = $tbody.find('tr.group-header-row');
                     $allHeaders.removeClass('drop-target-highlight');
+                    lastDragTargetGroupId = '';
 
                     const mouseY = event.pageY;
-                    $allHeaders.each(function() {
+                    $allHeaders.each(function(index) {
                         const $header = $(this);
                         const headerTop = $header.offset().top;
-                        let zoneBottom = headerTop + $header.outerHeight();
 
-                        let $next = $header.next('tr');
-                        while ($next.length && !$next.hasClass('group-header-row')) {
-                            zoneBottom = $next.offset().top + $next.outerHeight();
-                            $next = $next.next('tr');
+                        // Zone extends from header top to the top of the next group header
+                        // (covers empty groups and gaps between groups)
+                        const $nextHeader = $allHeaders.eq(index + 1);
+                        let zoneBottom;
+                        if ($nextHeader.length) {
+                            zoneBottom = $nextHeader.offset().top;
+                        } else {
+                            zoneBottom = $tbody.offset().top + $tbody.outerHeight();
                         }
 
-                        if (mouseY >= headerTop && mouseY <= zoneBottom) {
+                        if (mouseY >= headerTop && mouseY < zoneBottom) {
                             $header.addClass('drop-target-highlight');
+                            lastDragTargetGroupId = $header.attr('data-group-id');
                         }
                     });
                 }
@@ -1393,27 +1399,9 @@
                         // If a category was dropped, determine its new group via mouse position
                         const $moved = ui.item;
                         if (!draggingGroup && $moved.attr('data-category-id')) {
-                            // Use mouse Y to find the target group zone
-                            const mouseY = event.pageY;
-                            let targetGroupId = '';
-                            const $allHeaders = $tbody.find('tr.group-header-row');
-
-                            $allHeaders.each(function() {
-                                const $header = $(this);
-                                const headerTop = $header.offset().top;
-                                let zoneBottom = headerTop + $header.outerHeight();
-
-                                // Extend zone to next header or system/end
-                                let $next = $header.next('tr');
-                                while ($next.length && !$next.hasClass('group-header-row')) {
-                                    zoneBottom = $next.offset().top + $next.outerHeight();
-                                    $next = $next.next('tr');
-                                }
-
-                                if (mouseY >= headerTop && mouseY <= zoneBottom) {
-                                    targetGroupId = $header.attr('data-group-id');
-                                }
-                            });
+                            // Use the target group tracked during sort (before DOM reflow)
+                            // rather than recalculating from post-reflow positions
+                            let targetGroupId = lastDragTargetGroupId;
 
                             // Fallback: if no zone matched, check prev/next rows
                             if (!targetGroupId) {

@@ -122,8 +122,13 @@
                             <span class="nav-tooltip">Add Category</span>
                         </button>
                         <div class="type-selector-popover" id="add-type-selector" style="display:none;">
-                            <div class="type-selector-option" data-type="income"><i class="fa-solid fa-plus" style="color:#2AAAA8;"></i> Income</div>
-                            <div class="type-selector-option" data-type="expense"><i class="fa-solid fa-minus" style="color:#E45F1C;"></i> Expense</div>
+                            <div class="type-selector-label">Add Category</div>
+                            <div class="type-selector-option" data-type="income"><i class="fa-kit fa-solid-folder-plus-circle-plus" style="color:#2AAAA8;"></i> Income</div>
+                            <div class="type-selector-option" data-type="expense"><i class="fa-kit fa-solid-folder-minus-circle-plus" style="color:#E45F1C;"></i> Expense</div>
+                            <div class="type-selector-divider"></div>
+                            <div class="type-selector-label">Add Group</div>
+                            <div class="type-selector-option" data-type="income-group"><i class="fa-kit fa-solid-layer-plus-circle-plus" style="color:#2AAAA8;"></i> Income</div>
+                            <div class="type-selector-option" data-type="expense-group"><i class="fa-kit fa-solid-layer-minus-circle-plus" style="color:#E45F1C;"></i> Expense</div>
                         </div>
                     </div>
                     <button class="edit-category-btn unified" id="unified-edit-btn" onclick="toggleEditMode('all')">
@@ -495,6 +500,12 @@
         <div id="ca-category-input-container" class="floating-input-container" style="display:none;">
             <input type="text" id="new-ca-category" placeholder="New Credit Account Category Name" maxlength="20">
             <button onclick="addCaCategory()"><i class="fa-solid fa-check"></i></button>
+        </div>
+
+        <!-- Floating input field for adding a new group -->
+        <div id="group-input-container" class="floating-input-container" style="display:none;">
+            <input type="text" id="new-group-name" placeholder="New Group Name" maxlength="20">
+            <button onclick="addGroup()"><i class="fa-solid fa-check"></i></button>
         </div>
     </div>
 
@@ -1818,6 +1829,7 @@
             sumCells.forEach((cell, colIdx) => {
                 if (state === 'expanded') {
                     cell.textContent = '';
+                    cell.style.fontSize = '';
                     return;
                 }
                 let sum = 0;
@@ -1828,7 +1840,12 @@
                         if (!isNaN(val)) sum += val;
                     }
                 });
-                cell.textContent = sum !== 0 ? formatCurrency(sum) : '';
+                const text = sum !== 0 ? formatCurrency(sum) : '';
+                cell.textContent = text;
+                // Fit font immediately so there's no flash
+                const cs = window.getComputedStyle(cell);
+                const avail = cell.offsetWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+                fitElement(cell, text, avail);
             });
         }
 
@@ -1917,14 +1934,33 @@
             if (incomeTotalRow) sidebarTbody.appendChild(incomeTotalRow);
 
             // Render groups (sorted DESC by display_order — already sorted from server)
+            let _lastIncomeSidebarEl = null;
             incomeGroups.forEach(group => {
                 const cats = groupedCats[group.id];
-                if (!cats || cats.length === 0) return;
+                if (!cats || cats.length === 0) {
+                    // Empty group — render hidden headers (shown in edit mode)
+                    const sidebarHeader = createSidebarGroupHeader(group, 'income');
+                    sidebarHeader.classList.add('empty-group');
+                    if (!isIncomeEditMode) sidebarHeader.style.display = 'none';
+                    if (_lastIncomeSidebarEl) {
+                        _lastIncomeSidebarEl.after(sidebarHeader);
+                    } else {
+                        sidebarTbody.insertBefore(sidebarHeader, sidebarTbody.firstChild);
+                    }
+                    _lastIncomeSidebarEl = sidebarHeader;
+
+                    const groupHeaderRow = createGroupHeaderRow(group, 'income', numColumns);
+                    groupHeaderRow.classList.add('empty-group');
+                    if (!isIncomeEditMode) groupHeaderRow.style.display = 'none';
+                    incomeTableBody.appendChild(groupHeaderRow);
+                    return;
+                }
 
                 const state = getGroupState('income', group.id);
 
                 const sidebarHeader = createSidebarGroupHeader(group, 'income');
                 cats[0].parentNode.insertBefore(sidebarHeader, cats[0]);
+                _lastIncomeSidebarEl = cats[cats.length - 1];
 
                 const groupHeaderRow = createGroupHeaderRow(group, 'income', numColumns);
                 incomeTableBody.appendChild(groupHeaderRow);
@@ -2111,14 +2147,33 @@
             if (expenseTotalRow) sidebarTbody.appendChild(expenseTotalRow);
 
             // Render groups
+            let _lastExpenseSidebarEl = null;
             expenseGroups.forEach(group => {
                 const cats = groupedCats[group.id];
-                if (!cats || cats.length === 0) return;
+                if (!cats || cats.length === 0) {
+                    // Empty group — render hidden headers (shown in edit mode)
+                    const sidebarHeader = createSidebarGroupHeader(group, 'expense');
+                    sidebarHeader.classList.add('empty-group');
+                    if (!isExpenseEditMode) sidebarHeader.style.display = 'none';
+                    if (_lastExpenseSidebarEl) {
+                        _lastExpenseSidebarEl.after(sidebarHeader);
+                    } else {
+                        sidebarTbody.insertBefore(sidebarHeader, sidebarTbody.firstChild);
+                    }
+                    _lastExpenseSidebarEl = sidebarHeader;
+
+                    const groupHeaderRow = createGroupHeaderRow(group, 'expense', numColumns);
+                    groupHeaderRow.classList.add('empty-group');
+                    if (!isExpenseEditMode) groupHeaderRow.style.display = 'none';
+                    expensesTableBody.appendChild(groupHeaderRow);
+                    return;
+                }
 
                 const state = getGroupState('expense', group.id);
 
                 const sidebarHeader = createSidebarGroupHeader(group, 'expense');
                 cats[0].parentNode.insertBefore(sidebarHeader, cats[0]);
+                _lastExpenseSidebarEl = cats[cats.length - 1];
 
                 const groupHeaderRow = createGroupHeaderRow(group, 'expense', numColumns);
                 expensesTableBody.appendChild(groupHeaderRow);
@@ -2319,14 +2374,33 @@
                 if (caTotalRow) sidebarTbody.appendChild(caTotalRow);
 
                 // Render user groups
+                let _lastCaSidebarEl = null;
                 accountGroups.forEach(group => {
                     const cats = groupedCats[group.id];
-                    if (!cats || cats.length === 0) return;
+                    if (!cats || cats.length === 0) {
+                        // Empty group — render hidden headers (shown in edit mode)
+                        const sidebarHeader = createSidebarGroupHeader(group, caType);
+                        sidebarHeader.classList.add('empty-group');
+                        if (!(window.isCaEditMode && window.isCaEditMode[accountId])) sidebarHeader.style.display = 'none';
+                        if (_lastCaSidebarEl) {
+                            _lastCaSidebarEl.after(sidebarHeader);
+                        } else {
+                            sidebarTbody.insertBefore(sidebarHeader, sidebarTbody.firstChild);
+                        }
+                        _lastCaSidebarEl = sidebarHeader;
+
+                        const groupHeaderRow = createGroupHeaderRow(group, caType, numColumns);
+                        groupHeaderRow.classList.add('empty-group');
+                        if (!(window.isCaEditMode && window.isCaEditMode[accountId])) groupHeaderRow.style.display = 'none';
+                        caTableBody.appendChild(groupHeaderRow);
+                        return;
+                    }
 
                     const state = getGroupState(caType, group.id);
 
                     const sidebarHeader = createSidebarGroupHeader(group, caType);
                     cats[0].parentNode.insertBefore(sidebarHeader, cats[0]);
+                    _lastCaSidebarEl = cats[cats.length - 1];
 
                     const groupHeaderRow = createGroupHeaderRow(group, caType, numColumns);
                     caTableBody.appendChild(groupHeaderRow);
@@ -2609,6 +2683,7 @@
         }
 
         function enableIncomeEditMode() {
+            document.getElementById('income-categories-table').classList.add('editing');
             // Enable sorting for income categories
             $("#income-categories-table tbody").sortable("enable");
 
@@ -2653,6 +2728,14 @@
                 }
             });
 
+            // Show empty group headers
+            document.querySelectorAll('#income-categories-table .sidebar-group-header.empty-group').forEach(el => {
+                el.style.display = '';
+            });
+            document.querySelectorAll('#income-categories-body .group-header-row.empty-group').forEach(el => {
+                el.style.display = '';
+            });
+
             // Add group sort handles to sidebar group headers (skip ungrouped and system)
             document.querySelectorAll('#income-categories-table .sidebar-group-header .sidebar-group-cell').forEach(td => {
                 const row = td.closest('tr');
@@ -2675,10 +2758,13 @@
                 }
                 td.querySelector('.group-sort-handle').style.display = 'inline-block';
             });
+
+            if (typeof fitTextDebounced === 'function') fitTextDebounced();
         }
 
 
         function disableIncomeEditMode() {
+            document.getElementById('income-categories-table').classList.remove('editing');
 
 
             // Disable sorting for income categories
@@ -2718,9 +2804,19 @@
                 handle.remove();
             });
 
+            // Hide empty group headers
+            document.querySelectorAll('#income-categories-table .sidebar-group-header.empty-group').forEach(el => {
+                el.style.display = 'none';
+            });
+            document.querySelectorAll('#income-categories-body .group-header-row.empty-group').forEach(el => {
+                el.style.display = 'none';
+            });
+
+            if (typeof fitTextDebounced === 'function') fitTextDebounced();
         }
 
         function enableExpenseEditMode() {
+            document.getElementById('expense-categories-table').classList.add('editing');
             // Enable sorting for expense categories
             $("#expense-categories-table tbody").sortable("enable");
 
@@ -2767,6 +2863,14 @@
                 }
             });
 
+            // Show empty group headers
+            document.querySelectorAll('#expense-categories-table .sidebar-group-header.empty-group').forEach(el => {
+                el.style.display = '';
+            });
+            document.querySelectorAll('#expense-categories-body .group-header-row.empty-group').forEach(el => {
+                el.style.display = '';
+            });
+
             // Add group sort handles to sidebar group headers (skip ungrouped and system)
             document.querySelectorAll('#expense-categories-table .sidebar-group-header .sidebar-group-cell').forEach(td => {
                 const row = td.closest('tr');
@@ -2789,9 +2893,12 @@
                 }
                 td.querySelector('.group-sort-handle').style.display = 'inline-block';
             });
+
+            if (typeof fitTextDebounced === 'function') fitTextDebounced();
         }
 
         function disableExpenseEditMode() {
+            document.getElementById('expense-categories-table').classList.remove('editing');
 
             // Disable sorting for expense categories
             $("#expense-categories-table tbody").sortable("disable");
@@ -2830,9 +2937,20 @@
                 handle.remove();
             });
 
+            // Hide empty group headers
+            document.querySelectorAll('#expense-categories-table .sidebar-group-header.empty-group').forEach(el => {
+                el.style.display = 'none';
+            });
+            document.querySelectorAll('#expense-categories-body .group-header-row.empty-group').forEach(el => {
+                el.style.display = 'none';
+            });
+
+            if (typeof fitTextDebounced === 'function') fitTextDebounced();
         }
 
         function enableCaEditMode(accountId) {
+            var caTable = document.getElementById('ca-categories-table-' + accountId);
+            if (caTable) caTable.classList.add('editing');
             // CA categories are NOT drag-and-drop reorderable (order syncs from expense categories)
             document.querySelectorAll(`#ca-categories-table-${accountId} tr[data-category-id]`).forEach(row => {
                 // Only show rename button if not interest and not auto adjustment
@@ -2841,13 +2959,35 @@
                     if (renameBtn) renameBtn.style.display = 'inline-block';
                 }
             });
+
+            // Show empty group headers
+            document.querySelectorAll(`#ca-categories-table-${accountId} .sidebar-group-header.empty-group`).forEach(el => {
+                el.style.display = '';
+            });
+            document.querySelectorAll(`#ca-categories-body-${accountId} .group-header-row.empty-group`).forEach(el => {
+                el.style.display = '';
+            });
+
+            if (typeof fitTextDebounced === 'function') fitTextDebounced();
         }
 
         function disableCaEditMode(accountId) {
+            var caTable = document.getElementById('ca-categories-table-' + accountId);
+            if (caTable) caTable.classList.remove('editing');
             // CA categories are NOT drag-and-drop reorderable (order syncs from expense categories)
             document.querySelectorAll(`#ca-categories-table-${accountId} .rename-category-btn.ca`).forEach(btn => {
                 btn.style.display = 'none';
             });
+
+            // Hide empty group headers
+            document.querySelectorAll(`#ca-categories-table-${accountId} .sidebar-group-header.empty-group`).forEach(el => {
+                el.style.display = 'none';
+            });
+            document.querySelectorAll(`#ca-categories-body-${accountId} .group-header-row.empty-group`).forEach(el => {
+                el.style.display = 'none';
+            });
+
+            if (typeof fitTextDebounced === 'function') fitTextDebounced();
         }
 
         function showDeleteButtons(type, accountId = null) {
@@ -4062,6 +4202,7 @@
             const incomeContainer = document.getElementById('income-category-input-container');
             const expenseContainer = document.getElementById('expense-category-input-container');
             const caContainer = document.getElementById('ca-category-input-container');
+            const groupContainer = document.getElementById('group-input-container');
             const unifiedAddBtn = document.getElementById('unified-add-btn');
             const overlay = document.getElementById('category-input-overlay');
 
@@ -4080,14 +4221,79 @@
                 if (unifiedAddBtn) unifiedAddBtn.disabled = false;
                 if (overlay) overlay.style.display = 'none';
             }
+            if (groupContainer && groupContainer.style.display === 'flex' && !groupContainer.contains(event.target) && (!unifiedAddBtn || !unifiedAddBtn.contains(event.target))) {
+                groupContainer.style.display = 'none';
+                if (unifiedAddBtn) unifiedAddBtn.disabled = false;
+                if (overlay) overlay.style.display = 'none';
+            }
             if (
                 (!incomeContainer || incomeContainer.style.display === 'none') &&
                 (!expenseContainer || expenseContainer.style.display === 'none') &&
-                (!caContainer || caContainer.style.display === 'none')
+                (!caContainer || caContainer.style.display === 'none') &&
+                (!groupContainer || groupContainer.style.display === 'none')
             ) {
                 document.removeEventListener('mousedown', closeInputOnClickOutside);
             }
         }
+
+        let _addGroupType = null;
+
+        function toggleGroupInput(type) {
+            _addGroupType = type;
+            const incomeContainer = document.getElementById('income-category-input-container');
+            const expenseContainer = document.getElementById('expense-category-input-container');
+            const caContainer = document.getElementById('ca-category-input-container');
+            const groupContainer = document.getElementById('group-input-container');
+            const unifiedAddBtn = document.getElementById('unified-add-btn');
+            const overlay = document.getElementById('category-input-overlay');
+
+            if (incomeContainer) incomeContainer.style.display = 'none';
+            if (expenseContainer) expenseContainer.style.display = 'none';
+            if (caContainer) caContainer.style.display = 'none';
+
+            if (groupContainer) {
+                const input = document.getElementById('new-group-name');
+                input.placeholder = type === 'income' ? 'New Income Group Name' : 'New Expense Group Name';
+                input.value = '';
+                groupContainer.style.display = 'flex';
+                if (unifiedAddBtn) unifiedAddBtn.disabled = true;
+                if (overlay) overlay.style.display = 'block';
+                input.focus();
+                document.addEventListener('mousedown', closeInputOnClickOutside);
+            }
+        }
+
+        function addGroup() {
+            const input = document.getElementById('new-group-name');
+            const groupName = input.value.trim();
+            if (!groupName) {
+                showToast('Please enter a group name.', 'warning');
+                return;
+            }
+            const url = _addGroupType === 'income'
+                ? "{{ url_for('add_income_category_group') }}"
+                : "{{ url_for('add_expense_category_group') }}";
+            $.ajax({
+                url: url,
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ name: groupName }),
+                success: function(response) {
+                    if (response.success) {
+                        location.reload();
+                    } else {
+                        showToast(response.error || 'Failed to create group.', 'error');
+                    }
+                },
+                error: function() {
+                    showToast('Failed to create group.', 'error');
+                }
+            });
+        }
+
+        document.getElementById('new-group-name').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); addGroup(); }
+        });
 
         function addIncomeCategory() {
             const input = document.getElementById('new-income-category');
@@ -8046,8 +8252,7 @@
             function closeAllPopovers() {
                 document.querySelectorAll('.type-selector-popover').forEach(p => {
                     p.style.display = 'none';
-                    const label = p.querySelector('.type-selector-label');
-                    if (label) label.remove();
+                    p.querySelectorAll('.type-selector-label.dynamic-label').forEach(l => l.remove());
                 });
                 document.querySelectorAll('.popover-open').forEach(btn => btn.classList.remove('popover-open'));
                 if (categoryBtnContainer) categoryBtnContainer.classList.remove('popover-active');
@@ -8057,11 +8262,11 @@
                 popover.style.display = 'block';
                 btn.classList.add('popover-open');
                 if (categoryBtnContainer) categoryBtnContainer.classList.add('popover-active');
-                // Add tooltip text as label at top of popover
+                // Add tooltip text as label at top of popover (only if no labels exist already)
                 const tooltip = btn.querySelector('.nav-tooltip');
                 if (tooltip && !popover.querySelector('.type-selector-label')) {
                     const label = document.createElement('div');
-                    label.className = 'type-selector-label';
+                    label.className = 'type-selector-label dynamic-label';
                     label.textContent = tooltip.textContent;
                     popover.prepend(label);
                 }
@@ -8148,9 +8353,15 @@
                 addTypeSelector.querySelectorAll('.type-selector-option').forEach(option => {
                     option.addEventListener('click', function(e) {
                         e.stopPropagation();
-                        const type = this.getAttribute('data-type');
                         closeAllPopovers();
-                        toggleCategoryInput(type);
+                        const type = this.getAttribute('data-type');
+                        if (type === 'income-group') {
+                            toggleGroupInput('income');
+                        } else if (type === 'expense-group') {
+                            toggleGroupInput('expense');
+                        } else {
+                            toggleCategoryInput(type);
+                        }
                     });
                 });
             }
