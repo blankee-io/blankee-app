@@ -654,52 +654,50 @@ function showDashboardSpinner(show = true, context = "") {
     }
 }
 
+// ===================== Text Fit Helpers (global) =====================
+var _fitMinFontSize = 8;
+
+// Get the CSS base font size from the table itself (never has inline overrides)
+function _fitGetBaseFontSize(el) {
+    var table = el.closest('#income-table, #expenses-table, .cas-table, #income-categories-table, #expense-categories-table, .ca-categories-table, #remainder-row-right, #savings-row-right');
+    if (table) return parseFloat(window.getComputedStyle(table).fontSize);
+    var wrapper = el.closest('#dashboard-wrapper');
+    if (wrapper) return parseFloat(window.getComputedStyle(wrapper).fontSize);
+    return parseFloat(window.getComputedStyle(el).fontSize);
+}
+
+// Measure text width at a given font size
+function _fitTextWidth(text, fontSize, fontWeight, fontFamily) {
+    var span = document.createElement('span');
+    span.style.cssText = 'visibility:hidden;position:absolute;white-space:nowrap;font-size:' + fontSize + 'px;font-weight:' + fontWeight + ';font-family:' + fontFamily;
+    span.textContent = text;
+    document.body.appendChild(span);
+    var w = span.offsetWidth;
+    document.body.removeChild(span);
+    return w;
+}
+
+// Fit a single element: shrink if needed, restore if possible
+function fitElement(el, text, availableWidth) {
+    if (!text.trim() || availableWidth <= 0) { el.style.fontSize = ''; return; }
+    var baseFontSize = _fitGetBaseFontSize(el);
+    var style = window.getComputedStyle(el);
+    var fw = style.fontWeight, ff = style.fontFamily;
+
+    if (_fitTextWidth(text, baseFontSize, fw, ff) <= availableWidth) {
+        el.style.fontSize = '';
+        return;
+    }
+    var fs = baseFontSize;
+    while (fs > _fitMinFontSize && _fitTextWidth(text, fs, fw, ff) > availableWidth) {
+        fs -= 0.5;
+    }
+    el.style.fontSize = fs + 'px';
+}
+
 // Function to scale font size to fit text within container width
 // Fit text to container — shrinks font only when text overflows, restores when space is available
 function fitTextToContainer() {
-    var minFontSize = 8;
-
-    // Get the CSS base font size from the table itself (never has inline overrides)
-    function getBaseFontSize(el) {
-        var table = el.closest('#income-table, #expenses-table, .cas-table, #remainder-row-right, #savings-row-right');
-        if (table) return parseFloat(window.getComputedStyle(table).fontSize);
-        // For dashboard-d cells, read from parent container
-        var wrapper = el.closest('#dashboard-wrapper');
-        if (wrapper) return parseFloat(window.getComputedStyle(wrapper).fontSize);
-        return parseFloat(window.getComputedStyle(el).fontSize);
-    }
-
-    // Measure text width at a given font size
-    function textWidth(text, fontSize, fontWeight, fontFamily) {
-        var span = document.createElement('span');
-        span.style.cssText = 'visibility:hidden;position:absolute;white-space:nowrap;font-size:' + fontSize + 'px;font-weight:' + fontWeight + ';font-family:' + fontFamily;
-        span.textContent = text;
-        document.body.appendChild(span);
-        var w = span.offsetWidth;
-        document.body.removeChild(span);
-        return w;
-    }
-
-    // Fit a single element: shrink if needed, restore if possible
-    function fitElement(el, text, availableWidth) {
-        if (!text.trim() || availableWidth <= 0) { el.style.fontSize = ''; return; }
-        var baseFontSize = getBaseFontSize(el);
-        var style = window.getComputedStyle(el);
-        var fw = style.fontWeight, ff = style.fontFamily;
-
-        // Check if text fits at the base (CSS) font size
-        if (textWidth(text, baseFontSize, fw, ff) <= availableWidth) {
-            el.style.fontSize = ''; // fits — remove any inline override
-            return;
-        }
-        // Shrink until it fits
-        var fs = baseFontSize;
-        while (fs > minFontSize && textWidth(text, fs, fw, ff) > availableWidth) {
-            fs -= 0.5;
-        }
-        el.style.fontSize = fs + 'px';
-    }
-
     // Bottom rows / special rows (direct text in td)
     document.querySelectorAll('#income-bottom-row td, #last-remainder-row-right td, #expenses-bottom-row td, .ca-bottom-row td, #remainder-row-right td, #savings-row-right td').forEach(function(td) {
         var s = window.getComputedStyle(td);
@@ -723,6 +721,54 @@ function fitTextToContainer() {
         var avail = target.offsetWidth - (parseFloat(s.paddingLeft) || 0) - (parseFloat(s.paddingRight) || 0);
         fitElement(target, text, avail);
     });
+
+    // Group header sum cells
+    document.querySelectorAll('.group-sum-cell').forEach(function(td) {
+        var s = window.getComputedStyle(td);
+        var avail = td.offsetWidth - (parseFloat(s.paddingLeft) || 0) - (parseFloat(s.paddingRight) || 0);
+        fitElement(td, td.textContent, avail);
+    });
+
+    // Category name spans in sidebar cells
+    document.querySelectorAll('.category-cell .category-name').forEach(function(span) {
+        var td = span.closest('.category-cell');
+        if (!td) return;
+        var s = window.getComputedStyle(td);
+        var avail = td.offsetWidth - (parseFloat(s.paddingLeft) || 0) - (parseFloat(s.paddingRight) || 0);
+        // Account for icon width
+        var icon = span.querySelector('.category-icon');
+        if (icon) avail -= icon.offsetWidth + 4;
+        // Account for sort handle / lock when in edit mode
+        var sortHandle = td.querySelector('.sort-handle, .sort-handle-lock');
+        if (sortHandle && sortHandle.offsetWidth > 0) avail -= sortHandle.offsetWidth + 4;
+        // Account for edit button when visible
+        var editBtn = td.querySelector('.rename-category-btn, .delete-category-btn');
+        if (editBtn && editBtn.offsetWidth > 0) avail -= editBtn.offsetWidth + 4;
+        // Get just the text node content (excluding icon text)
+        var text = '';
+        span.childNodes.forEach(function(n) { if (n.nodeType === 3) text += n.textContent; });
+        text = text.trim();
+        if (text) fitElement(span, text, avail);
+    });
+
+    // Group name spans in sidebar group headers
+    document.querySelectorAll('.category-cell .group-toggle').forEach(function(span) {
+        var td = span.closest('.category-cell');
+        if (!td) return;
+        var s = window.getComputedStyle(td);
+        var avail = td.offsetWidth - (parseFloat(s.paddingLeft) || 0) - (parseFloat(s.paddingRight) || 0);
+        // Account for chevron icon
+        var chevron = span.querySelector('.group-chevron');
+        if (chevron) avail -= chevron.offsetWidth + 6;
+        // Account for sort handle when in edit mode
+        var sortHandle = td.querySelector('.group-sort-handle, .group-sort-handle-lock');
+        if (sortHandle && sortHandle.offsetWidth > 0) avail -= sortHandle.offsetWidth + 4;
+        // Get just the text node content
+        var text = '';
+        span.childNodes.forEach(function(n) { if (n.nodeType === 3) text += n.textContent; });
+        text = text.trim();
+        if (text) fitElement(span, text, avail);
+    });
 }
 
 // Debounced fitText handler
@@ -742,6 +788,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Weekly dashboard tables
     const tables = document.querySelectorAll('#income-table, #expenses-table, .cas-table');
     tables.forEach(function(table) {
+        observer.observe(table, { childList: true, subtree: true, characterData: true });
+    });
+
+    // Sidebar category tables
+    const sidebarTables = document.querySelectorAll('#income-categories-table, #expense-categories-table, .ca-categories-table');
+    sidebarTables.forEach(function(table) {
         observer.observe(table, { childList: true, subtree: true, characterData: true });
     });
     
