@@ -194,7 +194,7 @@
             
                 <label>Category</label>
                 <div class="category-input-wrapper">
-                    <input type="text" class="category-input" id="category_name" name="category_name" placeholder="Search or create category..." autocomplete="off" required>
+                    <input type="text" class="category-input" id="category_name" name="category_name" placeholder="Search or create category..." autocomplete="off" required maxlength="20">
                     <input type="hidden" class="category-hidden" id="category_id_hidden" name="category_id" value="">
                     <div class="pending-transactions-category-dropdown" style="display: none;"></div>
                 </div>
@@ -312,7 +312,7 @@
             
                 <!-- Update Category Name directly -->
                 <label for="edit-category-name">Category Name</label>
-                <input type="text" id="edit-category-name" name="category_name" required>
+                <input type="text" id="edit-category-name" name="category_name" required maxlength="20">
 
                 <div class="form-row">
                     <label for="edit-wage-bill-select">Type:</label>

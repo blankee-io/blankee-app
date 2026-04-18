@@ -9950,14 +9950,25 @@ def add_income_category_group():
             return jsonify({'status': 'error', 'message': 'A group with that name already exists'}), 400
 
         display_order = _next_group_display_order(groups)
-        new_id = _add_category_group_to_redis('income_category_groups', user_id, {
-            'name': name,
-            'display_order': display_order
-        })
-        if new_id is None:
-            return jsonify({'status': 'error', 'message': 'Failed to create group'}), 500
 
-        return jsonify({'status': 'success', 'group_id': new_id, 'display_order': display_order})
+        # Insert into MySQL first to get a real auto-increment ID (avoids temp-ID race)
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO income_category_groups (user_id, name, display_order) VALUES (%s, %s, %s)",
+                (user_id, name, display_order)
+            )
+            conn.commit()
+            real_id = cursor.lastrowid
+            cursor.close()
+
+        # Store in Redis with the real ID
+        group_data = {'id': real_id, 'user_id': user_id, 'name': name, 'display_order': display_order}
+        groups.append(group_data)
+        redis_key = f"income_category_groups:v1:{user_id}"
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(groups, cls=DecimalEncoder))
+
+        return jsonify({'status': 'success', 'group_id': real_id, 'display_order': display_order})
     except Exception as e:
         log_error(app.logger, 'INCOME', f"[add_income_category_group] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Failed to create group'}), 500
@@ -9980,25 +9991,44 @@ def add_expense_category_group():
             return jsonify({'status': 'error', 'message': 'A group with that name already exists'}), 400
 
         display_order = _next_group_display_order(groups)
-        new_id = _add_category_group_to_redis('expense_category_groups', user_id, {
-            'name': name,
-            'display_order': display_order
-        })
-        if new_id is None:
-            return jsonify({'status': 'error', 'message': 'Failed to create group'}), 500
 
-        # Auto-mirror: create c_expense_category_groups for every credit account
-        accounts = _get_credit_accounts_from_redis(user_id) or []
-        for account in accounts:
-            account_id = account.get('id')
-            _add_category_group_to_redis('c_expense_category_groups', user_id, {
-                'account_id': account_id,
-                'source_group_id': new_id,
-                'name': name,
-                'display_order': display_order
-            })
+        # Insert into MySQL first to get a real auto-increment ID (avoids temp-ID race)
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO expense_category_groups (user_id, name, display_order) VALUES (%s, %s, %s)",
+                (user_id, name, display_order)
+            )
+            conn.commit()
+            real_id = cursor.lastrowid
 
-        return jsonify({'status': 'success', 'group_id': new_id, 'display_order': display_order})
+            # Store in Redis with the real ID
+            group_data = {'id': real_id, 'user_id': user_id, 'name': name, 'display_order': display_order}
+            groups.append(group_data)
+            redis_key = f"expense_category_groups:v1:{user_id}"
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(groups, cls=DecimalEncoder))
+
+            # Auto-mirror: create c_expense_category_groups for every credit account
+            accounts = _get_credit_accounts_from_redis(user_id) or []
+            c_groups = _get_category_groups_from_redis('c_expense_category_groups', user_id) or []
+            for account in accounts:
+                account_id = account.get('id')
+                cursor.execute(
+                    "INSERT INTO c_expense_category_groups (account_id, user_id, name, display_order, source_group_id) VALUES (%s, %s, %s, %s, %s)",
+                    (account_id, user_id, name, display_order, real_id)
+                )
+                conn.commit()
+                c_real_id = cursor.lastrowid
+                c_groups.append({
+                    'id': c_real_id, 'account_id': account_id, 'user_id': user_id,
+                    'name': name, 'display_order': display_order, 'source_group_id': real_id
+                })
+            cursor.close()
+
+            c_redis_key = f"c_expense_category_groups:v1:{user_id}"
+            _redis_client.setex(c_redis_key, PERSISTENT_CACHE_TTL, json.dumps(c_groups, cls=DecimalEncoder))
+
+        return jsonify({'status': 'success', 'group_id': real_id, 'display_order': display_order})
     except Exception as e:
         log_error(app.logger, 'EXPENSE', f"[add_expense_category_group] Error: {e}")
         return jsonify({'status': 'error', 'message': 'Failed to create group'}), 500
