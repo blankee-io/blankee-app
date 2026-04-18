@@ -691,27 +691,27 @@ def register():
 
             # Create default income and expense categories for the new user
             cursor.execute("""
-                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (new_user_id, 'Uncategorized', -2, 0, 1))
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (new_user_id, 'Uncategorized', 0.0001, 0, 1, 1))
             cursor.execute("""
-                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (new_user_id, 'Uncategorized', -2, 0, 1))
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (new_user_id, 'Uncategorized', 0.0001, 0, 1, 1))
             # --- Add Savings categories ---
             cursor.execute("""
-                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (new_user_id, 'Savings', -1, 0, 1))
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (new_user_id, 'Savings', 0.0002, 0, 1, 1))
             cursor.execute("""
-                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (new_user_id, 'Savings', -1, 0, 1))
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (new_user_id, 'Savings', 0.0002, 0, 1, 1))
             # --- Add Interest Charge category (system, hidden from dropdowns) ---
             cursor.execute("""
-                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (new_user_id, 'Interest Charge', 0, 0, 1))
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (new_user_id, 'Interest Charge', 0.0003, 0, 1, 1))
             cursor.close()
             conn.commit()
 
@@ -830,21 +830,21 @@ def verify_email():
         if cursor.fetchone()['COUNT(*)'] == 0:
             # Create default income and expense categories
             cursor.execute("""
-                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, 'Uncategorized', -2, 0, 1))
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (user_id, 'Uncategorized', 0.0001, 0, 1, 1))
             cursor.execute("""
-                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, 'Uncategorized', -2, 0, 1))
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (user_id, 'Uncategorized', 0.0001, 0, 1, 1))
             cursor.execute("""
-                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, 'Savings', -1, 0, 1))
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (user_id, 'Savings', 0.0002, 0, 1, 1))
             cursor.execute("""
-                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, 'Savings', -1, 0, 1))
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (user_id, 'Savings', 0.0002, 0, 1, 1))
             conn.commit()
         
         cursor.close()
@@ -1432,9 +1432,9 @@ def complete_profile_setup():
             # If the category does not exist, create it
             if not category:
                 cursor.execute("""
-                    INSERT INTO income_categories (user_id, name, display_order) 
-                    VALUES (%s, %s, %s)
-                """, (current_user.id, 'Starting Balance', 0))
+                    INSERT INTO income_categories (user_id, name, display_order, is_system) 
+                    VALUES (%s, %s, %s, %s)
+                """, (current_user.id, 'Starting Balance', 0.0004, 1))
                 starting_balance_category_id = cursor.lastrowid
             else:
                 starting_balance_category_id = category[0]
@@ -2577,7 +2577,7 @@ def dashboard_d():
                 FROM c_expense_categories cec
                 JOIN credit_accounts ca ON cec.account_id = ca.id
                 WHERE ca.user_id = %s
-                ORDER BY cec.display_order ASC, cec.id ASC
+                ORDER BY cec.display_order DESC, cec.id DESC
             """, (current_user.id,))
             c_expense_categories = list(cursor.fetchall())
         else:
@@ -5315,7 +5315,7 @@ def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=
         log_error(app.logger, 'BUCKET', f"Error deleting future buckets from {table_name} in Redis: {e}")
 
 
-def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None):
+def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None, is_system=0):
     """
     Sync an expense category to all credit accounts for a user.
     Creates a non-recurring c_expense_category for each credit account.
@@ -5327,7 +5327,8 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
         user_id: User ID
         category_name: Name of the category
         display_order: Display order from the expense_category
-        group_id: Optional group ID (currently not used for c_expense)
+        group_id: Optional expense group ID — mapped to c_expense group via source_group_id
+        is_system: Whether this is a system category (0 or 1)
     
     Returns:
         Dictionary mapping account_id -> c_expense_category_id
@@ -5346,6 +5347,9 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
     
     if not accounts:
         return created_map  # No credit accounts, nothing to sync
+
+    # Pre-fetch c_expense_category_groups to map expense group_id → c_expense group_id per account
+    c_groups = _get_category_groups_from_redis('c_expense_category_groups', user_id) or []
     
     for account in accounts:
         account_id = account.get('id')
@@ -5362,26 +5366,50 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
                 # Already exists, return the existing ID
                 created_map[account_id] = existing_cat.get('id')
                 continue
-        
-        # Get max display_order for this account's categories
+
+        # Map expense group_id to c_expense group_id for this account
+        c_group_id = None
+        if group_id is not None:
+            c_group = next(
+                (cg for cg in c_groups
+                 if cg.get('source_group_id') is not None
+                 and int(cg['source_group_id']) == int(group_id)
+                 and cg.get('account_id') == account_id),
+                None
+            )
+            c_group_id = int(c_group['id']) if c_group else None
+
+        # Determine display_order tier based on group membership
         if existing_categories:
             account_cats = [cat for cat in existing_categories if cat.get('account_id') == account_id]
-            max_order = max([cat.get('display_order', 0) for cat in account_cats], default=0)
+            if c_group_id is not None:
+                # Find the c_group's display_order to use as the tier
+                c_grp = next((cg for cg in c_groups if int(cg.get('id', 0)) == c_group_id), None)
+                tier = int(float(c_grp.get('display_order', 1))) if c_grp else 1
+            elif is_system:
+                tier = 0
+            else:
+                tier = 1
+            new_display_order = _next_display_order(account_cats, tier=tier)
         else:
-            max_order = display_order  # Use the expense_category's display_order as fallback
+            if is_system:
+                new_display_order = 0.0001
+            else:
+                new_display_order = 1.0001
         
         # Create c_expense category data (always non-recurring)
         c_expense_category = {
             'account_id': account_id,
             'name': category_name,
-            'display_order': max_order + 1,
-            'group_id': None,  # group_id not synced for now
+            'display_order': new_display_order,
+            'group_id': c_group_id,
             'is_recurring': 0,  # Always non-recurring when synced
             'no_end_date': 0,
             'hidden': 0,
             'is_bud': 0,
             'is_interest': 0,
-            'is_auto_adjustment': 0
+            'is_auto_adjustment': 0,
+            'is_system': is_system
         }
         
         # Add to Redis
@@ -5394,9 +5422,9 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO c_expense_categories 
-                    (account_id, name, display_order, is_recurring, hidden, is_bud, is_interest, is_auto_adjustment)
-                    VALUES (%s, %s, %s, 0, 0, 0, 0, 0)
-                """, (account_id, category_name, max_order + 1))
+                    (account_id, name, display_order, is_recurring, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
+                    VALUES (%s, %s, %s, 0, 0, 0, 0, 0, 0)
+                """, (account_id, category_name, new_display_order))
                 new_id = cursor.lastrowid
                 conn.commit()
                 cursor.close()
@@ -5408,6 +5436,7 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
 def _copy_expense_categories_to_new_credit_account(user_id, account_id):
     """
     Copy all existing expense categories to a newly created credit account.
+    Also clones expense_category_groups as c_expense_category_groups with source_group_id FK.
     Skips system categories (is_credit_account=1, is_auto_adjustment=1) and
     categories that already exist for this account.
     
@@ -5420,6 +5449,20 @@ def _copy_expense_categories_to_new_credit_account(user_id, account_id):
     Returns:
         Number of categories copied
     """
+    # Clone expense_category_groups as c_expense_category_groups for this account
+    expense_groups = _get_category_groups_from_redis('expense_category_groups', user_id) or []
+    exp_group_to_c_group = {}  # expense group_id → c_expense group_id
+    for eg in expense_groups:
+        eg_id = eg.get('id')
+        c_group_id = _add_category_group_to_redis('c_expense_category_groups', user_id, {
+            'account_id': account_id,
+            'source_group_id': eg_id,
+            'name': eg.get('name', ''),
+            'display_order': eg.get('display_order', 2)
+        })
+        if c_group_id is not None:
+            exp_group_to_c_group[int(eg_id)] = c_group_id
+
     # Get all expense categories for this user
     expense_categories = _get_categories_from_redis('expense_categories', user_id)
     if expense_categories is None:
@@ -5439,9 +5482,9 @@ def _copy_expense_categories_to_new_credit_account(user_id, account_id):
         if cat.get('account_id') == account_id
     )
     
-    # Find max display_order for this account's categories
+    # Track next display_order per tier
     account_cats = [cat for cat in existing_c_cats if cat.get('account_id') == account_id]
-    max_order = max([cat.get('display_order', 0) for cat in account_cats], default=1)
+    tier_counters = {}  # tier → next_order
     
     copied = 0
     for exp_cat in expense_categories:
@@ -5452,23 +5495,38 @@ def _copy_expense_categories_to_new_credit_account(user_id, account_id):
             continue
         if exp_cat.get('is_auto_adjustment') == 1:
             continue
+        if exp_cat.get('is_system') == 1:
+            continue
         
         # Skip if already exists for this account
         if name in existing_names_for_account:
             continue
+
+        # Determine group_id and tier for this c_expense category
+        exp_group_id = exp_cat.get('group_id')
+        c_group_id = None
+        if exp_group_id is not None:
+            c_group_id = exp_group_to_c_group.get(int(exp_group_id))
+
+        # Use same tier as the expense category's display_order
+        tier = int(float(exp_cat.get('display_order', 1)))
+        if tier not in tier_counters:
+            tier_counters[tier] = _next_display_order(account_cats, tier=tier)
+        next_order = tier_counters[tier]
+        tier_counters[tier] = round(next_order + 0.0001, 4)
         
-        max_order += 1
         _add_category_to_redis('c_expense_categories', user_id, {
             'account_id': account_id,
             'name': name,
-            'display_order': max_order,
-            'group_id': None,
+            'display_order': next_order,
+            'group_id': c_group_id,
             'is_recurring': 0,
             'no_end_date': 0,
             'hidden': 0,
             'is_bud': 0,
             'is_interest': 0,
-            'is_auto_adjustment': 0
+            'is_auto_adjustment': 0,
+            'is_system': 0
         })
         copied += 1
     
@@ -5643,6 +5701,29 @@ def _sync_delete_to_credit_accounts(user_id, category_name):
     
     if deleted_count > 0:
         log_info(app.logger, 'CATEGORY_SYNC', f"Deleted '{category_name}' from {deleted_count} c_expense categories for user {user_id}")
+
+
+def _next_display_order(categories, tier=1):
+    """
+    Calculate the next display_order value for a new category in the given tier.
+    
+    Tiers:
+        0 = system categories (auto-adjustment, Starting Balance, Uncategorized, etc.)
+        1 = ungrouped user categories
+        2+ = user-created groups
+    
+    Args:
+        categories: list of category dicts (from Redis or MySQL)
+        tier: integer tier (0, 1, or group display_order)
+    
+    Returns:
+        Decimal-compatible float like 1.0005
+    """
+    tier_cats = [c for c in categories if int(float(c.get('display_order', 0))) == tier]
+    if not tier_cats:
+        return round(tier + 0.0001, 4)
+    max_order = max(float(c.get('display_order', 0)) for c in tier_cats)
+    return round(max_order + 0.0001, 4)
 
 
 def _category_name_exists(table_name, user_id, name, exclude_id=None):
@@ -5890,6 +5971,221 @@ def _get_categories_from_redis(table_name, user_id):
     except Exception as e:
         log_error(app.logger, 'REDIS', f"Error getting categories from {table_name} in Redis: {e}")
         return None
+
+
+# ============================================================
+# Redis helper functions for category groups
+# ============================================================
+
+def _get_category_groups_from_redis(table_name, user_id):
+    """
+    Get category groups from Redis cache.
+    
+    Args:
+        table_name: 'income_category_groups', 'expense_category_groups', or 'c_expense_category_groups'
+        user_id: User ID
+    
+    Returns:
+        List of group dictionaries, or None if not in Redis
+    """
+    if not app.config.get('REDIS_OK'):
+        return None
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        return json.loads(cached) if cached else None
+    except Exception as e:
+        log_error(app.logger, 'REDIS', f"Error getting groups from {table_name}: {e}")
+        return None
+
+
+def _add_category_group_to_redis(table_name, user_id, group_data):
+    """
+    Add a new category group to Redis cache.
+    
+    Args:
+        table_name: 'income_category_groups', 'expense_category_groups', or 'c_expense_category_groups'
+        user_id: User ID
+        group_data: Dictionary with group fields (name, display_order, etc.)
+    
+    Returns:
+        The new group ID (negative temporary ID), or None on failure
+    """
+    if not app.config.get('REDIS_OK'):
+        return None
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        rows = json.loads(cached) if cached else []
+        
+        existing_ids = [int(row.get('id', 0)) for row in rows]
+        min_id = min(existing_ids) if existing_ids else 0
+        new_id = min_id - 1 if min_id <= 0 else -1
+        
+        group_data['id'] = new_id
+        group_data['user_id'] = user_id
+        rows.append(group_data)
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        return new_id
+    except Exception as e:
+        log_error(app.logger, 'REDIS', f"Error adding group to {table_name}: {e}")
+        return None
+
+
+def _update_category_group_in_redis(table_name, user_id, group_id, updates):
+    """
+    Update a category group in Redis cache.
+    
+    Args:
+        table_name: 'income_category_groups', 'expense_category_groups', or 'c_expense_category_groups'
+        user_id: User ID
+        group_id: ID of the group to update
+        updates: Dictionary of fields to update
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        if not cached:
+            return
+        
+        rows = json.loads(cached)
+        group_id_int = int(group_id)
+        
+        for row in rows:
+            if int(row.get('id')) == group_id_int:
+                row.update(updates)
+                break
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        log_error(app.logger, 'REDIS', f"Error updating group in {table_name}: {e}")
+
+
+def _delete_category_group_from_redis(table_name, user_id, group_id):
+    """
+    Delete a category group from Redis cache.
+    
+    Args:
+        table_name: 'income_category_groups', 'expense_category_groups', or 'c_expense_category_groups'
+        user_id: User ID
+        group_id: ID of the group to delete
+    
+    Returns:
+        True if deleted, False otherwise
+    """
+    if not app.config.get('REDIS_OK'):
+        return False
+    try:
+        redis_key = f"{table_name}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        if not cached:
+            return False
+        
+        rows = json.loads(cached)
+        group_id_int = int(group_id)
+        original_len = len(rows)
+        rows = [r for r in rows if int(r.get('id', 0)) != group_id_int]
+        
+        if len(rows) == original_len:
+            return False
+        
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
+        
+        # Add to pending deletes if it's a real (positive) ID
+        if group_id_int > 0:
+            pending_key = f"pending_deletes:{table_name}:{user_id}"
+            _redis_client.sadd(pending_key, str(group_id_int))
+            _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+        
+        dirty_key = f"dirty_tables:{user_id}"
+        _redis_client.sadd(dirty_key, table_name)
+        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        return True
+    except Exception as e:
+        log_error(app.logger, 'REDIS', f"Error deleting group from {table_name}: {e}")
+        return False
+
+
+def _next_group_display_order(groups):
+    """
+    Calculate the next display_order for a new category group.
+    Groups start at x=2 (0=system, 1=ungrouped are reserved).
+    
+    Args:
+        groups: list of group dicts
+    
+    Returns:
+        Integer display_order (e.g. 2, 3, 4...)
+    """
+    if not groups:
+        return 2
+    max_order = max(int(float(g.get('display_order', 1))) for g in groups)
+    return max(max_order + 1, 2)
+
+
+def _ungroup_categories_in_redis(category_table, user_id, group_id):
+    """
+    Ungroup all categories that belong to a given group.
+    Sets group_id=NULL and recalculates display_order to tier 1 (ungrouped).
+    
+    Args:
+        category_table: 'income_categories', 'expense_categories', or 'c_expense_categories'
+        user_id: User ID
+        group_id: The group_id to ungroup from
+    
+    Returns:
+        Number of categories ungrouped
+    """
+    if not app.config.get('REDIS_OK'):
+        return 0
+    try:
+        redis_key = f"{category_table}:v1:{user_id}"
+        cached = _redis_client.get(redis_key)
+        if not cached:
+            return 0
+        
+        categories = json.loads(cached)
+        group_id_int = int(group_id)
+        
+        # Find min display_order in tier 1 to place ungrouped categories at the bottom (DESC sort)
+        tier1_cats = [c for c in categories if int(float(c.get('display_order', 0))) == 1]
+        if tier1_cats:
+            min_order = min(float(c.get('display_order', 0)) for c in tier1_cats)
+            # Place below the current bottom, descending
+            start_order = round(min_order - 0.0001, 4)
+        else:
+            start_order = 1.0001
+        
+        count = 0
+        for cat in categories:
+            cat_group = cat.get('group_id')
+            if cat_group is not None and int(cat_group) == group_id_int:
+                cat['group_id'] = None
+                cat['display_order'] = round(start_order - count * 0.0001, 4)
+                count += 1
+        
+        if count > 0:
+            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(categories, cls=DecimalEncoder))
+            dirty_key = f"dirty_tables:{user_id}"
+            _redis_client.sadd(dirty_key, category_table)
+            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+        
+        return count
+    except Exception as e:
+        log_error(app.logger, 'REDIS', f"Error ungrouping categories in {category_table}: {e}")
+        return 0
+
 
 # Redis helper functions for buds and bud_items
 
@@ -8218,27 +8514,28 @@ def add_income_category():
     if _category_name_exists('income_categories', current_user.id, category_name):
         return jsonify({'status': 'error', 'message': f'An income category named "{category_name.strip()}" already exists.'}), 400
     
-    # Get max display_order - try Redis first, fallback to MySQL
+    # Get next display_order in ungrouped tier (1.YYYY)
     categories = _get_categories_from_redis('income_categories', current_user.id)
     if categories is not None:
-        max_order = max([cat.get('display_order', 0) for cat in categories], default=0)
+        new_display_order = _next_display_order(categories, tier=1)
     else:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COALESCE(MAX(display_order), 0) FROM income_categories WHERE user_id = %s", (current_user.id,))
-            max_order = cursor.fetchone()[0]
+            cursor.execute("SELECT COALESCE(MAX(display_order), 1.0) FROM income_categories WHERE user_id = %s AND FLOOR(display_order) = 1", (current_user.id,))
+            new_display_order = round(float(cursor.fetchone()[0]) + 0.0001, 4)
             cursor.close()
     
     # Create category data
     new_category = {
         'user_id': current_user.id,
         'name': category_name,
-        'display_order': max_order + 1,
+        'display_order': new_display_order,
         'group_id': None,
         'is_recurring': 0,
         'is_auto_adjustment': 0,
         'no_end_date': 0,
-        'hidden': 0
+        'hidden': 0,
+        'is_system': 0
     }
     
     # Add to Redis first (flush worker will sync to MySQL)
@@ -8248,8 +8545,8 @@ def add_income_category():
         # Redis failed, fallback to MySQL directly
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO income_categories (user_id, name, display_order) VALUES (%s, %s, %s)", 
-                          (current_user.id, category_name, max_order + 1))
+            cursor.execute("INSERT INTO income_categories (user_id, name, display_order, is_system) VALUES (%s, %s, %s, 0)", 
+                          (current_user.id, category_name, new_display_order))
             new_category_id = cursor.lastrowid
             conn.commit()
             cursor.close()
@@ -8268,29 +8565,30 @@ def add_expense_category():
     if _category_name_exists('expense_categories', current_user.id, category_name):
         return jsonify({'status': 'error', 'message': f'An expense category named "{category_name.strip()}" already exists.'}), 400
     
-    # Get max display_order - try Redis first, fallback to MySQL
+    # Get next display_order in ungrouped tier (1.YYYY)
     categories = _get_categories_from_redis('expense_categories', current_user.id)
     if categories is not None:
-        max_order = max([cat.get('display_order', 0) for cat in categories], default=0)
+        new_display_order = _next_display_order(categories, tier=1)
     else:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COALESCE(MAX(display_order), 0) FROM expense_categories WHERE user_id = %s", (current_user.id,))
-            max_order = cursor.fetchone()[0]
+            cursor.execute("SELECT COALESCE(MAX(display_order), 1.0) FROM expense_categories WHERE user_id = %s AND FLOOR(display_order) = 1", (current_user.id,))
+            new_display_order = round(float(cursor.fetchone()[0]) + 0.0001, 4)
             cursor.close()
     
     # Create category data
     new_category = {
         'user_id': current_user.id,
         'name': category_name,
-        'display_order': max_order + 1,
+        'display_order': new_display_order,
         'group_id': None,
         'is_recurring': 0,
         'is_auto_adjustment': 0,
         'no_end_date': 0,
         'hidden': 0,
         'is_bud': 0,
-        'is_credit_account': 0
+        'is_credit_account': 0,
+        'is_system': 0
     }
     
     # Add to Redis first (flush worker will sync to MySQL)
@@ -8300,15 +8598,15 @@ def add_expense_category():
         # Redis failed, fallback to MySQL directly
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO expense_categories (user_id, name, display_order) VALUES (%s, %s, %s)", 
-                          (current_user.id, category_name, max_order + 1))
+            cursor.execute("INSERT INTO expense_categories (user_id, name, display_order, is_system) VALUES (%s, %s, %s, 0)", 
+                          (current_user.id, category_name, new_display_order))
             new_category_id = cursor.lastrowid
             conn.commit()
             cursor.close()
     
     # Sync to all credit accounts (creates non-recurring c_expense categories)
     # Returns mapping of account_id -> c_expense_category_id
-    c_expense_map = _sync_expense_category_to_credit_accounts(current_user.id, category_name, max_order + 1)
+    c_expense_map = _sync_expense_category_to_credit_accounts(current_user.id, category_name, new_display_order)
     
     # Sync updated categories to Ntropy (non-blocking)
     _trigger_ntropy_sync(current_user.id)
@@ -8901,6 +9199,37 @@ def dashboard():
     quiltt_flags = get_user_quiltt_account_flags(current_user.id)
     quiltt_last_txn_date = get_quiltt_last_transaction_date(current_user.id)
 
+    # Fetch category groups for dashboard grouping
+    income_groups = _get_category_groups_from_redis('income_category_groups', current_user.id)
+    if income_groups is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM income_category_groups WHERE user_id = %s ORDER BY display_order DESC", (current_user.id,))
+            income_groups = cursor.fetchall()
+            cursor.close()
+    else:
+        income_groups = sorted(income_groups, key=lambda x: float(x.get('display_order', 0) or 0), reverse=True)
+
+    expense_groups = _get_category_groups_from_redis('expense_category_groups', current_user.id)
+    if expense_groups is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM expense_category_groups WHERE user_id = %s ORDER BY display_order DESC", (current_user.id,))
+            expense_groups = cursor.fetchall()
+            cursor.close()
+    else:
+        expense_groups = sorted(expense_groups, key=lambda x: float(x.get('display_order', 0) or 0), reverse=True)
+
+    c_expense_groups = _get_category_groups_from_redis('c_expense_category_groups', current_user.id)
+    if c_expense_groups is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM c_expense_category_groups WHERE user_id = %s ORDER BY display_order DESC", (current_user.id,))
+            c_expense_groups = cursor.fetchall()
+            cursor.close()
+    else:
+        c_expense_groups = sorted(c_expense_groups, key=lambda x: float(x.get('display_order', 0) or 0), reverse=True)
+
     return render_template(
         'dashboard.html',
         fridays_by_month=fridays_by_month,
@@ -8909,6 +9238,9 @@ def dashboard():
         last_name=last_name,
         income_categories=income_categories,
         expense_categories=expense_categories,
+        income_groups=income_groups,
+        expense_groups=expense_groups,
+        c_expense_groups=c_expense_groups,
         income_entries=income_entries,
         expense_entries=expense_entries,
         totals_remainders=totals_remainders,
@@ -9369,7 +9701,7 @@ def update_income_order():
     user_id = current_user.id
 
     # Build lookup: category id → new display_order
-    order_by_id = {int(item['id']): int(item['order']) for item in order_data if item.get('id')}
+    order_by_id = {int(item['id']): float(item['order']) for item in order_data if item.get('id')}
 
     try:
         redis_key = f"income_categories:v1:{user_id}"
@@ -9390,7 +9722,7 @@ def update_income_order():
                     cursor.execute("""
                         UPDATE income_categories SET display_order = %s
                         WHERE user_id = %s AND id = %s
-                    """, (int(item['order']), user_id, int(item['id'])))
+                    """, (float(item['order']), user_id, int(item['id'])))
                 conn.commit()
                 cursor.close()
     except Exception as e:
@@ -9406,8 +9738,8 @@ def update_expense_order():
     user_id = current_user.id
 
     # Build lookup: category id → new display_order (and name for c_expense sync)
-    order_by_id = {int(item['id']): int(item['order']) for item in order_data if item.get('id')}
-    order_by_name = {item['name']: int(item['order']) for item in order_data if item.get('name')}
+    order_by_id = {int(item['id']): float(item['order']) for item in order_data if item.get('id')}
+    order_by_name = {item['name']: float(item['order']) for item in order_data if item.get('name')}
 
     try:
         if not app.config.get('REDIS_OK'):
@@ -9425,18 +9757,45 @@ def update_expense_order():
             _redis_client.setex(exp_key, 604800, json.dumps(categories, cls=DecimalEncoder))
             _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_categories')
 
-        # Sync display_order to c_expense_categories in Redis (by name match)
+        # Sync display_order (and group_id) to c_expense_categories in Redis (by name match)
         ca_key = f"c_expense_categories:v1:{user_id}"
         ca_cached = _redis_client.get(ca_key)
         if ca_cached:
             c_categories = json.loads(ca_cached)
+
+            # Build name → (display_order, group_id) from updated expense_categories
+            exp_name_map = {}
+            if categories:
+                for ecat in categories:
+                    if not ecat.get('is_credit_account'):
+                        exp_name_map[ecat.get('name')] = {
+                            'display_order': ecat.get('display_order'),
+                            'group_id': ecat.get('group_id')
+                        }
+
+            # Map expense group_ids to c_expense group_ids via source_group_id
+            c_groups = _get_category_groups_from_redis('c_expense_category_groups', user_id) or []
+
             changed = False
             for cat in c_categories:
                 if cat.get('is_interest') or cat.get('is_auto_adjustment'):
                     continue
-                new_order = order_by_name.get(cat.get('name'))
-                if new_order is not None:
-                    cat['display_order'] = new_order
+                exp_info = exp_name_map.get(cat.get('name'))
+                if exp_info is not None:
+                    cat['display_order'] = exp_info['display_order']
+                    # Map expense group_id → c_expense group_id for this account
+                    if exp_info['group_id'] is not None:
+                        acct_id = cat.get('account_id')
+                        c_group = next(
+                            (cg for cg in c_groups
+                             if cg.get('source_group_id') is not None
+                             and int(cg['source_group_id']) == int(exp_info['group_id'])
+                             and cg.get('account_id') == acct_id),
+                            None
+                        )
+                        cat['group_id'] = int(c_group['id']) if c_group else None
+                    else:
+                        cat['group_id'] = None
                     changed = True
             if changed:
                 _redis_client.setex(ca_key, 604800, json.dumps(c_categories, cls=DecimalEncoder))
@@ -9450,7 +9809,7 @@ def update_expense_order():
                     cursor.execute("""
                         UPDATE expense_categories SET display_order = %s
                         WHERE user_id = %s AND id = %s AND is_credit_account = 0
-                    """, (int(item['order']), user_id, int(item['id'])))
+                    """, (float(item['order']), user_id, int(item['id'])))
                 cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
                 acct_rows = cursor.fetchall()
                 for item in order_data:
@@ -9460,7 +9819,7 @@ def update_expense_order():
                             UPDATE c_expense_categories SET display_order = %s
                             WHERE account_id = %s AND name = %s
                               AND is_interest = 0 AND is_auto_adjustment = 0
-                        """, (int(item['order']), acct_id, item['name']))
+                        """, (float(item['order']), acct_id, item['name']))
                 conn.commit()
                 cursor.close()
     except Exception as e:
@@ -9479,7 +9838,7 @@ def update_ca_order():
     if not account_id or not order_data:
         return jsonify({'status': 'error', 'message': 'Missing account_id or order data'}), 400
 
-    order_by_id = {int(item['id']): int(item['order']) for item in order_data if item.get('id')}
+    order_by_id = {int(item['id']): float(item['order']) for item in order_data if item.get('id')}
 
     try:
         ca_key = f"c_expense_categories:v1:{user_id}"
@@ -9502,7 +9861,7 @@ def update_ca_order():
                     cursor.execute("""
                         UPDATE c_expense_categories SET display_order = %s
                         WHERE account_id = %s AND id = %s
-                    """, (int(item['order']), account_id, int(item['id'])))
+                    """, (float(item['order']), account_id, int(item['id'])))
                 conn.commit()
                 cursor.close()
     except Exception as e:
@@ -9567,6 +9926,443 @@ def update_credit_account_order():
     except Exception as e:
         log_error(app.logger, 'CREDIT', f"Error updating credit account order: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ──────────────────────────────────────────────
+#  Category Group CRUD endpoints (Phase 2)
+# ──────────────────────────────────────────────
+
+@app.route('/add_income_category_group', methods=['POST'])
+@login_required
+def add_income_category_group():
+    """Create a new income category group."""
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    user_id = current_user.id
+
+    if not name:
+        return jsonify({'status': 'error', 'message': 'Group name is required'}), 400
+
+    try:
+        groups = _get_category_groups_from_redis('income_category_groups', user_id) or []
+        # Check for duplicate name
+        if any(g.get('name', '').lower() == name.lower() for g in groups):
+            return jsonify({'status': 'error', 'message': 'A group with that name already exists'}), 400
+
+        display_order = _next_group_display_order(groups)
+        new_id = _add_category_group_to_redis('income_category_groups', user_id, {
+            'name': name,
+            'display_order': display_order
+        })
+        if new_id is None:
+            return jsonify({'status': 'error', 'message': 'Failed to create group'}), 500
+
+        return jsonify({'status': 'success', 'group_id': new_id, 'display_order': display_order})
+    except Exception as e:
+        log_error(app.logger, 'INCOME', f"[add_income_category_group] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to create group'}), 500
+
+
+@app.route('/add_expense_category_group', methods=['POST'])
+@login_required
+def add_expense_category_group():
+    """Create a new expense category group + auto-mirror to all credit accounts."""
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    user_id = current_user.id
+
+    if not name:
+        return jsonify({'status': 'error', 'message': 'Group name is required'}), 400
+
+    try:
+        groups = _get_category_groups_from_redis('expense_category_groups', user_id) or []
+        if any(g.get('name', '').lower() == name.lower() for g in groups):
+            return jsonify({'status': 'error', 'message': 'A group with that name already exists'}), 400
+
+        display_order = _next_group_display_order(groups)
+        new_id = _add_category_group_to_redis('expense_category_groups', user_id, {
+            'name': name,
+            'display_order': display_order
+        })
+        if new_id is None:
+            return jsonify({'status': 'error', 'message': 'Failed to create group'}), 500
+
+        # Auto-mirror: create c_expense_category_groups for every credit account
+        accounts = _get_credit_accounts_from_redis(user_id) or []
+        for account in accounts:
+            account_id = account.get('id')
+            _add_category_group_to_redis('c_expense_category_groups', user_id, {
+                'account_id': account_id,
+                'source_group_id': new_id,
+                'name': name,
+                'display_order': display_order
+            })
+
+        return jsonify({'status': 'success', 'group_id': new_id, 'display_order': display_order})
+    except Exception as e:
+        log_error(app.logger, 'EXPENSE', f"[add_expense_category_group] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to create group'}), 500
+
+
+@app.route('/update_income_category_group', methods=['POST'])
+@login_required
+def update_income_category_group():
+    """Rename an income category group."""
+    data = request.json or {}
+    group_id = data.get('group_id')
+    name = (data.get('name') or '').strip()
+    user_id = current_user.id
+
+    if not group_id or not name:
+        return jsonify({'status': 'error', 'message': 'group_id and name are required'}), 400
+
+    try:
+        groups = _get_category_groups_from_redis('income_category_groups', user_id) or []
+        if any(g.get('name', '').lower() == name.lower() and int(g.get('id', 0)) != int(group_id) for g in groups):
+            return jsonify({'status': 'error', 'message': 'A group with that name already exists'}), 400
+
+        _update_category_group_in_redis('income_category_groups', user_id, group_id, {'name': name})
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        log_error(app.logger, 'INCOME', f"[update_income_category_group] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to rename group'}), 500
+
+
+@app.route('/update_expense_category_group', methods=['POST'])
+@login_required
+def update_expense_category_group():
+    """Rename an expense category group + auto-mirror to credit accounts."""
+    data = request.json or {}
+    group_id = data.get('group_id')
+    name = (data.get('name') or '').strip()
+    user_id = current_user.id
+
+    if not group_id or not name:
+        return jsonify({'status': 'error', 'message': 'group_id and name are required'}), 400
+
+    try:
+        groups = _get_category_groups_from_redis('expense_category_groups', user_id) or []
+        if any(g.get('name', '').lower() == name.lower() and int(g.get('id', 0)) != int(group_id) for g in groups):
+            return jsonify({'status': 'error', 'message': 'A group with that name already exists'}), 400
+
+        _update_category_group_in_redis('expense_category_groups', user_id, group_id, {'name': name})
+
+        # Auto-mirror: rename matching c_expense_category_groups via source_group_id
+        c_groups = _get_category_groups_from_redis('c_expense_category_groups', user_id) or []
+        for cg in c_groups:
+            if cg.get('source_group_id') is not None and int(cg['source_group_id']) == int(group_id):
+                _update_category_group_in_redis('c_expense_category_groups', user_id, cg['id'], {'name': name})
+
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        log_error(app.logger, 'EXPENSE', f"[update_expense_category_group] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to rename group'}), 500
+
+
+@app.route('/delete_income_category_group', methods=['POST'])
+@login_required
+def delete_income_category_group():
+    """Delete an income category group. Ungroups its categories (group_id=NULL, display_order → tier 1)."""
+    data = request.json or {}
+    group_id = data.get('group_id')
+    user_id = current_user.id
+
+    if not group_id:
+        return jsonify({'status': 'error', 'message': 'group_id is required'}), 400
+
+    try:
+        ungrouped = _ungroup_categories_in_redis('income_categories', user_id, group_id)
+        _delete_category_group_from_redis('income_category_groups', user_id, group_id)
+        log_info(app.logger, 'INCOME', f"Deleted income group {group_id}, ungrouped {ungrouped} categories", user_id=user_id)
+        return jsonify({'status': 'success', 'ungrouped_count': ungrouped})
+    except Exception as e:
+        log_error(app.logger, 'INCOME', f"[delete_income_category_group] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to delete group'}), 500
+
+
+@app.route('/delete_expense_category_group', methods=['POST'])
+@login_required
+def delete_expense_category_group():
+    """Delete an expense category group. Ungroups categories, then auto-mirror cleanup for credit accounts."""
+    data = request.json or {}
+    group_id = data.get('group_id')
+    user_id = current_user.id
+
+    if not group_id:
+        return jsonify({'status': 'error', 'message': 'group_id is required'}), 400
+
+    try:
+        # BEFORE deleting: find all c_expense_category_groups that mirror this expense group
+        c_groups = _get_category_groups_from_redis('c_expense_category_groups', user_id) or []
+        mirrored_c_group_ids = [
+            cg['id'] for cg in c_groups
+            if cg.get('source_group_id') is not None and int(cg['source_group_id']) == int(group_id)
+        ]
+
+        # Ungroup c_expense categories that belong to the mirrored groups
+        for c_group_id in mirrored_c_group_ids:
+            _ungroup_categories_in_redis('c_expense_categories', user_id, c_group_id)
+            _delete_category_group_from_redis('c_expense_category_groups', user_id, c_group_id)
+
+        # Ungroup expense categories
+        ungrouped = _ungroup_categories_in_redis('expense_categories', user_id, group_id)
+
+        # Delete the expense group itself (FK cascade will also clean up c_expense_category_groups in MySQL)
+        _delete_category_group_from_redis('expense_category_groups', user_id, group_id)
+
+        log_info(app.logger, 'EXPENSE', f"Deleted expense group {group_id}, ungrouped {ungrouped} categories", user_id=user_id)
+        return jsonify({'status': 'success', 'ungrouped_count': ungrouped})
+    except Exception as e:
+        log_error(app.logger, 'EXPENSE', f"[delete_expense_category_group] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to delete group'}), 500
+
+
+@app.route('/assign_category_to_group', methods=['POST'])
+@login_required
+def assign_category_to_group():
+    """
+    Assign a category to a group (or ungroup it by passing group_id=null).
+    Updates display_order to the target group's tier.
+    For expense: also updates matching c_expense categories across all credit accounts.
+    """
+    data = request.json or {}
+    cat_type = data.get('type')  # 'income' or 'expense'
+    category_id = data.get('category_id')
+    new_group_id = data.get('group_id')  # null/None to ungroup
+    user_id = current_user.id
+
+    if not cat_type or not category_id:
+        return jsonify({'status': 'error', 'message': 'type and category_id are required'}), 400
+    if cat_type not in ('income', 'expense'):
+        return jsonify({'status': 'error', 'message': 'type must be income or expense'}), 400
+
+    try:
+        cat_table = f"{cat_type}_categories"
+        group_table = f"{cat_type}_category_groups"
+
+        # Determine the target tier
+        if new_group_id is not None:
+            groups = _get_category_groups_from_redis(group_table, user_id) or []
+            target_group = next((g for g in groups if int(g.get('id', 0)) == int(new_group_id)), None)
+            if not target_group:
+                return jsonify({'status': 'error', 'message': 'Group not found'}), 404
+            tier = int(float(target_group.get('display_order', 2)))
+        else:
+            tier = 1  # ungrouped
+
+        # Update the category in Redis
+        categories = _get_categories_from_redis(cat_table, user_id)
+        if not categories:
+            return jsonify({'status': 'error', 'message': 'No categories found'}), 404
+
+        new_order = _next_display_order(categories, tier=tier)
+        category_name = None
+        for cat in categories:
+            if int(cat.get('id', 0)) == int(category_id):
+                cat['group_id'] = int(new_group_id) if new_group_id is not None else None
+                cat['display_order'] = new_order
+                category_name = cat.get('name')
+                break
+        else:
+            return jsonify({'status': 'error', 'message': 'Category not found'}), 404
+
+        redis_key = f"{cat_table}:v1:{user_id}"
+        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(categories, cls=DecimalEncoder))
+        _redis_client.sadd(f"dirty_tables:{user_id}", cat_table)
+        _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
+
+        # For expense: also update matching c_expense categories across all credit accounts
+        if cat_type == 'expense' and category_name:
+            c_categories = _get_categories_from_redis('c_expense_categories', user_id) or []
+            c_groups = _get_category_groups_from_redis('c_expense_category_groups', user_id) or []
+
+            # Find the c_expense group_id that mirrors the expense group
+            c_group_id = None
+            if new_group_id is not None:
+                for cg in c_groups:
+                    if cg.get('source_group_id') is not None and int(cg['source_group_id']) == int(new_group_id):
+                        # Use the first match (all accounts share the same source_group_id mapping)
+                        c_group_id = int(cg['id'])
+                        break
+
+            changed = False
+            for cat in c_categories:
+                if cat.get('is_interest') or cat.get('is_auto_adjustment'):
+                    continue
+                if cat.get('name') == category_name:
+                    # For c_expense, find the correct c_group for this account
+                    if new_group_id is not None:
+                        acct_id = cat.get('account_id')
+                        acct_c_group = next(
+                            (cg for cg in c_groups
+                             if cg.get('source_group_id') is not None
+                             and int(cg['source_group_id']) == int(new_group_id)
+                             and cg.get('account_id') == acct_id),
+                            None
+                        )
+                        cat['group_id'] = int(acct_c_group['id']) if acct_c_group else None
+                    else:
+                        cat['group_id'] = None
+                    cat['display_order'] = new_order
+                    changed = True
+
+            if changed:
+                ca_key = f"c_expense_categories:v1:{user_id}"
+                _redis_client.setex(ca_key, PERSISTENT_CACHE_TTL, json.dumps(c_categories, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+                _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
+
+        return jsonify({'status': 'success', 'new_display_order': new_order})
+    except Exception as e:
+        log_error(app.logger, 'EXPENSE', f"[assign_category_to_group] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to assign category to group'}), 500
+
+
+@app.route('/update_income_group_order', methods=['POST'])
+@login_required
+def update_income_group_order():
+    """Reorder income groups. Updates group display_orders AND cascades x value to all member categories."""
+    order_data = request.json.get('order', [])
+    user_id = current_user.id
+
+    if not order_data:
+        return jsonify({'status': 'error', 'message': 'No order data provided'}), 400
+
+    try:
+        groups = _get_category_groups_from_redis('income_category_groups', user_id) or []
+        categories = _get_categories_from_redis('income_categories', user_id)
+
+        # Build lookup: group_id → new display_order
+        order_map = {int(item['id']): int(item['order']) for item in order_data}
+
+        # Map old group display_order → new display_order (for cascading to categories)
+        old_to_new = {}
+        for g in groups:
+            gid = int(g.get('id', 0))
+            if gid in order_map:
+                old_order = int(float(g.get('display_order', 2)))
+                new_order = order_map[gid]
+                old_to_new[gid] = (old_order, new_order)
+                g['display_order'] = new_order
+
+        # Save updated groups
+        grp_key = f"income_category_groups:v1:{user_id}"
+        _redis_client.setex(grp_key, PERSISTENT_CACHE_TTL, json.dumps(groups, cls=DecimalEncoder))
+        _redis_client.sadd(f"dirty_tables:{user_id}", 'income_category_groups')
+        _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
+
+        # Cascade: update x value for categories in affected groups
+        if categories:
+            for cat in categories:
+                cat_group_id = cat.get('group_id')
+                if cat_group_id is None:
+                    continue
+                cat_group_id = int(cat_group_id)
+                if cat_group_id in old_to_new:
+                    old_x, new_x = old_to_new[cat_group_id]
+                    current_order = float(cat.get('display_order', 0))
+                    fraction = round(current_order - int(current_order), 4)
+                    cat['display_order'] = round(new_x + fraction, 4)
+
+            cat_key = f"income_categories:v1:{user_id}"
+            _redis_client.setex(cat_key, PERSISTENT_CACHE_TTL, json.dumps(categories, cls=DecimalEncoder))
+            _redis_client.sadd(f"dirty_tables:{user_id}", 'income_categories')
+            _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
+
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        log_error(app.logger, 'INCOME', f"[update_income_group_order] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to reorder groups'}), 500
+
+
+@app.route('/update_expense_group_order', methods=['POST'])
+@login_required
+def update_expense_group_order():
+    """Reorder expense groups + cascade + auto-mirror to c_expense_category_groups."""
+    order_data = request.json.get('order', [])
+    user_id = current_user.id
+
+    if not order_data:
+        return jsonify({'status': 'error', 'message': 'No order data provided'}), 400
+
+    try:
+        groups = _get_category_groups_from_redis('expense_category_groups', user_id) or []
+        categories = _get_categories_from_redis('expense_categories', user_id)
+
+        order_map = {int(item['id']): int(item['order']) for item in order_data}
+
+        old_to_new = {}
+        for g in groups:
+            gid = int(g.get('id', 0))
+            if gid in order_map:
+                old_order = int(float(g.get('display_order', 2)))
+                new_order = order_map[gid]
+                old_to_new[gid] = (old_order, new_order)
+                g['display_order'] = new_order
+
+        # Save updated expense groups
+        grp_key = f"expense_category_groups:v1:{user_id}"
+        _redis_client.setex(grp_key, PERSISTENT_CACHE_TTL, json.dumps(groups, cls=DecimalEncoder))
+        _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_category_groups')
+        _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
+
+        # Cascade: update x value for expense categories in affected groups
+        if categories:
+            for cat in categories:
+                cat_group_id = cat.get('group_id')
+                if cat_group_id is None:
+                    continue
+                cat_group_id = int(cat_group_id)
+                if cat_group_id in old_to_new:
+                    old_x, new_x = old_to_new[cat_group_id]
+                    current_order = float(cat.get('display_order', 0))
+                    fraction = round(current_order - int(current_order), 4)
+                    cat['display_order'] = round(new_x + fraction, 4)
+
+            exp_key = f"expense_categories:v1:{user_id}"
+            _redis_client.setex(exp_key, PERSISTENT_CACHE_TTL, json.dumps(categories, cls=DecimalEncoder))
+            _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_categories')
+            _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
+
+        # Auto-mirror: update c_expense_category_groups display_order via source_group_id
+        c_groups = _get_category_groups_from_redis('c_expense_category_groups', user_id) or []
+        c_categories = _get_categories_from_redis('c_expense_categories', user_id) or []
+        c_group_changed = False
+        c_cat_changed = False
+
+        for cg in c_groups:
+            src_id = cg.get('source_group_id')
+            if src_id is not None and int(src_id) in old_to_new:
+                _, new_order = old_to_new[int(src_id)]
+                cg['display_order'] = new_order
+                c_group_changed = True
+
+                # Also cascade to c_expense categories in this c_group
+                c_group_id = int(cg.get('id', 0))
+                for cat in c_categories:
+                    if cat.get('group_id') is not None and int(cat['group_id']) == c_group_id:
+                        current_order = float(cat.get('display_order', 0))
+                        fraction = round(current_order - int(current_order), 4)
+                        cat['display_order'] = round(new_order + fraction, 4)
+                        c_cat_changed = True
+
+        if c_group_changed:
+            cg_key = f"c_expense_category_groups:v1:{user_id}"
+            _redis_client.setex(cg_key, PERSISTENT_CACHE_TTL, json.dumps(c_groups, cls=DecimalEncoder))
+            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_category_groups')
+            _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
+
+        if c_cat_changed:
+            ca_key = f"c_expense_categories:v1:{user_id}"
+            _redis_client.setex(ca_key, PERSISTENT_CACHE_TTL, json.dumps(c_categories, cls=DecimalEncoder))
+            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+            _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
+
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        log_error(app.logger, 'EXPENSE', f"[update_expense_group_order] Error: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to reorder groups'}), 500
+
 
 def _get_updated_buckets_from_redis(table_name, user_id, category_id, aggregation='week', specific_date=None):
     """
@@ -11138,6 +11934,37 @@ def dashboard_3m():
     quiltt_flags = get_user_quiltt_account_flags(current_user.id)
     quiltt_last_txn_date = get_quiltt_last_transaction_date(current_user.id)
 
+    # Fetch category groups for dashboard grouping
+    income_groups = _get_category_groups_from_redis('income_category_groups', current_user.id)
+    if income_groups is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM income_category_groups WHERE user_id = %s ORDER BY display_order DESC", (current_user.id,))
+            income_groups = cursor.fetchall()
+            cursor.close()
+    else:
+        income_groups = sorted(income_groups, key=lambda x: float(x.get('display_order', 0) or 0), reverse=True)
+
+    expense_groups = _get_category_groups_from_redis('expense_category_groups', current_user.id)
+    if expense_groups is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM expense_category_groups WHERE user_id = %s ORDER BY display_order DESC", (current_user.id,))
+            expense_groups = cursor.fetchall()
+            cursor.close()
+    else:
+        expense_groups = sorted(expense_groups, key=lambda x: float(x.get('display_order', 0) or 0), reverse=True)
+
+    c_expense_groups = _get_category_groups_from_redis('c_expense_category_groups', current_user.id)
+    if c_expense_groups is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM c_expense_category_groups WHERE user_id = %s ORDER BY display_order DESC", (current_user.id,))
+            c_expense_groups = cursor.fetchall()
+            cursor.close()
+    else:
+        c_expense_groups = sorted(c_expense_groups, key=lambda x: float(x.get('display_order', 0) or 0), reverse=True)
+
     return render_template(
         'dashboard_3m.html',
         fridays_by_month=fridays_by_month,
@@ -11146,6 +11973,9 @@ def dashboard_3m():
         last_name=last_name,
         income_categories=income_categories,
         expense_categories=expense_categories,
+        income_groups=income_groups,
+        expense_groups=expense_groups,
+        c_expense_groups=c_expense_groups,
         income_entries=income_entries,
         expense_entries=expense_entries,
         totals_remainders=totals_remainders,
@@ -11790,7 +12620,7 @@ def dashboard_m():
                 FROM c_expense_categories cec
                 JOIN credit_accounts ca ON cec.account_id = ca.id
                 WHERE ca.user_id = %s
-                ORDER BY cec.display_order ASC, cec.id ASC
+                ORDER BY cec.display_order DESC, cec.id DESC
             """, (current_user.id,))
             c_expense_categories = list(cursor.fetchall())
         else:
@@ -14325,10 +15155,33 @@ def manage_categories():
     notifications_list = _get_entries_from_redis('notifications', user_id) or []
     unread_notifications_count = sum(1 for n in notifications_list if not n.get('is_read'))
 
+    # Fetch category groups
+    income_category_groups = _get_category_groups_from_redis('income_category_groups', user_id)
+    if income_category_groups is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM income_category_groups WHERE user_id = %s ORDER BY display_order DESC", (user_id,))
+            income_category_groups = cursor.fetchall()
+            cursor.close()
+    else:
+        income_category_groups = sorted(income_category_groups, key=lambda x: float(x.get('display_order', 0) or 0), reverse=True)
+
+    expense_category_groups = _get_category_groups_from_redis('expense_category_groups', user_id)
+    if expense_category_groups is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT * FROM expense_category_groups WHERE user_id = %s ORDER BY display_order DESC", (user_id,))
+            expense_category_groups = cursor.fetchall()
+            cursor.close()
+    else:
+        expense_category_groups = sorted(expense_category_groups, key=lambda x: float(x.get('display_order', 0) or 0), reverse=True)
+
     return render_template(
         'manage_categories.html',
         income_categories=income_categories,
         expense_categories=expense_categories,
+        income_category_groups=income_category_groups,
+        expense_category_groups=expense_category_groups,
         profile_picture=profile_picture,
         nav_first_name=first_name,
         nav_last_name=last_name,
@@ -15250,29 +16103,30 @@ def add_recurring_income():
             if _category_name_exists('income_categories', current_user.id, category_name):
                 return jsonify({'status': 'error', 'message': f'An income category named "{category_name.strip()}" already exists.'}), 400
 
-            # Step 1: Get max display_order - try Redis first, fallback to MySQL
+            # Step 1: Get next display_order in ungrouped tier (1.YYYY)
             categories = _get_categories_from_redis('income_categories', current_user.id)
             if categories is not None:
-                max_display_order = max([cat.get('display_order', 0) for cat in categories], default=0)
+                new_display_order = _next_display_order(categories, tier=1)
             else:
                 with get_db_pool().get_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute("""
-                        SELECT COALESCE(MAX(display_order), 0) FROM income_categories WHERE user_id = %s
+                        SELECT COALESCE(MAX(display_order), 1.0) FROM income_categories WHERE user_id = %s AND FLOOR(display_order) = 1
                     """, (current_user.id,))
-                    max_display_order = cursor.fetchone()[0]
+                    new_display_order = round(float(cursor.fetchone()[0]) + 0.0001, 4)
                     cursor.close()
 
             # Step 2: Create category in Redis first (flush worker will sync to MySQL)
             new_category = {
                 'user_id': current_user.id,
                 'name': category_name,
-                'display_order': max_display_order + 1,
+                'display_order': new_display_order,
                 'group_id': None,
                 'is_recurring': 1,
                 'is_auto_adjustment': 0,
                 'no_end_date': no_end_date,
-                'hidden': 0
+                'hidden': 0,
+                'is_system': 0
             }
             
             category_id = _add_category_to_redis('income_categories', current_user.id, new_category)
@@ -16060,31 +16914,32 @@ def add_recurring_expense():
             if _category_name_exists('expense_categories', current_user.id, category_name):
                 return jsonify({'status': 'error', 'message': f'An expense category named \"{category_name.strip()}\" already exists.'}), 400
 
-            # Step 1: Get max display_order - try Redis first, fallback to MySQL
+            # Step 1: Get next display_order in ungrouped tier (1.YYYY)
             categories = _get_categories_from_redis('expense_categories', current_user.id)
             if categories is not None:
-                max_display_order = max([cat.get('display_order', 0) for cat in categories], default=0)
+                new_display_order = _next_display_order(categories, tier=1)
             else:
                 with get_db_pool().get_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute("""
-                        SELECT COALESCE(MAX(display_order), 0) FROM expense_categories WHERE user_id = %s
+                        SELECT COALESCE(MAX(display_order), 1.0) FROM expense_categories WHERE user_id = %s AND FLOOR(display_order) = 1
                     """, (current_user.id,))
-                    max_display_order = cursor.fetchone()[0]
+                    new_display_order = round(float(cursor.fetchone()[0]) + 0.0001, 4)
                     cursor.close()
 
             # Step 2: Create category in Redis first (flush worker will sync to MySQL)
             new_category = {
                 'user_id': current_user.id,
                 'name': category_name,
-                'display_order': max_display_order + 1,
+                'display_order': new_display_order,
                 'group_id': None,
                 'is_recurring': 1,
                 'is_auto_adjustment': 0,
                 'no_end_date': no_end_date,
                 'hidden': 0,
                 'is_bud': 0,
-                'is_credit_account': 0
+                'is_credit_account': 0,
+                'is_system': 0
             }
             
             category_id = _add_category_to_redis('expense_categories', current_user.id, new_category)
@@ -16093,7 +16948,7 @@ def add_recurring_expense():
                 return jsonify({'status': 'error', 'message': 'Failed to create category'}), 500
 
             # Sync to all credit accounts (creates NON-RECURRING c_expense categories)
-            _sync_expense_category_to_credit_accounts(current_user.id, category_name, max_display_order + 1)
+            _sync_expense_category_to_credit_accounts(current_user.id, category_name, new_display_order)
 
         # Step 3: Create recurring expense record in Redis
         recurring_data = {
@@ -17756,13 +18611,13 @@ def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val)
             cat_row = cursor.fetchone()
             if not cat_row:
                 cursor.execute(
-                    "SELECT COALESCE(MAX(display_order), 0) AS max_display_order FROM c_expense_categories WHERE account_id = %s",
+                    "SELECT COALESCE(MAX(display_order), 1.0) AS max_do FROM c_expense_categories WHERE account_id = %s AND FLOOR(display_order) = 1",
                     (account_id,)
                 )
                 max_order = cursor.fetchone()
-                display_order = max_order['max_display_order'] + 1 if max_order and max_order['max_display_order'] is not None else 1
+                display_order = round(float(max_order['max_do']) + 0.0001, 4) if max_order and max_order['max_do'] is not None else 1.0001
                 cursor.execute(
-                    "INSERT INTO c_expense_categories (account_id, name, display_order, is_bud) VALUES (%s, %s, %s, 1)",
+                    "INSERT INTO c_expense_categories (account_id, name, display_order, is_bud, is_system) VALUES (%s, %s, %s, 1, 0)",
                     (account_id, bud_name, display_order)
                 )
                 category_id = cursor.lastrowid
@@ -18933,13 +19788,14 @@ def toggle_bud_active():
         if active == 1:
             if not bud_row.get('expense_category_id'):
                 cursor.execute("""
-                    SELECT COALESCE(MAX(display_order), 0) FROM expense_categories WHERE user_id = %s
+                    SELECT COALESCE(MAX(display_order), 1.0) AS max_do FROM expense_categories WHERE user_id = %s AND FLOOR(display_order) = 1
                 """, (current_user.id,))
-                max_order = cursor.fetchone()['COALESCE(MAX(display_order), 0)']
+                max_order_val = cursor.fetchone()['max_do']
+                new_display_order = round(float(max_order_val) + 0.0001, 4)
                 cursor.execute("""
-                    INSERT INTO expense_categories (user_id, name, display_order, is_bud)
-                    VALUES (%s, %s, %s, 1)
-                """, (current_user.id, bud_name, max_order + 1))
+                    INSERT INTO expense_categories (user_id, name, display_order, is_bud, is_system)
+                    VALUES (%s, %s, %s, 1, 0)
+                """, (current_user.id, bud_name, new_display_order))
                 expense_category_id = cursor.lastrowid
                 
                 # Update bud in Redis with new expense_category_id
@@ -19434,7 +20290,7 @@ def add_credit_account():
     account_type = data.get('type')
     starting_balance = data.get('starting_balance', None)
 
-    if not name or not interest_rate or not account_type:
+    if not name or interest_rate is None or interest_rate == '' or not account_type:
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
     is_card = 1 if account_type == 'card' else 0
@@ -19469,38 +20325,41 @@ def add_credit_account():
         {
             'account_id': temp_account_id,
             'name': 'Interest Charge',
-            'display_order': 2,
+            'display_order': 0.0003,
             'group_id': None,
             'is_recurring': 0,
             'no_end_date': 0,
             'hidden': 0,
             'is_bud': 0,
             'is_interest': 1,
-            'is_auto_adjustment': 0
+            'is_auto_adjustment': 0,
+            'is_system': 1
         },
         {
             'account_id': temp_account_id,
             'name': 'Uncategorized',
-            'display_order': 0,
+            'display_order': 0.0001,
             'group_id': None,
             'is_recurring': 0,
             'no_end_date': 0,
             'hidden': 0,
             'is_bud': 0,
             'is_interest': 0,
-            'is_auto_adjustment': 1
+            'is_auto_adjustment': 1,
+            'is_system': 1
         },
         {
             'account_id': temp_account_id,
             'name': 'Starting Balance',
-            'display_order': 1,
+            'display_order': 0.0002,
             'group_id': None,
             'is_recurring': 0,
             'no_end_date': 0,
             'hidden': 0,
             'is_bud': 0,
             'is_interest': 0,
-            'is_auto_adjustment': 0
+            'is_auto_adjustment': 0,
+            'is_system': 1
         }
     ])
     # IDs are in order: [Interest Charge, Uncategorized, Starting Balance]
@@ -19517,43 +20376,21 @@ def add_credit_account():
     # Create matching expense_categories record for payment
     payment_category_name = f"{name} payment"
     
-    # Payment categories always get display_order 1 (top of list)
+    # Payment categories get next display_order in ungrouped tier (appears at top with DESC sort)
     expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
-    new_display_order = 1
+    if expense_categories is not None:
+        new_display_order = _next_display_order(expense_categories, tier=1)
+    else:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COALESCE(MAX(display_order), 1.0) FROM expense_categories WHERE user_id = %s AND FLOOR(display_order) = 1", (current_user.id,))
+            new_display_order = round(float(cursor.fetchone()[0]) + 0.0001, 4)
+            cursor.close()
     
-    # Shift all non-system categories at or above this position up by 1
-    if expense_categories:
-        shifted = False
-        for cat in expense_categories:
-            if cat.get('is_auto_adjustment') == 1:
-                continue
-            if cat.get('display_order', 0) >= new_display_order:
-                cat['display_order'] = cat.get('display_order', 0) + 1
-                shifted = True
-        if shifted:
-            _redis_client.set(
-                f"expense_categories:v1:{current_user.id}",
-                json.dumps(expense_categories, cls=DecimalEncoder)
-            )
-            _redis_client.expire(f"expense_categories:v1:{current_user.id}", 604800)
-            _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
-    # Also shift c_expense_categories display_order to stay in sync
-    c_expense_cats = _get_categories_from_redis('c_expense_categories', current_user.id)
-    if c_expense_cats:
-        shifted = False
-        for cat in c_expense_cats:
-            if cat.get('is_auto_adjustment') == 1 or cat.get('is_interest') == 1:
-                continue
-            if cat.get('display_order', 0) >= new_display_order:
-                cat['display_order'] = cat.get('display_order', 0) + 1
-                shifted = True
-        if shifted:
-            _redis_client.set(
-                f"c_expense_categories:v1:{current_user.id}",
-                json.dumps(c_expense_cats, cls=DecimalEncoder)
-            )
-            _redis_client.expire(f"c_expense_categories:v1:{current_user.id}", 604800)
-            _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_categories')
+    # Also create c_expense payment category at top of ungrouped tier for this account
+    c_expense_cats = _get_categories_from_redis('c_expense_categories', current_user.id) or []
+    account_cats = [cat for cat in c_expense_cats if cat.get('account_id') == temp_account_id]
+    c_expense_display_order = _next_display_order(account_cats, tier=1)
     
     # Set is_recurring and no_end_date if recurring payment is enabled
     is_recurring = 1 if recurring_payment else 0
@@ -19570,7 +20407,8 @@ def add_credit_account():
         'hidden': 0,
         'is_bud': 0,
         'is_credit_account': 1,
-        'credit_account_id': temp_account_id
+        'credit_account_id': temp_account_id,
+        'is_system': 0
     })
     
     # Create recurring expense entry if recurring payment is enabled
@@ -20357,6 +21195,26 @@ def delete_credit_account():
                         else:
                             _redis_client.delete(cat_redis_key)
                         _redis_client.sadd(dirty_key, 'c_expense_categories')
+                    
+                    # 1b. Delete c_expense_category_groups for this account
+                    ceg_redis_key = f"c_expense_category_groups:v1:{current_user.id}"
+                    ceg_cached = _redis_client.get(ceg_redis_key)
+                    if ceg_cached:
+                        groups = json.loads(ceg_cached)
+                        group_ids_to_delete = [g['id'] for g in groups if g.get('account_id') == actual_id_to_delete]
+                        filtered_groups = [g for g in groups if g.get('account_id') != actual_id_to_delete]
+                        if filtered_groups:
+                            _redis_client.setex(ceg_redis_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_groups, cls=DecimalEncoder))
+                        else:
+                            _redis_client.delete(ceg_redis_key)
+                        _redis_client.sadd(dirty_key, 'c_expense_category_groups')
+                        # Add real (positive) IDs to pending deletes
+                        if group_ids_to_delete:
+                            pending_ceg_key = f"pending_deletes:c_expense_category_groups:{current_user.id}"
+                            for gid in group_ids_to_delete:
+                                if gid and int(gid) > 0:
+                                    _redis_client.sadd(pending_ceg_key, str(gid))
+                            _redis_client.expire(pending_ceg_key, PERSISTENT_CACHE_TTL)
                     
                     # 2. Delete c_expense_entries (via c_expense_categories -> cascade)
                     # These are stored per user, not per account, so we need to filter
@@ -21875,38 +22733,41 @@ def quiltt_sync_profile():
                                 {
                                     'account_id': temp_account_id,
                                     'name': 'Interest Charge',
-                                    'display_order': 2,
+                                    'display_order': 0.0003,
                                     'group_id': None,
                                     'is_recurring': 0,
                                     'no_end_date': 0,
                                     'hidden': 0,
                                     'is_bud': 0,
                                     'is_interest': 1,
-                                    'is_auto_adjustment': 0
+                                    'is_auto_adjustment': 0,
+                                    'is_system': 1
                                 },
                                 {
                                     'account_id': temp_account_id,
                                     'name': 'Uncategorized',
-                                    'display_order': 0,
+                                    'display_order': 0.0001,
                                     'group_id': None,
                                     'is_recurring': 0,
                                     'no_end_date': 0,
                                     'hidden': 0,
                                     'is_bud': 0,
                                     'is_interest': 0,
-                                    'is_auto_adjustment': 1
+                                    'is_auto_adjustment': 1,
+                                    'is_system': 1
                                 },
                                 {
                                     'account_id': temp_account_id,
                                     'name': 'Starting Balance',
-                                    'display_order': 1,
+                                    'display_order': 0.0002,
                                     'group_id': None,
                                     'is_recurring': 0,
                                     'no_end_date': 0,
                                     'hidden': 0,
                                     'is_bud': 0,
                                     'is_interest': 0,
-                                    'is_auto_adjustment': 0
+                                    'is_auto_adjustment': 0,
+                                    'is_system': 1
                                 }
                             ])
                             # IDs are in order: [Interest Charge, Uncategorized, Starting Balance]
@@ -21918,44 +22779,12 @@ def quiltt_sync_profile():
                             # Create matching expense_categories record for payment
                             payment_category_name = f"{credit_account_display_name} payment"
                             
-                            # Payment categories always get display_order 1 (top of list)
+                            # Payment categories get next display_order in ungrouped tier (appears at top with DESC sort)
                             expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
-                            new_display_order = 1
-                            
-                            # Shift all non-system categories at or above this position up by 1
-                            if expense_categories:
-                                shifted = False
-                                for cat in expense_categories:
-                                    if cat.get('is_auto_adjustment') == 1:
-                                        continue
-                                    if cat.get('display_order', 0) >= new_display_order:
-                                        cat['display_order'] = cat.get('display_order', 0) + 1
-                                        shifted = True
-                                if shifted:
-                                    _redis_client.set(
-                                        f"expense_categories:v1:{current_user.id}",
-                                        json.dumps(expense_categories, cls=DecimalEncoder)
-                                    )
-                                    _redis_client.expire(f"expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL)
-                                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
-                            
-                            # Also shift c_expense_categories display_order to stay in sync
-                            c_expense_cats_sync = _get_categories_from_redis('c_expense_categories', current_user.id)
-                            if c_expense_cats_sync:
-                                shifted = False
-                                for cat in c_expense_cats_sync:
-                                    if cat.get('is_auto_adjustment') == 1 or cat.get('is_interest') == 1:
-                                        continue
-                                    if cat.get('display_order', 0) >= new_display_order:
-                                        cat['display_order'] = cat.get('display_order', 0) + 1
-                                        shifted = True
-                                if shifted:
-                                    _redis_client.set(
-                                        f"c_expense_categories:v1:{current_user.id}",
-                                        json.dumps(c_expense_cats_sync, cls=DecimalEncoder)
-                                    )
-                                    _redis_client.expire(f"c_expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL)
-                                    _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_categories')
+                            if expense_categories is not None:
+                                new_display_order = _next_display_order(expense_categories, tier=1)
+                            else:
+                                new_display_order = 1.0001
                             
                             payment_category_id = _add_category_to_redis('expense_categories', current_user.id, {
                                 'user_id': current_user.id,
@@ -21968,7 +22797,8 @@ def quiltt_sync_profile():
                                 'hidden': 0,
                                 'is_bud': 0,
                                 'is_credit_account': 1,
-                                'credit_account_id': temp_account_id
+                                'credit_account_id': temp_account_id,
+                                'is_system': 0
                             })
                             
                             # Create starting balance entry if starting_balance > 0
@@ -25624,14 +26454,15 @@ def _create_credit_account_auto_adjustment(user_id, quiltt_account_id, bank_bala
                 new_cat_id = _add_category_to_redis('c_expense_categories', user_id, {
                     'account_id': account_id,
                     'name': 'Uncategorized',
-                    'display_order': 0,
+                    'display_order': 0.0001,
                     'group_id': None,
                     'is_recurring': 0,
                     'no_end_date': 0,
                     'hidden': 0,
                     'is_bud': 0,
                     'is_interest': 0,
-                    'is_auto_adjustment': 1
+                    'is_auto_adjustment': 1,
+                    'is_system': 1
                 })
                 
                 if new_cat_id:
@@ -25959,38 +26790,41 @@ def quiltt_toggle_sync():
                                     {
                                         'account_id': temp_account_id,
                                         'name': 'Interest Charge',
-                                        'display_order': 2,
+                                        'display_order': 0.0003,
                                         'group_id': None,
                                         'is_recurring': 0,
                                         'no_end_date': 0,
                                         'hidden': 0,
                                         'is_bud': 0,
                                         'is_interest': 1,
-                                        'is_auto_adjustment': 0
+                                        'is_auto_adjustment': 0,
+                                        'is_system': 1
                                     },
                                     {
                                         'account_id': temp_account_id,
                                         'name': 'Uncategorized',
-                                        'display_order': 0,
+                                        'display_order': 0.0001,
                                         'group_id': None,
                                         'is_recurring': 0,
                                         'no_end_date': 0,
                                         'hidden': 0,
                                         'is_bud': 0,
                                         'is_interest': 0,
-                                        'is_auto_adjustment': 1
+                                        'is_auto_adjustment': 1,
+                                        'is_system': 1
                                     },
                                     {
                                         'account_id': temp_account_id,
                                         'name': 'Starting Balance',
-                                        'display_order': 1,
+                                        'display_order': 0.0002,
                                         'group_id': None,
                                         'is_recurring': 0,
                                         'no_end_date': 0,
                                         'hidden': 0,
                                         'is_bud': 0,
                                         'is_interest': 0,
-                                        'is_auto_adjustment': 0
+                                        'is_auto_adjustment': 0,
+                                        'is_system': 1
                                     }
                                 ])
                                 # IDs are in order: [Interest Charge, Uncategorized, Starting Balance]
@@ -26002,44 +26836,12 @@ def quiltt_toggle_sync():
                                 # Create matching expense_categories record for payment
                                 payment_category_name = f"{credit_account_display_name} payment"
                                 
-                                # Payment categories always get display_order 1 (top of list)
+                                # Payment categories get next display_order in ungrouped tier (appears at top with DESC sort)
                                 expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
-                                new_display_order = 1
-                                
-                                # Shift all non-system categories at or above this position up by 1
-                                if expense_categories:
-                                    shifted = False
-                                    for cat in expense_categories:
-                                        if cat.get('is_auto_adjustment') == 1:
-                                            continue
-                                        if cat.get('display_order', 0) >= new_display_order:
-                                            cat['display_order'] = cat.get('display_order', 0) + 1
-                                            shifted = True
-                                    if shifted:
-                                        _redis_client.set(
-                                            f"expense_categories:v1:{current_user.id}",
-                                            json.dumps(expense_categories, cls=DecimalEncoder)
-                                        )
-                                        _redis_client.expire(f"expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL)
-                                        _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
-                                
-                                # Also shift c_expense_categories display_order to stay in sync
-                                c_expense_cats_toggle = _get_categories_from_redis('c_expense_categories', current_user.id)
-                                if c_expense_cats_toggle:
-                                    shifted = False
-                                    for cat in c_expense_cats_toggle:
-                                        if cat.get('is_auto_adjustment') == 1 or cat.get('is_interest') == 1:
-                                            continue
-                                        if cat.get('display_order', 0) >= new_display_order:
-                                            cat['display_order'] = cat.get('display_order', 0) + 1
-                                            shifted = True
-                                    if shifted:
-                                        _redis_client.set(
-                                            f"c_expense_categories:v1:{current_user.id}",
-                                            json.dumps(c_expense_cats_toggle, cls=DecimalEncoder)
-                                        )
-                                        _redis_client.expire(f"c_expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL)
-                                        _redis_client.sadd(f"dirty_tables:{current_user.id}", 'c_expense_categories')
+                                if expense_categories is not None:
+                                    new_display_order = _next_display_order(expense_categories, tier=1)
+                                else:
+                                    new_display_order = 1.0001
                                 
                                 _add_category_to_redis('expense_categories', current_user.id, {
                                     'user_id': current_user.id,
@@ -26052,7 +26854,8 @@ def quiltt_toggle_sync():
                                     'hidden': 0,
                                     'is_bud': 0,
                                     'is_credit_account': 1,
-                                    'credit_account_id': temp_account_id
+                                    'credit_account_id': temp_account_id,
+                                    'is_system': 0
                                 })
                                 
                                 log_info(app.logger, 'CREDIT', f"Created payment category '{payment_category_name}' for credit account (toggle-sync)")
@@ -26503,14 +27306,17 @@ def quiltt_create_recommended_categories():
         five_years_from_now = (datetime.now() + timedelta(days=365*5)).strftime('%Y-%m-%d')
         today = datetime.now().strftime('%Y-%m-%d')
         
-        # Process income categories
+        # Process income categories - use tiered display_order (1.YYYY for ungrouped)
+        # Get existing categories to compute starting display_order
+        existing_inc = _get_categories_from_redis('income_categories', current_user.id) or []
+        inc_display_order = _next_display_order(existing_inc, tier=1)
         for idx, cat in enumerate(income_categories):
             try:
                 result = _create_single_category(
                     user_id=current_user.id,
                     category_type='income',
                     category_data=cat,
-                    display_order=idx + 1,
+                    display_order=round(inc_display_order + idx * 0.0001, 4),
                     today=today,
                     five_years_from_now=five_years_from_now
                 )
@@ -26520,13 +27326,15 @@ def quiltt_create_recommended_categories():
                 errors.append(f"Income '{cat.get('name')}': {str(e)}")
         
         # Process expense categories
+        existing_exp = _get_categories_from_redis('expense_categories', current_user.id) or []
+        exp_display_order = _next_display_order(existing_exp, tier=1)
         for idx, cat in enumerate(expense_categories):
             try:
                 result = _create_single_category(
                     user_id=current_user.id,
                     category_type='expense',
                     category_data=cat,
-                    display_order=idx + 1,
+                    display_order=round(exp_display_order + idx * 0.0001, 4),
                     today=today,
                     five_years_from_now=five_years_from_now
                 )
@@ -26587,7 +27395,8 @@ def _create_single_category(user_id, category_type, category_data, display_order
         'is_recurring': 1 if is_recurring else 0,
         'is_auto_adjustment': 0,
         'no_end_date': 1 if is_recurring and category_data.get('no_end_date', True) else 0,
-        'hidden': 0
+        'hidden': 0,
+        'is_system': 0
     }
     
     # Add expense-specific fields

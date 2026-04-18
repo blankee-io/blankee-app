@@ -6,6 +6,7 @@
     --bg-page:            #F2F7F7;
 
     --primary:            #2AAAA8;
+    --primary-mid:        #42C0BE;
     --primary-hover:      #59D6D4;
     --primary-lighter:    #E6FAF9;
 
@@ -15,6 +16,7 @@
     --secondary-lighter:  #F4F4F4;
 
     --accent:             #E45F1C;
+    --accent-mid:         #EA7F4A;
     --accent-hover:       #EF9F77;
     --accent-lighter:     #FDEEEE;
 
@@ -3894,6 +3896,12 @@ transform: scale(1.2);
 .zebra-odd-ca { background-color: var(--secondary-hover); }
 .zebra-even-ca { background-color: var(--secondary-lighter); }
 
+/* For border-collapse: separate tables, td paints over tr — target cells explicitly */
+.manage-cat-table .zebra-odd-income > td { background-color: var(--primary-hover); }
+.manage-cat-table .zebra-even-income > td { background-color: var(--primary-lighter); }
+.manage-cat-table .zebra-odd-expense > td { background-color: var(--accent-hover); }
+.manage-cat-table .zebra-even-expense > td { background-color: var(--accent-lighter); }
+
 .category-cell {
     position: relative;
     margin-right: 5px;
@@ -4215,6 +4223,7 @@ transform: scale(1.2);
     margin-right: 0;
     color: var(--text-dark);
     cursor: move;
+    touch-action: none;
 }
 
 .ui-sortable-helper {
@@ -4223,13 +4232,14 @@ transform: scale(1.2);
 
 .sort-handle i {
     /* Adjust the icon size as needed */
-    font-size: 15px; 
+    font-size: 12px; 
     vertical-align: middle;
 }
 
 /* Overlay for modal background */
 #category-input-overlay,
-#addCategoryModal.category-input-overlay {
+#addCategoryModal.category-input-overlay,
+#addGroupModal.category-input-overlay {
     position: fixed;
     top: 0;
     left: 0;
@@ -4250,7 +4260,8 @@ transform: scale(1.2);
 #income-category-input-container,
 #expense-category-input-container,
 #ca-category-input-container,
-#add-category-input-container {
+#add-category-input-container,
+#add-group-input-container {
     position: fixed;
     top: 50%;
     left: 50%;
@@ -4273,7 +4284,8 @@ transform: scale(1.2);
 #income-category-input-container input,
 #expense-category-input-container input,
 #ca-category-input-container input,
-#add-category-input-container input {
+#add-category-input-container input,
+#add-group-input-container input {
     width: 100%;
     height: 44px;
     padding: 12px 14px;
@@ -4291,7 +4303,8 @@ transform: scale(1.2);
 #income-category-input-container input:focus,
 #expense-category-input-container input:focus,
 #ca-category-input-container input:focus,
-#add-category-input-container input:focus {
+#add-category-input-container input:focus,
+#add-group-input-container input:focus {
     background-color: var(--text-light);
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-lighter);
@@ -4302,7 +4315,8 @@ transform: scale(1.2);
 #income-category-input-container button,
 #expense-category-input-container button,
 #ca-category-input-container button,
-#add-category-input-container button {
+#add-category-input-container button,
+#add-group-input-container button {
     width: 35px;
     height: 35px;
     margin-left: 8px;
@@ -4318,7 +4332,8 @@ transform: scale(1.2);
 #income-category-input-container button:hover,
 #expense-category-input-container button:hover,
 #ca-category-input-container button:hover,
-#add-category-input-container button:hover {
+#add-category-input-container button:hover,
+#add-group-input-container button:hover {
     background: var(--primary-hover);
     transform: scale(1.2);
 }
@@ -4326,7 +4341,8 @@ transform: scale(1.2);
 #income-category-input-container button:disabled,
 #expense-category-input-container button:disabled,
 #ca-category-input-container button:disabled,
-#add-category-input-container button:disabled {
+#add-category-input-container button:disabled,
+#add-group-input-container button:disabled {
     background: var(--secondary-hover);
     cursor: not-allowed;
 }
@@ -4488,7 +4504,8 @@ td:has(.bucket-progress-container) {
     box-sizing: border-box;
 }
 
-#editCategoryInput {
+#editCategoryInput,
+#editGroupInput {
     flex: 1;
     width: 150px;
     padding: 10px 12px;
@@ -4500,7 +4517,8 @@ td:has(.bucket-progress-container) {
     box-sizing: border-box;
 }
 
-#editCategoryInput:focus {
+#editCategoryInput:focus,
+#editGroupInput:focus {
     background-color: var(--text-light);
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-lighter);
@@ -4668,7 +4686,19 @@ td:has(.bucket-progress-container) {
     }
 
     .sort-handle i {
-        font-size: 20px;
+        font-size: 14px;
+    }
+
+    .sort-handle-lock i {
+        font-size: 14px;
+    }
+
+    .sidebar-group-header .group-sort-handle {
+        font-size: 14px;
+    }
+
+    .sidebar-group-header .group-sort-handle-lock {
+        font-size: 14px;
     }
 
     .category-name {
@@ -4933,7 +4963,7 @@ td:has(.bucket-progress-container) {
 
 .current-week-outline {
     position: absolute;
-    z-index: 5;
+    z-index: 15;
     background: none;
     border: 4px solid var(--accent);
     border-radius: 10px;
@@ -5194,6 +5224,13 @@ td:has(.bucket-progress-container) {
         height: 40px;    
     }
 
+    #income-categories-body .group-header-row td,
+    #expense-categories-body .group-header-row td,
+    .ca-group-header.group-header-row td,
+    .sidebar-group-header td {
+        height: 40px;
+    }
+
     #income-categories-table,
     #expense-categories-table,
     #remainder-row,
@@ -5333,7 +5370,8 @@ td:has(.bucket-progress-container) {
 .ca-collapsed .category-btn-container.ca,
 .ca-collapsed .search-btn-container.ca,
 .ca-collapsed tbody[id^="ca-categories-body-"],
-.ca-collapsed .ca-bottom-row {
+.ca-collapsed .ca-bottom-row,
+.ca-collapsed .sidebar-group-header {
     display: none !important;
 }
 
@@ -13432,7 +13470,8 @@ transform: scale(1.2);
 /* Manage categories table */
 .manage-cat-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: clamp(12px, calc(1.13vw + 4.65px), 14px);
     text-align: left;
     table-layout: fixed;
@@ -13530,7 +13569,13 @@ transform: scale(1.2);
 
 .manage-cat-table .sort-handle:hover {
     color: inherit;
-    transform: scale(1.2);
+}
+
+.manage-cat-table .sort-handle-lock {
+    margin-right: 8px;
+    margin-left: 12px;
+    color: inherit;
+    display: inline-block;
 }
 
 /* Rename button (always visible in manage page) - must override global .rename-category-btn */
@@ -13563,6 +13608,7 @@ transform: scale(1.2);
     max-width: none;
     overflow: hidden;
     padding: 0;
+    padding-left: 28px;
     height: 35px;
     width: 100%;
 }
@@ -13578,13 +13624,192 @@ transform: scale(1.2);
     align-items: center;
 }
 
-.manage-cat-table .category-cell .category-name:first-child {
-    padding-left: 12px;
-}
-
 /* Hidden categories styling */
 .manage-cat-table .hidden_style {
     opacity: 0.5;
+}
+
+/* ── Category Group Styles ── */
+
+/* Group header row */
+.manage-cat-table .group-header-row {
+    background: var(--primary-lighter);
+    position: relative;
+    z-index: 1;
+}
+
+/* Income group: primary bg */
+.manage-cat-table .group-header-row.income-group-header {
+    background: var(--primary-mid);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+}
+
+/* Expense group: accent bg */
+.manage-cat-table .group-header-row.expense-group-header {
+    background: var(--accent-mid);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+}
+
+/* Drop highlight: accent for income tables, primary for expense tables */
+.manage-cat-table.income-manage-table .group-header-row.drop-target-highlight {
+    box-shadow: inset 0 0 0 4px var(--accent), 0 0 8px var(--shadow-md);
+}
+
+.manage-cat-table.expense-manage-table .group-header-row.drop-target-highlight {
+    box-shadow: inset 0 0 0 4px var(--primary), 0 0 8px var(--shadow-md);
+}
+
+/* Dim ungrouped/system groups during group drag */
+.group-drag-dimmed {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+/* Dim original main table row while its clone is being dragged */
+.main-row-dragging > td {
+    visibility: hidden;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    line-height: 0 !important;
+    font-size: 0 !important;
+    overflow: hidden;
+}
+.main-row-dragging {
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden;
+}
+
+/* Floating clone of main table row during drag — inherits computed styles from JS */
+.main-row-drag-clone {
+    border-collapse: collapse;
+    table-layout: fixed;
+    border-radius: 3px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px var(--shadow-lg);
+}
+
+/* Drop indicator in main table during drag */
+.main-table-drop-indicator td {
+    background: var(--secondary-lighter) !important;
+    border: none !important;
+    outline: 2px dashed var(--secondary);
+    outline-offset: -2px;
+    padding: 0 !important;
+    line-height: 0 !important;
+    font-size: 0 !important;
+    box-sizing: border-box !important;
+}
+
+/* Drop highlight for dashboard sidebar group headers */
+.sidebar-group-header.income-group-header.drop-target-highlight {
+    box-shadow: inset 0 0 0 3px var(--accent), 0 0 8px var(--shadow-md);
+}
+
+.sidebar-group-header.expense-group-header.drop-target-highlight {
+    box-shadow: inset 0 0 0 3px var(--primary), 0 0 8px var(--shadow-md);
+}
+
+.manage-cat-table .group-header-cell {
+    padding: 10px 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-light);
+}
+
+.manage-cat-table .group-header-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.manage-cat-table .sortable-placeholder {
+    background: var(--secondary-lighter);
+    border: 2px dashed var(--secondary-hover);
+    visibility: visible !important;
+}
+
+.manage-cat-table .group-sort-handle {
+    cursor: move;
+    color: inherit;
+    font-size: 1.05rem;
+    padding: 0 4px;
+    flex-shrink: 0;
+}
+
+.manage-cat-table .group-sort-handle-lock {
+    color: inherit;
+    font-size: 1.05rem;
+    padding: 0 4px;
+    flex-shrink: 0;
+}
+
+.manage-cat-table .group-icon {
+    color: inherit;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.manage-cat-table .group-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.manage-cat-table .edit-group-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    font-size: 14px;
+    padding: 4px 6px;
+    display: inline-flex;
+    transition: all 0.2s ease;
+}
+
+.manage-cat-table .edit-group-btn:hover {
+    color: inherit;
+    transform: scale(1.2);
+}
+
+/* Grouped category row — indent */
+.manage-cat-table .grouped-category-row .grouped-cell {
+    padding-left: 36px;
+}
+
+/* System section */
+/* Add Group button — matches add-cat-btn style */
+.manage-cat-btn.add-group-btn {
+    background: none;
+    width: auto;
+    height: auto;
+    font-size: 20px;
+    padding: 4px 0;
+    line-height: 28px;
+}
+
+.income .manage-cat-btn.add-group-btn {
+    color: var(--primary);
+}
+
+.income .manage-cat-btn.add-group-btn:hover {
+    color: var(--primary-hover);
+    background: none;
+    transform: scale(1.2);
+}
+
+.expenses .manage-cat-btn.add-group-btn {
+    color: var(--accent);
+}
+
+.expenses .manage-cat-btn.add-group-btn:hover {
+    color: var(--accent-hover);
+    background: none;
+    transform: scale(1.2);
 }
 
 /* Dark mode support */
@@ -13596,14 +13821,173 @@ transform: scale(1.2);
     }
 
     .manage-cat-table .sort-handle {
-        color: var(--secondary);
+        color: inherit;
     }
 
-    .manage-cat-table .sort-handle:hover {
-        color: var(--secondary-hover);
-        transform: scale(1.2);
-    }
+}
 
+/* ==================== Dashboard Group Headers ==================== */
+
+/* Sidebar group header row */
+.sidebar-group-header {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    z-index: 1;
+}
+
+.sidebar-group-header.income-group-header {
+    background: var(--primary-mid);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+}
+
+.sidebar-group-header.expense-group-header {
+    background: var(--accent-mid);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+}
+
+.sidebar-group-header.ca-group-header {
+    background: var(--secondary);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+}
+
+.sidebar-group-header td {
+    padding: 0;
+    padding-left: calc(var(--base-padding) + var(--p-scaling-factor));
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-light);
+    text-align: left;
+    vertical-align: middle;
+    --base-padding: .2px;
+    --p-scaling-factor: 0.9vw;
+}
+
+@media (width > 600px) {
+    .sidebar-group-header td {
+        height: 20px;
+    }
+}
+
+.sidebar-group-header .group-chevron {
+    display: inline-block;
+    transition: transform 0.2s ease;
+    margin-right: 4px;
+    font-size: 0.75rem;
+}
+
+.sidebar-group-header .group-sort-handle {
+    cursor: move;
+    color: inherit;
+    padding: 0 2px 0 0;
+    display: none;
+    touch-action: none;
+}
+
+.sidebar-group-header .group-sort-handle-lock {
+    color: inherit;
+    padding: 0 2px 0 0;
+    display: none;
+    opacity: 0.5;
+}
+
+@media (width > 600px) {
+    .sidebar-group-header .group-sort-handle,
+    .sidebar-group-header .group-sort-handle-lock {
+        font-size: 12px;
+    }
+}
+
+.sort-handle-lock {
+    margin-right: 0;
+    color: var(--text-dark);
+    opacity: 0.5;
+    display: none;
+}
+
+.sort-handle-lock i {
+    vertical-align: middle;
+}
+
+@media (width > 600px) {
+    .sort-handle-lock i {
+        font-size: 12px;
+    }
+}
+
+.sortable-placeholder {
+    visibility: visible !important;
+    background: var(--secondary-lighter) !important;
+    border: none !important;
+    outline: 2px dashed var(--secondary);
+    outline-offset: -2px;
+    overflow: hidden !important;
+    line-height: 0 !important;
+    font-size: 0 !important;
+    padding: 0 !important;
+}
+.sortable-placeholder td,
+.sortable-placeholder th {
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    line-height: 0 !important;
+    font-size: 0 !important;
+    overflow: hidden !important;
+}
+
+@media (max-width: 600px) {
+    .sortable-placeholder {
+    }
+}
+
+/* Main table group header row */
+#income-categories-body .group-header-row,
+#expense-categories-body .group-header-row,
+.ca-group-header.group-header-row {
+    position: relative;
+    z-index: 1;
+}
+
+#income-categories-body .group-header-row {
+    background: var(--primary-mid);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+}
+
+#expense-categories-body .group-header-row {
+    background: var(--accent-mid);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+}
+
+.ca-group-header.group-header-row {
+    background: var(--secondary);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+}
+
+#income-categories-body .group-header-row td,
+#expense-categories-body .group-header-row td,
+.ca-group-header.group-header-row td {
+    padding: 0 3px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-light);
+    text-align: right;
+    vertical-align: middle;
+}
+
+#income-categories-body .group-header-row .group-sum-cell,
+#expense-categories-body .group-header-row .group-sum-cell,
+.ca-group-header.group-header-row .group-sum-cell {
+    font-weight: 500;
+}
+
+/* Replace shadow with border on all collapsed groups */
+.sidebar-group-header.group-collapsed,
+.group-header-row.group-collapsed,
+#income-categories-body .group-header-row.group-collapsed,
+#expense-categories-body .group-header-row.group-collapsed,
+.ca-group-header.group-header-row.group-collapsed {
+    box-shadow: none;
 }
 
 /* Category dropdown styles inside recurring add modals */

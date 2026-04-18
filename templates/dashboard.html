@@ -141,8 +141,8 @@
                     <tbody>
                         <!-- Loop through each income category and display it -->
                         {% for category in income_categories %}
-                            {% if category.name != "Starting Balance" %}
-                            <tr data-category-id="{{ category.id }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}">
+                            {% if not category.is_system %}
+                            <tr data-category-id="{{ category.id }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-group-id="{{ category.group_id or '' }}" data-is-system="{{ category.is_system or 0 }}">
                                 <td class="category-cell">
                                     <span class="category-name">
                                         {% if category.is_bud %}
@@ -171,6 +171,23 @@
                             </tr>
                             {% endif %}
                         {% endfor %}
+                        <!-- System categories (rendered at bottom, no group header) -->
+                        {% for category in income_categories %}
+                            {% if category.is_system and category.name != 'Starting Balance' %}
+                            <tr data-category-id="{{ category.id }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-group-id="" data-is-system="1" class="system-category-row">
+                                <td class="category-cell">
+                                    <span class="category-name">
+                                        {% if category.is_auto_adjustment %}
+                                            <i class="fa-regular fa-lock category-icon"></i>
+                                        {% else %}
+                                            <i class="fa-regular fa-gear category-icon"></i>
+                                        {% endif %}
+                                        {{ category.name }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endif %}
+                        {% endfor %}
                         <!-- Row for displaying total income -->
                         <tr id="income-total-row">
                             <td>Total Income</td>
@@ -190,8 +207,8 @@
                     </thead>
                     <tbody>
                         {% for category in expense_categories %}
-                            {% if category.name != 'Interest Charge' %}
-                            <tr data-category-id="{{ category.id }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-is-credit-account="{{ category.is_credit_account }}">
+                            {% if not category.is_system %}
+                            <tr data-category-id="{{ category.id }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-is-credit-account="{{ category.is_credit_account }}" data-group-id="{{ category.group_id or '' }}" data-is-system="{{ category.is_system or 0 }}">
                                 <td class="category-cell">
                                     <span class="category-name">
                                         {% if category.is_bud %}
@@ -220,6 +237,23 @@
                                         data-category-name="{{ category.name }}">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
+                                </td>
+                            </tr>
+                            {% endif %}
+                        {% endfor %}
+                        <!-- System categories (rendered at bottom, no group header) -->
+                        {% for category in expense_categories %}
+                            {% if category.is_system and category.name != 'Starting Balance' %}
+                            <tr data-category-id="{{ category.id }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-is-credit-account="{{ category.is_credit_account }}" data-group-id="" data-is-system="1" class="system-category-row">
+                                <td class="category-cell">
+                                    <span class="category-name">
+                                        {% if category.is_auto_adjustment %}
+                                            <i class="fa-regular fa-lock category-icon"></i>
+                                        {% else %}
+                                            <i class="fa-regular fa-gear category-icon"></i>
+                                        {% endif %}
+                                        {{ category.name }}
+                                    </span>
                                 </td>
                             </tr>
                             {% endif %}
@@ -256,16 +290,14 @@
                         </thead>
                         <tbody>
                             {% for category in c_expense_categories if category.account_id == account.id %}
-                                {% if category.name != "Starting Balance" %}
-                                <tr data-category-id="{{ category.id }}" data-is-interest="{{ category.is_interest }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}">
+                                {% if not category.is_system and category.name != 'Starting Balance' %}
+                                <tr data-category-id="{{ category.id }}" data-is-interest="{{ category.is_interest }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-group-id="{{ category.group_id or '' }}" data-is-system="0">
                                     <td class="category-cell">
                                         <span class="category-name">
                                             {% if category.is_bud %}
                                                 <i class="fa-regular fa-seedling category-icon"></i>
                                             {% elif category.is_recurring %}
                                                 <i class="fa-regular fa-arrows-repeat category-icon"></i>
-                                            {% elif category.is_interest or category.is_auto_adjustment %}
-                                                <i class="fa-regular fa-lock category-icon"></i>
                                             {% else %}
                                                 <i class="fa-regular fa-folder category-icon"></i>
                                             {% endif %}
@@ -278,6 +310,23 @@
                                             data-category-name="{{ category.name }}">
                                             <i class="fa-solid fa-pen-to-square"></i>
                                         </button>
+                                    </td>
+                                </tr>
+                                {% endif %}
+                            {% endfor %}
+                            <!-- System categories (Interest Charge, Uncategorized) -->
+                            {% for category in c_expense_categories if category.account_id == account.id %}
+                                {% if category.is_system and category.name != 'Starting Balance' %}
+                                <tr data-category-id="{{ category.id }}" data-is-interest="{{ category.is_interest }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-group-id="" data-is-system="1" class="system-category-row">
+                                    <td class="category-cell">
+                                        <span class="category-name">
+                                            {% if category.is_interest or category.is_auto_adjustment %}
+                                                <i class="fa-regular fa-lock category-icon"></i>
+                                            {% else %}
+                                                <i class="fa-regular fa-gear category-icon"></i>
+                                            {% endif %}
+                                            {{ category.name }}
+                                        </span>
                                     </td>
                                 </tr>
                                 {% endif %}
@@ -619,6 +668,9 @@
         let credit_accounts = {{ credit_accounts | tojson }};
         let incomeCategories = {{ income_categories | tojson | safe }};
         let expenseCategories = {{ expense_categories | tojson | safe }};
+        let incomeGroups = {{ income_groups | tojson | safe }};
+        let expenseGroups = {{ expense_groups | tojson | safe }};
+        let cExpenseGroups = {{ c_expense_groups | tojson | safe }};
 
         let incomeEntries = {{ income_entries | tojson | safe }};
         let expenseEntries = {{ expense_entries | tojson | safe }};
@@ -812,6 +864,10 @@
         // Function to handle the start of a touch event
         function handleTouchStart(event) {
             if (isAnimating || isCategorySortActive) return;
+
+            // Don't start swipe tracking if touching a sort handle (let sortable handle it)
+            const target = event.target;
+            if (target.closest && (target.closest('.sort-handle') || target.closest('.group-sort-handle'))) return;
 
             touchStartX = event.touches[0].screenX;
             touchStartY = event.touches[0].screenY; // Capture the vertical start point
@@ -1043,6 +1099,7 @@
 
             if (sections.includes("populateIncome")) {
                 populateIncomeData();
+                updateAllGroupSums('income');
             }
 
             if (sections.includes("updateIncomeTotals")) {
@@ -1051,10 +1108,12 @@
 
             if (sections.includes("populateExpense")) {
                 populateExpenseData();
+                updateAllGroupSums('expense');
             }
 
             if (sections.includes("populateCa")) {
                 populateCaData();
+                updateAllCaGroupSums();
             }
 
             if (sections.includes("updateExpenseTotals")) {
@@ -1235,6 +1294,11 @@
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
             }).format(value);
+        }
+
+        function parseCurrencyValue(str) {
+            if (!str) return 0;
+            return parseFloat(String(str).replace(/[^0-9.\-]/g, '')) || 0;
         }
 
         function getCutoffDate() {
@@ -1602,79 +1666,395 @@
             });
         }
 
+        // ===================== GROUP COLLAPSE STATE =====================
+        const userId = {{ current_user.id }};
+        function getGroupState(type, groupId) {
+            return localStorage.getItem(`categoryGroupState_${userId}_${type}_${groupId}`) || 'expanded';
+        }
+        function setGroupState(type, groupId, state) {
+            localStorage.setItem(`categoryGroupState_${userId}_${type}_${groupId}`, state);
+        }
+
+        // Build a group header <tr> for the main data table
+        function createGroupHeaderRow(group, type, numColumns) {
+            const headerRow = document.createElement('tr');
+            headerRow.classList.add('group-header-row', `${type}-group-header`);
+            if (type.startsWith('ca_')) headerRow.classList.add('ca-group-header');
+            headerRow.setAttribute('data-group-id', group.id);
+
+            // Data cells (one per date column) — show sums when collapsed
+            for (let i = 0; i < numColumns; i++) {
+                const td = document.createElement('td');
+                td.classList.add('group-sum-cell');
+                td.style.textAlign = 'right';
+                td.style.fontWeight = '600';
+                headerRow.appendChild(td);
+            }
+
+            return headerRow;
+        }
+
+        // Create a sidebar group header row
+        function createSidebarGroupHeader(group, type) {
+            const tr = document.createElement('tr');
+            tr.classList.add('sidebar-group-header', `${type}-group-header`);
+            if (type.startsWith('ca_')) tr.classList.add('ca-group-header');
+            tr.setAttribute('data-group-id', group.id);
+            const td = document.createElement('td');
+            td.classList.add('category-cell', 'sidebar-group-cell');
+
+            const state = getGroupState(type, group.id);
+            const chevronClass = state === 'collapsed' ? 'fa-chevron-right' : 'fa-chevron-down';
+
+            td.innerHTML = `<span class="group-toggle" data-group-id="${group.id}" data-type="${type}">` +
+                `<i class="fa-solid ${chevronClass} group-chevron"></i> ${group.name}</span>`;
+            tr.appendChild(td);
+            return tr;
+        }
+
+        // Toggle group expand/collapse
+        function toggleGroup(type, groupId) {
+            const current = getGroupState(type, groupId);
+            const newState = current === 'collapsed' ? 'expanded' : 'collapsed';
+            setGroupState(type, groupId, newState);
+
+            // Update sidebar chevron
+            const toggle = document.querySelector(`.group-toggle[data-group-id="${groupId}"][data-type="${type}"]`);
+            if (toggle) {
+                const chevron = toggle.querySelector('.group-chevron');
+                chevron.classList.toggle('fa-chevron-right', newState === 'collapsed');
+                chevron.classList.toggle('fa-chevron-down', newState === 'expanded');
+            }
+
+            // Determine target tbody and sidebar based on type
+            let tbody, sidebarTbody;
+            if (type.startsWith('ca_')) {
+                const accountId = type.substring(3);
+                tbody = document.getElementById(`ca-categories-body-${accountId}`);
+                sidebarTbody = document.querySelector(`#ca-categories-table-${accountId} tbody`);
+            } else {
+                const bodyId = type === 'income' ? 'income-categories-body' : 'expense-categories-body';
+                tbody = document.getElementById(bodyId);
+                const sidebarId = type === 'income' ? 'income-categories-table' : 'expense-categories-table';
+                sidebarTbody = document.querySelector(`#${sidebarId} tbody`);
+            }
+
+            // Show/hide category rows in main table
+            const catRows = tbody.querySelectorAll(`tr[data-group-id="${groupId}"]:not(.group-header-row)`);
+            catRows.forEach(row => {
+                row.style.display = newState === 'collapsed' ? 'none' : '';
+            });
+
+            // Show/hide in sidebar
+            const sidebarCats = sidebarTbody.querySelectorAll(`tr[data-group-id="${groupId}"]:not(.sidebar-group-header)`);
+            sidebarCats.forEach(row => {
+                row.style.display = newState === 'collapsed' ? 'none' : '';
+            });
+
+            // Update group header sums
+            const groupHeaderRow = tbody.querySelector(`tr.group-header-row[data-group-id="${groupId}"]`);
+            if (groupHeaderRow) {
+                updateGroupSums(groupHeaderRow, type, groupId, newState);
+                groupHeaderRow.classList.toggle('group-collapsed', newState === 'collapsed');
+            }
+
+            // Toggle collapsed class on sidebar header
+            const sidebarHeader = sidebarTbody.querySelector(`tr.sidebar-group-header[data-group-id="${groupId}"]`);
+            if (sidebarHeader) {
+                sidebarHeader.classList.toggle('group-collapsed', newState === 'collapsed');
+            }
+
+            // Recalculate today highlight outline after rows show/hide
+            requestAnimationFrame(() => {
+                window.dispatchEvent(new Event('resize'));
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+            });
+
+            // Re-run zebra striping
+            if (type.startsWith('ca_')) {
+                const accountId = type.substring(3);
+                zebraStripeVisibleRows(`#ca-categories-body-${accountId}`, 'zebra-odd-ca', 'zebra-even-ca');
+                zebraStripeVisibleRows(`#ca-categories-table-${accountId} tbody`, 'zebra-odd-ca', 'zebra-even-ca');
+            } else if (type === 'income') {
+                zebraStripeVisibleRows('#income-categories-body', 'zebra-odd-income', 'zebra-even-income');
+                zebraStripeVisibleRows('#income-categories-table tbody', 'zebra-odd-income', 'zebra-even-income');
+            } else {
+                zebraStripeVisibleRows('#expense-categories-body', 'zebra-odd-expense', 'zebra-even-expense');
+                zebraStripeVisibleRows('#expense-categories-table tbody', 'zebra-odd-expense', 'zebra-even-expense');
+            }
+        }
+
+        // Delegated click handler for sidebar group toggles
+        document.addEventListener('click', function(e) {
+            const toggle = e.target.closest('.group-toggle');
+            if (toggle) {
+                toggleGroup(toggle.getAttribute('data-type'), toggle.getAttribute('data-group-id'));
+            }
+        });
+
+        // Update group header sum cells
+        function updateGroupSums(headerRow, type, groupId, state) {
+            let tbody;
+            if (type.startsWith('ca_')) {
+                const accountId = type.substring(3);
+                tbody = document.getElementById(`ca-categories-body-${accountId}`);
+            } else {
+                const bodyId = type === 'income' ? 'income-categories-body' : 'expense-categories-body';
+                tbody = document.getElementById(bodyId);
+            }
+            const catRows = tbody.querySelectorAll(`tr[data-group-id="${groupId}"]:not(.group-header-row)`);
+            // Sum cells start at index 0 (no name cell in main table since it's hidden)
+            const sumCells = headerRow.querySelectorAll('.group-sum-cell');
+
+            sumCells.forEach((cell, colIdx) => {
+                if (state === 'expanded') {
+                    cell.textContent = '';
+                    return;
+                }
+                // Sum all category inputs in this column
+                let sum = 0;
+                catRows.forEach(row => {
+                    const input = row.querySelectorAll('input')[colIdx];
+                    if (input) {
+                        const val = parseCurrencyValue(input.value);
+                        if (!isNaN(val)) sum += val;
+                    }
+                });
+                cell.textContent = sum !== 0 ? formatCurrency(sum) : '';
+            });
+        }
+
+        // Update ALL group sums (called after batch data loads)
+        function updateAllGroupSums(type) {
+            const groups = type === 'income' ? incomeGroups : expenseGroups;
+            const bodyId = type === 'income' ? 'income-categories-body' : 'expense-categories-body';
+            const tbody = document.getElementById(bodyId);
+            // User-created groups + virtual groups (_ungrouped, _system)
+            const allGroupIds = groups.map(g => g.id).concat(['_ungrouped', '_system']);
+            allGroupIds.forEach(groupId => {
+                const headerRow = tbody.querySelector(`tr.group-header-row[data-group-id="${groupId}"]`);
+                if (headerRow) {
+                    const state = getGroupState(type, groupId);
+                    updateGroupSums(headerRow, type, groupId, state);
+                }
+            });
+        }
+
+        // Update ALL CA group sums across all credit accounts
+        function updateAllCaGroupSums() {
+            document.querySelectorAll('table[id^="ca-categories-table-"]').forEach(caTable => {
+                const accountId = caTable.id.replace('ca-categories-table-', '');
+                const caType = `ca_${accountId}`;
+                const tbody = document.getElementById(`ca-categories-body-${accountId}`);
+                if (!tbody) return;
+                const accountGroups = cExpenseGroups.filter(g => String(g.account_id) === String(accountId));
+                const allGroupIds = accountGroups.map(g => g.id).concat(['_ungrouped', '_system']);
+                allGroupIds.forEach(groupId => {
+                    const headerRow = tbody.querySelector(`tr.group-header-row[data-group-id="${groupId}"]`);
+                    if (headerRow) {
+                        const state = getGroupState(caType, groupId);
+                        updateGroupSums(headerRow, caType, groupId, state);
+                    }
+                });
+            });
+        }
+
         // Function to create rows for each income category in the month view
         function createAndClearMonthIncomeRows() {
 
             let incomeHiddenActive = localStorage.getItem('allHiddenActive') === 'true';
 
             const incomeTableBody = document.getElementById('income-categories-body');
-            incomeTableBody.innerHTML = ''; // Clear existing income category rows
+            incomeTableBody.innerHTML = '';
+
+            // Also rebuild sidebar with group headers
+            const sidebarTbody = document.querySelector('#income-categories-table tbody');
+            // Remove old sidebar group headers
+            sidebarTbody.querySelectorAll('.sidebar-group-header').forEach(el => el.remove());
 
             const displayedIncomeCategories = document.querySelectorAll("#income-categories-table tbody tr[data-category-id]");
-            
-            displayedIncomeCategories.forEach(displayedCategory => {
-                const categoryName = displayedCategory.querySelector('.category-name').textContent.trim();
-                // Skip the row creation if the category name is "Starting Balance"
-                if (categoryName === "Starting Balance") {
+            const numColumns = globalFridays.length;
+
+            // Organize categories by group
+            const groupedCats = {}; // groupId → [sidebarRow, ...]
+            const ungroupedCats = [];
+            const systemCats = [];
+            displayedIncomeCategories.forEach(cat => {
+                const catId = cat.getAttribute('data-category-id');
+                const catObj = incomeCategories.find(c => String(c.id) === String(catId));
+                const isSystem = catObj ? (catObj.is_system == 1) : (cat.getAttribute('data-is-system') === '1');
+                if (isSystem) {
+                    systemCats.push(cat);
                     return;
                 }
-                // Log is_auto_adjustment value
-                const isAutoAdjustment = displayedCategory.getAttribute('data-is-auto-adjustment');
-                const categoryId = displayedCategory.getAttribute('data-category-id');
-                const incomeRow = document.createElement('tr');
-                incomeRow.setAttribute('data-category-id', categoryId); // Set the data-category-id attribute
-                incomeRow.setAttribute('data-is-auto-adjustment', isAutoAdjustment);
-
-                const catObj = incomeCategories.find(cat => String(cat.id) === String(categoryId));
-                if (catObj && catObj.hidden == 1) {
-                    incomeRow.classList.add('hidden_style');
-                    if (incomeHiddenActive) {
-                        incomeRow.classList.add('hidden_categories');
-                    }
+                const gid = catObj ? catObj.group_id : null;
+                if (gid !== null && gid !== undefined && String(gid) !== '' && String(gid) !== 'None') {
+                    if (!groupedCats[gid]) groupedCats[gid] = [];
+                    groupedCats[gid].push(cat);
+                } else {
+                    ungroupedCats.push(cat);
                 }
+            });
 
-                globalFridays.forEach(friday => {
-                    const td = document.createElement('td');
-                    const fridayDate = new Date(friday);
-                    td.setAttribute('data-date', friday.toISOString().split('T')[0]);
-                    if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
+            // Reorder sidebar rows: grouped first (in group order), then ungrouped, then system
+            const incomeTotalRow = sidebarTbody.querySelector('#income-total-row');
+            incomeGroups.forEach(group => {
+                const cats = groupedCats[group.id];
+                if (cats) cats.forEach(cat => sidebarTbody.appendChild(cat));
+            });
+            ungroupedCats.forEach(cat => sidebarTbody.appendChild(cat));
+            systemCats.forEach(cat => sidebarTbody.appendChild(cat));
+            if (incomeTotalRow) sidebarTbody.appendChild(incomeTotalRow);
 
-                    // Instead of contentEditable, use an input
-                    const input = document.createElement('input');
-                    input.type = 'text';
-                    input.className = 'income-cell-input';
-                    input.setAttribute('data-date', friday.toISOString().split('T')[0]);
-                    input.setAttribute('inputmode', 'decimal');
-                    input.style.width = '100%';
-                    input.style.textAlign = 'right';
+            // Render groups (sorted DESC by display_order — already sorted from server)
+            incomeGroups.forEach(group => {
+                const cats = groupedCats[group.id];
+                if (!cats || cats.length === 0) return; // Skip empty groups on dashboard
 
-                    // If the date is older than the cutoff OR before member_since, disable the input
-                    // In goofy mode, use Thursday (week end) for cutoff comparison
-                    const weekEndDate = goofyWeekMode ? new Date(Date.UTC(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth(), fridayDate.getUTCDate() + 6)) : fridayDate;
-                    // If locked by Quiltt, use readonly instead to maintain keyboard navigation
-                    const isQuilttLocked = isEntryLockedByQuiltt(friday, categoryId, 'income');
-                    if (weekEndDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
-                        input.disabled = true;
-                        input.classList.add('auto-disable');
-                        td.classList.add('readonly-cell');
-                    } else if (isQuilttLocked) {
-                        input.readOnly = true;
-                        input.classList.add('auto-disable');
-                        td.classList.add('readonly-cell');
-                        // Attach only keyboard navigation for readonly inputs
-                        input.addEventListener('keydown', function(event) {
-                            handleInputKeyNavigation(event, input);
-                        });
-                    } else {
-                        handleInputEdit(input, 'income');
-                    }
+                const state = getGroupState('income', group.id);
 
-                    td.appendChild(input);
-                    incomeRow.appendChild(td);
+                // Insert sidebar group header before first category of this group
+                const sidebarHeader = createSidebarGroupHeader(group, 'income');
+                cats[0].parentNode.insertBefore(sidebarHeader, cats[0]);
+
+                // Main table group header
+                const groupHeaderRow = createGroupHeaderRow(group, 'income', numColumns);
+                incomeTableBody.appendChild(groupHeaderRow);
+
+                // Category rows for this group
+                cats.forEach(displayedCategory => {
+                    const row = _createIncomeCategoryRow(displayedCategory, incomeHiddenActive);
+                    row.setAttribute('data-group-id', group.id);
+                    if (state === 'collapsed') row.style.display = 'none';
+                    incomeTableBody.appendChild(row);
                 });
 
-                incomeTableBody.appendChild(incomeRow);
+                // Collapse sidebar categories if needed
+                if (state === 'collapsed') {
+                    cats.forEach(cat => { cat.style.display = 'none'; });
+                }
+
+                // Update sums
+                updateGroupSums(groupHeaderRow, 'income', group.id, state);
+                if (state === 'collapsed') {
+                    groupHeaderRow.classList.add('group-collapsed');
+                    sidebarHeader.classList.add('group-collapsed');
+                }
             });
+
+            // Ungrouped categories — collapsible group
+            if (ungroupedCats.length > 0) {
+                const ungroupedGroup = { id: '_ungrouped', name: 'Ungrouped' };
+                const ungroupedState = getGroupState('income', '_ungrouped');
+
+                const sidebarHeader = createSidebarGroupHeader(ungroupedGroup, 'income');
+                ungroupedCats[0].parentNode.insertBefore(sidebarHeader, ungroupedCats[0]);
+
+                const groupHeaderRow = createGroupHeaderRow(ungroupedGroup, 'income', numColumns);
+                incomeTableBody.appendChild(groupHeaderRow);
+
+                ungroupedCats.forEach(displayedCategory => {
+                    displayedCategory.setAttribute('data-group-id', '_ungrouped');
+                    const row = _createIncomeCategoryRow(displayedCategory, incomeHiddenActive);
+                    row.setAttribute('data-group-id', '_ungrouped');
+                    if (ungroupedState === 'collapsed') row.style.display = 'none';
+                    incomeTableBody.appendChild(row);
+                });
+
+                if (ungroupedState === 'collapsed') {
+                    ungroupedCats.forEach(cat => { cat.style.display = 'none'; });
+                }
+                updateGroupSums(groupHeaderRow, 'income', '_ungrouped', ungroupedState);
+                if (ungroupedState === 'collapsed') {
+                    groupHeaderRow.classList.add('group-collapsed');
+                    sidebarHeader.classList.add('group-collapsed');
+                }
+            }
+
+            // System categories — collapsible group at bottom
+            if (systemCats.length > 0) {
+                const systemGroup = { id: '_system', name: 'System' };
+                const systemState = getGroupState('income', '_system');
+
+                const sidebarHeader = createSidebarGroupHeader(systemGroup, 'income');
+                systemCats[0].parentNode.insertBefore(sidebarHeader, systemCats[0]);
+
+                const groupHeaderRow = createGroupHeaderRow(systemGroup, 'income', numColumns);
+                incomeTableBody.appendChild(groupHeaderRow);
+
+                systemCats.forEach(displayedCategory => {
+                    displayedCategory.setAttribute('data-group-id', '_system');
+                    const row = _createIncomeCategoryRow(displayedCategory, incomeHiddenActive);
+                    row.setAttribute('data-group-id', '_system');
+                    row.classList.add('system-category-row');
+                    if (systemState === 'collapsed') row.style.display = 'none';
+                    incomeTableBody.appendChild(row);
+                });
+
+                if (systemState === 'collapsed') {
+                    systemCats.forEach(cat => { cat.style.display = 'none'; });
+                }
+                updateGroupSums(groupHeaderRow, 'income', '_system', systemState);
+                if (systemState === 'collapsed') {
+                    groupHeaderRow.classList.add('group-collapsed');
+                    sidebarHeader.classList.add('group-collapsed');
+                }
+            }
+        }
+
+        // Helper: create a single income category <tr> for the main data table
+        function _createIncomeCategoryRow(displayedCategory, hiddenActive) {
+            const categoryName = displayedCategory.querySelector('.category-name').textContent.trim();
+            const isAutoAdjustment = displayedCategory.getAttribute('data-is-auto-adjustment');
+            const categoryId = displayedCategory.getAttribute('data-category-id');
+            const incomeRow = document.createElement('tr');
+            incomeRow.setAttribute('data-category-id', categoryId);
+            incomeRow.setAttribute('data-is-auto-adjustment', isAutoAdjustment);
+
+            const catObj = incomeCategories.find(cat => String(cat.id) === String(categoryId));
+            if (catObj && catObj.hidden == 1) {
+                incomeRow.classList.add('hidden_style');
+                if (hiddenActive) {
+                    incomeRow.classList.add('hidden_categories');
+                }
+            }
+
+            globalFridays.forEach(friday => {
+                const td = document.createElement('td');
+                const fridayDate = new Date(friday);
+                td.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'income-cell-input';
+                input.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                input.setAttribute('inputmode', 'decimal');
+                input.style.width = '100%';
+                input.style.textAlign = 'right';
+
+                const weekEndDate = goofyWeekMode ? new Date(Date.UTC(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth(), fridayDate.getUTCDate() + 6)) : fridayDate;
+                const isQuilttLocked = isEntryLockedByQuiltt(friday, categoryId, 'income');
+                if (weekEndDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
+                    input.disabled = true;
+                    input.classList.add('auto-disable');
+                    td.classList.add('readonly-cell');
+                } else if (isQuilttLocked) {
+                    input.readOnly = true;
+                    input.classList.add('auto-disable');
+                    td.classList.add('readonly-cell');
+                    input.addEventListener('keydown', function(event) {
+                        handleInputKeyNavigation(event, input);
+                    });
+                } else {
+                    handleInputEdit(input, 'income');
+                }
+
+                td.appendChild(input);
+                incomeRow.appendChild(td);
+            });
+
+            return incomeRow;
         }
 
         // Function to create rows for each expense category in the month view
@@ -1683,77 +2063,205 @@
             const expensesTableBody = document.getElementById('expense-categories-body');
             expensesTableBody.innerHTML = '';
 
+            // Also rebuild sidebar with group headers
+            const sidebarTbody = document.querySelector('#expense-categories-table tbody');
+            sidebarTbody.querySelectorAll('.sidebar-group-header').forEach(el => el.remove());
+
             const displayedExpenseCategories = document.querySelectorAll("#expense-categories-table tbody tr[data-category-id]");
+            const numColumns = globalFridays.length;
 
-            displayedExpenseCategories.forEach(displayedCategory => {
-                const categoryName = displayedCategory.querySelector('.category-name').textContent.trim();
-                const isAutoAdjustment = displayedCategory.getAttribute('data-is-auto-adjustment');
-                const categoryId = displayedCategory.getAttribute('data-category-id');
-                const isCreditAccount = displayedCategory.getAttribute('data-is-credit-account');
-                const expenseRow = document.createElement('tr');
-                expenseRow.setAttribute('data-category-id', categoryId);
-                expenseRow.setAttribute('data-is-auto-adjustment', isAutoAdjustment);
-                expenseRow.setAttribute('data-is-credit-account', isCreditAccount);
-
-                // Find the category object in expenseCategories
-                const catObj = expenseCategories.find(cat => String(cat.id) === String(categoryId));
-                if (catObj && catObj.hidden == 1) {
-                    expenseRow.classList.add('hidden_style');
-                    if (expenseHiddenActive) {
-                        expenseRow.classList.add('hidden_categories');
-                    }
+            // Organize categories by group
+            const groupedCats = {};
+            const ungroupedCats = [];
+            const systemCats = [];
+            displayedExpenseCategories.forEach(cat => {
+                const catId = cat.getAttribute('data-category-id');
+                const catObj = expenseCategories.find(c => String(c.id) === String(catId));
+                const isSystem = catObj ? (catObj.is_system == 1) : (cat.getAttribute('data-is-system') === '1');
+                const isCreditAccount = catObj ? (catObj.is_credit_account == 1) : (cat.getAttribute('data-is-credit-account') === '1');
+                if (isSystem || isCreditAccount) {
+                    systemCats.push(cat);
+                    return;
                 }
+                const gid = catObj ? catObj.group_id : null;
+                if (gid !== null && gid !== undefined && String(gid) !== '' && String(gid) !== 'None') {
+                    if (!groupedCats[gid]) groupedCats[gid] = [];
+                    groupedCats[gid].push(cat);
+                } else {
+                    ungroupedCats.push(cat);
+                }
+            });
 
-                globalFridays.forEach(friday => {
-                    const td = document.createElement('td');
-                    const fridayDate = new Date(friday);
-                    td.setAttribute('data-date', friday.toISOString().split('T')[0]);
-                    if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
+            // Reorder sidebar rows: grouped first (in group order), then ungrouped, then system
+            const expenseTotalRow = sidebarTbody.querySelector('#expense-total-row');
+            expenseGroups.forEach(group => {
+                const cats = groupedCats[group.id];
+                if (cats) cats.forEach(cat => sidebarTbody.appendChild(cat));
+            });
+            ungroupedCats.forEach(cat => sidebarTbody.appendChild(cat));
+            systemCats.forEach(cat => sidebarTbody.appendChild(cat));
+            if (expenseTotalRow) sidebarTbody.appendChild(expenseTotalRow);
 
-                    const input = document.createElement('input');
-                    input.type = 'text';
-                    input.className = 'expense-cell-input';
-                    input.setAttribute('data-date', friday.toISOString().split('T')[0]);
-                    input.setAttribute('inputmode', 'decimal');
-                    input.style.width = '100%';
-                    input.style.textAlign = 'right';
+            // Render groups
+            expenseGroups.forEach(group => {
+                const cats = groupedCats[group.id];
+                if (!cats || cats.length === 0) return;
 
-                    // Disable input if date is older than cutoff OR before member_since
-                    // In goofy mode, use Thursday (week end) for cutoff comparison
-                    const expWeekEndDate = goofyWeekMode ? new Date(Date.UTC(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth(), fridayDate.getUTCDate() + 6)) : fridayDate;
-                    // If locked by Quiltt, use readonly instead to maintain keyboard navigation
-                    const isExpenseQuilttLocked = isEntryLockedByQuiltt(friday, categoryId, 'expense');
-                    if (expWeekEndDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
-                        input.disabled = true;
-                        input.classList.add('auto-disable');
-                        td.classList.add('readonly-cell');
-                    } else if (isExpenseQuilttLocked) {
-                        input.readOnly = true;
-                        input.classList.add('auto-disable');
-                        td.classList.add('readonly-cell');
-                        // Attach only keyboard navigation for readonly inputs
-                        input.addEventListener('keydown', function(event) {
-                            handleInputKeyNavigation(event, input);
-                        });
-                    } else if (!(catObj && catObj.is_bud == 1)) {
-                        // Only attach handler if NOT a Bud category
-                        handleInputEdit(input, 'expense');
-                    } else {
-                        // For Bud categories, disable input and add a class
-                        input.disabled = true;
-                        input.classList.add('bud-category-cell');
-                        td.classList.add('readonly-cell');
-                    }
+                const state = getGroupState('expense', group.id);
 
-                    td.appendChild(input);
-                    expenseRow.appendChild(td);
+                // Insert sidebar group header before first category of this group
+                const sidebarHeader = createSidebarGroupHeader(group, 'expense');
+                cats[0].parentNode.insertBefore(sidebarHeader, cats[0]);
+
+                // Main table group header
+                const groupHeaderRow = createGroupHeaderRow(group, 'expense', numColumns);
+                expensesTableBody.appendChild(groupHeaderRow);
+
+                // Category rows for this group
+                cats.forEach(displayedCategory => {
+                    const row = _createExpenseCategoryRow(displayedCategory, expenseHiddenActive);
+                    row.setAttribute('data-group-id', group.id);
+                    if (state === 'collapsed') row.style.display = 'none';
+                    expensesTableBody.appendChild(row);
                 });
 
-                expensesTableBody.appendChild(expenseRow);
+                // Collapse sidebar categories if needed
+                if (state === 'collapsed') {
+                    cats.forEach(cat => { cat.style.display = 'none'; });
+                }
+
+                // Update sums
+                updateGroupSums(groupHeaderRow, 'expense', group.id, state);
+                if (state === 'collapsed') {
+                    groupHeaderRow.classList.add('group-collapsed');
+                    sidebarHeader.classList.add('group-collapsed');
+                }
             });
+
+            // Ungrouped categories — collapsible group
+            if (ungroupedCats.length > 0) {
+                const ungroupedGroup = { id: '_ungrouped', name: 'Ungrouped' };
+                const ungroupedState = getGroupState('expense', '_ungrouped');
+
+                const sidebarHeader = createSidebarGroupHeader(ungroupedGroup, 'expense');
+                ungroupedCats[0].parentNode.insertBefore(sidebarHeader, ungroupedCats[0]);
+
+                const groupHeaderRow = createGroupHeaderRow(ungroupedGroup, 'expense', numColumns);
+                expensesTableBody.appendChild(groupHeaderRow);
+
+                ungroupedCats.forEach(displayedCategory => {
+                    displayedCategory.setAttribute('data-group-id', '_ungrouped');
+                    const row = _createExpenseCategoryRow(displayedCategory, expenseHiddenActive);
+                    row.setAttribute('data-group-id', '_ungrouped');
+                    if (ungroupedState === 'collapsed') row.style.display = 'none';
+                    expensesTableBody.appendChild(row);
+                });
+
+                if (ungroupedState === 'collapsed') {
+                    ungroupedCats.forEach(cat => { cat.style.display = 'none'; });
+                }
+                updateGroupSums(groupHeaderRow, 'expense', '_ungrouped', ungroupedState);
+                if (ungroupedState === 'collapsed') {
+                    groupHeaderRow.classList.add('group-collapsed');
+                    sidebarHeader.classList.add('group-collapsed');
+                }
+            }
+
+            // System categories — collapsible group at bottom
+            if (systemCats.length > 0) {
+                const systemGroup = { id: '_system', name: 'System' };
+                const systemState = getGroupState('expense', '_system');
+
+                const sidebarHeader = createSidebarGroupHeader(systemGroup, 'expense');
+                systemCats[0].parentNode.insertBefore(sidebarHeader, systemCats[0]);
+
+                const groupHeaderRow = createGroupHeaderRow(systemGroup, 'expense', numColumns);
+                expensesTableBody.appendChild(groupHeaderRow);
+
+                systemCats.forEach(displayedCategory => {
+                    displayedCategory.setAttribute('data-group-id', '_system');
+                    const row = _createExpenseCategoryRow(displayedCategory, expenseHiddenActive);
+                    row.setAttribute('data-group-id', '_system');
+                    row.classList.add('system-category-row');
+                    if (systemState === 'collapsed') row.style.display = 'none';
+                    expensesTableBody.appendChild(row);
+                });
+
+                if (systemState === 'collapsed') {
+                    systemCats.forEach(cat => { cat.style.display = 'none'; });
+                }
+                updateGroupSums(groupHeaderRow, 'expense', '_system', systemState);
+                if (systemState === 'collapsed') {
+                    groupHeaderRow.classList.add('group-collapsed');
+                    sidebarHeader.classList.add('group-collapsed');
+                }
+            }
+        }
+
+        // Helper: create a single expense category <tr> for the main data table
+        function _createExpenseCategoryRow(displayedCategory, hiddenActive) {
+            const categoryName = displayedCategory.querySelector('.category-name').textContent.trim();
+            const isAutoAdjustment = displayedCategory.getAttribute('data-is-auto-adjustment');
+            const categoryId = displayedCategory.getAttribute('data-category-id');
+            const isCreditAccount = displayedCategory.getAttribute('data-is-credit-account');
+            const expenseRow = document.createElement('tr');
+            expenseRow.setAttribute('data-category-id', categoryId);
+            expenseRow.setAttribute('data-is-auto-adjustment', isAutoAdjustment);
+            expenseRow.setAttribute('data-is-credit-account', isCreditAccount);
+
+            const catObj = expenseCategories.find(cat => String(cat.id) === String(categoryId));
+            if (catObj && catObj.hidden == 1) {
+                expenseRow.classList.add('hidden_style');
+                if (hiddenActive) {
+                    expenseRow.classList.add('hidden_categories');
+                }
+            }
+
+            globalFridays.forEach(friday => {
+                const td = document.createElement('td');
+                const fridayDate = new Date(friday);
+                td.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'expense-cell-input';
+                input.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                input.setAttribute('inputmode', 'decimal');
+                input.style.width = '100%';
+                input.style.textAlign = 'right';
+
+                const expWeekEndDate = goofyWeekMode ? new Date(Date.UTC(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth(), fridayDate.getUTCDate() + 6)) : fridayDate;
+                const isExpenseQuilttLocked = isEntryLockedByQuiltt(friday, categoryId, 'expense');
+                if (expWeekEndDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
+                    input.disabled = true;
+                    input.classList.add('auto-disable');
+                    td.classList.add('readonly-cell');
+                } else if (isExpenseQuilttLocked) {
+                    input.readOnly = true;
+                    input.classList.add('auto-disable');
+                    td.classList.add('readonly-cell');
+                    input.addEventListener('keydown', function(event) {
+                        handleInputKeyNavigation(event, input);
+                    });
+                } else if (!(catObj && catObj.is_bud == 1)) {
+                    handleInputEdit(input, 'expense');
+                } else {
+                    input.disabled = true;
+                    input.classList.add('bud-category-cell');
+                    td.classList.add('readonly-cell');
+                }
+
+                td.appendChild(input);
+                expenseRow.appendChild(td);
+            });
+
+            return expenseRow;
         }
 
         function createAndClearMonthCaRows() {
+            const caHiddenActive = localStorage.getItem('allHiddenActive') === 'true';
+
             // For each credit account, create rows for its categories in the month view
             document.querySelectorAll('table[id^="ca-categories-table-"]').forEach(caTable => {
                 const accountId = caTable.id.replace('ca-categories-table-', '');
@@ -1762,79 +2270,200 @@
 
                 caTableBody.innerHTML = ''; // Clear previous rows
 
-                // Get all categories for this account, sorted by display_order
-                const caCategories = c_expense_categories.filter(cat => String(cat.account_id) === String(accountId));
-                caCategories.sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
-                caCategories.forEach(category => {
-                    // --- Skip "Starting Balance" category ---
-                    if (category.name === "Starting Balance") return;
-                    
-                    const caRow = document.createElement('tr');
-                    caRow.setAttribute('data-category-id', category.id);
+                // Rebuild sidebar with group headers
+                const sidebarTbody = caTable.querySelector('tbody');
+                sidebarTbody.querySelectorAll('.sidebar-group-header').forEach(el => el.remove());
 
-                    // Add data-is-interest attribute
-                    caRow.setAttribute('data-is-interest', category.is_interest ? category.is_interest : '0');
-                    // Add data-is-auto-adjustment attribute
-                    caRow.setAttribute('data-is-auto-adjustment', category.is_auto_adjustment ? category.is_auto_adjustment : '0');
+                const displayedCaCategories = sidebarTbody.querySelectorAll('tr[data-category-id]');
+                const numColumns = globalFridays.length;
+                const caType = `ca_${accountId}`;
 
-                    // Handle hidden categories
-                    if (category.hidden == 1) {
-                        caRow.classList.add('hidden_style');
-                        // Use unified hidden state
-                        const caHiddenActive = localStorage.getItem('allHiddenActive') === 'true';
-                        if (caHiddenActive) {
-                            caRow.classList.add('hidden_categories');
-                        }
+                // Get groups for this account
+                const accountGroups = cExpenseGroups.filter(g => String(g.account_id) === String(accountId));
+                accountGroups.sort((a, b) => (parseFloat(b.display_order) || 0) - (parseFloat(a.display_order) || 0));
+
+                // Organize categories by group
+                const groupedCats = {};
+                const ungroupedCats = [];
+                const systemCats = [];
+                displayedCaCategories.forEach(cat => {
+                    const catId = cat.getAttribute('data-category-id');
+                    const catObj = c_expense_categories.find(c => String(c.id) === String(catId));
+                    const isSystem = catObj ? (catObj.is_system == 1) : (cat.getAttribute('data-is-system') === '1');
+                    if (isSystem) {
+                        systemCats.push(cat);
+                        return;
                     }
+                    const gid = catObj ? catObj.group_id : null;
+                    if (gid !== null && gid !== undefined && String(gid) !== '' && String(gid) !== 'None') {
+                        if (!groupedCats[gid]) groupedCats[gid] = [];
+                        groupedCats[gid].push(cat);
+                    } else {
+                        ungroupedCats.push(cat);
+                    }
+                });
 
-                    globalFridays.forEach(friday => {
-                        const td = document.createElement('td');
-                        const fridayDate = new Date(friday);
-                        td.setAttribute('data-date', friday.toISOString().split('T')[0]);
-                        if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
+                // Reorder sidebar rows: grouped first (in group order), then ungrouped, then system
+                const caTotalRow = sidebarTbody.querySelector('.ca-total-row');
+                accountGroups.forEach(group => {
+                    const cats = groupedCats[group.id];
+                    if (cats) cats.forEach(cat => sidebarTbody.appendChild(cat));
+                });
+                ungroupedCats.forEach(cat => sidebarTbody.appendChild(cat));
+                systemCats.forEach(cat => sidebarTbody.appendChild(cat));
+                if (caTotalRow) sidebarTbody.appendChild(caTotalRow);
 
-                        const input = document.createElement('input');
-                        input.type = 'text';
-                        input.className = 'ca-cell-input';
-                        input.setAttribute('data-date', friday.toISOString().split('T')[0]);
-                        input.setAttribute('inputmode', 'decimal');
-                        input.style.width = '100%';
-                        input.style.textAlign = 'right';
+                // Render user groups
+                accountGroups.forEach(group => {
+                    const cats = groupedCats[group.id];
+                    if (!cats || cats.length === 0) return;
 
-                        // Disable input if date is older than cutoff OR before member_since
-                        // In goofy mode, use Thursday (week end) for cutoff comparison
-                        const caWeekEndDate = goofyWeekMode ? new Date(Date.UTC(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth(), fridayDate.getUTCDate() + 6)) : fridayDate;
-                        // If locked by Quiltt, use readonly instead to maintain keyboard navigation
-                        const isCaQuilttLocked = isEntryLockedByQuiltt(friday, category.id, 'ca', accountId);
-                        if (caWeekEndDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
-                            input.disabled = true;
-                            input.classList.add('auto-disable');
-                            td.classList.add('readonly-cell');
-                        } else if (isCaQuilttLocked) {
-                            input.readOnly = true;
-                            input.classList.add('auto-disable');
-                            td.classList.add('readonly-cell');
-                            // Attach only keyboard navigation for readonly inputs
-                            input.addEventListener('keydown', function(event) {
-                                handleInputKeyNavigation(event, input);
-                            });
-                        } else if (!(category.is_bud == 1)) {
-                            // Only attach handler if NOT a Bud category
-                            handleInputEdit(input, 'ca');
-                        } else {
-                            // For Bud categories, disable input and add a class
-                            input.disabled = true;
-                            input.classList.add('bud-category-cell');
-                            td.classList.add('readonly-cell');
-                        }
+                    const state = getGroupState(caType, group.id);
 
-                        td.appendChild(input);
-                        caRow.appendChild(td);
+                    // Insert sidebar group header before first category of this group
+                    const sidebarHeader = createSidebarGroupHeader(group, caType);
+                    cats[0].parentNode.insertBefore(sidebarHeader, cats[0]);
+
+                    // Main table group header
+                    const groupHeaderRow = createGroupHeaderRow(group, caType, numColumns);
+                    caTableBody.appendChild(groupHeaderRow);
+
+                    // Category rows for this group
+                    cats.forEach(displayedCategory => {
+                        const row = _createCaCategoryRow(displayedCategory, caHiddenActive, accountId);
+                        row.setAttribute('data-group-id', group.id);
+                        if (state === 'collapsed') row.style.display = 'none';
+                        caTableBody.appendChild(row);
                     });
 
-                    caTableBody.appendChild(caRow);
+                    if (state === 'collapsed') {
+                        cats.forEach(cat => { cat.style.display = 'none'; });
+                    }
+                    updateGroupSums(groupHeaderRow, caType, group.id, state);
+                    if (state === 'collapsed') {
+                        groupHeaderRow.classList.add('group-collapsed');
+                        sidebarHeader.classList.add('group-collapsed');
+                    }
                 });
+
+                // Ungrouped categories
+                if (ungroupedCats.length > 0) {
+                    const ungroupedGroup = { id: '_ungrouped', name: 'Ungrouped' };
+                    const ungroupedState = getGroupState(caType, '_ungrouped');
+
+                    const sidebarHeader = createSidebarGroupHeader(ungroupedGroup, caType);
+                    ungroupedCats[0].parentNode.insertBefore(sidebarHeader, ungroupedCats[0]);
+
+                    const groupHeaderRow = createGroupHeaderRow(ungroupedGroup, caType, numColumns);
+                    caTableBody.appendChild(groupHeaderRow);
+
+                    ungroupedCats.forEach(displayedCategory => {
+                        displayedCategory.setAttribute('data-group-id', '_ungrouped');
+                        const row = _createCaCategoryRow(displayedCategory, caHiddenActive, accountId);
+                        row.setAttribute('data-group-id', '_ungrouped');
+                        if (ungroupedState === 'collapsed') row.style.display = 'none';
+                        caTableBody.appendChild(row);
+                    });
+
+                    if (ungroupedState === 'collapsed') {
+                        ungroupedCats.forEach(cat => { cat.style.display = 'none'; });
+                    }
+                    updateGroupSums(groupHeaderRow, caType, '_ungrouped', ungroupedState);
+                    if (ungroupedState === 'collapsed') {
+                        groupHeaderRow.classList.add('group-collapsed');
+                        sidebarHeader.classList.add('group-collapsed');
+                    }
+                }
+
+                // System categories (Interest Charge, Uncategorized)
+                if (systemCats.length > 0) {
+                    const systemGroup = { id: '_system', name: 'System' };
+                    const systemState = getGroupState(caType, '_system');
+
+                    const sidebarHeader = createSidebarGroupHeader(systemGroup, caType);
+                    systemCats[0].parentNode.insertBefore(sidebarHeader, systemCats[0]);
+
+                    const groupHeaderRow = createGroupHeaderRow(systemGroup, caType, numColumns);
+                    caTableBody.appendChild(groupHeaderRow);
+
+                    systemCats.forEach(displayedCategory => {
+                        displayedCategory.setAttribute('data-group-id', '_system');
+                        const row = _createCaCategoryRow(displayedCategory, caHiddenActive, accountId);
+                        row.setAttribute('data-group-id', '_system');
+                        row.classList.add('system-category-row');
+                        if (systemState === 'collapsed') row.style.display = 'none';
+                        caTableBody.appendChild(row);
+                    });
+
+                    if (systemState === 'collapsed') {
+                        systemCats.forEach(cat => { cat.style.display = 'none'; });
+                    }
+                    updateGroupSums(groupHeaderRow, caType, '_system', systemState);
+                    if (systemState === 'collapsed') {
+                        groupHeaderRow.classList.add('group-collapsed');
+                        sidebarHeader.classList.add('group-collapsed');
+                    }
+                }
             });
+        }
+
+        // Helper: create a single CA category <tr> for the main data table
+        function _createCaCategoryRow(displayedCategory, hiddenActive, accountId) {
+            const categoryId = displayedCategory.getAttribute('data-category-id');
+            const caRow = document.createElement('tr');
+            caRow.setAttribute('data-category-id', categoryId);
+            caRow.setAttribute('data-is-interest', displayedCategory.getAttribute('data-is-interest') || '0');
+            caRow.setAttribute('data-is-auto-adjustment', displayedCategory.getAttribute('data-is-auto-adjustment') || '0');
+
+            const category = c_expense_categories.find(cat => String(cat.id) === String(categoryId));
+
+            if (category && category.hidden == 1) {
+                caRow.classList.add('hidden_style');
+                if (hiddenActive) {
+                    caRow.classList.add('hidden_categories');
+                }
+            }
+
+            globalFridays.forEach(friday => {
+                const td = document.createElement('td');
+                const fridayDate = new Date(friday);
+                td.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                if (isWeekBeforeMemberSince(friday)) td.classList.add('before-member-since');
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'ca-cell-input';
+                input.setAttribute('data-date', friday.toISOString().split('T')[0]);
+                input.setAttribute('inputmode', 'decimal');
+                input.style.width = '100%';
+                input.style.textAlign = 'right';
+
+                const caWeekEndDate = goofyWeekMode ? new Date(Date.UTC(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth(), fridayDate.getUTCDate() + 6)) : fridayDate;
+                const isCaQuilttLocked = isEntryLockedByQuiltt(friday, categoryId, 'ca', accountId);
+                if (caWeekEndDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
+                    input.disabled = true;
+                    input.classList.add('auto-disable');
+                    td.classList.add('readonly-cell');
+                } else if (isCaQuilttLocked) {
+                    input.readOnly = true;
+                    input.classList.add('auto-disable');
+                    td.classList.add('readonly-cell');
+                    input.addEventListener('keydown', function(event) {
+                        handleInputKeyNavigation(event, input);
+                    });
+                } else if (!(category && category.is_bud == 1)) {
+                    handleInputEdit(input, 'ca');
+                } else {
+                    input.disabled = true;
+                    input.classList.add('bud-category-cell');
+                    td.classList.add('readonly-cell');
+                }
+
+                td.appendChild(input);
+                caRow.appendChild(td);
+            });
+
+            return caRow;
         }
 
         // Function to add the bottom row for total income in the month view
@@ -1982,20 +2611,55 @@
                 }
             });
 
-            // Add sort icon only for non-auto-adjustment rows
+            // Add sort icon only for non-system, non-auto-adjustment rows (skip group headers)
             document.querySelectorAll('#income-categories-table .category-cell').forEach(td => {
                 const row = td.closest('tr');
-                if (row && row.getAttribute('data-is-auto-adjustment') !== '1') {
+                if (row && row.getAttribute('data-is-auto-adjustment') !== '1'
+                    && row.getAttribute('data-is-system') !== '1'
+                    && !row.classList.contains('sidebar-group-header')
+                    && !row.classList.contains('system-category-row')) {
                     if (!td.querySelector('.sort-handle')) {
                         const sortIcon = document.createElement('span');
                         sortIcon.classList.add('sort-handle');
                         sortIcon.innerHTML = '<i class="fa fa-bars"></i>';
                         td.prepend(sortIcon);
                     }
+                } else if (row && !row.classList.contains('sidebar-group-header')
+                    && (row.getAttribute('data-is-system') === '1' || row.classList.contains('system-category-row'))) {
+                    // Lock icon for unmovable categories
+                    if (!td.querySelector('.sort-handle-lock')) {
+                        const lock = document.createElement('span');
+                        lock.classList.add('sort-handle-lock');
+                        lock.innerHTML = '<i class="fa-kit fa-solid-bars-lock"></i>';
+                        td.prepend(lock);
+                    }
+                    td.querySelector('.sort-handle-lock').style.display = 'inline-block';
                 }
             });
 
-            // Change edit button style (unified button handles icon via toggleEditButtonIcon)
+            // Add group sort handles to sidebar group headers (skip ungrouped and system)
+            document.querySelectorAll('#income-categories-table .sidebar-group-header .sidebar-group-cell').forEach(td => {
+                const row = td.closest('tr');
+                const gid = row ? row.getAttribute('data-group-id') : '';
+                if (gid === '_ungrouped' || gid === '_system') {
+                    // Lock icon for unmovable groups
+                    if (!td.querySelector('.group-sort-handle-lock')) {
+                        const lock = document.createElement('span');
+                        lock.classList.add('group-sort-handle-lock');
+                        lock.innerHTML = '<i class="fa-kit fa-solid-bars-lock"></i>';
+                        td.prepend(lock);
+                    }
+                    td.querySelector('.group-sort-handle-lock').style.display = 'inline-block';
+                    return;
+                }
+                if (!td.querySelector('.group-sort-handle')) {
+                    const handle = document.createElement('span');
+                    handle.classList.add('group-sort-handle');
+                    handle.innerHTML = '<i class="fa fa-bars"></i>';
+                    td.prepend(handle);
+                }
+                td.querySelector('.group-sort-handle').style.display = 'inline-block';
+            });
         }
 
 
@@ -2021,10 +2685,23 @@
 
             // Remove sort icons
             document.querySelectorAll('#income-categories-table .sort-handle').forEach(handle => {
-                handle.remove(); // Remove the sort icon
+                handle.remove();
             });
 
-            // Revert edit button style (unified button handles icon via toggleEditButtonIcon)
+            // Remove lock icons
+            document.querySelectorAll('#income-categories-table .sort-handle-lock').forEach(handle => {
+                handle.remove();
+            });
+
+            // Remove group sort handles
+            document.querySelectorAll('#income-categories-table .group-sort-handle').forEach(handle => {
+                handle.remove();
+            });
+
+            // Remove group lock icons
+            document.querySelectorAll('#income-categories-table .group-sort-handle-lock').forEach(handle => {
+                handle.remove();
+            });
         }
 
         function enableExpenseEditMode() {
@@ -2047,20 +2724,57 @@
                 }
             });
 
-            // Add sort icon only for non-auto-adjustment, non-credit-account rows
+            // Add sort icon only for non-system, non-auto-adjustment, non-credit-account rows (skip group headers)
             document.querySelectorAll('#expense-categories-table .category-cell').forEach(td => {
                 const row = td.closest('tr');
-                if (row && row.getAttribute('data-is-auto-adjustment') !== '1' && row.getAttribute('data-is-credit-account') !== '1') {
+                if (row && row.getAttribute('data-is-auto-adjustment') !== '1'
+                    && row.getAttribute('data-is-credit-account') !== '1'
+                    && row.getAttribute('data-is-system') !== '1'
+                    && !row.classList.contains('sidebar-group-header')
+                    && !row.classList.contains('system-category-row')) {
                     if (!td.querySelector('.sort-handle')) {
                         const sortIcon = document.createElement('span');
                         sortIcon.classList.add('sort-handle');
                         sortIcon.innerHTML = '<i class="fa fa-bars"></i>';
                         td.prepend(sortIcon);
                     }
+                } else if (row && !row.classList.contains('sidebar-group-header')
+                    && (row.getAttribute('data-is-system') === '1' || row.classList.contains('system-category-row')
+                        || row.getAttribute('data-is-credit-account') === '1')) {
+                    // Lock icon for unmovable categories (system + credit account)
+                    if (!td.querySelector('.sort-handle-lock')) {
+                        const lock = document.createElement('span');
+                        lock.classList.add('sort-handle-lock');
+                        lock.innerHTML = '<i class="fa-kit fa-solid-bars-lock"></i>';
+                        td.prepend(lock);
+                    }
+                    td.querySelector('.sort-handle-lock').style.display = 'inline-block';
                 }
             });
 
-            // Change edit button style (unified)
+            // Add group sort handles to sidebar group headers (skip ungrouped and system)
+            document.querySelectorAll('#expense-categories-table .sidebar-group-header .sidebar-group-cell').forEach(td => {
+                const row = td.closest('tr');
+                const gid = row ? row.getAttribute('data-group-id') : '';
+                if (gid === '_ungrouped' || gid === '_system') {
+                    // Lock icon for unmovable groups
+                    if (!td.querySelector('.group-sort-handle-lock')) {
+                        const lock = document.createElement('span');
+                        lock.classList.add('group-sort-handle-lock');
+                        lock.innerHTML = '<i class="fa-kit fa-solid-bars-lock"></i>';
+                        td.prepend(lock);
+                    }
+                    td.querySelector('.group-sort-handle-lock').style.display = 'inline-block';
+                    return;
+                }
+                if (!td.querySelector('.group-sort-handle')) {
+                    const handle = document.createElement('span');
+                    handle.classList.add('group-sort-handle');
+                    handle.innerHTML = '<i class="fa fa-bars"></i>';
+                    td.prepend(handle);
+                }
+                td.querySelector('.group-sort-handle').style.display = 'inline-block';
+            });
         }
 
         function disableExpenseEditMode() {
@@ -2084,10 +2798,23 @@
 
             // Remove sort icons
             document.querySelectorAll('#expense-categories-table .sort-handle').forEach(handle => {
-                handle.remove(); // Remove the sort icon
+                handle.remove();
             });
 
-            // Revert edit button style (unified)
+            // Remove lock icons
+            document.querySelectorAll('#expense-categories-table .sort-handle-lock').forEach(handle => {
+                handle.remove();
+            });
+
+            // Remove group sort handles
+            document.querySelectorAll('#expense-categories-table .group-sort-handle').forEach(handle => {
+                handle.remove();
+            });
+
+            // Remove group lock icons
+            document.querySelectorAll('#expense-categories-table .group-sort-handle-lock').forEach(handle => {
+                handle.remove();
+            });
         }
 
         function enableCaEditMode(accountId) {
@@ -2120,10 +2847,16 @@
                 });
             } else if (type === 'expense') {
                 document.querySelectorAll('.delete-category-btn.expense').forEach(btn => {
-                    btn.style.display = 'inline-block';
+                    const row = btn.closest('tr');
+                    if (row && row.getAttribute('data-is-credit-account') !== '1') {
+                        btn.style.display = 'inline-block';
+                    }
                 });
                 document.querySelectorAll('.rename-category-btn.expense').forEach(btn => {
-                    btn.style.display = 'inline-block';
+                    const row = btn.closest('tr');
+                    if (row && row.getAttribute('data-is-credit-account') !== '1') {
+                        btn.style.display = 'inline-block';
+                    }
                 });
             } else if (type === 'ca' && accountId) {
                 document.querySelectorAll(`#ca-categories-table-${accountId} .delete-category-btn.ca`).forEach(btn => {
@@ -2895,11 +3628,16 @@
                 row.querySelectorAll('.current-week').forEach(cell => cell.classList.remove('current-week'));
 
                 // Highlight only the cell in this row with matching data-date
+                let matched = false;
                 row.querySelectorAll(`${cellTag}[data-date]`).forEach(cell => {
                     if (cell.getAttribute('data-date') === fridayDateString) {
                         cell.classList.add('current-week');
+                        matched = true;
                     }
                 });
+                if (tableId.startsWith('cas-table-')) {
+                    console.log(`[CA-HIGHLIGHT-DEBUG] ${tableId}: fridayDateString=${fridayDateString}, matched=${matched}, cellTag=${cellTag}, cells with data-date:`, row.querySelectorAll(`${cellTag}[data-date]`).length);
+                }
             });
         }
 
@@ -3877,77 +4615,213 @@
         }
 
 
-        // Function to save the new order of categories to the server
+        // Function to save the new order of categories to the server (group-aware x.y display_order)
         function saveNewOrder(type, accountId = null) {
-            let order = [];
-            let table, rows;
+            let tableSelector;
             if (type === 'income') {
-                table = '#income-categories-table';
-                rows = $(`${table} tbody tr`).get().reverse();
+                tableSelector = '#income-categories-table';
             } else if (type === 'expense') {
-                table = '#expense-categories-table';
-                rows = $(`${table} tbody tr`).get().reverse();
+                tableSelector = '#expense-categories-table';
             } else if (type === 'ca' && accountId) {
-                table = `#ca-categories-table-${accountId}`;
-                rows = $(`${table} tbody tr`).get().reverse();
+                tableSelector = `#ca-categories-table-${accountId}`;
             } else {
                 return;
             }
-            let orderNum = 1;
-            rows.forEach(function(element, index) {
-                // Skip credit account payment categories and auto-adjustment categories — they have fixed positions
-                if ($(element).attr('data-is-credit-account') === '1' || $(element).attr('data-is-auto-adjustment') === '1') return;
-                order.push({
-                    id: $(element).attr('data-category-id'),
-                    name: $(element).find('.category-name').text().trim(),
-                    order: orderNum++
+
+            // CA categories use flat integer ordering (no groups on CA sidebar)
+            if (type === 'ca') {
+                let caOrder = [];
+                let caOrderNum = 1;
+                const caRows = $(`${tableSelector} tbody tr`).get().reverse();
+                caRows.forEach(function(element) {
+                    if ($(element).attr('data-is-auto-adjustment') === '1') return;
+                    if ($(element).hasClass('ca-total-row')) return;
+                    const catId = $(element).attr('data-category-id');
+                    if (!catId) return;
+                    caOrder.push({
+                        id: catId,
+                        name: $(element).find('.category-name').text().trim(),
+                        order: caOrderNum++
+                    });
                 });
-            });
-            // Send the new order to the server
-            let url;
-            if (type === 'income') {
-                url = "{{ url_for('update_income_order') }}";
-            } else if (type === 'expense') {
-                url = "{{ url_for('update_expense_order') }}";
-            } else if (type === 'ca') {
-                url = "/update_ca_order";
-            }
-            $.ajax({
-                url: url,
-                method: "POST",
-                contentType: "application/json",
-                data: JSON.stringify({ order: order, account_id: accountId }),
-                success: function(response) {
-                    if (response.status === 'success') {
-                        // If expense order changed, sync display_order to c_expense_categories and re-sort CA sidebar
-                        if (type === 'expense') {
-                            order.forEach(item => {
-                                c_expense_categories.forEach(cCat => {
-                                    if (cCat.name === item.name && !cCat.is_interest && !cCat.is_auto_adjustment) {
-                                        cCat.display_order = item.order;
-                                    }
-                                });
-                            });
-                            // Re-sort sidebar CA rows by display_order
-                            document.querySelectorAll('table[id^="ca-categories-table-"] tbody').forEach(tbody => {
-                                const rows = Array.from(tbody.querySelectorAll('tr[data-category-id]'));
-                                const totalRow = tbody.querySelector('.ca-total-row');
-                                rows.sort((a, b) => {
-                                    const catA = c_expense_categories.find(c => String(c.id) === a.getAttribute('data-category-id'));
-                                    const catB = c_expense_categories.find(c => String(c.id) === b.getAttribute('data-category-id'));
-                                    return ((catB ? catB.display_order : 0) || 0) - ((catA ? catA.display_order : 0) || 0);
-                                });
-                                rows.forEach(row => tbody.appendChild(row));
-                                if (totalRow) tbody.appendChild(totalRow);
-                            });
-                        }
-                        updateView();
-                    } else {
+                $.ajax({
+                    url: "/update_ca_order",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify({ order: caOrder, account_id: accountId }),
+                    success: function(response) {
+                        if (response.status === 'success') updateView();
                     }
-                },
-                error: function() {
+                });
+                return;
+            }
+
+            // --- Group-aware x.y display_order for income/expense ---
+            const groups = type === 'income' ? incomeGroups : expenseGroups;
+            const allRows = $(`${tableSelector} tbody tr`).get(); // top→bottom (high→low display_order)
+            let groupOrder = [];
+            let categoryOrder = [];
+            let catSeq = {};
+            let xValue = groups.length + 2;
+
+            // Pre-count categories per group for descending sub-orders
+            let catCounts = {};
+            for (const row of allRows) {
+                const $row = $(row);
+                if ($row.hasClass('sidebar-group-header') || $row.hasClass('system-category-row') || $row.attr('data-is-system') === '1') continue;
+                if ($row.attr('data-is-credit-account') === '1' || $row.attr('data-is-auto-adjustment') === '1') continue;
+                if ($row.hasClass('ca-total-row') || $row.attr('id') === 'income-total-row' || $row.attr('id') === 'expense-total-row') continue;
+                if ($row.attr('id') === 'last-remainder-row') continue;
+                const catId = $row.attr('data-category-id');
+                if (!catId) continue;
+                const rgid = $row.attr('data-group-id') || 'ungrouped';
+                catCounts[rgid] = (catCounts[rgid] || 0) + 1;
+            }
+
+            for (const row of allRows) {
+                const $row = $(row);
+                if ($row.hasClass('sidebar-group-header')) {
+                    const gid = $row.attr('data-group-id');
+                    if (gid === 'ungrouped' || gid === '_ungrouped' || gid === '_system') {
+                        catSeq['ungrouped'] = (catCounts['ungrouped'] || 1) * 0.0001;
+                        continue;
+                    }
+                    groupOrder.push({ id: gid, order: xValue });
+                    catSeq[gid] = (catCounts[gid] || 1) * 0.0001;
+                    xValue--;
+                } else if ($row.hasClass('system-category-row') || $row.attr('data-is-system') === '1') {
+                    continue;
+                } else if ($row.attr('data-is-credit-account') === '1' || $row.attr('data-is-auto-adjustment') === '1') {
+                    continue;
+                } else if ($row.attr('id') === 'income-total-row' || $row.attr('id') === 'expense-total-row' || $row.attr('id') === 'last-remainder-row') {
+                    continue;
+                } else {
+                    const catId = $row.attr('data-category-id');
+                    if (!catId) continue;
+
+                    const rowGroupId = $row.attr('data-group-id');
+                    if (!rowGroupId || rowGroupId === '' || rowGroupId === 'ungrouped' || rowGroupId === '_ungrouped') {
+                        // Ungrouped category — tier 1
+                        if (catSeq['ungrouped'] === undefined) {
+                            catSeq['ungrouped'] = (catCounts['ungrouped'] || 1) * 0.0001;
+                        }
+                        categoryOrder.push({
+                            id: catId,
+                            name: $row.find('.category-name').text().trim(),
+                            order: Math.round((1 + catSeq['ungrouped']) * 10000) / 10000
+                        });
+                        catSeq['ungrouped'] = Math.round((catSeq['ungrouped'] - 0.0001) * 10000) / 10000;
+                    } else if (catSeq[rowGroupId] !== undefined) {
+                        // Category in a group
+                        const groupEntry = groupOrder.find(g => String(g.id) === String(rowGroupId));
+                        const gx = groupEntry ? groupEntry.order : 1;
+                        const displayOrder = Math.round((gx + catSeq[rowGroupId]) * 10000) / 10000;
+                        catSeq[rowGroupId] = Math.round((catSeq[rowGroupId] - 0.0001) * 10000) / 10000;
+                        categoryOrder.push({
+                            id: catId,
+                            name: $row.find('.category-name').text().trim(),
+                            order: displayOrder
+                        });
+                    } else {
+                        // Fallback ungrouped
+                        categoryOrder.push({
+                            id: catId,
+                            name: $row.find('.category-name').text().trim(),
+                            order: 1 + (categoryOrder.filter(c => Math.floor(c.order) === 1).length * 0.0001)
+                        });
+                    }
                 }
-            });
+            }
+
+            // Update local groups array immediately so updateView() uses correct order
+            if (groupOrder.length > 0) {
+                const groupsArr = type === 'income' ? incomeGroups : expenseGroups;
+                groupOrder.forEach(item => {
+                    const grp = groupsArr.find(g => String(g.id) === String(item.id));
+                    if (grp) grp.display_order = item.order;
+                });
+                groupsArr.sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
+            }
+
+            // Update local categories array immediately
+            if (categoryOrder.length > 0) {
+                const catArr = type === 'income' ? incomeCategories : expenseCategories;
+                categoryOrder.forEach(item => {
+                    const catObj = catArr.find(c => String(c.id) === String(item.id));
+                    if (catObj) catObj.display_order = item.order;
+                });
+            }
+
+            // Helper: save category order and refresh view
+            function _saveCategoryOrderAndRefresh() {
+                if (categoryOrder.length > 0) {
+                    const catUrl = type === 'income' ? "{{ url_for('update_income_order') }}" : "{{ url_for('update_expense_order') }}";
+                    $.ajax({
+                        url: catUrl,
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ order: categoryOrder }),
+                        success: function(response) {
+                            if (response.status === 'success') {
+                                // If expense order changed, sync display_order to c_expense_categories and re-sort CA sidebar
+                                if (type === 'expense') {
+                                    categoryOrder.forEach(item => {
+                                        c_expense_categories.forEach(cCat => {
+                                            if (cCat.name === item.name && !cCat.is_interest && !cCat.is_auto_adjustment) {
+                                                cCat.display_order = item.order;
+                                            }
+                                        });
+                                    });
+                                    // Re-sort sidebar CA rows by display_order
+                                    document.querySelectorAll('table[id^="ca-categories-table-"] tbody').forEach(tbody => {
+                                        const rows = Array.from(tbody.querySelectorAll('tr[data-category-id]'));
+                                        const totalRow = tbody.querySelector('.ca-total-row');
+                                        rows.sort((a, b) => {
+                                            const catA = c_expense_categories.find(c => String(c.id) === a.getAttribute('data-category-id'));
+                                            const catB = c_expense_categories.find(c => String(c.id) === b.getAttribute('data-category-id'));
+                                            return ((catB ? catB.display_order : 0) || 0) - ((catA ? catA.display_order : 0) || 0);
+                                        });
+                                        rows.forEach(row => tbody.appendChild(row));
+                                        if (totalRow) tbody.appendChild(totalRow);
+                                    });
+                                }
+                                updateView();
+                                // Re-enable all active edit modes (updateView rebuilds all sidebar group headers)
+                                if (isIncomeEditMode) enableIncomeEditMode();
+                                if (isExpenseEditMode) enableExpenseEditMode();
+                            }
+                        },
+                        error: function() {
+                            showToast('Failed to save order.', 'error');
+                        }
+                    });
+                } else {
+                    updateView();
+                }
+            }
+
+            // Save group order first, then category order (sequential to avoid Redis race condition)
+            if (groupOrder.length > 0) {
+                const groupUrl = type === 'income' ? '/update_income_group_order' : '/update_expense_group_order';
+                $.ajax({
+                    url: groupUrl,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ order: groupOrder }),
+                    success: function(response) {
+                        if (response.status !== 'success') {
+                            showToast('Failed to save group order.', 'error');
+                        }
+                        _saveCategoryOrderAndRefresh();
+                    },
+                    error: function() {
+                        showToast('Failed to save group order.', 'error');
+                        _saveCategoryOrderAndRefresh();
+                    }
+                });
+            } else {
+                _saveCategoryOrderAndRefresh();
+            }
         }
 
         // Function to calculate the start and end date of the week based on the given Friday
@@ -4622,123 +5496,525 @@
         setupCategoryDuplicateCheck(document.getElementById('new-expense-category'), function() { return expenseCategories; });
         setupCategoryDuplicateCheck(document.getElementById('new-ca-category'), function() { return expenseCategories; });
 
+        // Sortable helper: detect which group zone the mouse is in
+        function _detectTargetGroup($tbody, mouseY) {
+            let targetGroupId = '';
+            $tbody.find('tr.sidebar-group-header').each(function() {
+                const $header = $(this);
+                const headerTop = $header.offset().top;
+                let zoneBottom = headerTop + $header.outerHeight();
+                let $next = $header.next('tr');
+                while ($next.length && !$next.hasClass('sidebar-group-header') && !$next.hasClass('system-category-row') && $next.attr('id') !== 'income-total-row' && $next.attr('id') !== 'expense-total-row') {
+                    zoneBottom = $next.offset().top + $next.outerHeight();
+                    $next = $next.next('tr');
+                }
+                if (mouseY >= headerTop && mouseY <= zoneBottom) {
+                    targetGroupId = $header.attr('data-group-id');
+                }
+            });
+            return targetGroupId;
+        }
+
+        // Sortable helper: ensure a moved row is within its target group zone
+        function _ensureRowInGroupZone($tbody, $moved, targetGroupId) {
+            const $targetHeader = $tbody.find(`tr.sidebar-group-header[data-group-id="${targetGroupId}"]`);
+            if (!$targetHeader.length) return;
+            let isWithinGroup = false;
+            let $check = $targetHeader.next('tr');
+            while ($check.length && !$check.hasClass('sidebar-group-header') && !$check.hasClass('system-category-row')) {
+                if ($check.is($moved)) { isWithinGroup = true; break; }
+                $check = $check.next('tr');
+            }
+            if (!isWithinGroup) {
+                $moved.detach();
+                $targetHeader.after($moved);
+            }
+        }
+
+        // Sortable helper: assign a category to a group via AJAX
+        function assignCategoryToGroup(categoryId, groupId, type) {
+            return $.ajax({
+                url: '/assign_category_to_group',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ category_id: categoryId, group_id: groupId, type: type }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Update local JS data
+                        const catArr = type === 'income' ? incomeCategories : expenseCategories;
+                        const catObj = catArr.find(c => String(c.id) === String(categoryId));
+                        if (catObj) catObj.group_id = groupId;
+                    }
+                }
+            });
+        }
+
         // Sortable Table Functions
         $(document).ready(function() {
             let touchHandled = false; // Variable to track if the event was handled by touch
 
-            // Make the income categories table sortable, excluding the total row
-            $("#income-categories-table tbody").sortable({
-                containment: "parent",
-                axis: "y", // Allow only vertical sorting
-                scroll: true,              // Enable auto-scroll
-                scrollSensitivity: 30,     // Distance from edge to start scrolling
-                scrollSpeed: 5,
-                items: "> tr:not(#income-total-row):not([data-is-auto-adjustment='1'])", // Exclude total row and auto adjustment
-                handle: ".sort-handle", // Only allow sorting via the sort icon
-                helper: function(e, tr) {
-                    var $originals = tr.children();
-                    var $helper = tr.clone();
-                    $helper.children().each(function(index) {
-                        $(this).width($originals.eq(index).width());
-                    });
-                    $helper.css({
-                        display: 'table',
-                        'background': '#fff',
-                        'z-index': 1000,
-                        'margin': 0,
-                        'top': 0,
-                        'transform': 'translateY(0)'
-                    });
-                    return $helper;
-                },
-                cursor: "move",
-                appendTo: document.body, // Force helper to be appended to body for absolute positioning
-                start: function(event, ui) {
-                    disableCategoryEditing();
-                    isCategorySortActive = true;
-                    // Manually set the helper's position to the mouse Y
-                    var mouseY = event.pageY;
-                    var offsetY = ui.helper.height() / 2;
-                    ui.helper.css({
-                        position: 'absolute',
-                        top: mouseY - offsetY,
-                        left: event.pageX
-                    });
-                },
-                sort: function(event, ui) {
-                    // Keep helper under the mouse as you drag
-                    var mouseY = event.pageY;
-                    var offsetY = ui.helper.height() / 2;
-                    ui.helper.css({
-                        top: mouseY - offsetY,
-                        left: event.pageX
-                    });
-                },
-                stop: function(event, ui) {
-                    saveNewOrder('income');
-                    isCategorySortActive = false;
-                    if (isIncomeEditMode) {
-                        showDeleteButtons('income');
-                        enableCategoryEditing('income');
-                    }
-                }
-            }).disableSelection();
+            function initDashboardSortable(tableId, type) {
+                const $tbody = $(`#${tableId} tbody`);
+                const isIncome = type === 'income';
+                const totalRowId = isIncome ? 'income-total-row' : 'expense-total-row';
+                const mainBodyId = isIncome ? 'income-categories-body' : 'expense-categories-body';
+                const $mainBody = $(`#${mainBodyId}`);
 
-            // Make the expense categories table sortable, excluding the total row
-            $("#expense-categories-table tbody").sortable({
-                containment: "parent",
-                axis: "y", // Allow only vertical sorting
-                scroll: true,              // Enable auto-scroll
-                scrollSensitivity: 30,     // Distance from edge to start scrolling
-                scrollSpeed: 5,
-                items: "> tr:not(#expense-total-row):not([data-is-auto-adjustment='1']):not([data-is-credit-account='1'])", // Exclude total row, auto adjustment, and credit account payment categories
-                handle: ".sort-handle", // Only allow sorting via the sort icon
-                helper: function(e, tr) {
-                    var $originals = tr.children();
-                    var $helper = tr.clone();
-                    $helper.children().each(function(index) {
-                        $(this).width($originals.eq(index).width());
+                // Sync main data table row order to match sidebar order
+                function syncMainTableOrder(draggingItem, dragRowHeight, dragColCount) {
+                    // Remove previous drop indicator
+                    $mainBody.find('.main-table-drop-indicator').remove();
+
+                    const rowHeight = dragRowHeight || 0;
+                    const colCount = dragColCount || 1;
+
+                    // Reorder DOM to match sidebar
+                    const sidebarRows = $tbody.find('tr').get();
+                    let prevMainRow = null;
+
+                    sidebarRows.forEach(sRow => {
+                        const $sRow = $(sRow);
+
+                        if ($sRow.hasClass('ui-sortable-placeholder') && draggingItem && rowHeight > 0) {
+                            // Insert placeholder row matching dragged row height
+                            const $ph = $('<tr class="main-table-drop-indicator"><td colspan="' + colCount + '"></td></tr>');
+                            $ph.css('height', rowHeight + 'px');
+                            $ph.find('td').css('height', rowHeight + 'px');
+                            if (prevMainRow) $(prevMainRow).after($ph);
+                            else $mainBody.prepend($ph);
+                            prevMainRow = $ph[0];
+                            return;
+                        }
+
+                        const catId = sRow.getAttribute('data-category-id');
+                        const groupId = sRow.getAttribute('data-group-id');
+                        const isGroupHeader = $sRow.hasClass('sidebar-group-header');
+
+                        if (isGroupHeader) {
+                            const mainHeader = $mainBody.find(`tr.group-header-row[data-group-id="${groupId}"]`)[0];
+                            if (mainHeader) {
+                                if (prevMainRow) $(prevMainRow).after(mainHeader);
+                                else $mainBody.prepend(mainHeader);
+                                prevMainRow = mainHeader;
+                            }
+                        } else if (catId) {
+                            const mainRow = $mainBody.find(`tr[data-category-id="${catId}"]`)[0];
+                            if (mainRow) {
+                                if (prevMainRow) $(prevMainRow).after(mainRow);
+                                else $mainBody.prepend(mainRow);
+                                prevMainRow = mainRow;
+                            }
+                        }
                     });
-                    $helper.css({
-                        display: 'table',
-                        'background': '#fff',
-                        'z-index': 1000,
-                        'margin': 0,
-                        'top': 0,
-                        'transform': 'translateY(0)'
-                    });
-                    return $helper;
-                },
-                cursor: "move",
-                appendTo: document.body,
-                start: function(event, ui) {
-                    disableCategoryEditing();
-                    isCategorySortActive = true;
-                    var mouseY = event.pageY;
-                    var offsetY = ui.helper.height() / 2;
-                    ui.helper.css({
-                        position: 'absolute',
-                        top: mouseY - offsetY,
-                        left: event.pageX
-                    });
-                },
-                sort: function(event, ui) {
-                    var mouseY = event.pageY;
-                    var offsetY = ui.helper.height() / 2;
-                    ui.helper.css({
-                        top: mouseY - offsetY,
-                        left: event.pageX
-                    });
-                },
-                stop: function(event, ui) {
-                    saveNewOrder('expense');
-                    isCategorySortActive = false;
-                    if (isExpenseEditMode) {
-                        showDeleteButtons('expense');
-                        enableCategoryEditing('expense');
-                    }
                 }
-            }).disableSelection();
+
+                // Define items selectors for categories vs groups
+                let CATEGORY_ITEMS = isIncome
+                    ? "> tr:not(#income-total-row):not([data-is-auto-adjustment='1']):not([data-is-system='1']):not(.sidebar-group-header):not(.system-category-row):not(#last-remainder-row)"
+                    : "> tr:not(#expense-total-row):not([data-is-auto-adjustment='1']):not([data-is-credit-account='1']):not([data-is-system='1']):not(.sidebar-group-header):not(.system-category-row):not(#last-remainder-row)";
+                const GROUP_ITEMS = "> tr.sidebar-group-header:not([data-group-id='_ungrouped']):not([data-group-id='_system'])";
+
+                let draggingGroup = false;
+
+                function updateDropHighlight(event) {
+                    if (draggingGroup) return;
+                    const $allHeaders = $tbody.find('tr.sidebar-group-header');
+                    $allHeaders.removeClass('drop-target-highlight');
+                    const mouseY = event.pageY;
+                    $allHeaders.each(function() {
+                        const $header = $(this);
+                        const headerTop = $header.offset().top;
+                        let zoneBottom = headerTop + $header.outerHeight();
+                        let $next = $header.next('tr');
+                        while ($next.length && !$next.hasClass('sidebar-group-header') && !$next.hasClass('system-category-row') && $next.attr('id') !== 'income-total-row' && $next.attr('id') !== 'expense-total-row') {
+                            if ($next.css('display') !== 'none') {
+                                zoneBottom = $next.offset().top + $next.outerHeight();
+                            }
+                            $next = $next.next('tr');
+                        }
+                        if (mouseY >= headerTop && mouseY <= zoneBottom) {
+                            $header.addClass('drop-target-highlight');
+                        }
+                    });
+                }
+
+                // Switch items BEFORE jQuery UI processes the mousedown
+                $tbody.on('mousedown touchstart', '.sort-handle', function() {
+                    draggingGroup = false;
+                    $tbody.sortable('option', 'items', CATEGORY_ITEMS);
+                    $tbody.sortable('refresh');
+                });
+                $tbody.on('mousedown touchstart', '.group-sort-handle', function() {
+                    draggingGroup = true;
+                    $tbody.sortable('option', 'items', GROUP_ITEMS);
+                    $tbody.sortable('refresh');
+                });
+
+                $tbody.sortable({
+                    containment: "parent",
+                    axis: "y",
+                    scroll: true,
+                    scrollSensitivity: 30,
+                    scrollSpeed: 5,
+                    items: CATEGORY_ITEMS,
+                    handle: ".sort-handle, .group-sort-handle",
+                    tolerance: 'pointer',
+                    placeholder: "sortable-placeholder",
+                    helper: function(e, tr) {
+                        var $originals = tr.children();
+                        var $helper = tr.clone();
+                        $helper.children().each(function(index) {
+                            $(this).width($originals.eq(index).width());
+                        });
+
+                        if (draggingGroup) {
+                            // Build stacked visual: group header on top, child rows behind
+                            const groupId = tr.attr('data-group-id');
+                            const $children = $tbody.find(`tr[data-group-id="${groupId}"]:not(.sidebar-group-header)`);
+                            const totalWidth = tr.outerWidth();
+                            const rowHeight = tr.outerHeight();
+                            const cs = window.getComputedStyle(tr[0]);
+                            const bgColor = cs.backgroundColor;
+
+                            var $wrapper = $('<div>').css({
+                                position: 'relative',
+                                width: totalWidth,
+                                height: rowHeight,
+                                'z-index': 1000
+                            });
+
+                            // Add child "stack" layers behind (max 3 visible)
+                            const stackCount = Math.min($children.length, 3);
+                            for (let i = stackCount; i >= 1; i--) {
+                                $('<div>').css({
+                                    position: 'absolute',
+                                    top: (i * 3) + 'px',
+                                    left: (i * 3) + 'px',
+                                    width: (totalWidth - (i * 3)) + 'px',
+                                    height: rowHeight + 'px',
+                                    background: bgColor,
+                                    border: '1px solid var(--secondary-hover)',
+                                    borderRadius: '3px',
+                                    boxShadow: '0 1px 3px var(--shadow-sm)',
+                                    opacity: 1 - (i * 0.15)
+                                }).appendTo($wrapper);
+                            }
+
+                            $helper.css({
+                                display: 'table',
+                                tableLayout: 'fixed',
+                                width: totalWidth + 'px',
+                                height: rowHeight + 'px',
+                                position: 'relative',
+                                'z-index': 10,
+                                margin: 0,
+                                backgroundColor: bgColor,
+                                boxShadow: '0 4px 12px var(--shadow-lg)',
+                                borderRadius: '3px'
+                            });
+                            $wrapper.prepend($helper);
+                            return $wrapper;
+                        }
+
+                        const catCs = window.getComputedStyle(tr[0]);
+                        // Copy per-cell computed styles so text stays positioned
+                        tr.children().each(function(index) {
+                            const cs = window.getComputedStyle(this);
+                            $helper.children().eq(index).css({
+                                width: cs.width,
+                                minWidth: cs.width,
+                                maxWidth: cs.width,
+                                height: cs.height,
+                                padding: cs.padding,
+                                textAlign: cs.textAlign,
+                                fontSize: cs.fontSize,
+                                fontWeight: cs.fontWeight,
+                                color: cs.color,
+                                backgroundColor: cs.backgroundColor,
+                                boxSizing: 'border-box',
+                                overflow: 'hidden'
+                            });
+                        });
+                        $helper.css({
+                            display: 'table',
+                            tableLayout: 'fixed',
+                            width: tr.outerWidth() + 'px',
+                            height: tr.outerHeight() + 'px',
+                            backgroundColor: catCs.backgroundColor,
+                            'z-index': 1000,
+                            'margin': 0,
+                            'top': 0,
+                            'transform': 'translateY(0)',
+                            boxShadow: '0 4px 12px var(--shadow-lg)',
+                            borderRadius: '3px'
+                        });
+                        return $helper;
+                    },
+                    cursor: "move",
+                    appendTo: document.body,
+                    start: function(event, ui) {
+                        disableCategoryEditing();
+                        isCategorySortActive = true;
+                        const dragH = window.innerWidth <= 600 ? 40 : 20;
+                        var mouseY = event.pageY;
+
+                        // Lock sidebar table column widths to prevent resizing
+                        const $sideTable = $tbody.closest('table');
+                        $sideTable.css('table-layout', 'fixed');
+                        $sideTable.css('width', $sideTable.outerWidth() + 'px');
+                        $tbody.find('tr').each(function() {
+                            $(this).children().each(function() {
+                                const w = $(this).outerWidth();
+                                $(this).css({ width: w + 'px', minWidth: w + 'px', maxWidth: w + 'px' });
+                            });
+                        });
+
+                        // Lock main table column widths to prevent resizing
+                        const $mainTable = $mainBody.closest('table');
+                        $mainTable.css('table-layout', 'fixed');
+                        $mainTable.css('width', $mainTable.outerWidth() + 'px');
+                        $mainBody.find('tr').each(function() {
+                            $(this).children().each(function() {
+                                const w = $(this).outerWidth();
+                                $(this).css({ width: w + 'px', minWidth: w + 'px', maxWidth: w + 'px' });
+                            });
+                        });
+
+                        const helperLeft = $sideTable.offset().left;
+                        const helperH = draggingGroup ? dragH : ui.helper.outerHeight();
+                        ui.helper.css({
+                            position: 'absolute',
+                            top: mouseY - (helperH / 2),
+                            left: helperLeft
+                        });
+                        if (draggingGroup) {
+                            ui.helper.css({ height: dragH, overflow: 'hidden' });
+                        }
+                        ui.item.data('helperLeft', helperLeft);
+                        ui.item.data('helperH', helperH);
+                        ui.placeholder.css('height', helperH + 'px');
+
+                        if (draggingGroup) {
+                            // Dim ungrouped and system groups
+                            $tbody.find('tr.sidebar-group-header[data-group-id="_ungrouped"], tr.sidebar-group-header[data-group-id="_system"]').addClass('group-drag-dimmed');
+                            $tbody.find('tr[data-group-id="_ungrouped"]:not(.sidebar-group-header), tr.system-category-row').addClass('group-drag-dimmed');
+                            // Dim matching main table groups
+                            $mainBody.find('tr.group-header-row[data-group-id="_ungrouped"], tr.group-header-row[data-group-id="_system"]').addClass('group-drag-dimmed');
+                            $mainBody.find('tr[data-group-id="_ungrouped"]:not(.group-header-row), tr[data-group-id="_system"]:not(.group-header-row)').addClass('group-drag-dimmed');
+
+                            // Hide the dragged group's children (they move with it)
+                            const draggedGroupId = ui.item.attr('data-group-id');
+                            const $draggedChildren = $tbody.find(`tr[data-group-id="${draggedGroupId}"]:not(.sidebar-group-header)`);
+                            ui.item.data('childRows', $draggedChildren);
+                            $draggedChildren.hide();
+                            // Hide matching main table children
+                            const $mainDraggedChildren = $mainBody.find(`tr[data-group-id="${draggedGroupId}"]:not(.group-header-row)`);
+                            ui.item.data('mainChildRows', $mainDraggedChildren);
+                            $mainDraggedChildren.hide();
+                            // Dim dragged group header in main table
+                            $mainBody.find(`tr.group-header-row[data-group-id="${draggedGroupId}"]`).addClass('group-drag-dimmed');
+                        } else {
+                            // Category drag: create a floating clone of the main table row
+                            const catId = ui.item.attr('data-category-id');
+                            if (catId) {
+                                const $mainRow = $mainBody.find(`tr[data-category-id="${catId}"]`);
+                                if ($mainRow.length) {
+                                    const $origTable = $mainRow.closest('table');
+                                    // Clone into a floating table that follows the mouse
+                                    const $clone = $('<table></table>').addClass('main-row-drag-clone');
+                                    const $clonedRow = $mainRow.clone();
+                                    // Copy exact computed styles from original cells
+                                    const origRow = $mainRow[0];
+                                    const cloneRow = $clonedRow[0];
+                                    const rowStyles = window.getComputedStyle(origRow);
+                                    cloneRow.style.height = rowStyles.height;
+                                    cloneRow.style.backgroundColor = rowStyles.backgroundColor;
+                                    $mainRow.find('td').each(function(i) {
+                                        const cs = window.getComputedStyle(this);
+                                        const $ct = $clonedRow.find('td').eq(i);
+                                        $ct.css({
+                                            width: cs.width,
+                                            minWidth: cs.width,
+                                            maxWidth: cs.width,
+                                            height: cs.height,
+                                            padding: cs.padding,
+                                            fontSize: cs.fontSize,
+                                            fontWeight: cs.fontWeight,
+                                            color: cs.color,
+                                            backgroundColor: cs.backgroundColor,
+                                            textAlign: cs.textAlign,
+                                            borderLeft: cs.borderLeft,
+                                            borderRight: cs.borderRight
+                                        });
+                                    });
+                                    $clone.append($clonedRow);
+                                    $clone.css({
+                                        position: 'fixed',
+                                        top: event.clientY - ($mainRow.outerHeight() / 2),
+                                        left: $origTable[0].getBoundingClientRect().left,
+                                        width: $origTable.outerWidth(),
+                                        zIndex: 10000,
+                                        pointerEvents: 'none',
+                                        tableLayout: 'fixed',
+                                        borderCollapse: 'collapse'
+                                    });
+                                    $('body').append($clone);
+                                    ui.item.data('mainClone', $clone);
+                                    ui.item.data('mainRowHeight', $mainRow.outerHeight());
+                                    // Store colCount for placeholder
+                                    const firstDataRow = $mainBody.find('tr:not(.group-header-row):not(.main-table-drop-indicator)').first();
+                                    ui.item.data('mainColCount', firstDataRow.length ? firstDataRow.find('td').length : 1);
+                                    // Hide original AFTER clone captures styles
+                                    $mainRow.addClass('main-row-dragging');
+                                }
+                            }
+                        }
+                        // Show drop indicator immediately on drag start
+                        if (!draggingGroup) {
+                            syncMainTableOrder(ui.item[0], ui.item.data('mainRowHeight'), ui.item.data('mainColCount'));
+                        }
+                    },
+                    change: function(event, ui) {
+                        if (!draggingGroup) {
+                            // Category drag: sync main table order in real time
+                            syncMainTableOrder(ui.item[0], ui.item.data('mainRowHeight'), ui.item.data('mainColCount'));
+                            return;
+                        }
+                        // After placeholder moves, reattach all non-dragged groups' children to their headers
+                        $tbody.find('tr.sidebar-group-header').each(function() {
+                            const $header = $(this);
+                            if ($header.is(ui.item)) return;
+                            const gid = $header.attr('data-group-id');
+                            if (gid === '_ungrouped') return;
+                            const $children = $tbody.find(`tr[data-group-id="${gid}"]:not(.sidebar-group-header)`);
+                            if ($children.length) {
+                                $children.detach();
+                                $header.after($children);
+                            }
+                        });
+                    },
+                    sort: function(event, ui) {
+                        const dragH = window.innerWidth <= 600 ? 40 : 20;
+                        const helperH = ui.item.data('helperH') || dragH;
+                        var mouseY = event.pageY;
+                        ui.helper.css({
+                            top: mouseY - (helperH / 2),
+                            left: ui.item.data('helperLeft')
+                        });
+                        updateDropHighlight(event);
+                        // Move the main table row clone with the mouse
+                        const $clone = ui.item.data('mainClone');
+                        if ($clone) {
+                            const rowH = ui.item.data('mainRowHeight') || dragH;
+                            $clone.css({
+                                top: event.clientY - (rowH / 2)
+                            });
+                        }
+                    },
+                    stop: function(event, ui) {
+                        // Unlock table column widths
+                        const $sideTable = $tbody.closest('table');
+                        $sideTable.css({ 'table-layout': '', 'width': '' });
+                        $tbody.find('tr').each(function() {
+                            $(this).children().css({ width: '', minWidth: '', maxWidth: '' });
+                        });
+                        const $mainTable = $mainBody.closest('table');
+                        $mainTable.css({ 'table-layout': '', 'width': '' });
+                        $mainBody.find('tr').each(function() {
+                            $(this).children().css({ width: '', minWidth: '', maxWidth: '' });
+                        });
+
+                        $tbody.find('tr.sidebar-group-header').removeClass('drop-target-highlight');
+                        $tbody.find('.group-drag-dimmed').removeClass('group-drag-dimmed');
+                        $mainBody.find('.group-drag-dimmed').removeClass('group-drag-dimmed');
+                        $mainBody.find('.main-row-dragging').removeClass('main-row-dragging');
+                        $mainBody.find('.main-table-drop-indicator').remove();
+                        // Remove floating clone
+                        const $dragClone = ui.item.data('mainClone');
+                        if ($dragClone) {
+                            $dragClone.remove();
+                            ui.item.removeData('mainClone');
+                        }
+
+                        if (draggingGroup) {
+                            // Show and reattach dragged group's children after their header
+                            const childRows = ui.item.data('childRows');
+                            if (childRows && childRows.length) {
+                                childRows.detach();
+                                ui.item.after(childRows);
+                                childRows.show();
+                            }
+                            // Show matching main table children
+                            const mainChildRows = ui.item.data('mainChildRows');
+                            if (mainChildRows && mainChildRows.length) {
+                                mainChildRows.show();
+                            }
+                            // Reattach all other groups' children too (final cleanup)
+                            $tbody.find('tr.sidebar-group-header').each(function() {
+                                const $header = $(this);
+                                if ($header.is(ui.item)) return;
+                                const gid = $header.attr('data-group-id');
+                                if (gid === '_ungrouped') return;
+                                const $children = $tbody.find(`tr[data-group-id="${gid}"]:not(.sidebar-group-header)`);
+                                if ($children.length) {
+                                    $children.detach();
+                                    $header.after($children);
+                                }
+                            });
+                            // Reset and save
+                            draggingGroup = false;
+                            $tbody.sortable('option', 'items', CATEGORY_ITEMS);
+                            $tbody.sortable('refresh');
+                            syncMainTableOrder();
+                            saveNewOrder(type);
+                            isCategorySortActive = false;
+                            return;
+                        }
+
+                        // Category drag — detect target group from mouse position
+                        const $moved = ui.item;
+                        const mouseY = event.pageY;
+                        let targetGroupId = _detectTargetGroup($tbody, mouseY);
+                        const oldGroupId = $moved.attr('data-group-id') || '';
+                        const effectiveNew = (targetGroupId === '_ungrouped') ? '' : (targetGroupId || '');
+                        const effectiveOld = (oldGroupId === '_ungrouped') ? '' : oldGroupId;
+
+                        // Move row into target group zone if needed
+                        if (targetGroupId) {
+                            _ensureRowInGroupZone($tbody, $moved, targetGroupId);
+                        }
+
+                        if (effectiveNew !== effectiveOld) {
+                            $moved.attr('data-group-id', targetGroupId || '_ungrouped');
+                            // Update main table row's group too
+                            const movedCatId = $moved.attr('data-category-id');
+                            if (movedCatId) {
+                                $mainBody.find(`tr[data-category-id="${movedCatId}"]`).attr('data-group-id', targetGroupId || '_ungrouped');
+                            }
+                            assignCategoryToGroup($moved.attr('data-category-id'), effectiveNew || null, type)
+                                .always(function() { saveNewOrder(type); });
+                        } else {
+                            saveNewOrder(type);
+                        }
+
+                        syncMainTableOrder();
+                        draggingGroup = false;
+                        $tbody.sortable('option', 'items', CATEGORY_ITEMS);
+                        $tbody.sortable('refresh');
+                        isCategorySortActive = false;
+                        if (type === 'income' && isIncomeEditMode) {
+                            showDeleteButtons('income');
+                            enableCategoryEditing('income');
+                        } else if (type === 'expense' && isExpenseEditMode) {
+                            showDeleteButtons('expense');
+                            enableCategoryEditing('expense');
+                        }
+                    }
+                }).disableSelection();
+            }
+
+            initDashboardSortable('income-categories-table', 'income');
+            initDashboardSortable('expense-categories-table', 'expense');
 
             // CA categories are NOT drag-and-drop reorderable (order syncs from expense categories)
 
@@ -6289,15 +7565,18 @@
         });
 
         function zebraStripeVisibleRows(tableBodySelector, oddClass, evenClass) {
-            const rows = Array.from(document.querySelectorAll(`${tableBodySelector} tr[data-category-id]`))
-                .filter(row => row.style.display !== 'none' && !row.classList.contains('hidden_categories'));
-            rows.forEach((row, idx) => {
-                row.classList.remove(oddClass, evenClass);
-                if (idx % 2 === 0) {
-                    row.classList.add(oddClass);
-                } else {
-                    row.classList.add(evenClass);
+            const allRows = Array.from(document.querySelectorAll(`${tableBodySelector} tr`));
+            let idx = 0;
+            allRows.forEach(row => {
+                if (row.classList.contains('sidebar-group-header') || row.classList.contains('group-header-row')) {
+                    idx = 0;
+                    return;
                 }
+                if (!row.hasAttribute('data-category-id')) return;
+                if (row.style.display === 'none' || row.classList.contains('hidden_categories')) return;
+                row.classList.remove(oddClass, evenClass);
+                row.classList.add(idx % 2 === 0 ? evenClass : oddClass);
+                idx++;
             });
         }
         
@@ -6798,15 +8077,12 @@
                         localStorage.setItem(`caCollapsed_${accountId}`, 'true');
                     }
 
-                    // Force a reflow and update highlight after DOM/layout is updated
-                    setTimeout(() => {
-                        if (typeof updateView === 'function') {
-                            updateView(["highlightCurrentWeek", "addCurrentWeekDiv"]);
-                        }
-                        setTimeout(() => {
-                            if (typeof updateCurrentWeekOutline === 'function') updateCurrentWeekOutline();
-                        }, 0);
-                    }, 0);
+                    // Re-apply highlight and recalculate outline after collapse/expand
+                    highlightCurrentWeek();
+                    requestAnimationFrame(() => {
+                        window.dispatchEvent(new Event('resize'));
+                        setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+                    });
                 });
             });
         });
