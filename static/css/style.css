@@ -3061,6 +3061,7 @@ tr[data-category-id] td.before-member-since {
 .paid {
     font-weight: bold;
     position: relative;
+    z-index: 2;
 }
 
 .paid::after {
@@ -3086,6 +3087,7 @@ tr[data-category-id] td.before-member-since {
 .pending-entry {
     font-weight: bold;
     position: relative;
+    z-index: 2;
 }
 
 .pending-entry::after {
@@ -13715,7 +13717,7 @@ transform: scale(1.2);
     border-collapse: collapse;
     table-layout: fixed;
     border-radius: 3px;
-    overflow: hidden;
+    overflow: visible;
     box-shadow: 0 4px 12px var(--shadow-lg);
 }
 
