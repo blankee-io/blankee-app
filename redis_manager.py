@@ -50,6 +50,7 @@ USER_TABLES = [
     'income_category_groups',
     'expense_categories',
     'expense_category_groups',
+    'c_expense_category_groups',
     'income_entries',
     'expense_entries',
     'recurring_income',
@@ -637,6 +638,9 @@ def _flush_redis_to_mysql():
             'c_a_balances',
             'c_a_balances_d',
             'c_a_balances_m',
+            'income_category_groups',  # Groups flush before categories (categories reference groups)
+            'expense_category_groups',
+            'c_expense_category_groups',  # Depends on expense_category_groups
             'income_categories',  # Category definitions - flush before entries/recurring
             'expense_categories',
             'c_expense_categories',  # Depends on credit_accounts
@@ -3260,17 +3264,18 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
                             INSERT INTO income_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_system)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
                             row.get('name'),
-                            int(row.get('display_order', 0)),
+                            float(row.get('display_order', 0)),
                             row.get('group_id'),
                             int(row.get('is_recurring', 0)),
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('no_end_date', 0)),
-                            int(row.get('hidden', 0))
+                            int(row.get('hidden', 0)),
+                            int(row.get('is_system', 0))
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
@@ -3279,8 +3284,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
                             INSERT INTO income_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_system)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 display_order = VALUES(display_order),
@@ -3288,17 +3293,19 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 is_recurring = VALUES(is_recurring),
                                 is_auto_adjustment = VALUES(is_auto_adjustment),
                                 no_end_date = VALUES(no_end_date),
-                                hidden = VALUES(hidden)
+                                hidden = VALUES(hidden),
+                                is_system = VALUES(is_system)
                         """, (
                             old_id,
                             user_id,
                             row.get('name'),
-                            int(row.get('display_order', 0)),
+                            float(row.get('display_order', 0)),
                             row.get('group_id'),
                             int(row.get('is_recurring', 0)),
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('no_end_date', 0)),
-                            int(row.get('hidden', 0))
+                            int(row.get('hidden', 0)),
+                            int(row.get('is_system', 0))
                         ))
                 
                 conn.commit()
@@ -3417,12 +3424,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
                             INSERT INTO expense_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id, is_system)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
                             row.get('name'),
-                            int(row.get('display_order', 0)),
+                            float(row.get('display_order', 0)),
                             row.get('group_id'),
                             int(row.get('is_recurring', 0)),
                             int(row.get('is_auto_adjustment', 0)),
@@ -3430,7 +3437,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('hidden', 0)),
                             int(row.get('is_bud', 0)),
                             int(row.get('is_credit_account', 0)),
-                            row.get('credit_account_id')
+                            row.get('credit_account_id'),
+                            int(row.get('is_system', 0))
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
@@ -3439,8 +3447,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
                             INSERT INTO expense_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id, is_system)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 display_order = VALUES(display_order),
@@ -3451,12 +3459,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 hidden = VALUES(hidden),
                                 is_bud = VALUES(is_bud),
                                 is_credit_account = VALUES(is_credit_account),
-                                credit_account_id = VALUES(credit_account_id)
+                                credit_account_id = VALUES(credit_account_id),
+                                is_system = VALUES(is_system)
                         """, (
                             old_id,
                             user_id,
                             row.get('name'),
-                            int(row.get('display_order', 0)),
+                            float(row.get('display_order', 0)),
                             row.get('group_id'),
                             int(row.get('is_recurring', 0)),
                             int(row.get('is_auto_adjustment', 0)),
@@ -3464,7 +3473,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('hidden', 0)),
                             int(row.get('is_bud', 0)),
                             int(row.get('is_credit_account', 0)),
-                            row.get('credit_account_id')
+                            row.get('credit_account_id'),
+                            int(row.get('is_system', 0))
                         ))
                 
                 conn.commit()
@@ -3613,19 +3623,20 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
                             INSERT INTO c_expense_categories (id, account_id, name, display_order, group_id,
-                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             row.get('account_id'),
                             row.get('name'),
-                            int(row.get('display_order', 0)),
+                            float(row.get('display_order', 0)),
                             row.get('group_id'),
                             int(row.get('is_recurring', 0)),
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
                             int(row.get('is_bud', 0)),
                             int(row.get('is_interest', 0)),
-                            int(row.get('is_auto_adjustment', 0))
+                            int(row.get('is_auto_adjustment', 0)),
+                            int(row.get('is_system', 0))
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
@@ -3634,8 +3645,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
                             INSERT INTO c_expense_categories (id, account_id, name, display_order, group_id,
-                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 display_order = VALUES(display_order),
@@ -3645,19 +3656,21 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 hidden = VALUES(hidden),
                                 is_bud = VALUES(is_bud),
                                 is_interest = VALUES(is_interest),
-                                is_auto_adjustment = VALUES(is_auto_adjustment)
+                                is_auto_adjustment = VALUES(is_auto_adjustment),
+                                is_system = VALUES(is_system)
                         """, (
                             old_id,
                             row.get('account_id'),
                             row.get('name'),
-                            int(row.get('display_order', 0)),
+                            float(row.get('display_order', 0)),
                             row.get('group_id'),
                             int(row.get('is_recurring', 0)),
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
                             int(row.get('is_bud', 0)),
                             int(row.get('is_interest', 0)),
-                            int(row.get('is_auto_adjustment', 0))
+                            int(row.get('is_auto_adjustment', 0)),
+                            int(row.get('is_system', 0))
                         ))
                 
                 conn.commit()
@@ -3755,30 +3768,249 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
             elif table in ['income_category_groups', 'expense_category_groups']:
                 # Category groups tables
+
+                # Handle pending deletes FIRST
+                pending_key = f"pending_deletes:{table}:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                if pending_deletes:
+                    for gid_bytes in pending_deletes:
+                        gid = gid_bytes.decode('utf-8') if isinstance(gid_bytes, bytes) else gid_bytes
+                        cursor.execute(f"DELETE FROM {table} WHERE id = %s AND user_id = %s", (gid, user_id))
+                    conn.commit()
+                    _redis_client.delete(pending_key)
+                    log_info(logger, 'FLUSH', f"Deleted {len(pending_deletes)} rows from {table}")
+
                 if not rows:
+                    cursor.close()
                     return 0
+
+                # Orphan detection: delete MySQL rows not in Redis
+                redis_ids = set(int(r.get('id')) for r in rows if int(r.get('id', 0)) > 0)
+                cursor.execute(f"SELECT id FROM {table} WHERE user_id = %s", (user_id,))
+                mysql_ids = set(r[0] for r in cursor.fetchall())
+                orphan_ids = mysql_ids - redis_ids
+                if orphan_ids:
+                    for oid in orphan_ids:
+                        cursor.execute(f"DELETE FROM {table} WHERE id = %s AND user_id = %s", (oid, user_id))
+                    conn.commit()
+                    log_info(logger, 'FLUSH', f"Removed {len(orphan_ids)} orphan rows from {table}")
                 
-                batch_data = []
+                # Track temp ID to real ID mappings
+                temp_id_mappings = {}
+                
                 for row in rows:
-                    batch_data.append((
-                        row.get('id'),
-                        user_id,
-                        row.get('name'),
-                        int(row.get('display_order', 0))
-                    ))
-                
-                cursor.executemany(f"""
-                    INSERT INTO {table} (id, user_id, name, display_order)
-                    VALUES (%s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        name = VALUES(name),
-                        display_order = VALUES(display_order)
-                """, batch_data)
+                    old_id = row.get('id')
+                    is_temp = old_id and int(old_id) < 0
+                    
+                    if is_temp:
+                        cursor.execute(f"""
+                            INSERT INTO {table} (id, user_id, name, display_order)
+                            VALUES (NULL, %s, %s, %s)
+                        """, (
+                            user_id,
+                            row.get('name'),
+                            float(row.get('display_order', 0))
+                        ))
+                        new_id = cursor.lastrowid
+                        temp_id_mappings[int(old_id)] = new_id
+                        log_info(logger, 'FLUSH', f"{table} temp ID {old_id} → real ID {new_id}")
+                    else:
+                        cursor.execute(f"""
+                            INSERT INTO {table} (id, user_id, name, display_order)
+                            VALUES (%s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                name = VALUES(name),
+                                display_order = VALUES(display_order)
+                        """, (
+                            old_id,
+                            user_id,
+                            row.get('name'),
+                            float(row.get('display_order', 0))
+                        ))
                 
                 conn.commit()
+                
+                # Update Redis with new IDs if any temp IDs were replaced
+                if temp_id_mappings:
+                    for i, row in enumerate(rows):
+                        old_id = row.get('id')
+                        if old_id and int(old_id) in temp_id_mappings:
+                            rows[i]['id'] = temp_id_mappings[int(old_id)]
+                    
+                    redis_key = _get_redis_key(table, user_id)
+                    _redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(rows, cls=DecimalEncoder))
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} {table} temp IDs in Redis")
+                    
+                    # Update group_id references in category tables
+                    cat_table = 'income_categories' if table == 'income_category_groups' else 'expense_categories'
+                    cat_key = _get_redis_key(cat_table, user_id)
+                    cat_data = _redis_client.get(cat_key)
+                    if cat_data:
+                        categories = json.loads(cat_data)
+                        cats_updated = 0
+                        for cat in categories:
+                            old_gid = cat.get('group_id')
+                            if old_gid is not None and int(old_gid) in temp_id_mappings:
+                                cat['group_id'] = temp_id_mappings[int(old_gid)]
+                                cats_updated += 1
+                        if cats_updated > 0:
+                            _redis_client.setex(cat_key, INACTIVITY_TIMEOUT + 60, json.dumps(categories, cls=DecimalEncoder))
+                            _redis_client.sadd(f"dirty_tables:{user_id}", cat_table)
+                            log_info(logger, 'FLUSH', f"Updated {cats_updated} {cat_table} group_id refs")
+                    
+                    # For expense groups: also update source_group_id in c_expense_category_groups
+                    if table == 'expense_category_groups':
+                        ceg_key = _get_redis_key('c_expense_category_groups', user_id)
+                        ceg_data = _redis_client.get(ceg_key)
+                        if ceg_data:
+                            c_groups_list = json.loads(ceg_data)
+                            ceg_updated = 0
+                            for cg in c_groups_list:
+                                old_src = cg.get('source_group_id')
+                                if old_src is not None and int(old_src) in temp_id_mappings:
+                                    cg['source_group_id'] = temp_id_mappings[int(old_src)]
+                                    ceg_updated += 1
+                            if ceg_updated > 0:
+                                _redis_client.setex(ceg_key, INACTIVITY_TIMEOUT + 60, json.dumps(c_groups_list, cls=DecimalEncoder))
+                                _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_category_groups')
+                                log_info(logger, 'FLUSH', f"Updated {ceg_updated} c_expense_category_groups source_group_id refs")
+                
                 cursor.close()
-                log_info(logger, 'FLUSH', f"→ {table}: {len(batch_data)} rows")
-                return len(batch_data)
+                log_info(logger, 'FLUSH', f"→ {table}: {len(rows)} rows")
+                return len(rows)
+                
+            elif table == 'c_expense_category_groups':
+                # Credit account expense category groups table
+
+                # Handle pending deletes FIRST
+                pending_key = f"pending_deletes:c_expense_category_groups:{user_id}"
+                pending_deletes = _redis_client.smembers(pending_key)
+                if pending_deletes:
+                    for gid_bytes in pending_deletes:
+                        gid = gid_bytes.decode('utf-8') if isinstance(gid_bytes, bytes) else gid_bytes
+                        cursor.execute("DELETE FROM c_expense_category_groups WHERE id = %s AND user_id = %s", (gid, user_id))
+                    conn.commit()
+                    _redis_client.delete(pending_key)
+                    log_info(logger, 'FLUSH', f"Deleted {len(pending_deletes)} rows from c_expense_category_groups")
+
+                if not rows:
+                    cursor.close()
+                    return 0
+
+                # Orphan detection: delete MySQL rows not in Redis
+                redis_ids = set(int(r.get('id')) for r in rows if int(r.get('id', 0)) > 0)
+                cursor.execute("SELECT id FROM c_expense_category_groups WHERE user_id = %s", (user_id,))
+                mysql_ids = set(r[0] for r in cursor.fetchall())
+                orphan_ids = mysql_ids - redis_ids
+                if orphan_ids:
+                    for oid in orphan_ids:
+                        cursor.execute("DELETE FROM c_expense_category_groups WHERE id = %s AND user_id = %s", (oid, user_id))
+                    conn.commit()
+                    log_info(logger, 'FLUSH', f"Removed {len(orphan_ids)} orphan rows from c_expense_category_groups")
+                
+                # Track temp ID to real ID mappings
+                temp_id_mappings = {}
+                
+                # Pre-filter: verify account_ids exist in credit_accounts (Redis or MySQL)
+                # to avoid FK constraint failures from orphaned groups
+                valid_account_ids = set()
+                ca_key = f"credit_accounts:v1:{user_id}"
+                ca_cached = _redis_client.get(ca_key)
+                if ca_cached:
+                    ca_list = json.loads(ca_cached)
+                    valid_account_ids = set(int(a.get('id')) for a in ca_list if a.get('id') is not None)
+                if not valid_account_ids:
+                    cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
+                    valid_account_ids = set(r[0] for r in cursor.fetchall())
+                
+                # Remove orphaned groups (account_id not in any existing credit account)
+                valid_rows = []
+                removed_rows = []
+                for row in rows:
+                    acct_id = row.get('account_id')
+                    if acct_id is not None and int(acct_id) in valid_account_ids:
+                        valid_rows.append(row)
+                    else:
+                        removed_rows.append(row)
+                
+                if removed_rows:
+                    log_warning(logger, 'FLUSH', f"Removed {len(removed_rows)} orphaned c_expense_category_groups (invalid account_ids: {[r.get('account_id') for r in removed_rows]})")
+                    # Update Redis to remove orphaned groups
+                    redis_key = _get_redis_key('c_expense_category_groups', user_id)
+                    _redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(valid_rows, cls=DecimalEncoder))
+                    rows = valid_rows
+                
+                if not rows:
+                    cursor.close()
+                    return 0
+                
+                for row in rows:
+                    old_id = row.get('id')
+                    is_temp = old_id and int(old_id) < 0
+                    
+                    if is_temp:
+                        cursor.execute("""
+                            INSERT INTO c_expense_category_groups (id, account_id, user_id, name, display_order, source_group_id)
+                            VALUES (NULL, %s, %s, %s, %s, %s)
+                        """, (
+                            row.get('account_id'),
+                            user_id,
+                            row.get('name'),
+                            float(row.get('display_order', 0)),
+                            row.get('source_group_id')
+                        ))
+                        new_id = cursor.lastrowid
+                        temp_id_mappings[int(old_id)] = new_id
+                        log_info(logger, 'FLUSH', f"c_expense_category_groups temp ID {old_id} → real ID {new_id}")
+                    else:
+                        cursor.execute("""
+                            INSERT INTO c_expense_category_groups (id, account_id, user_id, name, display_order, source_group_id)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                name = VALUES(name),
+                                display_order = VALUES(display_order),
+                                source_group_id = VALUES(source_group_id)
+                        """, (
+                            old_id,
+                            row.get('account_id'),
+                            user_id,
+                            row.get('name'),
+                            float(row.get('display_order', 0)),
+                            row.get('source_group_id')
+                        ))
+                
+                conn.commit()
+                
+                # Update Redis with new IDs if any temp IDs were replaced
+                if temp_id_mappings:
+                    for i, row in enumerate(rows):
+                        old_id = row.get('id')
+                        if old_id and int(old_id) in temp_id_mappings:
+                            rows[i]['id'] = temp_id_mappings[int(old_id)]
+                    
+                    redis_key = _get_redis_key('c_expense_category_groups', user_id)
+                    _redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(rows, cls=DecimalEncoder))
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} c_expense_category_groups temp IDs in Redis")
+                    
+                    # Update group_id references in c_expense_categories
+                    cat_key = _get_redis_key('c_expense_categories', user_id)
+                    cat_data = _redis_client.get(cat_key)
+                    if cat_data:
+                        c_categories = json.loads(cat_data)
+                        cats_updated = 0
+                        for cat in c_categories:
+                            old_gid = cat.get('group_id')
+                            if old_gid is not None and int(old_gid) in temp_id_mappings:
+                                cat['group_id'] = temp_id_mappings[int(old_gid)]
+                                cats_updated += 1
+                        if cats_updated > 0:
+                            _redis_client.setex(cat_key, INACTIVITY_TIMEOUT + 60, json.dumps(c_categories, cls=DecimalEncoder))
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+                            log_info(logger, 'FLUSH', f"Updated {cats_updated} c_expense_categories group_id refs")
+                
+                cursor.close()
+                log_info(logger, 'FLUSH', f"→ c_expense_category_groups: {len(rows)} rows")
+                return len(rows)
                 
             elif table == 'credit_accounts':
                 # Credit accounts table
@@ -3901,6 +4133,28 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             log_info(logger, 'FLUSH', f"Updated account_id in {updated_count} c_expense_categories")
                             # Mark categories as dirty so they get flushed to MySQL
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                    
+                    # c_expense_category_groups also reference account_id — cascade temp ID resolution
+                    ceg_redis_key = f"c_expense_category_groups:v1:{user_id}"
+                    cached_groups = _redis_client.get(ceg_redis_key)
+                    if cached_groups:
+                        groups = json.loads(cached_groups)
+                        group_updated_count = 0
+                        for grp in groups:
+                            old_acct_id = grp.get('account_id')
+                            if old_acct_id in temp_id_mappings:
+                                grp['account_id'] = temp_id_mappings[old_acct_id]
+                                group_updated_count += 1
+                        
+                        if group_updated_count > 0:
+                            _redis_client.setex(
+                                ceg_redis_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(groups, cls=DecimalEncoder)
+                            )
+                            log_info(logger, 'FLUSH', f"Updated account_id in {group_updated_count} c_expense_category_groups")
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_category_groups')
                             _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
                     
                     # c_payment_entries are stored at c_payment_entries:v1:{user_id}
