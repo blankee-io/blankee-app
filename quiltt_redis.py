@@ -1663,7 +1663,7 @@ def upsert_category_memory(user_id, merchant_id, description, category_id, categ
         log_error(logger, 'QUILTT', f"Error upserting category memory for user {user_id}: {e}")
 
 
-def lookup_category_memory(user_id, merchant_id=None, description=None, category_type=None):
+def lookup_category_memory(user_id, merchant_id=None, description=None, category_type=None, credit_account_id=None):
     """
     Look up a user's remembered category for a merchant/description.
     Returns dict with category_id, category_type, account_id or None.
@@ -1671,9 +1671,31 @@ def lookup_category_memory(user_id, merchant_id=None, description=None, category
     Lookup order:
       1. Match by merchant_id + category_type (best)
       2. Match by description + category_type (fallback)
+    
+    For c_expense category_type, if credit_account_id is provided,
+    validates the matched category belongs to that specific credit account.
     """
     if not merchant_id and not description:
         return None
+
+    def _validate_credit_account(match):
+        """For c_expense, verify the category belongs to the correct credit account."""
+        if category_type != 'c_expense' or not credit_account_id:
+            return match
+        # Look up c_expense_categories to verify account ownership
+        cat_id = match.get('category_id')
+        if not cat_id:
+            return match
+        categories = _get_from_redis('c_expense_categories', user_id)
+        if categories:
+            for cat in categories:
+                if int(cat.get('id', 0)) == int(cat_id):
+                    if int(cat.get('account_id', 0)) == int(credit_account_id):
+                        return match
+                    else:
+                        # Category belongs to a different credit account — reject
+                        return None
+        return match  # Can't verify, allow through
 
     try:
         cached = _get_from_redis('quiltt_category_mappings', user_id)
@@ -1698,24 +1720,30 @@ def lookup_category_memory(user_id, merchant_id=None, description=None, category
             for m in cached:
                 if m.get('merchant_id') == merchant_id:
                     if category_type is None or m.get('category_type') == category_type:
-                        return {
+                        result = {
                             'category_id': m.get('category_id'),
                             'category_type': m.get('category_type'),
                             'account_id': m.get('account_id'),
                             'times_confirmed': m.get('times_confirmed', 1)
                         }
+                        result = _validate_credit_account(result)
+                        if result:
+                            return result
 
         # 2. Fallback: description match
         if description:
             for m in cached:
                 if m.get('description') == description:
                     if category_type is None or m.get('category_type') == category_type:
-                        return {
+                        result = {
                             'category_id': m.get('category_id'),
                             'category_type': m.get('category_type'),
                             'account_id': m.get('account_id'),
                             'times_confirmed': m.get('times_confirmed', 1)
                         }
+                        result = _validate_credit_account(result)
+                        if result:
+                            return result
 
         return None
     except Exception as e:

@@ -14416,17 +14416,23 @@ def confirm_transaction():
         # --- SAVE CATEGORY MEMORY ---
         # Remember this user's category choice for this merchant/description
         try:
-            from quiltt_redis import upsert_category_memory, get_quiltt_transactions
+            from quiltt_redis import upsert_category_memory, get_quiltt_transactions, get_blankee_credit_account_for_quiltt_account
             quiltt_txns = get_quiltt_transactions(user_id=current_user.id)
             txn_record = next((t for t in quiltt_txns if t.get('transaction_id') == transaction_id), None)
             if txn_record:
+                # For credit accounts, store blankee credit_account_id (not quiltt account_id string)
+                _mem_account_id = None
+                if entry_type in ('c_expense', 'c_payment') and txn_record.get('account_id'):
+                    _mem_acct = get_blankee_credit_account_for_quiltt_account(current_user.id, txn_record['account_id'])
+                    if _mem_acct:
+                        _mem_account_id = _mem_acct.get('id')
                 upsert_category_memory(
                     user_id=current_user.id,
                     merchant_id=txn_record.get('ntropy_merchant_id'),
                     description=txn_record.get('description'),
                     category_id=category_id,
                     category_type=entry_type,
-                    account_id=txn_record.get('account_id') if entry_type in ('c_expense', 'c_payment') else None
+                    account_id=_mem_account_id
                 )
                 log_info(app.logger, 'CONFIRM_TXN', f"Saved category memory: merchant_id={txn_record.get('ntropy_merchant_id')}, desc={txn_record.get('description', '')[:50]}, cat={category_id}, type={entry_type}")
         except Exception as mem_err:
@@ -14561,19 +14567,25 @@ def confirm_all_transactions():
         
         # --- SAVE CATEGORY MEMORY FOR ALL CONFIRMED TRANSACTIONS ---
         try:
-            from quiltt_redis import upsert_category_memory, get_quiltt_transactions
+            from quiltt_redis import upsert_category_memory, get_quiltt_transactions, get_blankee_credit_account_for_quiltt_account
             quiltt_txns = get_quiltt_transactions(user_id=current_user.id)
             txn_lookup = {t.get('transaction_id'): t for t in quiltt_txns}
             for mapping in all_txn_mappings:
                 txn_record = txn_lookup.get(mapping['transaction_id'])
                 if txn_record:
+                    # For credit accounts, store blankee credit_account_id (not quiltt account_id string)
+                    _mem_account_id = None
+                    if mapping['entry_type'] in ('c_expense', 'c_payment') and txn_record.get('account_id'):
+                        _mem_acct = get_blankee_credit_account_for_quiltt_account(current_user.id, txn_record['account_id'])
+                        if _mem_acct:
+                            _mem_account_id = _mem_acct.get('id')
                     upsert_category_memory(
                         user_id=current_user.id,
                         merchant_id=txn_record.get('ntropy_merchant_id'),
                         description=txn_record.get('description'),
                         category_id=mapping['category_id'],
                         category_type=mapping['entry_type'],
-                        account_id=txn_record.get('account_id') if mapping['entry_type'] in ('c_expense', 'c_payment') else None
+                        account_id=_mem_account_id
                     )
         except Exception as mem_err:
             log_warning(app.logger, 'CONFIRM_ALL', f"Failed to save category memory: {mem_err}")
@@ -23645,7 +23657,7 @@ def _auto_confirm_pending_entries(user_id):
                 # Fetch pending entries for this user
                 if entry_type == 'c_expense':
                     cursor.execute("""
-                        SELECT cee.id, cee.category_id, cee.date, cee.amount
+                        SELECT cee.id, cee.category_id, cee.date, cee.amount, cec.account_id
                         FROM c_expense_entries cee
                         JOIN c_expense_categories cec ON cee.category_id = cec.id
                         JOIN credit_accounts ca ON cec.account_id = ca.id
@@ -23669,6 +23681,7 @@ def _auto_confirm_pending_entries(user_id):
                     entry_id = entry['id']
                     entry_date = entry['date']
                     entry_amount = float(entry['amount']) if entry['amount'] else 0
+                    entry_account_id = entry.get('account_id')  # Only set for c_expense
 
                     # Look up Ntropy/memory suggestion from quiltt_transactions
                     new_category_id = None
@@ -23680,11 +23693,31 @@ def _auto_confirm_pending_entries(user_id):
                     suggestion = cursor.fetchone()
 
                     if suggestion and suggestion.get('custom_category_id'):
-                        new_category_id = suggestion['custom_category_id']
-                        log_info(app.logger, 'AUTO_CONFIRM',  f"Entry {entry_id} ({entry_type}) -> suggested category " f"{new_category_id} ({suggestion.get('custom_category_suggestion', '?')})" )
-                    else:
-                        # Fall back to Uncategorized
-                        uncat_id = get_uncategorized_category_id(user_id, entry_type)
+                        suggested_cat_id = suggestion['custom_category_id']
+                        
+                        # For c_expense, validate the suggested category belongs to the same credit account
+                        if entry_type == 'c_expense' and entry_account_id:
+                            cursor.execute("""
+                                SELECT account_id FROM c_expense_categories WHERE id = %s
+                            """, (suggested_cat_id,))
+                            cat_row = cursor.fetchone()
+                            if cat_row and int(cat_row['account_id']) != int(entry_account_id):
+                                # Suggestion is for a different credit account — fall back to Uncategorized
+                                log_warning(app.logger, 'AUTO_CONFIRM',
+                                    f"Entry {entry_id}: suggested category {suggested_cat_id} belongs to account "
+                                    f"{cat_row['account_id']}, entry is in account {entry_account_id} — falling back to Uncategorized")
+                                suggested_cat_id = None
+                        
+                        if suggested_cat_id:
+                            new_category_id = suggested_cat_id
+                            log_info(app.logger, 'AUTO_CONFIRM',  f"Entry {entry_id} ({entry_type}) -> suggested category " f"{new_category_id} ({suggestion.get('custom_category_suggestion', '?')})" )
+                    
+                    if not new_category_id:
+                        # Fall back to Uncategorized (for the correct account)
+                        if entry_type == 'c_expense' and entry_account_id:
+                            uncat_id = get_uncategorized_category_id(user_id, entry_type, account_id=entry_account_id)
+                        else:
+                            uncat_id = get_uncategorized_category_id(user_id, entry_type)
                         if uncat_id:
                             new_category_id = uncat_id
                             fallback_count += 1
@@ -24240,6 +24273,7 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             # Check if the user has previously confirmed a category for this merchant/description.
             # If so, use that instead of calling Ntropy.
             memory_match = None
+            _suggestion_credit_account_id = None  # Blankee credit account ID for scoping suggestions
             try:
                 from quiltt_redis import lookup_category_memory
                 txn_merchant_id = ntropy_data.get('ntropy_merchant_id')
@@ -24251,10 +24285,15 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                 acct_type = quiltt_account_info.get('account_type', '').upper()
                 if acct_type == 'CREDIT':
                     memory_category_type = 'c_expense' if is_expense else 'c_payment'
+                    # Resolve blankee credit account ID for scoping suggestions
+                    _blankee_acct = get_blankee_credit_account_for_quiltt_account(user_id, account_id)
+                    if _blankee_acct:
+                        _suggestion_credit_account_id = _blankee_acct.get('id')
 
                 memory_match = lookup_category_memory(
                     user_id, merchant_id=txn_merchant_id,
-                    description=txn_description, category_type=memory_category_type
+                    description=txn_description, category_type=memory_category_type,
+                    credit_account_id=_suggestion_credit_account_id
                 )
                 if memory_match:
                     # Look up category name from ID
@@ -24304,7 +24343,8 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         'date': date,
                         'transaction_type': 'expense' if is_expense else 'income'
                     },
-                    account_type=ntropy_account_type
+                    account_type=ntropy_account_type,
+                    credit_account_id=_suggestion_credit_account_id
                 )
                 if suggestion:
                     # Always save merchant/entity data from enrichment
@@ -25482,40 +25522,27 @@ def quiltt_suggest_category():
         suggestion = suggest_category_for_transaction(
             user_id=current_user.id,
             transaction=transaction,
-            account_type=account_type
+            account_type=account_type,
+            credit_account_id=int(credit_account_id) if credit_account_id else None
         )
         
-        # For c_expense, we need to filter to the specific credit account
-        if entry_type == 'c_expense' and credit_account_id and suggestion.get('suggested_category_id'):
-            # Get c_expense_categories to verify the suggested ID is for this account
+        # For c_expense, if Ntropy returned a category name but no ID match on this account,
+        # try to find a same-named category on this specific credit account
+        if entry_type == 'c_expense' and credit_account_id and not suggestion.get('suggested_category_id') and suggestion.get('suggested_category'):
             redis_key = f"c_expense_categories:v1:{current_user.id}"
             cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
             if cached:
                 c_expense_cats = json.loads(cached)
-                suggested_id = suggestion['suggested_category_id']
-                
-                # Check if suggested category belongs to this credit account
+                suggested_name = suggestion.get('suggested_category', '').lower()
                 matching_cat = next(
                     (c for c in c_expense_cats 
-                     if c.get('id') == suggested_id and str(c.get('account_id')) == str(credit_account_id)),
+                     if c.get('name', '').lower() == suggested_name 
+                     and str(c.get('account_id')) == str(credit_account_id)),
                     None
                 )
-                
-                if not matching_cat:
-                    # Suggested category is for wrong account - find one with same name on this account
-                    suggested_name = suggestion.get('suggested_category', '').lower()
-                    matching_cat = next(
-                        (c for c in c_expense_cats 
-                         if c.get('name', '').lower() == suggested_name 
-                         and str(c.get('account_id')) == str(credit_account_id)),
-                        None
-                    )
-                    if matching_cat:
-                        suggestion['suggested_category_id'] = matching_cat['id']
-                    else:
-                        # No matching category on this account
-                        suggestion['suggested_category_id'] = None
-                        suggestion['confidence'] = 'low'
+                if matching_cat:
+                    suggestion['suggested_category_id'] = matching_cat['id']
+                    suggestion['confidence'] = 'high'
         
         return jsonify({
             'status': 'success',
@@ -25612,10 +25639,16 @@ def quiltt_backfill_suggestions():
                 if not description:
                     continue
                 
-                # Determine account type
+                # Determine account type and credit account for scoping
                 account_info = account_lookup.get(txn.get('account_id'), {})
                 acct_type = account_info.get('account_type', '').upper()
                 ntropy_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
+                _bf_credit_account_id = None
+                if acct_type == 'CREDIT':
+                    from quiltt_redis import get_blankee_credit_account_for_quiltt_account
+                    _bf_acct = get_blankee_credit_account_for_quiltt_account(current_user.id, txn.get('account_id'))
+                    if _bf_acct:
+                        _bf_credit_account_id = _bf_acct.get('id')
                 
                 suggestion = suggest_category_for_transaction(
                     user_id=current_user.id,
@@ -25627,7 +25660,8 @@ def quiltt_backfill_suggestions():
                         'date': date,
                         'transaction_type': txn.get('transaction_type', '')  # Pass expense/income indicator
                     },
-                    account_type=ntropy_account_type
+                    account_type=ntropy_account_type,
+                    credit_account_id=_bf_credit_account_id
                 )
                 
                 if suggestion and suggestion.get('suggested_category'):
@@ -25727,32 +25761,22 @@ def quiltt_suggest_categories_batch():
             suggestion = suggest_category_for_transaction(
                 user_id=current_user.id,
                 transaction=transaction,
-                account_type=account_type
+                account_type=account_type,
+                credit_account_id=int(credit_account_id) if credit_account_id else None
             )
             
-            # For c_expense, filter to specific credit account
-            if entry_type == 'c_expense' and credit_account_id and suggestion.get('suggested_category_id'):
-                suggested_id = suggestion['suggested_category_id']
-                
+            # For c_expense, if no ID match on this account, try name match as fallback
+            if entry_type == 'c_expense' and credit_account_id and not suggestion.get('suggested_category_id') and suggestion.get('suggested_category'):
+                suggested_name = suggestion.get('suggested_category', '').lower()
                 matching_cat = next(
                     (c for c in c_expense_cats 
-                     if c.get('id') == suggested_id and str(c.get('account_id')) == str(credit_account_id)),
+                     if c.get('name', '').lower() == suggested_name 
+                     and str(c.get('account_id')) == str(credit_account_id)),
                     None
                 )
-                
-                if not matching_cat:
-                    suggested_name = suggestion.get('suggested_category', '').lower()
-                    matching_cat = next(
-                        (c for c in c_expense_cats 
-                         if c.get('name', '').lower() == suggested_name 
-                         and str(c.get('account_id')) == str(credit_account_id)),
-                        None
-                    )
-                    if matching_cat:
-                        suggestion['suggested_category_id'] = matching_cat['id']
-                    else:
-                        suggestion['suggested_category_id'] = None
-                        suggestion['confidence'] = 'low'
+                if matching_cat:
+                    suggestion['suggested_category_id'] = matching_cat['id']
+                    suggestion['confidence'] = 'high'
             
             suggestions[transaction_id] = suggestion
         
