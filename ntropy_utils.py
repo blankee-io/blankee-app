@@ -344,7 +344,8 @@ def enrich_transaction_with_custom_categories(
 def suggest_category_for_transaction(
     user_id: int,
     transaction: Dict[str, Any],
-    account_type: str  # 'DEPOSITORY' or 'CREDIT'
+    account_type: str,  # 'DEPOSITORY' or 'CREDIT'
+    credit_account_id: int = None  # Blankee credit_accounts.id for scoping c_expense categories
 ) -> Dict[str, Any]:
     """
     Get category suggestion for a transaction.
@@ -431,7 +432,7 @@ def suggest_category_for_transaction(
                 # Charge to credit card (outgoing/expense)
                 category_type = 'c_expense'
                 suggested_category_id = _find_category_id(
-                    user_id, suggested_category, 'c_expense_categories'
+                    user_id, suggested_category, 'c_expense_categories', account_id=credit_account_id
                 ) if suggested_category else None
         else:  # DEPOSITORY
             if entry_type == 'incoming':
@@ -474,7 +475,7 @@ def suggest_category_for_transaction(
         }
 
 
-def _find_category_id(user_id: int, category_name: str, table_name: str) -> Optional[int]:
+def _find_category_id(user_id: int, category_name: str, table_name: str, account_id: int = None) -> Optional[int]:
     """
     Find a category ID by name in the user's categories.
     
@@ -482,6 +483,7 @@ def _find_category_id(user_id: int, category_name: str, table_name: str) -> Opti
         user_id: User ID
         category_name: Category name to match (case-insensitive)
         table_name: 'income_categories', 'expense_categories', or 'c_expense_categories'
+        account_id: For c_expense_categories, only match categories belonging to this credit account
         
     Returns:
         Category ID if found, None otherwise
@@ -502,6 +504,10 @@ def _find_category_id(user_id: int, category_name: str, table_name: str) -> Opti
     category_name_lower = category_name.lower()
     for cat in categories:
         if cat.get('name', '').lower() == category_name_lower:
+            # For c_expense_categories, verify account ownership
+            if table_name == 'c_expense_categories' and account_id is not None:
+                if int(cat.get('account_id', 0)) != int(account_id):
+                    continue
             return cat.get('id')
     
     return None
