@@ -4288,22 +4288,43 @@ transform: scale(1.2);
 #add-category-input-container,
 #add-group-input-container,
 #group-input-container {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    z-index: 9999;
+    position: relative;
+    top: auto;
+    left: auto;
+    z-index: auto;
     display: none; 
-    flex-direction: row;
-    align-items: center;
-    width: 320px;
-    height: 85px;
-    padding: 24px 16px;
+    flex-direction: column;
+    align-items: stretch;
+    width: 400px;
+    max-width: 90%;
+    min-height: 0;
+    padding: 20px 30px;
     background: var(--text-light);
-    border-radius: 8px;
-    box-shadow: 0 0 6px var(--shadow-xxl);
-    transform: translate(-50%, -50%);
-    gap: 10px;
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px var(--shadow-xl);
+    transform: none;
+    gap: 12px;
     box-sizing: border-box;
+}
+
+.floating-input-title {
+    margin: 0;
+    color: var(--primary);
+    font-size: 20px;
+    font-weight: 600;
+    text-align: center;
+}
+
+.floating-input-container.expense-theme .floating-input-title {
+    color: var(--accent);
+}
+
+.floating-input-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
 }
 
 /* Input field styling inside the modal */
@@ -4340,40 +4361,98 @@ transform: scale(1.2);
 }
 
 /* Button styling inside the modal */
-#income-category-input-container button,
-#expense-category-input-container button,
-#ca-category-input-container button,
-#add-category-input-container button,
-#add-group-input-container button,
-#group-input-container button {
-    width: 35px;
-    height: 35px;
-    margin-left: 8px;
-    padding: 8px;
-    background: var(--primary);
+#income-category-input-container .floating-input-confirm-btn,
+#expense-category-input-container .floating-input-confirm-btn,
+#ca-category-input-container .floating-input-confirm-btn,
+#add-category-input-container .floating-input-confirm-btn,
+#add-group-input-container .floating-input-confirm-btn,
+#group-input-container .floating-input-confirm-btn,
+#income-category-input-container .floating-input-cancel-btn,
+#expense-category-input-container .floating-input-cancel-btn,
+#ca-category-input-container .floating-input-cancel-btn,
+#add-category-input-container .floating-input-cancel-btn,
+#add-group-input-container .floating-input-cancel-btn,
+#group-input-container .floating-input-cancel-btn {
+    min-width: 0;
+    flex: 1 1 0;
+    min-height: 44px;
+    padding: 12px 18px;
     border: none;
-    border-radius: 50%;
-    color: var(--text-light);
-    font-size: 1rem;
+    border-radius: 12px;
+    font-size: 17px;
+    font-weight: 600;
     cursor: pointer;
+    box-shadow: 0 2px 12px var(--shadow-lg);
 }
 
-#income-category-input-container button:hover,
-#expense-category-input-container button:hover,
-#ca-category-input-container button:hover,
-#add-category-input-container button:hover,
-#add-group-input-container button:hover,
-#group-input-container button:hover {
+#income-category-input-container .floating-input-confirm-btn,
+#expense-category-input-container .floating-input-confirm-btn,
+#ca-category-input-container .floating-input-confirm-btn,
+#add-category-input-container .floating-input-confirm-btn,
+#add-group-input-container .floating-input-confirm-btn,
+#group-input-container .floating-input-confirm-btn {
+    background: var(--primary);
+    color: var(--text-light);
+}
+
+#expense-category-input-container.expense-theme .floating-input-confirm-btn,
+#add-category-input-container.expense-theme .floating-input-confirm-btn,
+#add-group-input-container.expense-theme .floating-input-confirm-btn,
+#group-input-container.expense-theme .floating-input-confirm-btn {
+    background: var(--accent);
+}
+
+#income-category-input-container .floating-input-cancel-btn,
+#expense-category-input-container .floating-input-cancel-btn,
+#ca-category-input-container .floating-input-cancel-btn,
+#add-category-input-container .floating-input-cancel-btn,
+#add-group-input-container .floating-input-cancel-btn,
+#group-input-container .floating-input-cancel-btn {
+    background: var(--secondary);
+    color: var(--text-light);
+}
+
+#income-category-input-container .floating-input-confirm-btn:hover,
+#expense-category-input-container .floating-input-confirm-btn:hover,
+#ca-category-input-container .floating-input-confirm-btn:hover,
+#add-category-input-container .floating-input-confirm-btn:hover,
+#add-group-input-container .floating-input-confirm-btn:hover,
+#group-input-container .floating-input-confirm-btn:hover {
     background: var(--primary-hover);
-    transform: scale(1.2);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--shadow-lg);
 }
 
-#income-category-input-container button:disabled,
-#expense-category-input-container button:disabled,
-#ca-category-input-container button:disabled,
-#add-category-input-container button:disabled,
-#add-group-input-container button:disabled,
-#group-input-container button:disabled {
+#expense-category-input-container.expense-theme .floating-input-confirm-btn:hover,
+#add-category-input-container.expense-theme .floating-input-confirm-btn:hover,
+#add-group-input-container.expense-theme .floating-input-confirm-btn:hover,
+#group-input-container.expense-theme .floating-input-confirm-btn:hover {
+    background: var(--accent-hover);
+}
+
+#income-category-input-container .floating-input-cancel-btn:hover,
+#expense-category-input-container .floating-input-cancel-btn:hover,
+#ca-category-input-container .floating-input-cancel-btn:hover,
+#add-category-input-container .floating-input-cancel-btn:hover,
+#add-group-input-container .floating-input-cancel-btn:hover,
+#group-input-container .floating-input-cancel-btn:hover {
+    background: var(--secondary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+}
+
+#income-category-input-container .floating-input-confirm-btn:disabled,
+#expense-category-input-container .floating-input-confirm-btn:disabled,
+#ca-category-input-container .floating-input-confirm-btn:disabled,
+#add-category-input-container .floating-input-confirm-btn:disabled,
+#add-group-input-container .floating-input-confirm-btn:disabled,
+#group-input-container .floating-input-confirm-btn:disabled,
+#income-category-input-container .floating-input-cancel-btn:disabled,
+#expense-category-input-container .floating-input-cancel-btn:disabled,
+#ca-category-input-container .floating-input-cancel-btn:disabled,
+#add-category-input-container .floating-input-cancel-btn:disabled,
+#add-group-input-container .floating-input-cancel-btn:disabled,
+#group-input-container .floating-input-cancel-btn:disabled {
     background: var(--secondary-hover);
     cursor: not-allowed;
 }
@@ -4523,26 +4602,82 @@ td:has(.bucket-progress-container) {
 }
 
 .category-edit-modal-content {
-    max-width: 350px;
-    margin: 15% auto;
-    padding: 10px;
+    width: 400px;
+    max-width: 90%;
+    margin: auto;
+    padding: 20px 30px;
     background-color: var(--text-light);
-    border: 1px solid var(--text-dark);
-    border-radius: 15px;
-    box-shadow: 0 0 6px var(--shadow-xxl);
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px var(--shadow-xl);
     text-align: center;
     box-sizing: border-box;
+}
+
+.category-edit-modal-title {
+    margin: 0 0 14px;
+    color: var(--primary);
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.category-edit-primary-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.category-edit-group-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    margin: 0 0 10px;
+}
+
+.category-edit-group-label {
+    font-size: 12px;
+    color: var(--secondary-dark);
+    white-space: nowrap;
+}
+
+.category-edit-group-select {
+    flex: 1;
+    min-height: 44px;
+    height: 44px;
+    padding: 12px 14px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 10px;
+    background: var(--white);
+    color: var(--text-dark);
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.category-edit-actions-row {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.category-edit-group-select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-lighter);
+    outline: none;
 }
 
 #editCategoryInput,
 #editGroupInput {
     flex: 1;
-    width: 150px;
-    padding: 10px 12px;
+    width: auto;
+    min-height: 44px;
+    padding: 12px 14px;
     background-color: var(--white);
     border: 1px solid var(--secondary-hover);
     border-radius: 10px;
-    font-size: 12px;
+    font-size: 14px;
     transition: all 0.2s ease;
     box-sizing: border-box;
 }
@@ -4556,41 +4691,69 @@ td:has(.bucket-progress-container) {
 }
 
 .confirm-edit-category-btn {
-    height: 35px;
-    margin-left: 8px;
-    padding: 8px;
+    min-height: 44px;
+    min-width: 120px;
+    padding: 12px 18px;
     background: var(--primary);
     border: none;
-    border-radius: 25px;
+    border-radius: 12px;
     color: var(--text-light);
-    font-size: 12px;
+    font-size: 17px;
+    font-weight: 600;
     cursor: pointer;
+    box-shadow: 0 2px 12px var(--shadow-lg);
+}
+
+.confirm-edit-category-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+    background: var(--primary-hover);
 }
 
 .delete-from-edit-category-btn {
-    width: 35px;
-    height: 35px;
-    margin-left: 8px;
-    padding: 8px;
+    width: auto;
+    flex: 1 1 0;
+    min-height: 44px;
+    padding: 14px 24px;
+    margin: 10px 0 0;
     background: var(--danger);
     border: none;
-    border-radius: 50%;
+    border-radius: 12px;
     color: var(--text-light);
-    font-size: 1rem;
+    font-size: 17px;
+    font-weight: 600;
     cursor: pointer;
+    box-shadow: 0 2px 12px var(--shadow-lg);
+    text-align: center;
+}
+
+.delete-from-edit-category-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+    background: var(--danger-hover);
 }
 
 .hide-category-btn {
-    width: 35px;
-    height: 35px;
-    margin-left: 8px;
-    padding: 8px;
+    width: auto;
+    flex: 1 1 0;
+    min-height: 44px;
+    padding: 14px 24px;
+    margin: 10px 0 0;
     background: var(--secondary);
     border: none;
-    border-radius: 50%;
+    border-radius: 12px;
     color: var(--text-light);
-    font-size: 1rem;
+    font-size: 17px;
+    font-weight: 600;
     cursor: pointer;
+    box-shadow: 0 2px 12px var(--shadow-lg);
+    text-align: center;
+}
+
+.hide-category-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px var(--shadow-lg);
+    background: var(--secondary-hover);
 }
 
 .convert-recurring-btn {
