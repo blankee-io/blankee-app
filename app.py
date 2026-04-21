@@ -10187,14 +10187,29 @@ def assign_category_to_group():
 
         new_order = _next_display_order(categories, tier=tier)
         category_name = None
-        for cat in categories:
-            if int(cat.get('id', 0)) == int(category_id):
-                cat['group_id'] = int(new_group_id) if new_group_id is not None else None
-                cat['display_order'] = new_order
-                category_name = cat.get('name')
-                break
-        else:
-            return jsonify({'status': 'error', 'message': 'Category not found'}), 404
+        target_cat = next((c for c in categories if int(c.get('id', 0)) == int(category_id)), None)
+
+        # Newly-created categories can occasionally exist in MySQL but not yet in hydrated Redis.
+        # Hydrate the missing category and continue so group assignment works immediately.
+        if target_cat is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute(
+                    f"SELECT * FROM {cat_table} WHERE id = %s AND user_id = %s LIMIT 1",
+                    (category_id, user_id)
+                )
+                db_cat = cursor.fetchone()
+                cursor.close()
+
+            if db_cat:
+                categories.append(db_cat)
+                target_cat = db_cat
+            else:
+                return jsonify({'status': 'error', 'message': 'Category not found'}), 404
+
+        target_cat['group_id'] = int(new_group_id) if new_group_id is not None else None
+        target_cat['display_order'] = new_order
+        category_name = target_cat.get('name')
 
         redis_key = f"{cat_table}:v1:{user_id}"
         _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(categories, cls=DecimalEncoder))

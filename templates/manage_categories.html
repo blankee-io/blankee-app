@@ -455,37 +455,60 @@
     </div>
 
     <!-- Modal for editing category name -->
-    <div id="editCategoryModal" class="category-edit-modal">
-        <div class="category-edit-modal-content">
-            <input id="editCategoryInput" type="text" maxlength="20" />
-            <button id="confirmEditCategoryBtn" class="confirm-edit-category-btn">Rename</button>
-            <button id="hideCategoryBtn" class="hide-category-btn" title="Hide Category"><i class="fa-solid fa-eye-slash"></i></button>
-            <button id="deleteFromEditCategoryBtn" class="delete-from-edit-category-btn"><i class="fa-solid fa-trash"></i></button>
+    <div id="editCategoryModal" class="modal">
+        <div class="category-edit-modal-content modal-content">
+            <h2 class="category-edit-modal-title">Edit Category</h2>
+            <div class="category-edit-primary-row">
+                <input id="editCategoryInput" type="text" maxlength="20" />
+                <button id="confirmEditCategoryBtn" class="confirm-edit-category-btn">Rename</button>
+            </div>
+            <div id="editCategoryGroupRow" class="category-edit-group-row" style="display:none;">
+                <label for="editCategoryGroupSelect" class="category-edit-group-label">Group</label>
+                <select id="editCategoryGroupSelect" class="category-edit-group-select"></select>
+            </div>
+            <div class="category-edit-actions-row">
+                <button id="hideCategoryBtn" class="hide-category-btn" title="Hide Category"><span>Hide</span></button>
+                <button id="deleteFromEditCategoryBtn" class="delete-from-edit-category-btn"><span>Delete</span></button>
+            </div>
         </div>
     </div>
 
     <!-- Modal for adding a new category -->
-    <div id="addCategoryModal" class="category-input-overlay">
-        <div id="add-category-input-container" class="floating-input-container">
+    <div id="addCategoryModal" class="category-input-overlay modal">
+        <div id="add-category-input-container" class="floating-input-container modal-content">
+            <h2 id="addCategoryTitle" class="floating-input-title">Add Category</h2>
             <input id="addCategoryInput" type="text" maxlength="20" placeholder="Category Name" />
-            <button id="confirmAddCategoryBtn"><i class="fa-solid fa-check"></i></button>
+            <div class="floating-input-actions modal-buttons">
+                <button type="button" class="floating-input-cancel-btn" onclick="closeAddCategoryModal()">Cancel</button>
+                <button id="confirmAddCategoryBtn" class="floating-input-confirm-btn">Create</button>
+            </div>
         </div>
     </div>
 
     <!-- Modal for adding a new group -->
-    <div id="addGroupModal" class="category-input-overlay">
-        <div id="add-group-input-container" class="floating-input-container">
+    <div id="addGroupModal" class="category-input-overlay modal">
+        <div id="add-group-input-container" class="floating-input-container modal-content">
+            <h2 id="addGroupTitle" class="floating-input-title">Add Category Group</h2>
             <input id="addGroupInput" type="text" maxlength="20" placeholder="Group Name" />
-            <button id="confirmAddGroupBtn"><i class="fa-solid fa-check"></i></button>
+            <div class="floating-input-actions modal-buttons">
+                <button type="button" class="floating-input-cancel-btn" onclick="closeAddGroupModal()">Cancel</button>
+                <button id="confirmAddGroupBtn" class="floating-input-confirm-btn">Create</button>
+            </div>
         </div>
     </div>
 
     <!-- Modal for editing a group -->
-    <div id="editGroupModal" class="category-edit-modal">
-        <div class="category-edit-modal-content">
-            <input id="editGroupInput" type="text" maxlength="20" />
-            <button id="confirmEditGroupBtn" class="confirm-edit-category-btn">Rename</button>
-            <button id="deleteGroupBtn" class="delete-from-edit-category-btn" title="Delete Group"><i class="fa-solid fa-trash"></i></button>
+    <div id="editGroupModal" class="modal">
+        <div class="category-edit-modal-content modal-content">
+            <h2 class="category-edit-modal-title">Edit Group</h2>
+            <div class="category-edit-primary-row">
+                <input id="editGroupInput" type="text" maxlength="20" />
+                <button id="confirmEditGroupBtn" class="confirm-edit-category-btn">Rename</button>
+            </div>
+            <div class="category-edit-actions-row">
+                <button id="cancelEditGroupBtn" class="hide-category-btn" title="Cancel"><span>Cancel</span></button>
+                <button id="deleteGroupBtn" class="delete-from-edit-category-btn" title="Delete Group"><span>Delete</span></button>
+            </div>
         </div>
     </div>
 
@@ -525,14 +548,17 @@
         let addCategoryType = null;
         const addCategoryModal = document.getElementById('addCategoryModal');
         const addCategoryContainer = document.getElementById('add-category-input-container');
+        const addCategoryTitle = document.getElementById('addCategoryTitle');
         const addCategoryInput = document.getElementById('addCategoryInput');
         const confirmAddCategoryBtn = document.getElementById('confirmAddCategoryBtn');
 
         function openAddCategoryModal(type) {
             addCategoryType = type;
             addCategoryInput.value = '';
+            addCategoryContainer.classList.toggle('expense-theme', type === 'expense');
+            addCategoryTitle.textContent = type === 'income' ? 'Add Income Category' : 'Add Expense Category';
             addCategoryInput.placeholder = type === 'income' ? 'New Income Category Name' : 'New Expense Category Name';
-            addCategoryModal.style.display = 'block';
+            addCategoryModal.style.display = 'flex';
             addCategoryContainer.style.display = 'flex';
             addCategoryInput.focus();
             isModalOpen = true;
@@ -596,14 +622,17 @@
         let addGroupType = null;
         const addGroupModal = document.getElementById('addGroupModal');
         const addGroupContainer = document.getElementById('add-group-input-container');
+        const addGroupTitle = document.getElementById('addGroupTitle');
         const addGroupInput = document.getElementById('addGroupInput');
         const confirmAddGroupBtn = document.getElementById('confirmAddGroupBtn');
 
         function openAddGroupModal(type) {
             addGroupType = type;
             addGroupInput.value = '';
+            addGroupContainer.classList.toggle('expense-theme', type === 'expense');
+            addGroupTitle.textContent = type === 'income' ? 'Add Income Group' : 'Add Expense Group';
             addGroupInput.placeholder = type === 'income' ? 'New Income Group Name' : 'New Expense Group Name';
-            addGroupModal.style.display = 'block';
+            addGroupModal.style.display = 'flex';
             addGroupContainer.style.display = 'flex';
             addGroupInput.focus();
             isModalOpen = true;
@@ -663,6 +692,7 @@
             const editGroupModal = document.getElementById('editGroupModal');
             const editGroupInput = document.getElementById('editGroupInput');
             const confirmEditGroupBtn = document.getElementById('confirmEditGroupBtn');
+            const cancelEditGroupBtn = document.getElementById('cancelEditGroupBtn');
             const deleteGroupBtn = document.getElementById('deleteGroupBtn');
             let editingGroupId = null;
             let editingGroupType = null;
@@ -729,6 +759,11 @@
             editGroupInput.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') confirmEditGroupBtn.click();
             });
+
+            cancelEditGroupBtn.onclick = function() {
+                editGroupModal.style.display = 'none';
+                isModalOpen = false;
+            };
 
             // Delete group
             deleteGroupBtn.onclick = async function() {
@@ -937,11 +972,48 @@
         (function() {
             const editCategoryModal = document.getElementById('editCategoryModal');
             const editCategoryInput = document.getElementById('editCategoryInput');
+            const editCategoryGroupRow = document.getElementById('editCategoryGroupRow');
+            const editCategoryGroupSelect = document.getElementById('editCategoryGroupSelect');
             const confirmEditCategoryBtn = document.getElementById('confirmEditCategoryBtn');
             const deleteFromEditCategoryBtn = document.getElementById('deleteFromEditCategoryBtn');
             const hideCategoryBtn = document.getElementById('hideCategoryBtn');
             let editingCategoryId = null;
             let editingCategoryType = null;
+            let suppressGroupChange = false;
+
+            function getGroupsForType(type) {
+                return type === 'income' ? incomeGroups : expenseGroups;
+            }
+
+            function populateCategoryGroupDropdown(type, categoryObj) {
+                if (type !== 'income' && type !== 'expense') {
+                    editCategoryGroupRow.style.display = 'none';
+                    return;
+                }
+
+                const groups = (getGroupsForType(type) || []).slice();
+                groups.sort((a, b) => Number(b.display_order || 0) - Number(a.display_order || 0));
+
+                const currentGroupId = categoryObj && categoryObj.group_id != null ? String(categoryObj.group_id) : '';
+                suppressGroupChange = true;
+                editCategoryGroupSelect.innerHTML = '';
+
+                const ungroupedOption = document.createElement('option');
+                ungroupedOption.value = '';
+                ungroupedOption.textContent = 'Ungrouped';
+                editCategoryGroupSelect.appendChild(ungroupedOption);
+
+                groups.forEach(group => {
+                    const opt = document.createElement('option');
+                    opt.value = String(group.id);
+                    opt.textContent = group.name;
+                    editCategoryGroupSelect.appendChild(opt);
+                });
+
+                editCategoryGroupSelect.value = currentGroupId;
+                editCategoryGroupRow.style.display = 'flex';
+                suppressGroupChange = false;
+            }
 
             document.addEventListener('click', function(e) {
                 const btn = e.target.closest('.rename-category-btn');
@@ -971,30 +1043,42 @@
 
                 let catArr = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
                 let catObj = catArr.find(cat => String(cat.id) === String(editingCategoryId));
+                populateCategoryGroupDropdown(editingCategoryType, catObj);
                 if (catObj && catObj.hidden == 1) {
                     hideCategoryBtn.title = "Unhide Category";
-                    hideCategoryBtn.querySelector('i').classList.remove('fa-eye-slash');
-                    hideCategoryBtn.querySelector('i').classList.add('fa-eye');
+                    hideCategoryBtn.querySelector('span').textContent = 'Unhide';
                 } else {
                     hideCategoryBtn.title = "Hide Category";
-                    hideCategoryBtn.querySelector('i').classList.remove('fa-eye');
-                    hideCategoryBtn.querySelector('i').classList.add('fa-eye-slash');
+                    hideCategoryBtn.querySelector('span').textContent = 'Hide';
                 }
             });
 
             editCategoryModal.addEventListener('mousedown', function(e) {
                 if (e.target === editCategoryModal) {
                     editCategoryModal.style.display = 'none';
+                    editCategoryGroupRow.style.display = 'none';
                     isModalOpen = false;
                 }
             });
             document.addEventListener('keydown', function(e) {
                 if (isModalOpen && e.key === 'Escape') {
                     editCategoryModal.style.display = 'none';
+                    editCategoryGroupRow.style.display = 'none';
                     document.getElementById('editGroupModal').style.display = 'none';
                     closeAddCategoryModal();
                     closeAddGroupModal();
                 }
+            });
+
+            editCategoryGroupSelect.addEventListener('change', function() {
+                if (suppressGroupChange || !editingCategoryId || !editingCategoryType) return;
+                const newGroupId = this.value ? this.value : null;
+                assignCategoryToGroup(editingCategoryId, newGroupId, editingCategoryType)
+                    .done(function(response) {
+                        if (response.status === 'success') {
+                            location.reload();
+                        }
+                    });
             });
 
             editCategoryInput.addEventListener('input', function() {
@@ -1047,12 +1131,10 @@
                             catObj.hidden = newHidden;
                             if (newHidden == 1) {
                                 hideCategoryBtn.title = "Unhide Category";
-                                hideCategoryBtn.querySelector('i').classList.remove('fa-eye-slash');
-                                hideCategoryBtn.querySelector('i').classList.add('fa-eye');
+                                hideCategoryBtn.querySelector('span').textContent = 'Unhide';
                             } else {
                                 hideCategoryBtn.title = "Hide Category";
-                                hideCategoryBtn.querySelector('i').classList.remove('fa-eye');
-                                hideCategoryBtn.querySelector('i').classList.add('fa-eye-slash');
+                                hideCategoryBtn.querySelector('span').textContent = 'Hide';
                             }
                             const tableId = editingCategoryType === 'income' ? 'income-manage-table' : 'expense-manage-table';
                             const row = document.querySelector(`#${tableId} tr[data-category-id='${editingCategoryId}']`);
