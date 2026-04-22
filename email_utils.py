@@ -225,6 +225,121 @@ def send_verification_email(to_email, username, verification_token):
     return send_email(to_email, subject, html_content, text_content)
 
 
+def send_email_change_verification_email(to_email, current_email, verification_token):
+    """
+    Send a verification link specifically for confirming an email address change.
+
+    Args:
+        to_email (str): The new email address to verify
+        current_email (str): The currently active email on the account
+        verification_token (str): Unique verification token
+
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
+    verification_url = f"{APP_URL}/verify-email?token={verification_token}"
+
+    subject = "Confirm Your Blankee Email Change"
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{
+                font-family: 'Nunito', Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 20px;
+            }}
+            .header {{
+                background-color: #2aaaa8;
+                color: white;
+                padding: 30px;
+                text-align: center;
+                border-radius: 10px 10px 0 0;
+            }}
+            .content {{
+                background-color: #f5fffe;
+                padding: 30px;
+                border-radius: 0 0 10px 10px;
+            }}
+            .button {{
+                display: inline-block;
+                background-color: #2aaaa8;
+                color: #ffffff !important;
+                padding: 15px 30px;
+                text-decoration: none;
+                border-radius: 5px;
+                margin: 20px 0;
+                font-weight: bold;
+            }}
+            .footer {{
+                text-align: center;
+                margin-top: 20px;
+                color: #666;
+                font-size: 12px;
+            }}
+            .notice {{
+                background-color: #fff3cd;
+                border-left: 4px solid #ffc107;
+                padding: 15px;
+                margin: 20px 0;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Email Change Verification</h1>
+        </div>
+        <div class="content">
+            <p>Hi,</p>
+
+            <p>You requested to change your Blankee login email from <strong>{current_email}</strong> to <strong>{to_email}</strong>.</p>
+
+            <p>To confirm this email change, click the button below:</p>
+
+            <center>
+                <a href="{verification_url}" class="button" style="color: #ffffff !important;">Confirm Email Change</a>
+            </center>
+
+            <p>Or copy and paste this link into your browser:</p>
+            <p style="word-break: break-all; color: #2aaaa8;">{verification_url}</p>
+
+            <div class="notice">
+                <strong>Important:</strong> This link expires in 24 hours. If you did not request this change, you can ignore this email and your current login email will stay the same.
+            </div>
+
+            <p>Best regards,<br>The Blankee Team</p>
+        </div>
+        <div class="footer">
+            <p>This is an automated email. Please do not reply to this message.</p>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+    Blankee Email Change Verification
+
+    You requested to change your Blankee login email from {current_email} to {to_email}.
+
+    Confirm this email change by visiting:
+
+    {verification_url}
+
+    This link expires in 24 hours.
+    If you did not request this change, ignore this email and your current login email will remain active.
+
+    Best regards,
+    The Blankee Team
+    """
+
+    return send_email(to_email, subject, html_content, text_content)
+
+
 def send_password_reset_email(to_email, username, reset_token):
     """
     Send a password reset link to a user.
