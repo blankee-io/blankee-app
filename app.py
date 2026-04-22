@@ -25,7 +25,7 @@ from werkzeug.utils import secure_filename
 from markupsafe import Markup
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
-from email_utils import send_verification_email, generate_verification_token, get_verification_token_expiry, send_password_reset_email, generate_password_reset_token, get_password_reset_token_expiry
+from email_utils import send_verification_email, send_email_change_verification_email, generate_verification_token, get_verification_token_expiry, send_password_reset_email, generate_password_reset_token, get_password_reset_token_expiry
 import threading
 from collections import defaultdict
 from PIL import Image
@@ -2423,7 +2423,7 @@ def dashboard_d():
         last_name = user_data['last_name'] if user_data else ''
         goofy_week_mode = bool(user_data.get('goofy_week_mode', False)) if user_data else False
         balance_threshold = float(user_data.get('balance_threshold', 0)) if user_data else 0
-        member_since = user_data['member_since'] if user_data else None
+        member_since = user_data.get('member_since') if user_data else None
         currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
         landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard'
 
@@ -11971,7 +11971,7 @@ def dashboard_3m():
     first_name = user_data['first_name'] if user_data else ''
     last_name = user_data['last_name'] if user_data else ''
     balance_threshold = user_data['balance_threshold'] if user_data else 0
-    member_since = user_data['member_since'] if user_data else None
+    member_since = user_data.get('member_since') if user_data else None
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
     landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard_3m'
 
@@ -12529,7 +12529,7 @@ def dashboard_m():
         last_name = user_data['last_name'] if user_data else ''
         goofy_week_mode = bool(user_data.get('goofy_week_mode', False)) if user_data else False
         balance_threshold = float(user_data.get('balance_threshold', 0)) if user_data else 0
-        member_since = user_data['member_since'] if user_data else None
+        member_since = user_data.get('member_since') if user_data else None
         currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
         landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard_3m'
 
@@ -12888,7 +12888,7 @@ def dashboard_y():
         last_name = user_data['last_name'] if user_data else ''
         goofy_week_mode = bool(user_data.get('goofy_week_mode', False)) if user_data else False
         balance_threshold = float(user_data.get('balance_threshold', 0)) if user_data else 0
-        member_since = user_data['member_since'] if user_data else None
+        member_since = user_data.get('member_since') if user_data else None
         currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
         landing_page = user_data['landing_page'] if user_data and 'landing_page' in user_data else 'dashboard_3m'
 
@@ -13773,8 +13773,9 @@ def widget_pending_transactions():
 @app.route('/profile', methods=['GET'])
 @login_required
 def profile():
-    # Try to get user settings from Redis first
-    redis_key = f"users:v1:{current_user.id}"
+    # Use a dedicated cache key for profile-view payloads.
+    # Avoid writing partial profile fields into users:v1, which stores full user rows.
+    redis_key = f"user_profile:v1:{current_user.id}"
     user_data = None
     
     if app.config.get('REDIS_OK'):
@@ -15522,16 +15523,18 @@ def update_username():
         conn.commit()
         cursor.close()
     
-    # Invalidate Redis cache for user settings
-    redis_key = f"users:v1:{current_user.id}"
+    # Invalidate Redis caches for user/settings + profile view payload
+    users_redis_key = f"users:v1:{current_user.id}"
+    profile_redis_key = f"user_profile:v1:{current_user.id}"
     if app.config.get('REDIS_OK'):
         try:
-            _redis_client.delete(redis_key)
+            _redis_client.delete(users_redis_key)
+            _redis_client.delete(profile_redis_key)
         except Exception as e:
             pass
     
-    # Send verification email to NEW address
-    email_sent = send_verification_email(new_username, current_email, verification_token)
+    # Send dedicated email-change verification email to NEW address
+    email_sent = send_email_change_verification_email(new_username, current_email, verification_token)
     
     # Create notification
     add_notification(
@@ -15582,8 +15585,8 @@ def resend_pending_email_verification():
         conn.commit()
         cursor.close()
         
-        # Send new verification email
-        email_sent = send_verification_email(pending_email, current_email, verification_token)
+        # Send dedicated email-change verification email
+        email_sent = send_email_change_verification_email(pending_email, current_email, verification_token)
         
         # Create notification
         add_notification(
@@ -15616,11 +15619,13 @@ def cancel_pending_email_change():
             """, (current_user.id,))
             conn.commit()
             
-            # Invalidate Redis cache for user settings
-            redis_key = f"users:v1:{current_user.id}"
+            # Invalidate Redis caches for user/settings + profile view payload
+            users_redis_key = f"users:v1:{current_user.id}"
+            profile_redis_key = f"user_profile:v1:{current_user.id}"
             if app.config.get('REDIS_OK'):
                 try:
-                    _redis_client.delete(redis_key)
+                    _redis_client.delete(users_redis_key)
+                    _redis_client.delete(profile_redis_key)
                 except Exception as e:
                     pass
             
