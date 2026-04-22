@@ -28415,6 +28415,19 @@ def _get_fider_client_and_user():
     return client, fider_user_id, meta
 
 
+@app.route('/faq')
+@login_required
+def faq_page():
+    meta = _get_user_profile_meta(current_user.id)
+    return render_template(
+        'faq.html',
+        profile_picture=meta.get('profile_picture'),
+        first_name=meta.get('first_name'),
+        last_name=meta.get('last_name'),
+        landing_page=meta.get('landing_page', 'dashboard_3m'),
+    )
+
+
 @app.route('/feedback')
 @login_required
 def feedback_page():
