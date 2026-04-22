@@ -23332,12 +23332,83 @@ def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
             return
         
         session_token = profile['session_token']
+
+        # Check if session token is expired and refresh if needed
+        session_expires_at = profile.get('session_expires_at')
+        if session_expires_at:
+            if isinstance(session_expires_at, str):
+                try:
+                    expires_at = datetime.strptime(session_expires_at, '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    expires_at = datetime.now()  # Force refresh if cannot parse
+            else:
+                expires_at = session_expires_at
+
+            if expires_at <= datetime.now():
+                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Session token expired for user {user_id} (expired at {session_expires_at}), refreshing...")
+                try:
+                    with get_db_pool().get_connection() as conn:
+                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                        cursor.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+                        user_row = cursor.fetchone()
+                        cursor.close()
+
+                    if user_row and user_row.get('username'):
+                        refresh_success = _refresh_quiltt_session_token(user_id, user_row['username'])
+                        if refresh_success:
+                            # Read refreshed token directly from Redis to avoid MySQL staleness.
+                            _redis_key = f"quiltt_profiles:v1:{user_id}"
+                            _cached = _redis_client.get(_redis_key)
+                            if _cached:
+                                _profiles = json.loads(_cached)
+                                if _profiles and len(_profiles) > 0:
+                                    session_token = _profiles[0].get('session_token', session_token)
+                            else:
+                                profile = get_quiltt_profile(user_id)
+                                session_token = profile.get('session_token') if profile else session_token
+                            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Successfully refreshed session token for user {user_id}")
+                        else:
+                            log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"Failed to refresh expired session token for user {user_id}")
+                    else:
+                        log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"Could not find username to refresh token for user {user_id}")
+                except Exception as refresh_err:
+                    log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"Token refresh error for user {user_id}: {refresh_err}")
         
         # Fetch current bank balances from Quiltt API
         balance_data = quiltt_client.get_profile(session_token)
         if not balance_data:
-            log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"Failed to fetch balances for user {user_id}")
-            return
+            # Token may have been invalidated server-side before stored expiration.
+            # Refresh once and retry balance fetch.
+            log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"Failed to fetch balances for user {user_id}, refreshing token and retrying once")
+            try:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+                    user_row = cursor.fetchone()
+                    cursor.close()
+
+                if user_row and user_row.get('username'):
+                    retry_success = _refresh_quiltt_session_token(user_id, user_row['username'])
+                    if retry_success:
+                        _retry_redis_key = f"quiltt_profiles:v1:{user_id}"
+                        _retry_cached = _redis_client.get(_retry_redis_key)
+                        if _retry_cached:
+                            _retry_profiles = json.loads(_retry_cached)
+                            if _retry_profiles and len(_retry_profiles) > 0:
+                                session_token = _retry_profiles[0].get('session_token', session_token)
+                        else:
+                            profile = get_quiltt_profile(user_id)
+                            session_token = profile.get('session_token') if profile else session_token
+
+                        balance_data = quiltt_client.get_profile(session_token)
+                        if balance_data:
+                            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Balance fetch succeeded after token refresh for user {user_id}")
+                if not balance_data:
+                    log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"Failed to fetch balances for user {user_id}")
+                    return
+            except Exception as retry_err:
+                log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"Balance fetch retry failed for user {user_id}: {retry_err}")
+                return
         
         # Build account_id → balance map and update stored balances
         account_balances = {}
