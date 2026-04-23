@@ -15351,6 +15351,10 @@ transform: scale(1.2);
     display: none;
 }
 
+#support-page .profile-section::before {
+    display: none;
+}
+
 #feedback-page .profile-section::before {
     display: none;
 }
@@ -15547,6 +15551,73 @@ transform: scale(1.2);
     font-weight: 600;
 }
 
+.support-request-section {
+    margin-top: 8px;
+}
+
+.support-request-header {
+    padding: 8px 20px 12px;
+}
+
+.support-request-header .faq-title {
+    font-size: 1.5rem;
+}
+
+.support-request-header .faq-subtitle {
+    max-width: 520px;
+}
+
+.support-request-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px 18px 20px;
+}
+
+.support-request-form label {
+    font-size: 0.86rem;
+    color: var(--secondary-dark);
+    font-weight: 700;
+}
+
+.support-request-form .login-input,
+.support-message-input {
+    width: 100%;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 8px;
+    color: var(--text-dark);
+    background-color: var(--white);
+    box-sizing: border-box;
+}
+
+.support-request-form .login-input[readonly] {
+    background-color: var(--secondary-lighter);
+    color: var(--secondary-dark);
+}
+
+.support-message-input {
+    min-height: 140px;
+    padding: 10px 12px;
+    resize: vertical;
+    font-family: inherit;
+    font-size: 0.92rem;
+    line-height: 1.5;
+}
+
+.support-submit-btn {
+    align-self: flex-start;
+    margin-top: 6px;
+    box-shadow: 0 2px 12px var(--shadow-lg);
+}
+
+.support-submit-btn:hover {
+    box-shadow: 0 4px 16px var(--shadow-lg);
+}
+
+.support-submit-btn:active {
+    box-shadow: 0 1px 8px var(--shadow-lg);
+}
+
 @media (max-width: 600px) {
     .faq-title {
         font-size: 1.35rem;
@@ -15570,5 +15641,14 @@ transform: scale(1.2);
 
     .faq-section-title {
         padding: 12px 14px 8px;
+    }
+
+    .support-request-form {
+        padding: 14px 14px 18px;
+    }
+
+    .support-submit-btn {
+        width: 100%;
+        align-self: stretch;
     }
 }
