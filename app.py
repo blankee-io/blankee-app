@@ -15846,10 +15846,10 @@ def remove_profile_picture():
 
     return jsonify({'status': 'success'})  # Return a JSON response indicating success
 
-@app.route('/delete_user/<username>', methods=['POST'])
+@app.route('/delete_user/<int:user_id>', methods=['POST'])
 @login_required
-def delete_user(username):
-    if username != current_user.username:
+def delete_user(user_id):
+    if user_id != current_user.id:
         flash('You can only delete your own account.')
         return jsonify({'status': 'error', 'message': 'You can only delete your own account.'})
 
@@ -28408,7 +28408,7 @@ def _page_context_tag(path: str) -> str:
 def _get_fider_client_and_user():
     client = get_fider_client()
     meta = _get_user_profile_meta(current_user.id)
-    display_name = meta.get('handle', '').strip()
+    display_name = (meta.get('handle') or '').strip()
     email = meta.get('email') or meta.get('username')
     redis_client = _redis_client if app.config.get('REDIS_OK') else None
     fider_user_id = client.ensure_user(display_name, email, str(current_user.id), redis_client)
