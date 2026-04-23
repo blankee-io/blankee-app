@@ -15572,12 +15572,23 @@ transform: scale(1.2);
     flex-direction: column;
     gap: 10px;
     padding: 16px 18px 20px;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .support-request-form label {
     font-size: 0.86rem;
     color: var(--secondary-dark);
     font-weight: 700;
+    text-align: left;
+    align-self: flex-start;
+}
+
+.support-form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
 }
 
 .support-request-form .login-input,
@@ -15605,12 +15616,15 @@ transform: scale(1.2);
 }
 
 .support-submit-btn {
-    align-self: flex-start;
+    align-self: center;
     margin-top: 6px;
+    background-color: var(--primary);
+    color: var(--text-light);
     box-shadow: 0 2px 12px var(--shadow-lg);
 }
 
 .support-submit-btn:hover {
+    background-color: var(--primary-hover);
     box-shadow: 0 4px 16px var(--shadow-lg);
 }
 

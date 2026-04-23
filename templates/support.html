@@ -385,21 +385,23 @@
 
                     <div class="profile-section support-request-section">
                         <div class="section-liner">
-                            <div class="faq-section-title">
-                                <i class="fa-solid fa-paper-plane"></i>
-                                Contact Support
-                            </div>
-                            <form id="support-request-form" class="support-request-form" method="POST" action="{{ url_for('support_request') }}">
-                                <label for="support-title">Title</label>
-                                <input type="text" id="support-title" name="title" class="login-input" maxlength="150" required>
+                            <form id="support-request-form" class="support-request-form" method="POST" action="{{ url_for('support_request') }}" autocomplete="off">
+                                <div class="support-form-row">
+                                    <label for="support-title">Subject</label>
+                                    <input type="text" id="support-title" name="title" class="login-input" maxlength="150" autocomplete="off" required>
+                                </div>
 
-                                <label for="support-email">Your Email</label>
-                                <input type="email" id="support-email" name="email" class="login-input" value="{{ support_email }}" readonly>
+                                <div class="support-form-row">
+                                    <label for="support-email">Your Email</label>
+                                    <input type="email" id="support-email" name="email" class="login-input" value="{{ support_email }}" readonly>
+                                </div>
 
-                                <label for="support-message">How can we help?</label>
-                                <textarea id="support-message" name="message" class="support-message-input" rows="6" maxlength="5000" required></textarea>
+                                <div class="support-form-row">
+                                    <label for="support-message">How can we help?</label>
+                                    <textarea id="support-message" name="message" class="support-message-input" rows="6" maxlength="5000" placeholder="Describe your issue" required></textarea>
+                                </div>
 
-                                <button type="submit" class="submit-category-btn support-submit-btn">
+                                <button type="submit" class="confirm-delete-category-btn support-submit-btn">
                                     Send Support Request
                                 </button>
                             </form>
