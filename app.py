@@ -13793,7 +13793,7 @@ def profile():
 
             # Fetch profile picture, first name, last name, balance threshold, goofy_week_mode, landing_page, currency_type, and mfa_secret
             cursor.execute("""
-                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret, pending_email
+                SELECT profile_picture, first_name, last_name, balance_threshold, goofy_week_mode, landing_page, currency_type, mfa_secret, pending_email, handle
                 FROM users 
                 WHERE id = %s
             """, (current_user.id,))
@@ -15469,7 +15469,14 @@ def update_handle():
     
     # Update in Redis only - flush worker will persist to MySQL
     _update_user_setting_in_redis(current_user.id, 'handle', new_handle)
-    
+
+    # Invalidate profile-view cache so redirect shows new handle immediately
+    if app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(f"user_profile:v1:{current_user.id}")
+        except Exception:
+            pass
+
     flash('Handle updated successfully.')
     return redirect(url_for('profile', success='handle'))
 
