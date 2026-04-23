@@ -11,6 +11,7 @@ import redis
 import logging
 import json
 import time
+import html
 import pymysql.cursors
 from log_config import JsonFormatter, get_logger, log_info, log_error, log_warning, log_exception
 
@@ -25,7 +26,7 @@ from werkzeug.utils import secure_filename
 from markupsafe import Markup
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
-from email_utils import send_verification_email, send_email_change_verification_email, generate_verification_token, get_verification_token_expiry, send_password_reset_email, generate_password_reset_token, get_password_reset_token_expiry
+from email_utils import send_verification_email, send_email_change_verification_email, generate_verification_token, get_verification_token_expiry, send_password_reset_email, generate_password_reset_token, get_password_reset_token_expiry, send_email
 import threading
 from collections import defaultdict
 from PIL import Image
@@ -1693,8 +1694,16 @@ def login():
             cursor.execute("SELECT id, username, password, landing_page, email_verified FROM users WHERE username = %s", (username,))
             user = cursor.fetchone()
 
+            password_ok = False
+            if user:
+                try:
+                    password_ok = bcrypt.check_password_hash(user[2], password)
+                except ValueError:
+                    # Corrupted/non-bcrypt password hash should not 500 the login endpoint.
+                    log_error(logger, 'AUTH', f"Invalid password hash for user_id={user[0]}")
+
             # Check if the user exists and if the password is correct
-            if user and bcrypt.check_password_hash(user[2], password):
+            if user and password_ok:
                 # Check if email is verified
                 if not user[4]:  # email_verified field
                     cursor.close()
@@ -3898,6 +3907,21 @@ def _update_user_setting_in_redis(user_id, field, value):
             
             # Convert to dict if needed
             user_data = dict(user_data)
+
+        # If a partial users payload made it into Redis, refresh from MySQL before updating.
+        # This prevents writing blank username/password during flush.
+        if not user_data.get('username') or not user_data.get('password'):
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+                fresh_user_data = cursor.fetchone()
+                cursor.close()
+
+            if not fresh_user_data or not fresh_user_data.get('username') or not fresh_user_data.get('password'):
+                log_error(logger, 'REDIS', f"[user_settings] abort update for user={user_id}: missing username/password in source of truth")
+                return
+
+            user_data = dict(fresh_user_data)
         
         # Update the field
         old_value = user_data.get(field, 'NOT_SET')
@@ -13866,7 +13890,7 @@ def profile():
     # Pass all retrieved data to the template
     return render_template(
         'profile.html',
-        current_username=current_user.username,
+        current_username=current_user.username or '',
         profile_picture=profile_picture,
         first_name=first_name,
         last_name=last_name,
@@ -28425,14 +28449,72 @@ def _get_fider_client_and_user():
 @app.route('/faq')
 @login_required
 def faq_page():
+    return redirect(url_for('support_page'))
+
+
+@app.route('/support')
+@login_required
+def support_page():
     meta = _get_user_profile_meta(current_user.id)
+    support_email = meta.get('email') or meta.get('username') or ''
+    support_success = request.args.get('support') == 'sent'
     return render_template(
-        'faq.html',
+        'support.html',
         profile_picture=meta.get('profile_picture'),
         first_name=meta.get('first_name'),
         last_name=meta.get('last_name'),
         landing_page=meta.get('landing_page', 'dashboard_3m'),
+        support_email=support_email,
+        support_success=support_success,
     )
+
+
+@app.route('/support-request', methods=['POST'])
+@login_required
+def support_request():
+    title = (request.form.get('title') or '').strip()
+    message = (request.form.get('message') or '').strip()
+
+    if not title or not message:
+        flash('Please include both a title and message for your support request.')
+        return redirect(url_for('support_page'))
+
+    meta = _get_user_profile_meta(current_user.id)
+    account_email = meta.get('email') or meta.get('username') or ''
+    if not account_email:
+        flash('Unable to send support request because your account email is missing.')
+        return redirect(url_for('support_page'))
+
+    safe_title = html.escape(title)
+    safe_email = html.escape(account_email)
+    safe_message_html = html.escape(message).replace('\n', '<br>')
+
+    subject = f"Blankee Support Request: {title}"
+    html_content = f"""
+    <html>
+    <body>
+        <h2>New Support Request</h2>
+        <p><strong>From Account Email:</strong> {safe_email}</p>
+        <p><strong>Title:</strong> {safe_title}</p>
+        <p><strong>Message:</strong><br>{safe_message_html}</p>
+    </body>
+    </html>
+    """
+    text_content = (
+        "New Support Request\n\n"
+        f"From Account Email: {account_email}\n"
+        f"Title: {title}\n\n"
+        f"Message:\n{message}\n"
+    )
+
+    sent = send_email('support@blankee.io', subject, html_content, text_content)
+    if sent:
+        log_info(logger, 'SUPPORT', 'Support request email sent', user_id=current_user.id, account_email=account_email, title=title)
+        return redirect(url_for('support_page', support='sent'))
+
+    log_error(logger, 'SUPPORT', 'Failed to send support request email', user_id=current_user.id, account_email=account_email)
+    flash('Failed to send support request. Please try again in a moment.')
+    return redirect(url_for('support_page'))
 
 
 @app.route('/feedback')

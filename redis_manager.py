@@ -2760,6 +2760,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 user_data = rows if isinstance(rows, dict) else None
                 
                 if user_data:
+                    # Never overwrite identity/password with bad data from cache.
+                    # Passwords must be a bcrypt hash string ($2...)
+                    cached_username = user_data.get('username')
+                    cached_password = user_data.get('password')
+                    if not cached_username or not cached_password or not str(cached_password).startswith('$2'):
+                        log_warning(logger, 'FLUSH', f"users:v1:{user_id} has invalid username/password payload — skipping flush to protect account integrity")
+                        return 0
+
                     cursor.execute("""
                         UPDATE users
                         SET balance_threshold = %s,
