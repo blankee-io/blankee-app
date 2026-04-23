@@ -386,9 +386,13 @@
                     <div class="profile-section support-request-section">
                         <div class="section-liner">
                             <form id="support-request-form" class="support-request-form" method="POST" action="{{ url_for('support_request') }}" autocomplete="off">
+                                <!-- Honeypot fields to absorb browser/password-manager autofill -->
+                                <input type="text" name="fake_username" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;height:0;width:0;opacity:0;">
+                                <input type="password" name="fake_password" autocomplete="current-password" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;height:0;width:0;opacity:0;">
+
                                 <div class="support-form-row">
                                     <label for="support-title">Subject</label>
-                                    <input type="text" id="support-title" name="title" class="login-input" maxlength="150" autocomplete="off" required>
+                                    <input type="text" id="support-title" name="title" class="login-input" maxlength="150" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-form-type="other" data-1p-ignore="true" readonly required>
                                 </div>
 
                                 <div class="support-form-row">
@@ -426,6 +430,27 @@
             });
         });
         {% endif %}
+
+        // Clear any browser autofill on the Subject field
+        (function clearSubjectAutofill() {
+            var el = document.getElementById('support-title');
+            if (!el) return;
+            // Remove readonly on first interaction so user can type
+            var unlock = function() {
+                el.removeAttribute('readonly');
+                el.value = '';
+                el.removeEventListener('focus', unlock);
+                el.removeEventListener('mousedown', unlock);
+                el.removeEventListener('touchstart', unlock);
+            };
+            el.addEventListener('focus', unlock);
+            el.addEventListener('mousedown', unlock);
+            el.addEventListener('touchstart', unlock);
+            // Also clear anything that slipped in
+            var clear = function() { el.value = ''; };
+            clear();
+            window.addEventListener('load', function() { setTimeout(clear, 0); setTimeout(clear, 150); });
+        })();
 
         document.querySelectorAll('.faq-question').forEach(function(btn) {
             btn.addEventListener('click', function() {
