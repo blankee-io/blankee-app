@@ -24715,17 +24715,23 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
         # --- PUSH FORWARD BUCKET ENTRIES (MySQL-direct) ---
         # Instead of deleting bucket placeholders, push them forward to today.
         # This keeps them visible on the dashboard with a "X days late" indicator.
-        # Buckets older than 5 days are deleted (they're stale recurring placeholders).
+        # A bucket may never be pushed more than 5 days past its original_date —
+        # buckets that would exceed that cap are deleted (they're stale recurring placeholders).
         # Non-Quiltt credit buckets are converted to regular entries (no bank feed to replace them).
         earliest_bucket_date = None  # Track earliest date affected by bucket push for recalc
         if total_imported > 0:
             try:
-                five_days_ago_str = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
+                # Cap: a bucket may never be pushed more than 5 days past its original_date.
+                # Use push_to_date as the reference so the cap is independent of when the
+                # webhook fires relative to the latest transaction date.
                 # Use the latest imported transaction date as the boundary
                 last_txn_date_str = max(imported_dates) if imported_dates else None
                 # Push buckets to the day AFTER the latest transaction
                 if last_txn_date_str:
                     push_to_date = (datetime.strptime(last_txn_date_str, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+                    # Buckets whose original_date is more than 5 days BEFORE push_to_date
+                    # would be pushed >5 days from their origin → delete instead.
+                    max_push_cutoff_str = (datetime.strptime(push_to_date, '%Y-%m-%d') - timedelta(days=5)).strftime('%Y-%m-%d')
                 
                 if last_txn_date_str:
                     cleanup_count = 0
@@ -24762,16 +24768,17 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                             log_info(app.logger, 'BUCKET_PUSH', f"Earliest affected bucket date: {earliest_bucket_date} for user {user_id}")
                         
                         # --- income_entries ---
-                        # Delete buckets whose original date is > 5 days old
+                        # Delete buckets whose original_date is more than 5 days before push_to_date
+                        # (i.e. pushing them would exceed the 5-day cap).
                         _sync_cursor.execute("""
                             DELETE ie FROM income_entries ie
                             JOIN income_categories ic ON ie.category_id = ic.id
                             WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date <= %s
                               AND ie.original_date IS NOT NULL AND ie.original_date < %s
-                        """, (user_id, last_txn_date_str, five_days_ago_str))
+                        """, (user_id, last_txn_date_str, max_push_cutoff_str))
                         deleted_inc = _sync_cursor.rowcount
                         if deleted_inc > 0:
-                            log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_inc} income buckets > 5 days late for user {user_id}")
+                            log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_inc} income buckets exceeding 5-day push cap for user {user_id}")
                         cleanup_count += deleted_inc
                         
                         # Push remaining income buckets to day after last transaction
@@ -24805,16 +24812,16 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         cleanup_count += pushed_inc
                         
                         # --- expense_entries ---
-                        # Delete buckets whose original date is > 5 days old
+                        # Delete buckets whose original_date is more than 5 days before push_to_date.
                         _sync_cursor.execute("""
                             DELETE ee FROM expense_entries ee
                             JOIN expense_categories ec ON ee.category_id = ec.id
                             WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date <= %s
                               AND ee.original_date IS NOT NULL AND ee.original_date < %s
-                        """, (user_id, last_txn_date_str, five_days_ago_str))
+                        """, (user_id, last_txn_date_str, max_push_cutoff_str))
                         deleted_exp = _sync_cursor.rowcount
                         if deleted_exp > 0:
-                            log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_exp} expense buckets > 5 days late for user {user_id}")
+                            log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_exp} expense buckets exceeding 5-day push cap for user {user_id}")
                         cleanup_count += deleted_exp
                         
                         # Push remaining expense buckets to day after last transaction
@@ -24848,17 +24855,17 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         cleanup_count += pushed_exp
                     
                     # --- c_expense_entries (Quiltt-linked credit accounts) ---
-                    # Delete Quiltt credit buckets whose original date is > 5 days old
+                    # Delete Quiltt credit buckets whose original_date is more than 5 days before push_to_date.
                     _sync_cursor.execute("""
                         DELETE ce FROM c_expense_entries ce
                         JOIN c_expense_categories cec ON ce.category_id = cec.id
                         JOIN credit_accounts ca ON cec.account_id = ca.id
                         WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date <= %s AND ca.is_quiltt = 1
                           AND ce.original_date IS NOT NULL AND ce.original_date < %s
-                    """, (user_id, last_txn_date_str, five_days_ago_str))
+                    """, (user_id, last_txn_date_str, max_push_cutoff_str))
                     deleted_ce = _sync_cursor.rowcount
                     if deleted_ce > 0:
-                        log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_ce} credit buckets > 5 days late for user {user_id}")
+                        log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_ce} credit buckets exceeding 5-day push cap for user {user_id}")
                     cleanup_count += deleted_ce
                     
                     # Push remaining Quiltt credit buckets to day after last transaction
