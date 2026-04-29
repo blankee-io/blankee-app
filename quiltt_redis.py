@@ -1527,6 +1527,10 @@ def get_quiltt_last_transaction_date(user_id: int) -> Optional[str]:
             if txn_data:
                 transactions = json.loads(txn_data)
                 for txn in transactions:
+                    # Skip pending transactions — only POSTED txns should advance the marker
+                    pending_val = txn.get('pending')
+                    if pending_val in (1, True, '1', 'true', 'True'):
+                        continue
                     txn_date = txn.get('date')
                     if txn_date and (last_date is None or txn_date > last_date):
                         last_date = txn_date
@@ -1538,7 +1542,7 @@ def get_quiltt_last_transaction_date(user_id: int) -> Optional[str]:
         try:
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT MAX(date) FROM quiltt_transactions WHERE user_id = %s", (user_id,))
+                cursor.execute("SELECT MAX(date) FROM quiltt_transactions WHERE user_id = %s AND pending = 0", (user_id,))
                 row = cursor.fetchone()
                 cursor.close()
                 if row and row[0]:
