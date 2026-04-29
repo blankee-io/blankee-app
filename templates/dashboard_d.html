@@ -2986,12 +2986,12 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             dashboardDEntryTypeHidden.value = '';
             dashboardDEntryTypeDropdown.style.display = 'none';
             
-            // Determine if this is a locked date (before today only — today is allowed)
+            // A date is "locked" only when it falls on or before the latest synced
+            // (posted) Quiltt transaction date — dates after that, including today
+            // and any future date, are unlocked.
             let isLockedDate = false;
-            if (quiltt_flags && dateStr) {
-                const today = new Date();
-                const todayStr = today.toLocaleDateString('en-CA'); // YYYY-MM-DD format
-                isLockedDate = dateStr < todayStr;
+            if (quiltt_flags && dateStr && quiltt_last_txn_date) {
+                isLockedDate = dateStr <= quiltt_last_txn_date;
             }
             
             // For future dates or if no checking linked, show Income/Expense options
