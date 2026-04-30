@@ -2485,7 +2485,7 @@ def dashboard_d():
         if income_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id,
+                SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id, ie.pending, ie.auto_confirmed,
                        ic.id AS category_id, ic.name AS category_name, ic.display_order
                 FROM income_entries ie
                 JOIN income_categories ic ON ie.category_id = ic.id
@@ -2514,7 +2514,7 @@ def dashboard_d():
         if expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id,
+                SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.pending, ee.auto_confirmed,
                        ec.id AS category_id, ec.name AS category_name, ec.display_order
                 FROM expense_entries ee
                 JOIN expense_categories ec ON ee.category_id = ec.id
@@ -8889,7 +8889,7 @@ def dashboard():
         if raw_income_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.original_date, ie.recurring_id
+                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.original_date, ie.recurring_id, ie.pending, ie.auto_confirmed
                 FROM income_entries ie
                 WHERE ie.category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -8975,7 +8975,7 @@ def dashboard():
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bud_item_id
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bud_item_id, ee.pending, ee.auto_confirmed
                 FROM expense_entries ee
                 WHERE ee.category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -9049,7 +9049,7 @@ def dashboard():
         if raw_c_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date, cee.recurring_id, cee.bud_item_id, cee.pending, cee.auto_confirmed
                 FROM c_expense_entries cee
                 JOIN c_expense_categories cec ON cee.category_id = cec.id
                 JOIN credit_accounts ca ON cec.account_id = ca.id
@@ -11687,7 +11687,7 @@ def dashboard_3m():
         if raw_income_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.original_date, ie.recurring_id
+                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.original_date, ie.recurring_id, ie.pending, ie.auto_confirmed
                 FROM income_entries ie
                 WHERE ie.category_id IN (SELECT id FROM income_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -11759,7 +11759,7 @@ def dashboard_3m():
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bud_item_id
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bud_item_id, ee.pending, ee.auto_confirmed
                 FROM expense_entries ee
                 WHERE ee.category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -11830,7 +11830,7 @@ def dashboard_3m():
         if raw_c_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date, cee.recurring_id, cee.bud_item_id, cee.pending, cee.auto_confirmed
                 FROM c_expense_entries cee
                 JOIN c_expense_categories cec ON cee.category_id = cec.id
                 JOIN credit_accounts ca ON cec.account_id = ca.id
@@ -12591,7 +12591,7 @@ def dashboard_m():
         if income_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id,
+                SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id, ie.pending, ie.auto_confirmed,
                        ic.id AS category_id, ic.name AS category_name, ic.display_order
                 FROM income_entries ie
                 JOIN income_categories ic ON ie.category_id = ic.id
@@ -12615,7 +12615,7 @@ def dashboard_m():
         if expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.recurring_id,
+                SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.recurring_id, ee.pending, ee.auto_confirmed,
                        ec.id AS category_id, ec.name AS category_name, ec.display_order
                 FROM expense_entries ee
                 JOIN expense_categories ec ON ee.category_id = ec.id
@@ -12950,7 +12950,7 @@ def dashboard_y():
         if income_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id,
+                SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.original_amount, ie.recurring_id, ie.pending, ie.auto_confirmed,
                        ic.id AS category_id, ic.name AS category_name, ic.display_order
                 FROM income_entries ie
                 JOIN income_categories ic ON ie.category_id = ic.id
@@ -12974,7 +12974,7 @@ def dashboard_y():
         if expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.recurring_id,
+                SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.recurring_id, ee.pending, ee.auto_confirmed,
                        ec.id AS category_id, ec.name AS category_name, ec.display_order
                 FROM expense_entries ee
                 JOIN expense_categories ec ON ee.category_id = ec.id
