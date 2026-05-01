@@ -156,8 +156,8 @@ function getCategoryIcon(cat) {
     if (!cat) return '<i class="fa-regular fa-folder category-icon"></i>';
     if (cat.is_bud) return '<i class="fa-regular fa-seedling category-icon"></i>';
     if (cat.is_credit_account && cat.is_recurring) return '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
-    if (cat.name === 'Savings' && cat.is_recurring) return '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
-    if (cat.name === 'Savings') return '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
+    if (Number(cat.is_savings) === 1 && cat.is_recurring) return '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
+    if (Number(cat.is_savings) === 1) return '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
     if (cat.is_recurring) return '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
     if (cat.is_credit_account) return '<i class="fa-regular fa-credit-card category-icon"></i>';
     if (cat.is_interest) return '<i class="fa-regular fa-percent category-icon"></i>';

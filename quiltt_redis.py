@@ -1396,7 +1396,7 @@ def get_savings_category_ids(user_id: int) -> Dict[str, Optional[int]]:
         if income_cached:
             income_categories = json.loads(income_cached)
             for cat in income_categories:
-                if cat.get('name', '').lower() == 'savings':
+                if int(cat.get('is_savings') or 0) == 1:
                     result['income_savings_id'] = cat.get('id')
                     break
         else:
@@ -1404,7 +1404,7 @@ def get_savings_category_ids(user_id: int) -> Dict[str, Optional[int]]:
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute(
-                    "SELECT id FROM income_categories WHERE user_id = %s AND LOWER(name) = 'savings' LIMIT 1",
+                    "SELECT id FROM income_categories WHERE user_id = %s AND is_savings = 1 LIMIT 1",
                     (user_id,)
                 )
                 row = cursor.fetchone()
@@ -1419,7 +1419,7 @@ def get_savings_category_ids(user_id: int) -> Dict[str, Optional[int]]:
         if expense_cached:
             expense_categories = json.loads(expense_cached)
             for cat in expense_categories:
-                if cat.get('name', '').lower() == 'savings':
+                if int(cat.get('is_savings') or 0) == 1:
                     result['expense_savings_id'] = cat.get('id')
                     break
         else:
@@ -1427,7 +1427,7 @@ def get_savings_category_ids(user_id: int) -> Dict[str, Optional[int]]:
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute(
-                    "SELECT id FROM expense_categories WHERE user_id = %s AND LOWER(name) = 'savings' LIMIT 1",
+                    "SELECT id FROM expense_categories WHERE user_id = %s AND is_savings = 1 LIMIT 1",
                     (user_id,)
                 )
                 row = cursor.fetchone()
@@ -1613,12 +1613,17 @@ def update_quiltt_last_transaction_date(user_id: int, date_str: str = None):
 # CATEGORY MEMORY — user-confirmed merchant→category mappings
 # ============================================================================
 
-def upsert_category_memory(user_id, merchant_id, description, category_id, category_type, account_id=None):
+def upsert_category_memory(user_id, merchant_id, description, category_id, category_type):
     """
     Save or update a user's category choice for a merchant/description.
     Called when user confirms a pending transaction.
+
     Description is the primary match key (always present).
     merchant_id is supplementary (stored for faster lookup when available).
+
+    category_type is 'outgoing' or 'incoming' (unified across debit/credit).
+    category_id is the canonical id (expense_categories.id for 'outgoing',
+    income_categories.id for 'incoming').
     """
     if not description:
         return
@@ -1634,7 +1639,7 @@ def upsert_category_memory(user_id, merchant_id, description, category_id, categ
         for mapping in cached:
             if mapping.get('description') == description and mapping.get('category_type') == category_type:
                 mapping['category_id'] = category_id
-                mapping['account_id'] = account_id
+                mapping['account_id'] = None
                 mapping['times_confirmed'] = mapping.get('times_confirmed', 1) + 1
                 # Update merchant_id if we now have one
                 if merchant_id and not mapping.get('merchant_id'):
@@ -1651,7 +1656,7 @@ def upsert_category_memory(user_id, merchant_id, description, category_id, categ
                 'description': description,
                 'category_id': category_id,
                 'category_type': category_type,
-                'account_id': account_id,
+                'account_id': None,
                 'times_confirmed': 1
             })
 
@@ -1667,39 +1672,69 @@ def upsert_category_memory(user_id, merchant_id, description, category_id, categ
         log_error(logger, 'QUILTT', f"Error upserting category memory for user {user_id}: {e}")
 
 
-def lookup_category_memory(user_id, merchant_id=None, description=None, category_type=None, credit_account_id=None):
+def lookup_category_memory(user_id, merchant_id=None, description=None, category_type=None, account_type=None):
     """
     Look up a user's remembered category for a merchant/description.
     Returns dict with category_id, category_type, account_id or None.
 
+    category_type is 'outgoing' or 'incoming' (unified across debit/credit).
+    The returned category_id is the canonical id (expense_categories.id for
+    outgoing, income_categories.id for incoming) -- per-account c_expense
+    resolution happens at apply time via resolve_suggestion_for_entry().
+
     Lookup order:
       1. Match by merchant_id + category_type (best)
       2. Match by description + category_type (fallback)
-    
-    For c_expense category_type, if credit_account_id is provided,
-    validates the matched category belongs to that specific credit account.
+
+    Suppression rules (defensive -- mirror those in ntropy_utils._should_suppress_suggestion):
+      - Savings categories (is_savings=1) never returned as suggestions.
+      - Credit-payment mirror categories (is_credit_account=1 on expense_categories)
+        never returned when account_type='CREDIT'.
     """
     if not merchant_id and not description:
         return None
 
-    def _validate_credit_account(match):
-        """For c_expense, verify the category belongs to the correct credit account."""
-        if category_type != 'c_expense' or not credit_account_id:
-            return match
-        # Look up c_expense_categories to verify account ownership
+    def _resolve_cat_row(match):
+        """Look up the full category row for a memory match so we can inspect flags."""
         cat_id = match.get('category_id')
-        if not cat_id:
-            return match
-        categories = _get_from_redis('c_expense_categories', user_id)
-        if categories:
-            for cat in categories:
-                if int(cat.get('id', 0)) == int(cat_id):
-                    if int(cat.get('account_id', 0)) == int(credit_account_id):
-                        return match
-                    else:
-                        # Category belongs to a different credit account — reject
-                        return None
-        return match  # Can't verify, allow through
+        cat_type = match.get('category_type')
+        # Map both new (outgoing/incoming) and legacy (income/expense/c_expense)
+        # category_type values to the right Redis cache.
+        table_map = {
+            'outgoing': 'expense_categories',
+            'incoming': 'income_categories',
+            # Legacy values -- still readable until migration runs.
+            'income': 'income_categories',
+            'expense': 'expense_categories',
+            'c_expense': 'c_expense_categories',
+        }
+        table = table_map.get(cat_type)
+        if not cat_id or not table:
+            return None
+        cats = _get_from_redis(table, user_id)
+        if not cats:
+            return None
+        for c in cats:
+            try:
+                if int(c.get('id', 0)) == int(cat_id):
+                    return c
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _suppress(match):
+        """Apply savings + credit-payment suppression rules."""
+        cat = _resolve_cat_row(match)
+        if not cat:
+            return False
+        try:
+            if int(cat.get('is_savings') or 0) == 1:
+                return True
+            if str(account_type or '').upper() == 'CREDIT' and int(cat.get('is_credit_account') or 0) == 1:
+                return True
+        except (TypeError, ValueError):
+            return False
+        return False
 
     try:
         cached = _get_from_redis('quiltt_category_mappings', user_id)
@@ -1730,8 +1765,7 @@ def lookup_category_memory(user_id, merchant_id=None, description=None, category
                             'account_id': m.get('account_id'),
                             'times_confirmed': m.get('times_confirmed', 1)
                         }
-                        result = _validate_credit_account(result)
-                        if result:
+                        if not _suppress(result):
                             return result
 
         # 2. Fallback: description match
@@ -1745,8 +1779,7 @@ def lookup_category_memory(user_id, merchant_id=None, description=None, category
                             'account_id': m.get('account_id'),
                             'times_confirmed': m.get('times_confirmed', 1)
                         }
-                        result = _validate_credit_account(result)
-                        if result:
+                        if not _suppress(result):
                             return result
 
         return None
