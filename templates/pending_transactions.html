@@ -86,7 +86,7 @@
                                                value="{{ txn.custom_category_suggestion if (txn.custom_category_suggestion and txn.custom_category_id and (not txn.current_category_name or txn.current_category_name == 'Uncategorized')) else (txn.current_category_name or '') }}">
                                         <input type="hidden" class="category-hidden" 
                                                data-transaction-id="{{ txn.transaction_id }}"
-                                               value="{{ txn.custom_category_id if (txn.custom_category_id and (not txn.current_category_id or txn.current_category_name == 'Uncategorized')) else (txn.current_category_id or '') }}">
+                                               value="{{ txn.custom_category_id if (txn.custom_category_id and (not txn.current_category_id or txn.current_category_name == 'Uncategorized')) else ((txn.current_canonical_category_id or '') if txn.imported_entry_type == 'c_expense' else (txn.current_category_id or '')) }}">
                                         <div class="pending-transactions-category-dropdown" style="display: none;"></div>
                                     </div>
                                     <button class="confirm-btn" onclick="confirmTransaction('{{ txn.transaction_id }}')">
@@ -120,22 +120,15 @@
         const expenseCategories = {{ expense_categories | tojson | safe }};
         const cExpenseCategories = {{ c_expense_categories | tojson | safe }};
 
-        // Get the appropriate categories based on entry type and credit account
+        // Get the appropriate categories based on entry type.
+        // c_expense uses the canonical expense_categories list (account-agnostic);
+        // confirm_transaction translates the chosen canonical id back to the
+        // per-account c_expense_categories.id at apply time.
         function getCategoriesForInput(input) {
             const entryType = input.dataset.entryType;
-            const creditAccountId = input.dataset.creditAccountId;
             
             let cats;
-            if (entryType === 'c_expense') {
-                // For credit account expenses, filter by account_id
-                if (creditAccountId) {
-                    cats = cExpenseCategories.filter(cat => 
-                        String(cat.account_id) === String(creditAccountId)
-                    );
-                } else {
-                    cats = cExpenseCategories.slice();
-                }
-            } else if (entryType === 'expense') {
+            if (entryType === 'c_expense' || entryType === 'expense') {
                 cats = expenseCategories.filter(cat => cat.name !== 'Interest Charge');
             } else {
                 cats = incomeCategories.slice();
@@ -300,27 +293,22 @@
             const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
             const hiddenInput = wrapper.querySelector('.category-hidden');
             const entryType = input.dataset.entryType;
-            const creditAccountId = input.dataset.creditAccountId;
             
             // Duplicate check safety net
             let dupCats = entryType === 'income' ? incomeCategories : expenseCategories;
             if (checkCategoryDuplicate(input, dupCats)) return;
 
+            // c_expense and expense both create canonical expense_categories
+            // (which auto-syncs to all credit accounts via add_expense_category).
             let url, categoriesArray;
-            
-            if (entryType === 'c_expense') {
-                // For credit account expenses, create expense_category which auto-syncs to all credit accounts
-                url = "{{ url_for('add_expense_category') }}";
-                categoriesArray = cExpenseCategories;
-            } else if (entryType === 'expense') {
-                url = "{{ url_for('add_expense_category') }}";
-                categoriesArray = expenseCategories;
-            } else {
+            if (entryType === 'income') {
                 url = "{{ url_for('add_income_category') }}";
                 categoriesArray = incomeCategories;
+            } else {
+                url = "{{ url_for('add_expense_category') }}";
+                categoriesArray = expenseCategories;
             }
             
-            // Build data object (no account_id needed - expense categories sync to all credit accounts)
             const postData = { name: categoryName.trim() };
             
             $.ajax({
@@ -328,31 +316,15 @@
                 method: "POST",
                 data: postData,
                 success: function(response) {
-                    if (response.id || response.new_category_id) {
-                        let categoryIdToUse = response.id || response.new_category_id;
-                        
-                        // For c_expense, use the c_expense_category_id from the mapping
-                        if (entryType === 'c_expense' && creditAccountId && response.c_expense_categories) {
-                            const cExpenseId = response.c_expense_categories[creditAccountId];
-                            if (cExpenseId) {
-                                categoryIdToUse = cExpenseId;
-                            }
-                        }
-                        
-                        // Add to categories array (with account_id for c_expense)
-                        const newCat = { id: categoryIdToUse, name: categoryName.trim() };
-                        if (entryType === 'c_expense' && creditAccountId) {
-                            newCat.account_id = parseInt(creditAccountId);
-                            // Also add to expenseCategories since they're synced
-                            expenseCategories.push({ id: response.id || response.new_category_id, name: categoryName.trim() });
-                            expenseCategories.sort((a, b) => a.name.localeCompare(b.name));
-                        }
+                    const newCanonicalId = response.id || response.new_category_id;
+                    if (newCanonicalId) {
+                        // Add canonical id to the appropriate array.
+                        const newCat = { id: newCanonicalId, name: categoryName.trim() };
                         categoriesArray.push(newCat);
-                        // Sort alphabetically
                         categoriesArray.sort((a, b) => a.name.localeCompare(b.name));
-                        // Set the input values
+                        // Set the input values (canonical id; backend translates for c_expense).
                         input.value = categoryName.trim();
-                        hiddenInput.value = categoryIdToUse;
+                        hiddenInput.value = newCanonicalId;
                         dropdown.style.display = 'none';
                     } else {
                         showToast(response.message || 'Failed to create category', 'error');
@@ -592,7 +564,6 @@
                 const amountText = item.querySelector('.transaction-amount')?.textContent?.trim() || '0';
                 const amount = parseFloat(amountText.replace(/[^0-9.-]/g, '')) || 0;
                 const isExpense = item.querySelector('.transaction-amount')?.classList.contains('expense');
-                const creditAccountId = input?.dataset?.creditAccountId || '';
                 const dateText = item.querySelector('.transaction-date')?.textContent?.trim() || '';
                 
                 // Determine account type
@@ -604,8 +575,7 @@
                     amount: isExpense ? -Math.abs(amount) : Math.abs(amount),
                     date: dateText,
                     account_type: accountType,
-                    entry_type: entryType,
-                    credit_account_id: creditAccountId
+                    entry_type: entryType
                 });
             });
             

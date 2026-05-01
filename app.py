@@ -14231,12 +14231,22 @@ def pending_transactions():
             
             # Get credit_account_id for c_expense entries (need to look up from category)
             credit_account_id = None
+            current_canonical_category_id = None
             if entry_type == 'c_expense' and current_category_id:
-                # Look up the credit account id from the category
+                # Look up the credit account id and canonical name from the per-account category
+                _c_name = None
                 for cat in c_expense_categories if c_expense_categories else []:
                     if cat.get('id') == current_category_id:
                         credit_account_id = cat.get('account_id')
+                        _c_name = cat.get('name')
                         break
+                # Translate per-account c_expense id -> canonical expense_categories.id by name match
+                if _c_name:
+                    _c_name_lower = _c_name.lower()
+                    for ec in expense_categories:
+                        if (ec.get('name') or '').lower() == _c_name_lower:
+                            current_canonical_category_id = ec.get('id')
+                            break
             
             # Get cached custom category suggestion (from Ntropy direct API)
             custom_category_suggestion = txn.get('custom_category_suggestion')
@@ -14261,6 +14271,7 @@ def pending_transactions():
                 'is_expense': is_expense,
                 'current_category_id': current_category_id,
                 'credit_account_id': credit_account_id,  # Blankee credit account id
+                'current_canonical_category_id': current_canonical_category_id,  # canonical expense_categories.id for c_expense
                 'current_category_name': None,  # Will be set after categories are loaded
                 'is_auto_confirmed': is_auto_confirmed,  # Track if auto-confirmed by system
                 # Cached AI category suggestion
@@ -14274,8 +14285,10 @@ def pending_transactions():
     category_name_lookup = {}
     for cat in income_categories:
         category_name_lookup[('income', cat.get('id'))] = cat.get('name')
+        category_name_lookup[('incoming', cat.get('id'))] = cat.get('name')
     for cat in expense_categories:
         category_name_lookup[('expense', cat.get('id'))] = cat.get('name')
+        category_name_lookup[('outgoing', cat.get('id'))] = cat.get('name')
     for cat in c_expense_categories:
         category_name_lookup[('c_expense', cat.get('id'))] = cat.get('name')
     
@@ -14426,6 +14439,35 @@ def confirm_transaction():
             log_info(app.logger, 'CONFIRM_TXN', f"Pending entry: id={pe.get('id')} (type={type(pe.get('id')).__name__}), cat={pe.get('category_id')}, amount={pe.get('amount')}, date={pe.get('date')}, auto_confirmed={pe.get('auto_confirmed')}")
         
         log_info(app.logger, 'CONFIRM_TXN', f"Looking for entry_id={entry_id} (type={type(entry_id).__name__})")
+        
+        # For c_expense, the incoming category_id is canonical (expense_categories.id).
+        # Translate it to the per-account c_expense_categories.id for THIS entry's
+        # credit account before writing. We derive the account from the entry's
+        # current category_id.
+        if entry_type == 'c_expense':
+            _entry_account_id = None
+            try:
+                _cec_cached = _redis_client.get(f"c_expense_categories:v1:{current_user.id}") if app.config.get('REDIS_OK') else None
+                if _cec_cached:
+                    _cec = json.loads(_cec_cached)
+                    for _entry_row in entries:
+                        if _entry_row.get('id') == entry_id:
+                            _old_cat_id = _entry_row.get('category_id')
+                            for _c in _cec:
+                                if int(_c.get('id', 0)) == int(_old_cat_id or 0):
+                                    _entry_account_id = _c.get('account_id')
+                                    break
+                            break
+            except Exception as _e:
+                log_warning(app.logger, 'CONFIRM_TXN', f"Could not derive entry account_id: {_e}")
+            if _entry_account_id:
+                from ntropy_utils import resolve_suggestion_for_entry
+                _resolved = resolve_suggestion_for_entry(current_user.id, 'c_expense', _entry_account_id, category_id)
+                if _resolved:
+                    log_info(app.logger, 'CONFIRM_TXN', f"Translated canonical category {category_id} -> c_expense {_resolved} for account {_entry_account_id}")
+                    category_id = _resolved
+                else:
+                    log_warning(app.logger, 'CONFIRM_TXN', f"Could not resolve canonical {category_id} for account {_entry_account_id}; writing as-is (may FK-fail)")
         
         # Find and update the entry
         found = False
@@ -14594,6 +14636,7 @@ def confirm_all_transactions():
                 })
                 all_txn_mappings.append({
                     'transaction_id': txn.get('transaction_id'),
+                    'entry_id': int(txn.get('entry_id')),
                     'category_id': int(txn.get('category_id')),
                     'entry_type': entry_type
                 })
@@ -14627,6 +14670,38 @@ def confirm_all_transactions():
             
             # Build lookup of updates
             updates = {item['entry_id']: item['category_id'] for item in items}
+            
+            # For c_expense, translate canonical expense_categories.id ->
+            # per-account c_expense_categories.id using each entry's existing
+            # category to find the account.
+            if entry_type == 'c_expense':
+                from ntropy_utils import resolve_suggestion_for_entry
+                _cec_cached = _redis_client.get(f"c_expense_categories:v1:{current_user.id}") if app.config.get('REDIS_OK') else None
+                _cec_by_id = {}
+                if _cec_cached:
+                    for _c in json.loads(_cec_cached):
+                        try:
+                            _cec_by_id[int(_c.get('id', 0))] = _c
+                        except (TypeError, ValueError):
+                            continue
+                _translated = {}
+                for _entry_row in entries:
+                    _eid = _entry_row.get('id')
+                    if _eid not in updates:
+                        continue
+                    _old_cat = _entry_row.get('category_id')
+                    _acct = (_cec_by_id.get(int(_old_cat)) or {}).get('account_id') if _old_cat else None
+                    if _acct:
+                        _resolved = resolve_suggestion_for_entry(current_user.id, 'c_expense', _acct, updates[_eid])
+                        if _resolved:
+                            _translated[_eid] = _resolved
+                # Apply translations to the updates dict and to all_txn_mappings
+                # (so memory storage gets the per-account id, then translates back to canonical).
+                for _eid, _new_cat in _translated.items():
+                    updates[_eid] = _new_cat
+                    for _m in all_txn_mappings:
+                        if _m['entry_type'] == 'c_expense' and _m.get('entry_id') == _eid:
+                            _m['category_id'] = _new_cat
             
             # Track entries that need bucket reduction
             bucket_reductions = []
