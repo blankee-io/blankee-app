@@ -701,13 +701,13 @@ def register():
             """, (new_user_id, 'Uncategorized', 0.0001, 0, 1, 1))
             # --- Add Savings categories ---
             cursor.execute("""
-                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (new_user_id, 'Savings', 0.0002, 0, 1, 1))
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system, is_savings)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (new_user_id, 'Savings', 0.0002, 0, 1, 1, 1))
             cursor.execute("""
-                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (new_user_id, 'Savings', 0.0002, 0, 1, 1))
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system, is_savings)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (new_user_id, 'Savings', 0.0002, 0, 1, 1, 1))
             # --- Add Interest Charge category (system, hidden from dropdowns) ---
             cursor.execute("""
                 INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
@@ -839,13 +839,13 @@ def verify_email():
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (user_id, 'Uncategorized', 0.0001, 0, 1, 1))
             cursor.execute("""
-                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (user_id, 'Savings', 0.0002, 0, 1, 1))
+                INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system, is_savings)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (user_id, 'Savings', 0.0002, 0, 1, 1, 1))
             cursor.execute("""
-                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (user_id, 'Savings', 0.0002, 0, 1, 1))
+                INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system, is_savings)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (user_id, 'Savings', 0.0002, 0, 1, 1, 1))
             conn.commit()
         
         cursor.close()
@@ -2905,7 +2905,7 @@ def dashboard_d_add_entry():
 
     # Check if this is a savings category - update savings if so
     is_savings_category = False
-    if entry_type in ['income', 'expense'] and cat_data.get('name') == 'Savings':
+    if entry_type in ['income', 'expense'] and int(cat_data.get('is_savings') or 0) == 1:
         is_savings_category = True
 
     # If this is an expense category and is_credit_account=1, add payment entry and trigger CA balance update
@@ -6854,10 +6854,10 @@ def update_daily_savings_for_savings_category(user_id, start_date):
         # Get the "Savings" income and expense category IDs for this user in one query
         cursor.execute("""
             SELECT 'income' as type, id FROM income_categories 
-            WHERE user_id = %s AND name = 'Savings'
+            WHERE user_id = %s AND is_savings = 1
             UNION ALL
             SELECT 'expense' as type, id FROM expense_categories 
-            WHERE user_id = %s AND name = 'Savings'
+            WHERE user_id = %s AND is_savings = 1
         """, (user_id, user_id))
         
         results = cursor.fetchall()
@@ -8135,19 +8135,19 @@ def move_entry_d():
             # Check if this is a savings category
             is_savings_category = False
             if entry_type in ['income', 'expense']:
-                # Get category name to check if savings
+                # Get is_savings flag to check if savings
                 if entry_type == 'income':
                     cursor = conn.cursor(pymysql.cursors.DictCursor)
-                    cursor.execute("SELECT name FROM income_categories WHERE id = %s", (category_id,))
+                    cursor.execute("SELECT is_savings FROM income_categories WHERE id = %s", (category_id,))
                     cat = cursor.fetchone()
-                    if cat and cat.get('name') == 'Savings':
+                    if cat and int(cat.get('is_savings') or 0) == 1:
                         is_savings_category = True
                     cursor.close()
                 elif entry_type == 'expense':
                     cursor = conn.cursor(pymysql.cursors.DictCursor)
-                    cursor.execute("SELECT name FROM expense_categories WHERE id = %s", (category_id,))
+                    cursor.execute("SELECT is_savings FROM expense_categories WHERE id = %s", (category_id,))
                     cat = cursor.fetchone()
-                    if cat and cat.get('name') == 'Savings':
+                    if cat and int(cat.get('is_savings') or 0) == 1:
                         is_savings_category = True
                     cursor.close()
             
@@ -11012,7 +11012,7 @@ def delete_entry():
     
     # Check if this is a savings category - update savings if so
     is_savings_category = False
-    if entry_type in ['income', 'expense'] and cat_data.get('name') == 'Savings':
+    if entry_type in ['income', 'expense'] and int(cat_data.get('is_savings') or 0) == 1:
         is_savings_category = True
     
     # If this is an expense category and is_credit_account=1, delete payment entry and trigger CA balance update
@@ -14311,6 +14311,57 @@ def pending_transactions():
     )
 
 
+def _canonical_expense_category_id(user_id, c_expense_category_id):
+    """
+    Translate a per-account c_expense_categories.id to the user's canonical
+    expense_categories.id by name match. Returns None if no match.
+
+    Used when saving category memory for c_expense entries: memory is stored
+    under the canonical (account-agnostic) expense category, then resolved back
+    to the per-account c_expense category at apply time.
+    """
+    if not c_expense_category_id:
+        return None
+    try:
+        c_cats = None
+        e_cats = None
+        if app.config.get('REDIS_OK'):
+            c_cached = _redis_client.get(f"c_expense_categories:v1:{user_id}")
+            e_cached = _redis_client.get(f"expense_categories:v1:{user_id}")
+            if c_cached:
+                c_cats = json.loads(c_cached)
+            if e_cached:
+                e_cats = json.loads(e_cached)
+        if not c_cats or not e_cats:
+            with get_db_pool().get_connection() as _conn:
+                _cur = _conn.cursor(pymysql.cursors.DictCursor)
+                if not c_cats:
+                    _cur.execute("""
+                        SELECT cec.id, cec.name FROM c_expense_categories cec
+                          JOIN credit_accounts ca ON cec.account_id = ca.id
+                         WHERE ca.user_id = %s
+                    """, (user_id,))
+                    c_cats = _cur.fetchall()
+                if not e_cats:
+                    _cur.execute("SELECT id, name FROM expense_categories WHERE user_id = %s", (user_id,))
+                    e_cats = _cur.fetchall()
+                _cur.close()
+        c_name = None
+        for c in (c_cats or []):
+            if int(c.get('id', 0)) == int(c_expense_category_id):
+                c_name = c.get('name')
+                break
+        if not c_name:
+            return None
+        c_name_lower = c_name.lower()
+        for e in (e_cats or []):
+            if (e.get('name') or '').lower() == c_name_lower:
+                return e.get('id')
+    except Exception as e:
+        log_warning(app.logger, 'CONFIRM_TXN', f"_canonical_expense_category_id failed for user {user_id}, c_id={c_expense_category_id}: {e}")
+    return None
+
+
 @app.route('/quiltt/confirm-transaction', methods=['POST'])
 @login_required
 def confirm_transaction():
@@ -14454,27 +14505,42 @@ def confirm_transaction():
         _clear_pending_transactions_notification_if_none(current_user.id)
         
         # --- SAVE CATEGORY MEMORY ---
-        # Remember this user's category choice for this merchant/description
+        # Remember this user's category choice for this merchant/description.
         try:
-            from quiltt_redis import upsert_category_memory, get_quiltt_transactions, get_blankee_credit_account_for_quiltt_account
+            from quiltt_redis import upsert_category_memory, get_quiltt_transactions
             quiltt_txns = get_quiltt_transactions(user_id=current_user.id)
             txn_record = next((t for t in quiltt_txns if t.get('transaction_id') == transaction_id), None)
             if txn_record:
-                # For credit accounts, store blankee credit_account_id (not quiltt account_id string)
-                _mem_account_id = None
-                if entry_type in ('c_expense', 'c_payment') and txn_record.get('account_id'):
-                    _mem_acct = get_blankee_credit_account_for_quiltt_account(current_user.id, txn_record['account_id'])
-                    if _mem_acct:
-                        _mem_account_id = _mem_acct.get('id')
-                upsert_category_memory(
-                    user_id=current_user.id,
-                    merchant_id=txn_record.get('ntropy_merchant_id'),
-                    description=txn_record.get('description'),
-                    category_id=category_id,
-                    category_type=entry_type,
-                    account_id=_mem_account_id
-                )
-                log_info(app.logger, 'CONFIRM_TXN', f"Saved category memory: merchant_id={txn_record.get('ntropy_merchant_id')}, desc={txn_record.get('description', '')[:50]}, cat={category_id}, type={entry_type}")
+                # Memory uses canonical IDs (expense_categories.id / income_categories.id)
+                # and unified types ('outgoing' / 'incoming').
+                if entry_type == 'c_payment':
+                    # Payments to credit cards aren't categorized -- skip memory.
+                    pass
+                else:
+                    if entry_type == 'income':
+                        memory_category_id = category_id
+                        memory_category_type = 'incoming'
+                    elif entry_type == 'expense':
+                        memory_category_id = category_id
+                        memory_category_type = 'outgoing'
+                    elif entry_type == 'c_expense':
+                        # Translate per-account c_expense_categories.id -> canonical
+                        # expense_categories.id by name match.
+                        memory_category_id = _canonical_expense_category_id(current_user.id, category_id)
+                        memory_category_type = 'outgoing'
+                    else:
+                        memory_category_id = None
+                        memory_category_type = None
+
+                    if memory_category_id and memory_category_type:
+                        upsert_category_memory(
+                            user_id=current_user.id,
+                            merchant_id=txn_record.get('ntropy_merchant_id'),
+                            description=txn_record.get('description'),
+                            category_id=memory_category_id,
+                            category_type=memory_category_type,
+                        )
+                        log_info(app.logger, 'CONFIRM_TXN', f"Saved category memory: merchant_id={txn_record.get('ntropy_merchant_id')}, desc={txn_record.get('description', '')[:50]}, cat={memory_category_id}, type={memory_category_type}")
         except Exception as mem_err:
             log_warning(app.logger, 'CONFIRM_TXN', f"Failed to save category memory: {mem_err}")
         # --- END SAVE CATEGORY MEMORY ---
@@ -14607,25 +14673,33 @@ def confirm_all_transactions():
         
         # --- SAVE CATEGORY MEMORY FOR ALL CONFIRMED TRANSACTIONS ---
         try:
-            from quiltt_redis import upsert_category_memory, get_quiltt_transactions, get_blankee_credit_account_for_quiltt_account
+            from quiltt_redis import upsert_category_memory, get_quiltt_transactions
             quiltt_txns = get_quiltt_transactions(user_id=current_user.id)
             txn_lookup = {t.get('transaction_id'): t for t in quiltt_txns}
             for mapping in all_txn_mappings:
                 txn_record = txn_lookup.get(mapping['transaction_id'])
-                if txn_record:
-                    # For credit accounts, store blankee credit_account_id (not quiltt account_id string)
-                    _mem_account_id = None
-                    if mapping['entry_type'] in ('c_expense', 'c_payment') and txn_record.get('account_id'):
-                        _mem_acct = get_blankee_credit_account_for_quiltt_account(current_user.id, txn_record['account_id'])
-                        if _mem_acct:
-                            _mem_account_id = _mem_acct.get('id')
+                if not txn_record:
+                    continue
+                _entry_type = mapping['entry_type']
+                _cat_id = mapping['category_id']
+                if _entry_type == 'c_payment':
+                    continue
+                if _entry_type == 'income':
+                    mem_cat_id, mem_cat_type = _cat_id, 'incoming'
+                elif _entry_type == 'expense':
+                    mem_cat_id, mem_cat_type = _cat_id, 'outgoing'
+                elif _entry_type == 'c_expense':
+                    mem_cat_id = _canonical_expense_category_id(current_user.id, _cat_id)
+                    mem_cat_type = 'outgoing'
+                else:
+                    mem_cat_id, mem_cat_type = None, None
+                if mem_cat_id and mem_cat_type:
                     upsert_category_memory(
                         user_id=current_user.id,
                         merchant_id=txn_record.get('ntropy_merchant_id'),
                         description=txn_record.get('description'),
-                        category_id=mapping['category_id'],
-                        category_type=mapping['entry_type'],
-                        account_id=_mem_account_id
+                        category_id=mem_cat_id,
+                        category_type=mem_cat_type,
                     )
         except Exception as mem_err:
             log_warning(app.logger, 'CONFIRM_ALL', f"Failed to save category memory: {mem_err}")
@@ -23816,20 +23890,18 @@ def _auto_confirm_pending_entries(user_id):
 
                     if suggestion and suggestion.get('custom_category_id'):
                         suggested_cat_id = suggestion['custom_category_id']
-                        
-                        # For c_expense, validate the suggested category belongs to the same credit account
-                        if entry_type == 'c_expense' and entry_account_id:
-                            cursor.execute("""
-                                SELECT account_id FROM c_expense_categories WHERE id = %s
-                            """, (suggested_cat_id,))
-                            cat_row = cursor.fetchone()
-                            if cat_row and int(cat_row['account_id']) != int(entry_account_id):
-                                # Suggestion is for a different credit account — fall back to Uncategorized
-                                log_warning(app.logger, 'AUTO_CONFIRM',
-                                    f"Entry {entry_id}: suggested category {suggested_cat_id} belongs to account "
-                                    f"{cat_row['account_id']}, entry is in account {entry_account_id} — falling back to Uncategorized")
-                                suggested_cat_id = None
-                        
+
+                        # custom_category_id is canonical (expense_categories.id /
+                        # income_categories.id). For c_expense entries, translate
+                        # to the per-account c_expense_categories.id via the
+                        # resolver (falls back to that account's Uncategorized).
+                        if entry_type == 'c_expense':
+                            from ntropy_utils import resolve_suggestion_for_entry
+                            resolved = resolve_suggestion_for_entry(
+                                user_id, 'c_expense', entry_account_id, suggested_cat_id
+                            )
+                            suggested_cat_id = resolved
+
                         if suggested_cat_id:
                             new_category_id = suggested_cat_id
                             log_info(app.logger, 'AUTO_CONFIRM',  f"Entry {entry_id} ({entry_type}) -> suggested category " f"{new_category_id} ({suggestion.get('custom_category_suggestion', '?')})" )
@@ -24395,37 +24467,44 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             # Check if the user has previously confirmed a category for this merchant/description.
             # If so, use that instead of calling Ntropy.
             memory_match = None
-            _suggestion_credit_account_id = None  # Blankee credit account ID for scoping suggestions
             try:
                 from quiltt_redis import lookup_category_memory
                 txn_merchant_id = ntropy_data.get('ntropy_merchant_id')
                 txn_description = txn.get('description', '')
-                memory_category_type = 'expense' if is_expense else 'income'
 
-                # For credit accounts, use c_expense / c_payment
+                # Memory is unified: 'outgoing' / 'incoming'.
+                # Per-account c_expense resolution happens at apply time.
                 quiltt_account_info = quiltt_account_map.get(account_id, {})
                 acct_type = quiltt_account_info.get('account_type', '').upper()
-                if acct_type == 'CREDIT':
-                    memory_category_type = 'c_expense' if is_expense else 'c_payment'
-                    # Resolve blankee credit account ID for scoping suggestions
-                    _blankee_acct = get_blankee_credit_account_for_quiltt_account(user_id, account_id)
-                    if _blankee_acct:
-                        _suggestion_credit_account_id = _blankee_acct.get('id')
 
-                memory_match = lookup_category_memory(
-                    user_id, merchant_id=txn_merchant_id,
-                    description=txn_description, category_type=memory_category_type,
-                    credit_account_id=_suggestion_credit_account_id
-                )
+                # Skip memory lookup for CREDIT incoming (payments to credit cards
+                # have no category and shouldn't pick up incoming-side memory).
+                if acct_type == 'CREDIT' and not is_expense:
+                    memory_match = None
+                else:
+                    memory_category_type = 'outgoing' if is_expense else 'incoming'
+                    memory_match = lookup_category_memory(
+                        user_id, merchant_id=txn_merchant_id,
+                        description=txn_description, category_type=memory_category_type,
+                        account_type=acct_type
+                    )
                 if memory_match:
-                    # Look up category name from ID
+                    # Look up category name from CANONICAL table
                     memory_cat_name = 'Memory'
                     try:
                         mem_cat_type = memory_match['category_type']
                         mem_cat_id = memory_match['category_id']
-                        if mem_cat_type in ('income', 'expense', 'c_expense'):
-                            table_map = {'income': 'income_categories', 'expense': 'expense_categories', 'c_expense': 'c_expense_categories'}
-                            cat_redis_key = f"{table_map[mem_cat_type]}:v1:{user_id}"
+                        # Map both new (outgoing/incoming) and legacy types to canonical tables.
+                        table_map = {
+                            'outgoing': 'expense_categories',
+                            'incoming': 'income_categories',
+                            'income': 'income_categories',
+                            'expense': 'expense_categories',
+                            'c_expense': 'c_expense_categories',
+                        }
+                        cat_table = table_map.get(mem_cat_type)
+                        if cat_table:
+                            cat_redis_key = f"{cat_table}:v1:{user_id}"
                             cat_cached = _redis_client.get(cat_redis_key) if app.config.get('REDIS_OK') else None
                             if cat_cached:
                                 for cat in json.loads(cat_cached):
@@ -24449,12 +24528,12 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
             # Only use category suggestion if no memory match.
             try:
                 from ntropy_utils import suggest_category_for_transaction
-                
+
                 # Determine account type for category lookup
                 quiltt_account_info = quiltt_account_map.get(account_id, {})
                 acct_type = quiltt_account_info.get('account_type', '').upper()
                 ntropy_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
-                
+
                 suggestion = suggest_category_for_transaction(
                     user_id=user_id,
                     transaction={
@@ -24466,7 +24545,6 @@ def _sync_quiltt_transactions_for_user(user_id, start_date=None, end_date=None, 
                         'transaction_type': 'expense' if is_expense else 'income'
                     },
                     account_type=ntropy_account_type,
-                    credit_account_id=_suggestion_credit_account_id
                 )
                 if suggestion:
                     # Always save merchant/entity data from enrichment
@@ -25652,7 +25730,6 @@ def quiltt_suggest_category():
             user_id=current_user.id,
             transaction=transaction,
             account_type=account_type,
-            credit_account_id=int(credit_account_id) if credit_account_id else None
         )
         
         # For c_expense, if Ntropy returned a category name but no ID match on this account,
@@ -25768,16 +25845,10 @@ def quiltt_backfill_suggestions():
                 if not description:
                     continue
                 
-                # Determine account type and credit account for scoping
+                # Determine account type for category lookup
                 account_info = account_lookup.get(txn.get('account_id'), {})
                 acct_type = account_info.get('account_type', '').upper()
                 ntropy_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
-                _bf_credit_account_id = None
-                if acct_type == 'CREDIT':
-                    from quiltt_redis import get_blankee_credit_account_for_quiltt_account
-                    _bf_acct = get_blankee_credit_account_for_quiltt_account(current_user.id, txn.get('account_id'))
-                    if _bf_acct:
-                        _bf_credit_account_id = _bf_acct.get('id')
                 
                 suggestion = suggest_category_for_transaction(
                     user_id=current_user.id,
@@ -25790,7 +25861,6 @@ def quiltt_backfill_suggestions():
                         'transaction_type': txn.get('transaction_type', '')  # Pass expense/income indicator
                     },
                     account_type=ntropy_account_type,
-                    credit_account_id=_bf_credit_account_id
                 )
                 
                 if suggestion and suggestion.get('suggested_category'):
@@ -25891,7 +25961,6 @@ def quiltt_suggest_categories_batch():
                 user_id=current_user.id,
                 transaction=transaction,
                 account_type=account_type,
-                credit_account_id=int(credit_account_id) if credit_account_id else None
             )
             
             # For c_expense, if no ID match on this account, try name match as fallback
@@ -27579,7 +27648,8 @@ def _create_single_category(user_id, category_type, category_data, display_order
         'is_auto_adjustment': 0,
         'no_end_date': 1 if is_recurring and category_data.get('no_end_date', True) else 0,
         'hidden': 0,
-        'is_system': 0
+        'is_system': 0,
+        'is_savings': 1 if name == 'Savings' else None
     }
     
     # Add expense-specific fields

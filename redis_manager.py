@@ -3272,8 +3272,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
                             INSERT INTO income_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_system)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_system, is_savings)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
                             row.get('name'),
@@ -3283,7 +3283,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
-                            int(row.get('is_system', 0))
+                            int(row.get('is_system', 0)),
+                            (1 if row.get('is_savings') else None)
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
@@ -3292,8 +3293,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
                             INSERT INTO income_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_system)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_system, is_savings)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 display_order = VALUES(display_order),
@@ -3302,7 +3303,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 is_auto_adjustment = VALUES(is_auto_adjustment),
                                 no_end_date = VALUES(no_end_date),
                                 hidden = VALUES(hidden),
-                                is_system = VALUES(is_system)
+                                is_system = VALUES(is_system),
+                                is_savings = VALUES(is_savings)
                         """, (
                             old_id,
                             user_id,
@@ -3313,7 +3315,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
-                            int(row.get('is_system', 0))
+                            int(row.get('is_system', 0)),
+                            (1 if row.get('is_savings') else None)
                         ))
                 
                 conn.commit()
@@ -3432,8 +3435,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
                             INSERT INTO expense_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id, is_system)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id, is_system, is_savings)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
                             row.get('name'),
@@ -3446,7 +3449,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('is_bud', 0)),
                             int(row.get('is_credit_account', 0)),
                             row.get('credit_account_id'),
-                            int(row.get('is_system', 0))
+                            int(row.get('is_system', 0)),
+                            (1 if row.get('is_savings') else None)
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
@@ -3455,8 +3459,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
                             INSERT INTO expense_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id, is_system)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id, is_system, is_savings)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 display_order = VALUES(display_order),
@@ -3468,7 +3472,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 is_bud = VALUES(is_bud),
                                 is_credit_account = VALUES(is_credit_account),
                                 credit_account_id = VALUES(credit_account_id),
-                                is_system = VALUES(is_system)
+                                is_system = VALUES(is_system),
+                                is_savings = VALUES(is_savings)
                         """, (
                             old_id,
                             user_id,
@@ -3482,7 +3487,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('is_bud', 0)),
                             int(row.get('is_credit_account', 0)),
                             row.get('credit_account_id'),
-                            int(row.get('is_system', 0))
+                            int(row.get('is_system', 0)),
+                            (1 if row.get('is_savings') else None)
                         ))
                 
                 conn.commit()
