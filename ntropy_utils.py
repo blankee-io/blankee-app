@@ -345,25 +345,31 @@ def suggest_category_for_transaction(
     user_id: int,
     transaction: Dict[str, Any],
     account_type: str,  # 'DEPOSITORY' or 'CREDIT'
-    credit_account_id: int = None  # Blankee credit_accounts.id for scoping c_expense categories
 ) -> Dict[str, Any]:
     """
     Get category suggestion for a transaction.
-    
+
     Calls Ntropy to enrich the transaction with user's custom categories,
-    then maps the returned category to the appropriate category_id.
-    
+    then maps the returned category to the canonical category_id
+    (expense_categories.id or income_categories.id).
+
+    Per-account c_expense_categories.id resolution is deferred to apply time
+    (auto-confirm / confirm_transaction) via resolve_suggestion_for_entry().
+
     Args:
         user_id: The Blankee user ID
         transaction: Quiltt transaction dict with: id, description, amount, date, transaction_type
-        account_type: 'DEPOSITORY' or 'CREDIT' (determines which category table to use)
-        
+        account_type: 'DEPOSITORY' or 'CREDIT' (used for direction detection only)
+
     Returns:
         Dict with:
             - suggested_category: Category name from Ntropy
-            - suggested_category_id: Matching category ID, or None if no match
-            - category_type: 'income', 'expense', 'c_expense', or 'c_payment'
-            - confidence: 'high' if exact match, 'low' if Uncategorized fallback
+            - suggested_category_id: Canonical category ID (expense_categories.id
+              for outgoing, income_categories.id for incoming), or None.
+              Always None for CREDIT incoming (payments to credit cards have no category).
+            - category_type: 'outgoing' or 'incoming'
+            - confidence: 'high' if exact match, 'medium' if Ntropy gave a name
+              that didn't match any user category, 'low' otherwise.
     """
     try:
         amount = float(transaction.get('amount', 0))
@@ -397,6 +403,17 @@ def suggest_category_for_transaction(
         suggested_category = None
         if enrichment and enrichment.get('categories'):
             suggested_category = enrichment['categories'].get('general')
+
+        # For DEPOSITORY (debit/checking) expenses, the user-facing 'Interest Charge'
+        # category is hidden — credit interest tracking lives on c_expense per credit
+        # account. Remap the Ntropy suggestion to None so it falls back to 'Uncategorized'.
+        if (
+            account_type != 'CREDIT'
+            and entry_type != 'incoming'
+            and suggested_category
+            and suggested_category.strip().lower() == 'interest charge'
+        ):
+            suggested_category = None
         
         # Extract entity/merchant data from enrichment
         # Check counterparty first, fall back to first intermediary (e.g. Venmo)
@@ -422,30 +439,38 @@ def suggest_category_for_transaction(
                         merchant_website = intermediary.get('website')
                         merchant_logo = intermediary.get('logo')
         
-        # Determine which table to look up based on entry_type (already calculated correctly)
-        if account_type == 'CREDIT':
+        # Resolve to CANONICAL category id (expense_categories / income_categories).
+        # Per-account c_expense_categories.id is resolved at apply time, not here.
+        suggested_category_id = None
+        resolved_cat = None
+        category_type = entry_type  # 'outgoing' or 'incoming'
+
+        if account_type == 'CREDIT' and entry_type == 'incoming':
+            # Payment received on a credit card -- no category, no memory.
+            suggested_category_id = None
+        elif suggested_category:
             if entry_type == 'incoming':
-                # Payment to credit card
-                category_type = 'c_payment'
-                suggested_category_id = None  # Payments don't have categories
-            else:
-                # Charge to credit card (outgoing/expense)
-                category_type = 'c_expense'
-                suggested_category_id = _find_category_id(
-                    user_id, suggested_category, 'c_expense_categories', account_id=credit_account_id
-                ) if suggested_category else None
-        else:  # DEPOSITORY
-            if entry_type == 'incoming':
-                category_type = 'income'
-                suggested_category_id = _find_category_id(
+                suggested_category_id, resolved_cat = _resolve_category_with_flags(
                     user_id, suggested_category, 'income_categories'
-                ) if suggested_category else None
-            else:
-                category_type = 'expense'
-                suggested_category_id = _find_category_id(
+                )
+            else:  # 'outgoing'
+                suggested_category_id, resolved_cat = _resolve_category_with_flags(
                     user_id, suggested_category, 'expense_categories'
-                ) if suggested_category else None
-        
+                )
+
+        # Suppress savings + (CREDIT-only) credit-payment mirror suggestions.
+        # Falls back to no category match → caller surfaces 'Uncategorized'.
+        if _should_suppress_suggestion(resolved_cat, account_type):
+            log_info(
+                logger, 'NTROPY',
+                f"Suppressed suggestion '{suggested_category}' for user {user_id} "
+                f"(account_type={account_type}, is_savings={resolved_cat.get('is_savings')}, "
+                f"is_credit_account={resolved_cat.get('is_credit_account')})"
+            )
+            suggested_category = None
+            suggested_category_id = None
+            resolved_cat = None
+
         # Determine confidence
         if suggested_category_id:
             confidence = 'high'
@@ -470,9 +495,82 @@ def suggest_category_for_transaction(
         return {
             'suggested_category': 'Uncategorized',
             'suggested_category_id': None,
-            'category_type': 'expense' if account_type == 'DEPOSITORY' else 'c_expense',
+            'category_type': 'outgoing',
             'confidence': 'low'
         }
+
+
+def resolve_suggestion_for_entry(user_id: int, entry_type: str, account_id: Optional[int],
+                                  canonical_category_id: Optional[int]) -> Optional[int]:
+    """
+    Translate a canonical category_id (expense_categories.id / income_categories.id)
+    to the actual category_id that should be written to the entry table.
+
+    For income_entries / expense_entries: the canonical id IS the entry's category_id
+        -> returned as-is.
+
+    For c_expense_entries: looks up the canonical expense_categories.name, finds the
+        matching c_expense_categories row scoped to `account_id`. If no match exists
+        (orphaned mirror), falls back to that account's Uncategorized category.
+
+    Args:
+        user_id: Blankee user ID.
+        entry_type: 'income' | 'expense' | 'c_expense'.
+        account_id: For c_expense entries, the credit_accounts.id the entry belongs to.
+        canonical_category_id: expense_categories.id (outgoing) or income_categories.id
+            (incoming). May be None.
+
+    Returns:
+        The category_id to write to the entry's category_id column, or None if
+        nothing could be resolved.
+    """
+    if not canonical_category_id:
+        return None
+
+    if entry_type in ('income', 'expense'):
+        return canonical_category_id
+
+    if entry_type == 'c_expense':
+        if not account_id:
+            return None
+        # Look up the canonical expense category's name.
+        expense_cats = (_get_categories_from_redis('expense_categories', user_id)
+                        or _get_categories_from_mysql('expense_categories', user_id)
+                        or [])
+        canonical_name = None
+        for cat in expense_cats:
+            try:
+                if int(cat.get('id', 0)) == int(canonical_category_id):
+                    canonical_name = cat.get('name')
+                    break
+            except (TypeError, ValueError):
+                continue
+        if not canonical_name:
+            return None
+
+        # Find matching c_expense category for this account.
+        c_cats = (_get_categories_from_redis('c_expense_categories', user_id)
+                  or _get_categories_from_mysql('c_expense_categories', user_id)
+                  or [])
+        canonical_name_lower = canonical_name.lower()
+        for cat in c_cats:
+            try:
+                if (int(cat.get('account_id', 0)) == int(account_id)
+                        and cat.get('name', '').lower() == canonical_name_lower):
+                    return cat.get('id')
+            except (TypeError, ValueError):
+                continue
+
+        # Fall back to that account's Uncategorized.
+        try:
+            from quiltt_redis import get_uncategorized_category_id
+            return get_uncategorized_category_id(user_id, 'c_expense', account_id=account_id)
+        except Exception as e:
+            log_warning(logger, 'NTROPY',
+                f"resolve_suggestion_for_entry: Uncategorized lookup failed for user {user_id}, account {account_id}: {e}")
+            return None
+
+    return None
 
 
 def _find_category_id(user_id: int, category_name: str, table_name: str, account_id: int = None) -> Optional[int]:
@@ -488,29 +586,60 @@ def _find_category_id(user_id: int, category_name: str, table_name: str, account
     Returns:
         Category ID if found, None otherwise
     """
+    cat_id, _ = _resolve_category_with_flags(user_id, category_name, table_name, account_id)
+    return cat_id
+
+
+def _resolve_category_with_flags(user_id: int, category_name: str, table_name: str, account_id: int = None):
+    """
+    Same lookup as _find_category_id but also returns the full category dict so callers
+    can inspect flags (is_savings, is_credit_account, etc.) for suppression decisions.
+
+    Returns:
+        (category_id, category_dict) or (None, None) if not found.
+    """
     if not category_name:
-        return None
-        
+        return None, None
+
     categories = _get_categories_from_redis(table_name, user_id)
-    
-    # MySQL fallback if Redis doesn't have the data (e.g. cron scripts at midnight)
     if not categories:
         categories = _get_categories_from_mysql(table_name, user_id)
-    
     if not categories:
-        return None
-    
-    # Case-insensitive match
+        return None, None
+
     category_name_lower = category_name.lower()
     for cat in categories:
         if cat.get('name', '').lower() == category_name_lower:
-            # For c_expense_categories, verify account ownership
             if table_name == 'c_expense_categories' and account_id is not None:
                 if int(cat.get('account_id', 0)) != int(account_id):
                     continue
-            return cat.get('id')
-    
-    return None
+            return cat.get('id'), cat
+
+    return None, None
+
+
+def _should_suppress_suggestion(cat: Optional[dict], account_type: Optional[str]) -> bool:
+    """
+    Decide whether a resolved category should be suppressed as a suggestion.
+
+    Rules:
+      - Savings categories (is_savings=1) are always suppressed: savings has its
+        own dedicated flow and shouldn't be auto-suggested from bank txns.
+      - Credit-payment mirror categories (is_credit_account=1, only present on
+        expense_categories) are suppressed when the underlying account is CREDIT,
+        because a charge to a credit card cannot be categorized as a payment-from-
+        checking mirror. They remain valid suggestions for DEPOSITORY accounts.
+    """
+    if not cat:
+        return False
+    try:
+        if int(cat.get('is_savings') or 0) == 1:
+            return True
+        if str(account_type or '').upper() == 'CREDIT' and int(cat.get('is_credit_account') or 0) == 1:
+            return True
+    except (TypeError, ValueError):
+        return False
+    return False
 
 
 def get_recurring_groups(profile_id: str) -> Optional[List[Dict[str, Any]]]:

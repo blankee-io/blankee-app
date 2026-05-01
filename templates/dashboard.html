@@ -152,9 +152,9 @@
                                     <span class="category-name">
                                         {% if category.is_bud %}
                                             <i class="fa-regular fa-seedling category-icon"></i>
-                                        {% elif category.name == 'Savings' and category.is_recurring %}
+                                        {% elif category.is_savings and category.is_recurring %}
                                             <i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>
-                                        {% elif category.name == 'Savings' %}
+                                        {% elif category.is_savings %}
                                             <i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>
                                         {% elif category.is_recurring %}
                                             <i class="fa-regular fa-arrows-repeat category-icon"></i>
@@ -220,9 +220,9 @@
                                             <i class="fa-regular fa-seedling category-icon"></i>
                                         {% elif category.is_credit_account == 1 and category.is_recurring %}
                                             <i class="fa-kit fa-regular-credit-card-sync category-icon"></i>
-                                        {% elif category.name == 'Savings' and category.is_recurring %}
+                                        {% elif category.is_savings and category.is_recurring %}
                                             <i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>
-                                        {% elif category.name == 'Savings' %}
+                                        {% elif category.is_savings %}
                                             <i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>
                                         {% elif category.is_recurring %}
                                             <i class="fa-regular fa-arrows-repeat category-icon"></i>
@@ -248,7 +248,7 @@
                         {% endfor %}
                         <!-- System categories (rendered at bottom, no group header) -->
                         {% for category in expense_categories %}
-                            {% if category.is_system and category.name != 'Starting Balance' %}
+                            {% if category.is_system and category.name != 'Starting Balance' and category.name != 'Interest Charge' %}
                             <tr data-category-id="{{ category.id }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-is-credit-account="{{ category.is_credit_account }}" data-group-id="" data-is-system="1" class="system-category-row">
                                 <td class="category-cell">
                                     <span class="category-name">
@@ -4834,9 +4834,9 @@
                                         iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
                                     } else if ((type === 'expense') && catObj.is_credit_account == 1 && catObj.is_recurring == 1) {
                                         iconHtml = '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
-                                    } else if (catObj.name === 'Savings' && catObj.is_recurring == 1) {
+                                    } else if (Number(catObj.is_savings) === 1 && catObj.is_recurring == 1) {
                                         iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
-                                    } else if (catObj.name === 'Savings') {
+                                    } else if (Number(catObj.is_savings) === 1) {
                                         iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
                                     } else if (catObj.is_recurring == 1) {
                                         iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';

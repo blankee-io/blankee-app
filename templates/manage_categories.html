@@ -393,7 +393,7 @@
                     {# ── System categories (x=0, bottom, non-draggable) ── #}
                     {% set ns2 = namespace(has_system=false) %}
                     {% for category in expense_categories %}
-                        {% if category.is_system|default(0) == 1 or category.is_auto_adjustment == 1 or category.is_credit_account == 1 %}
+                        {% if (category.is_system|default(0) == 1 or category.is_auto_adjustment == 1 or category.is_credit_account == 1) and category.name != 'Interest Charge' %}
                             {% set ns2.has_system = true %}
                         {% endif %}
                     {% endfor %}
@@ -413,7 +413,7 @@
                         <td class="manage-cat-actions-col"></td>
                     </tr>
                     {% for category in expense_categories|sort(attribute='display_order', reverse=true) %}
-                        {% if category.is_system|default(0) == 1 or category.is_auto_adjustment == 1 or category.is_credit_account == 1 %}
+                        {% if (category.is_system|default(0) == 1 or category.is_auto_adjustment == 1 or category.is_credit_account == 1) and category.name != 'Interest Charge' %}
                         <tr class="system-category-row"
                             data-category-id="{{ category.id }}"
                             data-is-auto-adjustment="{{ category.is_auto_adjustment }}"
