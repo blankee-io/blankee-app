@@ -102,8 +102,39 @@ def load_user(user_id):
 
 @login_manager.unauthorized_handler
 def unauthorized():
+    # Stash the originally-requested URL so we can return there after login.
+    # Only stash safe relative GETs (avoid stashing form POSTs / API calls).
+    try:
+        if request.method == 'GET' and request.endpoint != 'login':
+            target = request.full_path if request.query_string else request.path
+            # Strip trailing '?' that full_path adds when query_string is empty
+            if target.endswith('?'):
+                target = target[:-1]
+            if _is_safe_next_url(target):
+                session['next_url'] = target
+    except Exception:
+        pass
     # Redirect unauthorized users to the login page
     return redirect(url_for('login'))
+
+
+def _is_safe_next_url(target):
+    """Allow only same-origin relative paths. Reject //, /\\, full URLs, etc."""
+    if not target or not isinstance(target, str):
+        return False
+    if not target.startswith('/'):
+        return False
+    if target.startswith('//') or target.startswith('/\\'):
+        return False
+    return True
+
+
+def _consume_next_url(default_endpoint):
+    """Pop session['next_url'] if safe, else return url_for(default_endpoint)."""
+    target = session.pop('next_url', None)
+    if target and _is_safe_next_url(target):
+        return target
+    return url_for(default_endpoint)
 
 #################################################################################
 ############################### REDIS INTEGRATION ###############################
@@ -1678,6 +1709,10 @@ def login():
         with get_db_pool().get_cursor() as cursor:
             cursor.execute("SELECT landing_page FROM users WHERE id = %s", (current_user.id,))
             landing_page = cursor.fetchone()
+        # Honor a deep-link target stashed by the unauthorized handler
+        next_target = session.pop('next_url', None)
+        if next_target and _is_safe_next_url(next_target):
+            return redirect(next_target)
         if landing_page and landing_page[0]:
             return redirect(url_for(landing_page[0]))
         else:
@@ -1918,7 +1953,13 @@ def login():
                 # If no income entries exist, user hasn't completed setup yet
                 if entry_count == 0:
                     return redirect(url_for('setup_profile'))
-                elif landing_page:
+
+                # Honor a deep-link target stashed by the unauthorized handler
+                next_target = session.pop('next_url', None)
+                if next_target and _is_safe_next_url(next_target):
+                    return redirect(next_target)
+
+                if landing_page:
                     return redirect(url_for(landing_page))
                 else:
                     return redirect(url_for('dashboard'))
@@ -1955,6 +1996,10 @@ def login_mfa():
         login_user(user_obj, remember=remember)
         session.pop('pre_mfa_user_id', None)
         session.pop('pre_mfa_remember', None)
+        # Honor a deep-link target stashed by the unauthorized handler
+        next_target = session.pop('next_url', None)
+        if next_target and _is_safe_next_url(next_target):
+            return redirect(next_target)
         landing_page = user[4] if len(user) > 4 and user[4] else 'dashboard'
         return redirect(url_for(landing_page))
     else:
