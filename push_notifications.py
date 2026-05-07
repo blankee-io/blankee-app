@@ -39,7 +39,7 @@ def _get_client():
     key_id = os.getenv("APNS_KEY_ID")
     team_id = os.getenv("APNS_TEAM_ID")
     topic = os.getenv("APNS_TOPIC")
-    use_sandbox = os.getenv("APNS_USE_SANDBOX", "false").lower() == "false"
+    use_sandbox = os.getenv("APNS_USE_SANDBOX", "false").lower() == "true"
 
     if not all([key_path, key_id, team_id, topic]):
         log_info(logger, 'PUSH', "APNs not configured; missing required environment variables")
