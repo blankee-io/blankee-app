@@ -58,9 +58,9 @@ def _get_client():
         )
         _apns_topic = topic
         _apns_sandbox = use_sandbox
-        log_info(logger, 'PUSH', "APNs client initialized (sandbox=%s)", use_sandbox)
-    except Exception:
-        logger.exception("Failed to initialize APNs client")
+        log_info(logger, 'PUSH', "APNs client initialized", sandbox=use_sandbox)
+    except Exception as exc:
+        log_exception(logger, 'PUSH', "Failed to initialize APNs client", error=str(exc))
         _apns_client = None
 
     return _apns_client
@@ -124,5 +124,5 @@ def send_apns_notification(device_token, title, body, badge=None, sound="default
     except (Unregistered, BadDeviceToken):
         return {"sent": False, "reason": "invalid_token"}
     except Exception as exc:
-        log_warning(logger, 'PUSH', "APNs send failed: %s", exc)
+        log_warning(logger, 'PUSH', "APNs send failed", error=str(exc))
         return {"sent": False, "reason": "apns_exception", "error": str(exc)}
