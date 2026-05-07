@@ -19015,6 +19015,19 @@ def add_notification(user_id, message, notification_date=None):
         try:
             tokens = get_user_device_tokens(user_id, platform='ios')
             if tokens:
+                # Extract first href from message HTML to use as deep-link target.
+                # Falls back to /notifications when message has no link.
+                deep_link_url = '/notifications'
+                try:
+                    href_match = re.search(r'href=["\']([^"\']+)["\']', message or '')
+                    if href_match:
+                        candidate = href_match.group(1).strip()
+                        # Only accept relative app paths (security: avoid external URLs)
+                        if candidate.startswith('/'):
+                            deep_link_url = candidate
+                except Exception:
+                    pass
+
                 for token_row in tokens:
                     token_value = token_row.get('device_token')
                     if not token_value:
@@ -19023,7 +19036,8 @@ def add_notification(user_id, message, notification_date=None):
                         device_token=token_value,
                         title="Blankee",
                         body=message,
-                        badge=unread_count
+                        badge=unread_count,
+                        custom={"url": deep_link_url}
                     )
                     if not result.get('sent') and result.get('reason') == 'invalid_token':
                         try:
