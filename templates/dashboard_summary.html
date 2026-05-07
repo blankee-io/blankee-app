@@ -898,6 +898,32 @@
             return closestBucket;
         }
 
+        // Find the most recent PAST bucket for a category (strictly before this week's monday)
+        function findPreviousBucket(categoryId, bucketLookup) {
+            const today = new Date();
+            const monday = getMondayOfWeek(today);
+            
+            let prevBucket = null;
+            let prevDate = null;
+            
+            Object.entries(bucketLookup).forEach(([k, bucket]) => {
+                if (k.startsWith(categoryId + '_')) {
+                    const bucketDate = parseDate(bucket.bucket_date);
+                    if (bucketDate && bucketDate < monday) {
+                        if (!prevDate || bucketDate > prevDate) {
+                            prevDate = bucketDate;
+                            prevBucket = {
+                                ...bucket,
+                                week_start: bucketDate
+                            };
+                        }
+                    }
+                }
+            });
+            
+            return prevBucket;
+        }
+
         // Calculate spent amount for a bucket (entries with is_bucket=1 in that bucket's week)
         function calculateSpent(categoryId, bucketWeekStart, entries) {
             if (!bucketWeekStart) return 0;
@@ -923,8 +949,65 @@
             return spent;
         }
 
+        // Render the inner HTML for a single bucket "side" (used by both single + dual layouts).
+        // `compact` shrinks date/text for the dual side-by-side display.
+        function renderBucketSideHTML(bucket, isBill, compact) {
+            if (!bucket) {
+                return `<div class="summary-no-bucket"><span>—</span></div>`;
+            }
+            const originalAmount = bucket.original_amount;
+            const currentAmount = bucket.current_amount;
+            const spent = originalAmount - currentAmount;
+            const dateLabel = formatDate(bucket.week_start);
+            
+            if (isBill) {
+                const isPaid = spent >= originalAmount;
+                if (isPaid) {
+                    return `
+                        <div class="summary-week-label">${dateLabel}</div>
+                        <div class="summary-bill-status">
+                            <span class="status-paid" title="Paid"><i class="fa-solid fa-hand-holding-dollar"></i>${compact ? '' : ' Paid'}</span>
+                            ${compact ? '' : `<span class="bill-amount paid">${formatCurrency(originalAmount)}</span>`}
+                        </div>
+                    `;
+                } else {
+                    return `
+                        <div class="summary-week-label">${dateLabel}</div>
+                        <div class="summary-bill-status">
+                            <span class="status-unpaid" title="Unpaid"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i>${compact ? '' : ' Unpaid'}</span>
+                            ${compact ? '' : `<span class="bill-amount unpaid">${formatCurrency(originalAmount)}</span>`}
+                        </div>
+                    `;
+                }
+            }
+            
+            const remaining = currentAmount;
+            const percentage = originalAmount > 0 ? Math.min((spent / originalAmount) * 100, 100) : 0;
+            const isOver = spent >= originalAmount;
+            
+            let remainingText;
+            if (remaining < 0) {
+                remainingText = `<span class="remaining-amount overspent">${formatCurrency(Math.abs(remaining))} overspent</span>`;
+            } else {
+                remainingText = `<span class="remaining-amount">${formatCurrency(remaining)} remaining</span>`;
+            }
+            
+            return `
+                <div class="summary-week-label">${dateLabel}</div>
+                <div class="bucket-status">
+                    <div class="bucket-bar-container">
+                        <div class="bucket-bar ${isOver ? 'bucket-bar-over' : 'bucket-bar-ok'}" style="width: ${percentage}%"></div>
+                    </div>
+                    <div class="summary-amounts">
+                        <span class="spent-amount">${formatCurrency(spent)} spent</span>
+                        ${remainingText}
+                    </div>
+                </div>
+            `;
+        }
+
         // Create a bucket progress row
-        function createBucketRow(category, bucket, entries, accountName = null) {
+        function createBucketRow(category, bucket, entries, accountName = null, prevBucket = null) {
             const row = document.createElement('div');
             row.className = 'summary-row';
             
@@ -942,64 +1025,22 @@
             // Determine if this is a bill (wage_bill == 1) or allowance
             const isBill = wageBillLookup[category.id] === 1;
             
-            if (!bucket) {
-                // No bucket for this category
+            if (prevBucket) {
+                // Dual layout: previous (left, dimmed) + current (right)
                 progressContainer.innerHTML = `
-                    <div class="summary-no-bucket">
-                        <span>—</span>
+                    <div class="bucket-dual">
+                        <div class="bucket-side bucket-prev">
+                            ${renderBucketSideHTML(prevBucket, isBill, true)}
+                        </div>
+                        <div class="bucket-dual-divider"></div>
+                        <div class="bucket-side bucket-cur">
+                            ${renderBucketSideHTML(bucket, isBill, true)}
+                        </div>
                     </div>
                 `;
-            } else if (isBill) {
-                // Bill: show paid/unpaid icon + amount (matching recurring_e style)
-                const originalAmount = bucket.original_amount;
-                const currentAmount = bucket.current_amount;
-                const spent = originalAmount - currentAmount;
-                const isPaid = spent >= originalAmount;
-                
-                if (isPaid) {
-                    progressContainer.innerHTML = `
-                        <div class="summary-week-label">${formatDate(bucket.week_start)}</div>
-                        <div class="summary-bill-status">
-                            <span class="status-paid" title="Paid"><i class="fa-solid fa-hand-holding-dollar"></i> Paid</span>
-                            <span class="bill-amount paid">${formatCurrency(originalAmount)}</span>
-                        </div>
-                    `;
-                } else {
-                    progressContainer.innerHTML = `
-                        <div class="summary-week-label">${formatDate(bucket.week_start)}</div>
-                        <div class="summary-bill-status">
-                            <span class="status-unpaid" title="Unpaid"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i> Unpaid</span>
-                            <span class="bill-amount unpaid">${formatCurrency(originalAmount)}</span>
-                        </div>
-                    `;
-                }
             } else {
-                const originalAmount = bucket.original_amount;
-                const currentAmount = bucket.current_amount;
-                const spent = originalAmount - currentAmount;
-                const remaining = currentAmount;
-                const percentage = originalAmount > 0 ? Math.min((spent / originalAmount) * 100, 100) : 0;
-                const isOver = spent >= originalAmount;
-                
-                let remainingText;
-                if (remaining < 0) {
-                    remainingText = `<span class="remaining-amount overspent">${formatCurrency(Math.abs(remaining))} overspent</span>`;
-                } else {
-                    remainingText = `<span class="remaining-amount">${formatCurrency(remaining)} remaining</span>`;
-                }
-                
-                progressContainer.innerHTML = `
-                    <div class="summary-week-label">${formatDate(bucket.week_start)}</div>
-                    <div class="bucket-status">
-                        <div class="bucket-bar-container">
-                            <div class="bucket-bar ${isOver ? 'bucket-bar-over' : 'bucket-bar-ok'}" style="width: ${percentage}%"></div>
-                        </div>
-                        <div class="summary-amounts">
-                            <span class="spent-amount">${formatCurrency(spent)} spent</span>
-                            ${remainingText}
-                        </div>
-                    </div>
-                `;
+                // Single layout (no previous bucket exists)
+                progressContainer.innerHTML = renderBucketSideHTML(bucket, isBill, false);
             }
             
             row.appendChild(categoryName);
@@ -1027,7 +1068,8 @@
             
             visibleCategories.forEach(category => {
                 const bucket = findCurrentBucket(category.id, bucketLookup);
-                const row = createBucketRow(category, bucket, expenseEntries);
+                const prevBucket = findPreviousBucket(category.id, bucketLookup);
+                const row = createBucketRow(category, bucket, expenseEntries, null, prevBucket);
                 container.appendChild(row);
             });
         }
@@ -1046,7 +1088,8 @@
             
             visibleCategories.forEach(category => {
                 const bucket = findCurrentBucket(category.id, bucketLookup);
-                const row = createBucketRow(category, bucket, cExpenseEntries);
+                const prevBucket = findPreviousBucket(category.id, bucketLookup);
+                const row = createBucketRow(category, bucket, cExpenseEntries, null, prevBucket);
                 listEl.appendChild(row);
             });
         }
