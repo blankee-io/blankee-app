@@ -67,7 +67,7 @@
                                 data-recurring="{{ 'true' if recurring_info.get('enabled') else 'false' }}"
                                 data-payment-amount="{{ recurring_info.get('amount', 0) }}"
                                 data-due-date="{{ recurring_info.get('monthly_days', '1') }}"
-                                data-is-quiltt="{{ account.is_quiltt|default(0) }}">
+                                data-bank-linked="{{ account.is_linked|default(0) }}">
                                 <td class="credit-account-sort-cell">
                                     <span class="sort-handle"><i class="fa fa-bars"></i></span>
                                 </td>
@@ -97,8 +97,8 @@
                                     {% endif %}
                                 </td>
                                 <td class="credit-account-action-cell">
-                                    {% if account.is_quiltt == 1 %}
-                                        <button class="quiltt-linked-btn" title="Linked to bank account">
+                                    {% if account.is_linked == 1 %}
+                                        <button class="bank-linked-btn" title="Linked to bank account">
                                             <i class="fa-solid fa-building-columns"></i>
                                         </button>
                                     {% else %}
@@ -263,10 +263,10 @@
                 e.preventDefault();
                 e.stopPropagation();
                 const $row = $(this).closest('tr');
-                const isQuiltt = $row.data('is-quiltt') == 1;
+                const isBankLinked = $row.data('bank-linked') == 1;
                 
-                // Don't allow editing Quiltt-linked accounts
-                if (isQuiltt) {
+                // Don't allow editing bank-linked accounts
+                if (isBankLinked) {
                     return;
                 }
                 
@@ -464,9 +464,9 @@
             $('.credit-accounts-table').on('click', '.delete-credit-account-btn', async function(e) {
                 e.preventDefault();
                 const $row = $(this).closest('tr');
-                const isQuiltt = $row.data('is-quiltt') == 1;
+                const isBankLinked = $row.data('bank-linked') == 1;
 
-                if (isQuiltt) return;
+                if (isBankLinked) return;
 
                 const accountId = $(this).data('account-id');
                 const confirmed = await showConfirmModal({
@@ -561,7 +561,7 @@
                         '<td>Line</td>' +
                         '<td>' + cs + '8,400.00</td>' +
                         '<td class="credit-account-action-cell">' +
-                            '<button class="quiltt-linked-btn tutorial-temp-btn" title="Linked to bank account"><i class="fa-solid fa-building-columns"></i></button>' +
+                            '<button class="bank-linked-btn tutorial-temp-btn" title="Linked to bank account"><i class="fa-solid fa-building-columns"></i></button>' +
                         '</td>';
 
                     if (tbody) {
@@ -601,8 +601,8 @@
                             padding: 6
                         },
                         {
-                            selector: '.tutorial-temp-row .quiltt-linked-btn',
-                            text: 'The <b>bank icon</b> means this account is linked to your bank via Quiltt. Linked accounts sync automatically and cannot be manually edited.',
+                            selector: '.tutorial-temp-row .bank-linked-btn',
+                            text: 'The <b>bank icon</b> means this account is linked to your bank. Linked accounts sync automatically and cannot be manually edited.',
                             padding: 6
                         }
                     ], { delay: 500, onComplete: cleanup });

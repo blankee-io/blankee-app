@@ -96,6 +96,12 @@
                                 </div>
                             </div>
                         {% endfor %}
+                    {% elif not has_bank_accounts %}
+                        <div class="profile-section no-pending-message">
+                            <i class="fa-solid fa-building-columns"></i>
+                            <h3>No bank connected</h3>
+                            <p>Connect a bank account and imported transactions will appear here for review.</p>
+                        </div>
                     {% else %}
                         <div class="profile-section no-pending-message">
                             <i class="fa-solid fa-circle-check"></i>
@@ -447,7 +453,7 @@
             };
             
             $.ajax({
-                url: '/quiltt/confirm-transaction',
+                url: '/bank/confirm-transaction',
                 method: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify(payload),
@@ -502,7 +508,7 @@
             items.find('.confirm-btn').prop('disabled', true);
             
             $.ajax({
-                url: '/quiltt/confirm-all-transactions',
+                url: '/bank/confirm-all-transactions',
                 method: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify({ transactions: transactions }),
@@ -548,78 +554,7 @@
             }
         }
         
-        // Note: fetchNtropySuggestions is kept for manual refresh if needed,
-        // but suggestions are now pre-loaded from server during sync
-        function fetchNtropySuggestions() {
-            const items = document.querySelectorAll('.pending-transaction-item');
-            if (items.length === 0) return;
-            
-            // Build batch request
-            const transactions = [];
-            items.forEach(item => {
-                const input = item.querySelector('.category-input');
-                const transactionId = item.dataset.transactionId;
-                const entryType = item.dataset.entryType;
-                const description = item.querySelector('.transaction-merchant')?.textContent?.trim() || '';
-                const amountText = item.querySelector('.transaction-amount')?.textContent?.trim() || '0';
-                const amount = parseFloat(amountText.replace(/[^0-9.-]/g, '')) || 0;
-                const isExpense = item.querySelector('.transaction-amount')?.classList.contains('expense');
-                const dateText = item.querySelector('.transaction-date')?.textContent?.trim() || '';
-                
-                // Determine account type
-                const accountType = (entryType === 'c_expense') ? 'CREDIT' : 'DEPOSITORY';
-                
-                transactions.push({
-                    transaction_id: transactionId,
-                    description: description,
-                    amount: isExpense ? -Math.abs(amount) : Math.abs(amount),
-                    date: dateText,
-                    account_type: accountType,
-                    entry_type: entryType
-                });
-            });
-            
-            if (transactions.length === 0) return;
-            
-            // Fetch suggestions
-            fetch('/quiltt/suggest-categories-batch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ transactions: transactions })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success' && data.suggestions) {
-                    applySuggestions(data.suggestions);
-                }
-            })
-            .catch(error => {});
-        }
-        
-        // Apply suggestions to the UI (kept for compatibility but suggestions now come pre-loaded from server)
-        function applySuggestions(suggestions) {
-            Object.entries(suggestions).forEach(([transactionId, suggestion]) => {
-                const item = document.querySelector(`.pending-transaction-item[data-transaction-id="${transactionId}"]`);
-                if (!item) return;
-                
-                const input = item.querySelector('.category-input');
-                const hiddenInput = item.querySelector('.category-hidden');
-                
-                // Store suggestion in data attributes for dropdown display
-                if (suggestion.suggested_category && suggestion.suggested_category_id) {
-                    input.dataset.suggestedCategory = suggestion.suggested_category;
-                    input.dataset.suggestedCategoryId = suggestion.suggested_category_id;
-                    
-                    // Pre-fill if input is currently empty or Uncategorized
-                    if (input.value === '' || input.value === 'Uncategorized') {
-                        input.value = suggestion.suggested_category;
-                        hiddenInput.value = suggestion.suggested_category_id;
-                    }
-                }
-            });
-        }
-        
-        // Suggestions are now pre-loaded from server via cached Ntropy data
+        // Suggestions are now pre-loaded from server via cached enrichment data
         // No need to call API on page load - instant page render!
     </script>
 </body>

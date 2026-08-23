@@ -105,6 +105,12 @@
                                     </button>
                                 </div>
                             </form>
+                            <p class="setting-description email-delivery-warning{% if email_delivery_verified() %} email-delivery-hidden{% endif %}"
+                               id="email-notifications-hint">
+                                Email delivery must be set up and switched on in the admin
+                                console before this can be turned on. Until then there is
+                                nowhere for notifications to go.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -325,8 +331,28 @@
             const emailNotificationsCheckbox = $('#email_notifications');
             
             if (emailNotificationsCheckbox.length) {
+                // Reverting has to put the ICON back too, not just the hidden
+                // checkbox. The visible switch is the icon, so restoring only
+                // the checkbox leaves the switch showing "on" while the stored
+                // value is off. That was survivable while refusals were rare;
+                // the verification gate below makes them routine.
+                function revertEmailNotifications(previous) {
+                    emailNotificationsCheckbox.prop('checked', previous);
+                    const icon = $('.toggle-switch[data-checkbox="email_notifications"] .toggle-icon');
+                    icon.toggleClass('toggle-off', !previous);
+                }
+
                 emailNotificationsCheckbox.on('change', function() {
                     const emailNotifications = $(this).is(':checked') ? 1 : 0;
+
+                    // Refuse locally when there is nowhere verified to send to.
+                    // The server enforces this as well - this branch exists so
+                    // the switch does not flick on and then snap back.
+                    if (emailNotifications === 1 && !emailDeliveryVerified) {
+                        revertEmailNotifications(false);
+                        showToast('Verify an email address under Email Delivery first.', 'error');
+                        return;
+                    }
 
                     // Send an AJAX request to update email_notifications in the database
                     $.ajax({
@@ -338,14 +364,13 @@
                                 showSuccessMessage('Email notifications ' + (emailNotifications ? 'enabled' : 'disabled'));
                             } else {
                                 showToast('Error updating email notifications: ' + response.message, 'error');
-                                // Revert checkbox on error
-                                emailNotificationsCheckbox.prop('checked', !emailNotifications);
+                                revertEmailNotifications(!emailNotifications);
                             }
                         },
-                        error: function() {
-                            showToast('An error occurred while updating email notifications.', 'error');
-                            // Revert checkbox on error
-                            emailNotificationsCheckbox.prop('checked', !emailNotifications);
+                        error: function(xhr) {
+                            const res = (xhr && xhr.responseJSON) || {};
+                            showToast(res.message || 'An error occurred while updating email notifications.', 'error');
+                            revertEmailNotifications(!emailNotifications);
                         }
                     });
                 });
@@ -402,6 +427,7 @@
                 }
             });
         }
+
 
     </script>    
 </body>

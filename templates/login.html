@@ -86,19 +86,24 @@
                     <label for="password">Password:</label>
                     <input type="password" name="password" class="login-input" required>
                 </div>
+                {# Offered only when the instance can actually send the mail.
+                   The route enforces the same rule; this just avoids showing a
+                   link that would bounce straight back here. #}
+                {% if email_delivery_verified() %}
                 <div class="forgot-password-container">
                     <div class="forgot-password-label"></div>
                     <div>
                         <a href="{{ url_for('forgot_password') }}" class="forgot-password-link">Forgot Password?</a>
                     </div>
                 </div>
+                {% endif %}
                 <div class="login-row remember-me">
                     <input type="checkbox" name="remember" id="remember">
                     <label for="remember">Remember Me</label>
                 </div>
                 <button type="submit" class="login-button">Login</button>
             </form>
-            <p>Don't have an account? <a href="{{ url_for('register') }}" class="register-link">Create account</a>.</p>
+
         {% endif %}
 
         {% with messages = get_flashed_messages() %}
@@ -187,31 +192,7 @@
                 mfaDigits[0].focus();
             }
 
-            {% if verification_modal %}
-            // Email verification required modal
-            var resendUrl = "{{ url_for('resend_verification') }}";
-            message.innerHTML = '<div class="modal-content-center">' +
-                               '<i class="fas fa-envelope verification-modal-icon"></i>' +
-                               '</div>' +
-                               '<div class="modal-content-center">' +
-                               '<strong>Email Verification Required</strong><br><br>' +
-                               'Please verify your email address before logging in.<br>' +
-                               'Check your inbox for the verification link.' +
-                               '</div>' +
-                               '<div class="verification-modal-divider modal-content-center">' +
-                               '<small class="verification-modal-help-text">Didn\'t receive the email?</small><br>' +
-                               '<a href="' + resendUrl + '" class="verification-modal-resend-btn">' +
-                               'Resend verification email</a>' +
-                               '</div>';
-            modal.style.display = 'flex';
-            
-            // Close only when clicking outside the modal content
-            modal.onclick = function(event) {
-                if (event.target === modal) {
-                    modal.style.display = 'none';
-                }
-            };
-            {% elif error_message %}
+            {% if error_message %}
             // Error message modal
             message.innerHTML = '<div class="modal-content-center">' +
                                '<i class="fa-solid fa-siren-on error-modal-icon"></i>' +

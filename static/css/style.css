@@ -51,7 +51,6 @@ a, button, input, select, textarea, th, td, tr, div, span, label, li, img,
     transition: all 0.2s ease;
 }
 
-
 /* General Styles */
 @font-face {
     font-family: Nunito;
@@ -532,26 +531,6 @@ body {
     background-color: var(--primary-hover);
 }
 
-.nav-feedback {
-    position: relative;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 40px;
-    height: 40px;
-    background-color: transparent;
-    border-radius: 50%;
-    color: white;
-    font-size: 17px;
-    text-decoration: none;
-    transition: background-color 0.2s ease, transform 0.2s ease;
-    padding-bottom: 5px
-}
-
-.nav-feedback:hover {
-    background-color: var(--primary-hover);
-}
-
 .nav-notifications {
     position: relative;
     display: flex;
@@ -583,18 +562,6 @@ body {
 
 /* Notification badge (red dot) */
 .notification-badge {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 10px;
-    height: 10px;
-    background-color: var(--accent);
-    border-radius: 50%;
-    border: 2px solid var(--primary);
-}
-
-/* Feedback badge (red dot) */
-.feedback-badge {
     position: absolute;
     top: 8px;
     right: 8px;
@@ -1078,7 +1045,11 @@ body {
 }
 
 /* Inputs and selects */
+/* email and password were missing here, so they fell through to the browser
+   default - a smaller, square box next to properly styled text inputs. */
 .footer-form-group input[type="text"],
+.footer-form-group input[type="email"],
+.footer-form-group input[type="password"],
 .footer-form-group input[type="number"],
 .footer-form-group select {
     width: 100%;
@@ -1096,6 +1067,8 @@ body {
 }
 
 .footer-form-group input[type="text"]:focus,
+.footer-form-group input[type="email"]:focus,
+.footer-form-group input[type="password"]:focus,
 .footer-form-group input[type="number"]:focus,
 .footer-form-group select:focus {
     background-color: var(--text-light);
@@ -1221,7 +1194,6 @@ transform: scale(1.2);
 #credit-accounts-body .calendarnavbuttonscontainer,
 #profile-body .calendarnavbuttonscontainer,
 #buds-body .calendarnavbuttonscontainer,
-#feedback-page .calendarnavbuttonscontainer,
 #notifications-body .calendarnavbuttonscontainer,
 #pending-transactions-body .calendarnavbuttonscontainer,
 #manage-categories-body .calendarnavbuttonscontainer {
@@ -1266,7 +1238,6 @@ transform: scale(1.2);
     #credit-accounts-body .calendarnavbuttonscontainer,
     #profile-body .calendarnavbuttonscontainer,
     #buds-body .calendarnavbuttonscontainer,
-    #feedback-page .calendarnavbuttonscontainer,
     #notifications-body .calendarnavbuttonscontainer,
     #pending-transactions-body .calendarnavbuttonscontainer,
     #manage-categories-body .calendarnavbuttonscontainer {
@@ -1277,7 +1248,6 @@ transform: scale(1.2);
     #credit-accounts-body .calendarnav,
     #profile-body .calendarnav,
     #buds-body .calendarnav,
-    #feedback-page .calendarnav,
     #notifications-body .calendarnav,
     #pending-transactions-body .calendarnav,
     #manage-categories-body .calendarnav {
@@ -2137,12 +2107,6 @@ transform: scale(1.02);
     text-decoration: underline;
 }
 
-/* Bank Connection Modal */
-.bank-connection-benefits {
-    text-align: left;
-    margin: 20px auto;
-    max-width: 400px;
-}
 
 .mfa-setup-benefits {
     text-align: left;
@@ -2159,25 +2123,6 @@ transform: scale(1.02);
     margin-left: 5px;
 }
 
-.bank-connection-benefits-list {
-    list-style: none;
-    padding: 0;
-}
-
-.bank-connection-benefits-list li {
-    color: var(--primary-hover);
-    margin-bottom: 10px;
-}
-
-.bank-connection-benefits-list li i {
-    margin-right: 8px;
-}
-
-.bank-connection-security-note {
-    font-size: 0.9em;
-    color: var(--secondary-dark);
-    margin-top: 20px;
-}
 
 /* Account Selection List */
 .account-selection-list {
@@ -2603,7 +2548,6 @@ transform: scale(1.02);
     }
 }
 
-
 /* Balance auto-fill indicators */
 .balance-auto-filled-indicator {
     color: var(--primary-hover);
@@ -2901,7 +2845,7 @@ tr[data-category-id] td.before-member-since {
 }
 
 /* ============================================================
-   Quiltt Sync Marker — bank-check icon on last synced date
+   Bank Sync Marker - bank-check icon on last synced date
    Upside-down teardrop (pin) shape with icon + date number
    ============================================================ */
 /* Teardrop pulse: continuous smooth sine-wave fade */
@@ -2911,7 +2855,7 @@ tr[data-category-id] td.before-member-since {
     100% { opacity: 0; }
 }
 
-.quiltt-sync-marker {
+.bank-sync-marker {
     position: absolute;
     display: flex;
     align-items: center;
@@ -2930,7 +2874,7 @@ tr[data-category-id] td.before-member-since {
     animation: syncMarkerPulse 1.8s ease-in-out infinite;
 }
 
-.quiltt-sync-marker-inner {
+.bank-sync-marker-inner {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -2944,11 +2888,11 @@ tr[data-category-id] td.before-member-since {
     margin-right: -2px;
 }
 
-.quiltt-sync-marker-inner i {
+.bank-sync-marker-inner i {
     font-size: inherit;
 }
 
-.quiltt-sync-marker--alternate .quiltt-sync-marker-date {
+.bank-sync-marker--alternate .bank-sync-marker-date {
     position: absolute;
     font-weight: 700;
     font-size: 11px;
@@ -2957,21 +2901,21 @@ tr[data-category-id] td.before-member-since {
 }
 
 /* Weekly dashboard: centered above the date number */
-#friday-dates-row th .quiltt-sync-marker {
+#friday-dates-row th .bank-sync-marker {
     top: -25px;
     left: 50%;
     margin-left: -13px;
 }
 
 /* Daily dashboard: centered above the date text */
-.dashboard-d-day-header .quiltt-sync-marker {
+.dashboard-d-day-header .bank-sync-marker {
     top: -26px;
     left: 50%;
     margin-left: -13px;
 }
 
 /* Monthly dashboard: centered above the day label */
-.dashboard-m-date .quiltt-sync-marker {
+.dashboard-m-date .bank-sync-marker {
     top: -13px;
     left: 50%;
     margin-left: -13px;
@@ -2985,7 +2929,7 @@ tr[data-category-id] td.before-member-since {
 }
 
 /* Yearly dashboard: above the date number, centered */
-.dashboard-y-day-content .quiltt-sync-marker {
+.dashboard-y-day-content .bank-sync-marker {
     top: -28px;
     left: 50%;
     margin-left: -13px;
@@ -3334,6 +3278,17 @@ tr[data-category-id] td.before-member-since {
   vertical-align: middle;
 }
 
+/* Grow on hover, same treatment as the friday date headers and the group
+   caret. 1.45 matches the caret rather than the 1.2 used for text, because
+   this is a 12px icon and a smaller target needs more scale to read. Scaling
+   the button rather than .calendar-icon carries the little move-arrows overlay
+   with it - that overlay centres itself with its own translate(-50%, -50%),
+   which a scale on an ancestor leaves intact. Easing comes from the global
+   transition at the top of this file, which matches [class*="btn"]. */
+.dashboard-d-move-btn:hover {
+  transform: scale(1.45);
+}
+
 .calendar-icon {
   position: relative;
   display: inline-block;
@@ -3577,7 +3532,6 @@ transform: scale(1.2);
     100% { transform: rotate(360deg); }
 }
 
-
 /* ////////////////////// Dashboard Week Styles /////////////////////////// */
 .dashbaord_container {
     margin-top: 10px;
@@ -3665,7 +3619,6 @@ transform: scale(1.2);
     will-change: transform;
 }
 
-
 #categories-container {
     z-index: 10;
     width: 30%; 
@@ -3730,7 +3683,6 @@ transform: scale(1.2);
 .ca-bottom-row td:last-child {
     border-bottom-right-radius: 10px;
 }
-
 
 .dashboard-this-week {
     height: 10px;
@@ -4560,21 +4512,118 @@ transform: scale(1.2);
     font: inherit;
     text-align: right;
     box-sizing: border-box;
+    /* Keyboard navigation scrolls these cells into view, and .nav-bar (50px,
+       sticky at top: 0) plus .calendarnav (sticky at top: 50px, ~44px tall from
+       6px padding + a 32px min-height button row) sit over the top of the table.
+       Without a scroll margin the browser counts a row hidden behind them as
+       already visible and refuses to scroll at all - which is why moving up
+       used to leave the selection stuck under the header while moving down
+       worked fine. Only the top is margined; scroll-margin-bottom would change
+       downward scrolling, which already behaves. */
+    scroll-margin-top: 100px;
 }
 
 .income-cell-input:focus,
 .expense-cell-input:focus,
 .ca-cell-input:focus {
-    /* Use outline instead of border */
-    outline: 2px solid var(--text-dark); 
+    /* The focus ring is drawn on the CELL, not here - see the :focus-within
+       rule below. The hover/focus rule scales this input, and a transform
+       scales an element's outline along with it, so a ring drawn on the input
+       would grow with the text. Drawn on the cell, it stays put. */
+    outline: none;
     box-sizing: border-box;
 }
 
+/* Focus ring for an entry cell, drawn on the cell so the input's transform
+   cannot scale it.
+
+   border-radius is what gives the ring its rounded corners: an outline follows
+   its element's border-radius, and this ring used to be drawn on the input,
+   which has border-radius: 5px. Moving the ring to the cell without carrying
+   the radius across is what made it look square. The cells paint no background
+   of their own (only th does), so the radius affects nothing but the outline.
+
+   outline-offset: -2px draws the ring INSIDE the cell. An outline normally sits
+   outside the border box, which put it on the cell's outer edge and let it
+   overlap the neighbouring column; pulling it in by its own width seats the
+   whole 2px within the cell. */
+#income-table td:focus-within,
+#expenses-table td:focus-within,
+.cas-table td:focus-within,
+#remainder-row-right td:focus-within,
+#savings-row-right td:focus-within,
+.dashboard-d-amount-cell:focus-within {
+    outline: 2px solid var(--text-dark);
+    outline-offset: -2px;
+    border-radius: 5px;
+}
+
+/* EDIT mode, as opposed to merely selected: the cell inverts.
+
+   A white ground was tried first and failed - zebra striping is applied to the
+   <tr> in six colours, three of which are near-white (#E6FAF9, #FDEEEE,
+   #F4F4F4), so white had almost nothing to contrast against. No brand hue works
+   either: teal vanishes on income rows, orange on expense rows. A dark fill is
+   the only thing that reads against all six, and it matches how the app already
+   signals emphasis (dark header row, dark total rows, white text).
+
+   :has() scopes this to cells whose input is actually editable, so locked cells
+   (bank-locked, bud-derived, before-member-since) keep the ring from the rule
+   above without pretending to be typeable. :has() is already used in this file
+   - see td:has(.bucket-progress-container) further down.
+
+   outline-color is flipped to white because the ring above is --text-dark, the
+   same colour as this fill, and would otherwise disappear into it. */
+#income-table td:has(input:focus:not([readonly]):not(.auto-disable)),
+#expenses-table td:has(input:focus:not([readonly]):not(.auto-disable)),
+.cas-table td:has(input:focus:not([readonly]):not(.auto-disable)),
+.dashboard-d-amount-cell:has(input:focus:not([readonly]):not(.auto-disable)) {
+    background-color: var(--text-dark);
+    outline-color: var(--white);
+}
+
+/* The app calls input.select() when focus moves to a cell (click and arrow-key
+   navigation alike), which would paint the browser's blue selection block over
+   the figure. Suppress it: the white cell background and the focus ring already
+   show which cell is being edited, so the selection block adds nothing but
+   noise. color is pinned to inherit so the text keeps its own colour rather
+   than the browser's selected-text colour. */
+.income-cell-input::selection,
+.expense-cell-input::selection,
+.ca-cell-input::selection {
+    background-color: transparent;
+    color: inherit;
+}
+
+/* Enlarge the figure on hover and while focused. Arrow-key navigation moves
+   focus between inputs, so :focus is what makes the selected cell grow too. */
 .income-cell-input:not([readonly]):not(.auto-disable):hover,
+.income-cell-input:not([readonly]):not(.auto-disable):focus,
 .expense-cell-input:not([readonly]):not(.auto-disable):hover,
-.ca-cell-input:not([readonly]):not(.auto-disable):hover {
+.expense-cell-input:not([readonly]):not(.auto-disable):focus,
+.ca-cell-input:not([readonly]):not(.auto-disable):hover,
+.ca-cell-input:not([readonly]):not(.auto-disable):focus {
     color: var(--secondary-dark);
-    font-size: 115%;
+    /* transform, not font-size: font-size changes the input's layout metrics,
+       so the box (and the row) resize with the text. A transform is painted
+       only - the element's layout box is untouched, so nothing reflows and
+       nothing else changes size. The focus ring is unaffected because it is
+       drawn on the cell, not on this input.
+       Origin is the right edge: these figures are right-aligned, so the number
+       stays anchored where it sits and grows leftward into empty cell space. */
+    transform: scale(1.15);
+    transform-origin: right center;
+}
+
+/* The rule above sets color for hover AND focus, and --secondary-dark (#676767)
+   is unreadable on the --text-dark (#575757) edit fill. Focus therefore needs
+   its own colour; this sits after that rule so it wins at equal specificity.
+   Hover keeps the darker grey. The caret follows `color`, so it turns light on
+   its own, and ::selection is already transparent with `color: inherit`. */
+.income-cell-input:not([readonly]):not(.auto-disable):focus,
+.expense-cell-input:not([readonly]):not(.auto-disable):focus,
+.ca-cell-input:not([readonly]):not(.auto-disable):focus {
+    color: var(--text-light);
 }
 
 /* Bucket Progress Bar - Shows spent (red) and remaining (green) */
@@ -4801,7 +4850,6 @@ td:has(.bucket-progress-container) {
     margin-top: 5px;
     margin-bottom: 10px;
 }
-
 
 #close-email-pending-btn {
     background-color: var(--primary);
@@ -5245,21 +5293,16 @@ td:has(.bucket-progress-container) {
     height: 25px;
     padding: 0;
     text-align: center;
-    transition: background-color 0.2s ease;
+    transition: transform 0.2s ease;
     cursor:pointer;
     vertical-align: middle;
 }
 
+/* Grow the date text on hover rather than tinting the cell. The two
+   :first-child/:last-child hover rules that used to round the tint's corners
+   went with it - they had nothing left to round. */
 #fridays-table th:hover {
-    background-color: var(--secondary);
-}
-
-#fridays-table th:first-child:hover {
-    border-top-left-radius: 10px;
-}
-
-#fridays-table th:last-child:hover {
-    border-top-right-radius: 10px;
+    transform: scale(1.2);
 }
 
 #fridays-table th.current-week {
@@ -5461,7 +5504,6 @@ td:has(.bucket-progress-container) {
     display: none;
 }
 
-
 /* Only show the exclamation bubble for below-threshold cells in the yearly dashboard calendar */
 .dashboard-y-calendar-table .below-threshold {
     position: relative;
@@ -5484,8 +5526,6 @@ td:has(.bucket-progress-container) {
     pointer-events: none;
     content: '';
 }
-
-
 
 /* Move the red exclamation circle up by the height of .dashboard-m-date */
 .dashboard-m-remainder.below-threshold::before {
@@ -5587,8 +5627,6 @@ td:has(.bucket-progress-container) {
     display: none !important;
 }
 
-
-
 .ca-collapse-toggle {
     display: inline-flex;
     justify-content: center;
@@ -5662,6 +5700,8 @@ td:has(.bucket-progress-container) {
     font-size: 25px;
     font-weight: bold;
     text-align: center;
+    /* Space between the month and year pickers. */
+    gap: 10px;
 }
 
 .month-wrapper,
@@ -5680,7 +5720,6 @@ td:has(.bucket-progress-container) {
     /* Match the height of the header */
     height: 30px; 
     background-color: transparent; 
-
 
     /* Explicitly remove the border */ /* Remove the outline */
     border: none; 
@@ -6243,7 +6282,6 @@ td:has(.bucket-progress-container) {
     margin: -40px auto 0;
 }
 
-
 /* Floating Today Banner */
 .today-floating-banner {
     position: sticky;
@@ -6792,6 +6830,13 @@ transform: scale(1.2);
 
 .profile-actions {
     display: grid;
+    /* Grid items default to min-width: auto, so an auto-sized column cannot
+       shrink below the widest child's min-content width - one wide row inside
+       any one panel then sets the floor for every panel in the grid. That is
+       why the settings page bottomed out around 407px while the profile page,
+       whose panels have narrower content, reached the declared 350px + chrome.
+       minmax(0, 1fr) lets the column shrink to the min-width below instead. */
+    grid-template-columns: minmax(0, 1fr);
     text-align: right;
     width: 100%;
     min-width: 350px;
@@ -7390,6 +7435,360 @@ transform: scale(1.2);
     font-weight: 700;
     letter-spacing: 0.5px;
     content: "Notifications";
+}
+
+/* ===== Email delivery panel (notifications page) =====
+   Its own class rather than .notification-section, deliberately. That class is
+   reused for two different things, and on this page
+   #notifications-body .notification-section::before rewrites the panel label to
+   "Notification" - a settings panel using it would inherit that label. Same
+   reasoning as the #bank-connections-section override above. */
+.email-delivery-section {
+    position: relative;
+    margin: 30px 0 35px;
+    padding: 16px;
+    background-color: var(--text-light);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    box-shadow: 0 -6px 8px var(--shadow-sm);
+}
+
+.email-delivery-section::before {
+    position: absolute;
+    top: -25px;
+    left: 20px;
+    padding: 4px 12px 6px;
+    background-color: var(--text-light);
+    border-radius: 8px 8px 0 0;
+    box-shadow: 0 -6px 8px var(--shadow-sm);
+    color: var(--primary);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    content: "Email Delivery";
+}
+
+/* Message blocks in this panel - the help text, the warning and the status
+   line - are boxed to the same metrics as .profile-form .input-group so they
+   line up with the field rows above them instead of sitting inset at a
+   different width. Padding, radius, background and margin all match that rule;
+   only the type is smaller, inherited from .setting-description. */
+.email-delivery-section .setting-description {
+    /* SETTINGS_ENCRYPTION_KEY in the warning is 23 characters with no break
+       opportunity - underscores are not break points - so without this it sets
+       a min-content floor for the whole grid column on any instance that has
+       not set the key yet. */
+    overflow-wrap: break-word;
+    padding: 12px 16px;
+    background-color: var(--white);
+    border-radius: 10px;
+    margin: 0 0 8px;
+    box-sizing: border-box;
+    width: 100%;
+}
+
+/* Status line: empty until an action reports back, so it takes no space - and
+   no empty box either - in the resting state. */
+#smtp-status:empty {
+    display: none;
+}
+
+.email-delivery-error {
+    color: var(--danger);
+}
+
+.email-delivery-warning {
+    color: var(--warning);
+}
+
+.email-delivery-verified {
+    color: var(--success);
+}
+
+/* Verification rows and status lines come and go as state changes. A class
+   rather than an inline style so the JS toggles one name, per the no-inline-
+   styles rule, and so the initial server-rendered state uses the same
+   mechanism the client does. */
+.email-delivery-hidden {
+    display: none;
+}
+
+/* ===== Administrator recovery page ===== */
+
+.admin-recovery-note {
+    max-width: 340px;
+    margin: 0 auto 16px;
+    padding: 12px 16px;
+    background-color: var(--primary-lighter);
+    border-radius: 10px;
+    box-sizing: border-box;
+    color: var(--text-dark);
+    font-size: 13px;
+    text-align: left;
+    /* RESET_ADMIN_PASSWORD is 20 characters with no break opportunity -
+       underscores are not break points - so without this it sets a min-content
+       floor for the whole container. */
+    overflow-wrap: break-word;
+}
+
+.admin-recovery-error {
+    max-width: 340px;
+    margin: 0 auto 16px;
+    padding: 12px 16px;
+    background-color: var(--accent-lighter);
+    border-radius: 10px;
+    box-sizing: border-box;
+    color: var(--danger);
+    font-size: 13px;
+    text-align: left;
+    overflow-wrap: break-word;
+}
+
+/* Destructive action in a panel of ordinary ones. Same geometry as
+   .profile-form .submit-button so the row still lines up; only the colour
+   differs, because the button that erases the configuration should not look
+   identical to the one that saves it. */
+.profile-form .submit-button.email-delivery-danger {
+    background-color: var(--danger);
+}
+
+.profile-form .submit-button.email-delivery-danger:hover {
+    background-color: var(--danger);
+    filter: brightness(0.9);
+}
+
+/* ===== Admin console ===== */
+
+/* Same panel treatment as .email-delivery-section, with its own label. */
+.admin-users-section {
+    position: relative;
+    margin: 30px 0 35px;
+    padding: 16px;
+    background-color: var(--text-light);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    box-shadow: 0 -6px 8px var(--shadow-sm);
+}
+
+.admin-users-section::before {
+    position: absolute;
+    top: -25px;
+    left: 20px;
+    padding: 4px 12px 6px;
+    background-color: var(--text-light);
+    border-radius: 8px 8px 0 0;
+    box-shadow: 0 -6px 8px var(--shadow-sm);
+    color: var(--primary);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    content: "Users";
+}
+
+/* Boxed to .profile-form .input-group metrics, matching the email panel, so
+   help text lines up with the field rows rather than sitting inset. */
+.admin-users-section .setting-description {
+    overflow-wrap: break-word;
+    padding: 12px 16px;
+    background-color: var(--white);
+    border-radius: 10px;
+    margin: 0 0 8px;
+    box-sizing: border-box;
+    width: 100%;
+}
+
+#admin-user-status:empty {
+    display: none;
+}
+
+/* Its own row above the table rather than floating over the panel edge, so it
+   sits with the list it acts on. */
+/* width:100% is what puts the button on the right. .section-liner is a flex
+   column with align-items:center, so without it this row shrinks to the
+   button's own width and lands in the middle - justify-content then has
+   nothing to distribute. */
+.admin-users-header {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.admin-add-user-btn {
+    padding: 4px 0;
+    background: none;
+    border: none;
+    color: var(--primary);
+    font-size: 20px;
+    line-height: 24px;
+    cursor: pointer;
+    transition: transform 0.15s ease, color 0.2s ease;
+}
+
+/* Matches .add-cas-btn:hover - the palette has no darker primary, and going
+   lighter on hover is this app's convention for icon buttons. */
+.admin-add-user-btn:hover {
+    transform: scale(1.2);
+    color: var(--primary-hover);
+}
+
+/* White with rules, not a filled table. The panel it sits in is already a
+   tinted card, so a second block of colour inside it just competes; horizontal
+   rules carry the row separation on their own. */
+.admin-users-table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: var(--white);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 8px;
+    font-size: clamp(11px, calc(1.13vw + 4.65px), 13px);
+    text-align: left;
+
+    /* Two declarations, one problem: this table was rendering wider than the
+       email panel's rows.
+
+       min-width: 0 - .section-liner is a flex column, and a flex item defaults
+       to min-width: auto, so it refuses to shrink below its own min-content
+       width and overflows the panel. The same fix appears twice already in this
+       file: min-width: 40px on .profile-form .login-input, and
+       minmax(0, 1fr) on .profile-actions.
+
+       table-layout: fixed - without it, width: 100% on a table is a floor
+       rather than a ceiling: the auto algorithm still widens the table to fit
+       its content. Fixed layout makes the column widths below authoritative and
+       lets long addresses wrap instead. */
+    min-width: 0;
+    table-layout: fixed;
+}
+
+/* Fixed layout needs the columns declared. The name columns get a share each,
+   the action column its icon's width, and the email column whatever is left -
+   it is the one that should absorb the slack. */
+.admin-users-table th:nth-child(2),
+.admin-users-table th:nth-child(3) {
+    width: 22%;
+}
+
+.admin-users-table th,
+.admin-users-table td {
+    height: 35px;
+    padding: 4px 12px;
+    box-sizing: border-box;
+}
+
+/* Row dividers, inset to the cells' own 12px padding so they start and end
+   with the text rather than running to the table's edges.
+   
+   Drawn as a background gradient rather than border-bottom: a cell's border
+   spans its padding too, so with border-collapse: collapse the line always
+   reached the outer edges and there was no way to inset just the ends. A
+   gradient can be sized independently of the box. tr::after would also work,
+   but positioning on a table row in collapse mode is the shakier of the two. */
+.admin-users-table th,
+.admin-users-table tbody td {
+    background-image: linear-gradient(var(--secondary-hover), var(--secondary-hover));
+    background-repeat: no-repeat;
+    background-position: bottom left;
+    background-size: 100% 1px;
+}
+
+/* Only the outer ends are inset - between columns the line stays continuous,
+   or it would read as a set of dashes rather than one rule. */
+.admin-users-table th:first-child,
+.admin-users-table tbody td:first-child {
+    background-position: bottom right;
+    background-size: calc(100% - 12px) 1px;
+}
+
+.admin-users-table th:last-child,
+.admin-users-table tbody td:last-child {
+    background-position: bottom left;
+    background-size: calc(100% - 12px) 1px;
+}
+
+/* --secondary-lighter would be the tidier-looking choice and is nearly
+   invisible on white; --secondary-hover is the lightest value here that still
+   reads as a line. */
+.admin-users-table th {
+    color: var(--text-dark);
+    font-weight: 700;
+}
+
+/* No trailing rule under the last row - it would read as an empty row. */
+.admin-users-table tbody tr:last-child td {
+    background-image: none;
+}
+
+/* The email is the long one; let it wrap rather than push the name columns off
+   the row. anywhere, not break-word, because addresses have no spaces. */
+.admin-users-table td:first-child {
+    overflow-wrap: anywhere;
+}
+
+.admin-user-email-cell .admin-user-tag {
+    margin-left: 6px;
+}
+
+/* Narrow, content-width column at the end. No header text by design. */
+.admin-user-action-col {
+    width: 44px;
+}
+
+.admin-user-action-cell {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.admin-user-delete-btn {
+    padding: 2px 4px;
+    background: none;
+    border: none;
+    color: var(--secondary-dark);
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform 0.15s ease, color 0.2s ease;
+}
+
+/* Turns red only on hover: a row of permanently red icons reads as an error
+   state rather than an available action. */
+.admin-user-delete-btn:hover {
+    transform: scale(1.2);
+    color: var(--danger);
+}
+
+
+.admin-user-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background-color: var(--primary);
+    border-radius: 8px;
+    color: var(--white);
+    font-size: 11px;
+    letter-spacing: 0.3px;
+    /* No white-space: nowrap. It shares the email column, and an unbreakable
+       token there is exactly what would push a fixed-layout cell over. */
+}
+
+/* Status line inside the create-user modal. Errors are the common case here -
+   duplicate address, weak password - so it needs to read against the modal's
+   own background rather than the panel's. */
+.add-user-modal-status {
+    margin: 8px 0 0;
+    font-size: 13px;
+    text-align: center;
+}
+
+.add-user-modal-status:empty {
+    display: none;
+}
+
+.add-user-modal-error {
+    color: var(--danger);
 }
 
 .notification-item {
@@ -8459,6 +8858,12 @@ transform: scale(1.2);
 }
 
 /* Modal Centering */
+/* Open state for .modal. Replaces the inline element.style.display = 'flex'
+   writes in script.js - the class is the only thing that should decide this. */
+.modal.modal--open {
+    display: flex;
+}
+
 .modal {
     position: fixed;
     top: 0;
@@ -9228,8 +9633,6 @@ form button[type="submit"] {
     cursor: pointer;
 }*/
 
-
-
 /* Match the color of your table row (adjust as needed) */
 #recurring-income-callout {
     position: relative;
@@ -9829,7 +10232,6 @@ form button[type="submit"] {
     font-weight: bold;
     text-decoration: underline;
 }
-
 
 /* /////////////////////////////  Recurring Credit Expenses /////////////////////////// */
 
@@ -11040,7 +11442,7 @@ td.credit-account-action-cell button {
     transform: scale(1.2);
 }
 
-.quiltt-linked-btn {
+.bank-linked-btn {
     width: 20px;
     height: 20px;
     background: transparent;
@@ -11106,6 +11508,114 @@ td.credit-account-action-cell button {
     background-color: var(--text-light);
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-lighter);
+}
+
+/* ===== Styled Select Dropdown =====
+   Native <select> elements whose option list cannot be styled are wrapped by
+   enhanceSelectAsDropdown() in script.js: the select is kept as the source of
+   truth but hidden, and a trigger plus a .category-dropdown list are drawn in
+   its place. That way the month/year header on the weekly dashboard and the
+   quarter/year header on the 3-month dashboard match the add-entry fields on
+   the daily dashboard, open list included. */
+.styled-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+/* The real control. Kept in the DOM and still the source of truth - it carries
+   the options and the page's change handler - but never shown. */
+.styled-dropdown-native {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Trigger. Deliberately NOT styled like a form field: only the open list is
+   meant to change, so this keeps the flat, transparent, inherited look the
+   native <select> had in these headers - .month-dropdown and friends set
+   background: transparent, border: none, color: var(--primary), bold. The
+   caret below is the only affordance, standing in for the one the native
+   control drew itself. */
+.styled-dropdown-trigger {
+    min-width: 2em;
+    padding: 0;
+    background: none;
+    border: none;
+    /* The native selects all set this explicitly; inheriting gives the plain
+       body grey on the monthly and yearly headers. */
+    color: var(--primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+/* Hover grows the label slightly and picks up the nav strip's hover colour.
+   Kept well below .nav-button's scale(1.2): that suits a 15px icon, but these
+   labels are up to 25px and bold, where the same factor is a big jump. The
+   default centre origin means it grows evenly on all sides rather than pushing
+   up and to the right. */
+.styled-dropdown-trigger:hover,
+.styled-dropdown-trigger:focus {
+    outline: none;
+    color: var(--primary-hover);
+    transform: scale(1.08);
+}
+
+/* The list itself reuses .category-dropdown wholesale, so item padding, hover
+   tint and separators are shared with the daily dashboard by definition. */
+.styled-dropdown-list {
+    display: none;
+    min-width: 100%;
+    /* The month/year header is up to 25px and bold, and the list would inherit
+       that. Reset to normal body type so the options look like the ones on the
+       daily dashboard rather than a stack of headings. */
+    font-size: 1rem;
+    font-weight: 400;
+    color: var(--text-dark);
+    text-align: left;
+}
+
+.styled-dropdown.is-open .styled-dropdown-list {
+    display: block;
+}
+
+.category-dropdown-item.is-selected {
+    font-weight: 600;
+}
+
+/* .month-year-header is a space-between flex row, and its two children are now
+   these wrappers rather than the selects. Reproduce what .month-dropdown and
+   .year-dropdown used to do - a small gap after the first, and an auto margin
+   after the second so the pair stays together at the start of the row instead
+   of being pushed to opposite ends. */
+/* The open list kept landing behind the table. .category-dropdown already has
+   z-index: 1000, but these headers establish their own stacking context - the
+   weekly/3-month one because it is position: sticky - so that 1000 only orders
+   the list *within* the header. #month-table-container is position: relative
+   and comes later in the DOM, so it painted on top. Giving each header a
+   z-index lifts the whole context above the table while staying below
+   .calendarnav (99) and .nav-bar (100). */
+.month-year-header {
+    z-index: 60;
+}
+
+.dashboard-m-month-year-header,
+.dashboard-y-year-header {
+    position: relative;
+    z-index: 60;
+}
+
+.month-year-header .styled-dropdown:first-of-type {
+    margin-right: 5px;
+}
+
+.month-year-header .styled-dropdown:last-of-type {
+    margin-right: auto;
 }
 
 /* Category Dropdown Autocomplete Styles */
@@ -11381,37 +11891,6 @@ html.modal-open {
     overflow: visible;
 }
 
-.bank-connections-sync-date {
-    display: flex;
-    justify-content: flex-end;
-    align-self: flex-end;
-    margin-bottom: 8px;
-}
-
-.bank-connections-sync-date-value {
-    position: relative;
-}
-
-.bank-connections-sync-date .quiltt-sync-marker--bank-page {
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    margin-left: -13px;
-    margin-bottom: 2px;
-    transform: rotate(-45deg);
-    width: 26px;
-    height: 26px;
-    font-size: 12px;
-    animation: syncMarkerPulse 1.8s ease-in-out infinite;
-}
-
-.bank-connections-sync-label {
-    font-size: 11px;
-    color: var(--secondary-dark);
-    font-weight: 500;
-    margin-top: 4px;
-    white-space: nowrap;
-}
 
 .profile-bank-connections h2 {
     margin-bottom: 20px;
@@ -11885,57 +12364,6 @@ transform: scale(1.2);
     margin-top: 10px;
 }
 
-/* Quiltt-style Account Selection Modal */
-.quiltt-style-modal {
-    max-width: 400px;
-    width: 400px;
-    max-height: 90vh;
-    height: auto;
-    border-radius: 16px;
-    padding: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-}
-
-.quiltt-modal-header {
-    padding: 24px 24px 16px 24px;
-    border-bottom: 1px solid var(--secondary-hover);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.quiltt-modal-header h2 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-dark);
-}
-
-.quiltt-modal-header .close-modal {
-    position: static;
-    color: var(--secondary-dark);
-    font-size: 24px;
-    font-weight: 400;
-    line-height: 1;
-    padding: 0;
-    margin: 0;
-    cursor: pointer;
-    transition: color 0.2s;
-}
-
-.quiltt-modal-header .close-modal:hover {
-    color: var(--text-dark);
-    transform: scale(1.2);
-}
-
-.quiltt-modal-body {
-    padding: 20px 24px;
-    overflow-y: auto;
-    max-height: calc(90vh - 180px);
-    flex: 1;
-}
 
 .account-selection-description {
     margin: 0 0 20px 0;
@@ -12019,33 +12447,6 @@ transform: scale(1.2);
     font-family: monospace;
 }
 
-.quiltt-modal-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--secondary-hover);
-    display: flex;
-    justify-content: flex-end;
-}
-
-.quiltt-save-btn {
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    padding: 12px 32px;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.quiltt-save-btn:hover {
-    background: var(--primary);
-    transform: scale(1.2);
-}
-
-.quiltt-save-btn:active {
-    transform: scale(0.98);
-}
 
 /* ============================================================================
    DASHBOARD SUMMARY STYLES
@@ -13086,63 +13487,6 @@ transform: scale(1.2);
     color: var(--primary);
 }
 
-.ntropy-suggestion {
-    background-color: var(--primary-lighter);
-    border: 1px solid var(--primary-lighter);
-    border-radius: 6px;
-    padding: 10px;
-    margin-top: 10px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.ntropy-suggestion.has-suggestion {
-    background-color: var(--primary-lighter);
-    border-color: var(--primary-lighter);
-}
-
-.ntropy-suggestion.has-suggestion i {
-    color: var(--success);
-}
-
-.ntropy-suggestion.has-suggestion .ntropy-label {
-    color: var(--success);
-}
-
-.ntropy-suggestion i {
-    color: var(--primary);
-}
-
-.ntropy-label {
-    font-size: 0.9em;
-    color: var(--primary);
-    font-weight: 500;
-}
-
-.confidence-badge {
-    font-size: 0.75em;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-}
-
-.confidence-badge.confidence-high {
-    background-color: var(--primary-lighter);
-    color: var(--success);
-}
-
-.confidence-badge.confidence-medium {
-    background-color: var(--accent-lighter);
-    color: var(--accent);
-}
-
-.confidence-badge.confidence-low {
-    background-color: var(--accent-lighter);
-    color: var(--danger);
-}
 
 .category-select-row {
     display: flex;
@@ -14088,6 +14432,15 @@ transform: scale(1.2);
     font-size: 0.75rem;
 }
 
+/* Grow the caret when its row is hovered. Safe to use transform here: the
+   expanded/collapsed states swap Font Awesome classes (fa-chevron-down vs
+   fa-chevron-right) rather than rotating, so nothing else is competing for
+   this property. Hovering the whole toggle rather than the caret itself keeps
+   the target reasonable at 0.75rem. */
+.group-toggle:hover .group-chevron {
+    transform: scale(1.45);
+}
+
 .sidebar-group-header .group-sort-handle {
     cursor: move;
     color: inherit;
@@ -14227,308 +14580,6 @@ transform: scale(1.2);
     box-sizing: border-box;
 }
 
-/* Feedback UI */
-
-#feedback-page .main-container {
-    padding-top: 20px;
-    padding-bottom: 60px;
-}
-
-.feedback-wrapper {
-    position: relative;
-    max-width: 875px;
-    margin: 0 auto;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    align-items: start;
-    padding-top: 25px;
-}
-
-.feedback-left, .feedback-right {
-    background: var(--text-light);
-    border-radius: 16px;
-    box-shadow: 0 10px 30px var(--shadow-sm);
-    padding: 16px;
-    min-height: 420px;
-}
-
-.feedback-filters {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-
-.feedback-filters input,
-.feedback-filters select,
-.feedback-form input,
-.feedback-form textarea {
-    width: 100%;
-    border: 1px solid var(--secondary-hover);
-    border-radius: 10px;
-    padding: 10px 12px;
-    font-family: inherit;
-    background: var(--white);
-}
-
-.feedback-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    max-height: 70vh;
-    overflow-y: auto;
-    padding: 6px 10px 0 0;
-}
-
-.feedback-list-compact {
-    max-height: 280px;
-}
-
-.feedback-card {
-    position: relative;
-    border: 1px solid var(--primary-lighter);
-    border-radius: 12px;
-    padding: 12px;
-    background: var(--text-light);
-    cursor: pointer;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.feedback-card-badge {
-    position: absolute;
-    top: -8px;
-    right: 15px;
-    background-color: var(--white);
-    color: var(--danger);
-    font-size: 0.55em;
-    font-weight: 700;
-    padding: 2px 8px;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    pointer-events: none;
-    z-index: 1;
-}
-
-.feedback-card:hover {
-    border-color: var(--primary);
-    box-shadow: 0 10px 25px var(--shadow-sm);
-}
-
-.feedback-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-}
-
-.feedback-card-title {
-    font-weight: 700;
-    color: var(--text-dark);
-}
-
-.feedback-card-votes {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 700;
-    color: var(--primary);
-    background: var(--primary-lighter);
-    border-radius: 20px;
-    padding: 6px 10px;
-}
-
-.feedback-card-body {
-    color: var(--text-dark);
-    margin: 8px 0;
-    font-size: 0.95em;
-}
-
-.feedback-card-meta {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    font-size: 0.9em;
-    color: var(--secondary-dark);
-}
-
-.feedback-card-status {
-    background: var(--bg-page);
-    border-radius: 10px;
-    padding: 4px 8px;
-}
-
-.feedback-card-tags {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-}
-
-.feedback-tag {
-    background: var(--bg-page);
-    color: var(--text-dark);
-    padding: 4px 8px;
-    border-radius: 8px;
-    font-size: 0.85em;
-    border: 1px solid var(--secondary-hover);
-}
-
-.feedback-detail {
-    border: 1px solid var(--primary-lighter);
-    border-radius: 12px;
-    padding: 14px;
-    padding-bottom: 28px;
-    margin-top: 18px;
-    min-height: 220px;
-    background: var(--white);
-    position: relative;
-}
-
-.feedback-detail::before {
-    content: 'Feedback Post';
-    position: absolute;
-    top: -11px;
-    left: 12px;
-    font-size: 0.65em;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    padding: 2px 10px;
-    border-radius: 20px;
-    background: var(--white);
-    color: var(--primary);
-    white-space: nowrap;
-    pointer-events: none;
-}
-
-.feedback-detail-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-}
-
-.feedback-detail-title {
-    font-size: 1.2em;
-    font-weight: 700;
-    color: var(--text-dark);
-}
-
-.feedback-detail-body {
-    margin: 10px 0;
-    color: var(--text-dark);
-}
-
-.feedback-detail-meta {
-    font-size: 0.95em;
-    color: var(--secondary-dark);
-}
-
-.feedback-timestamp {
-    position: absolute;
-    bottom: -11px;
-    right: 12px;
-    font-size: 0.65em;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    padding: 2px 10px;
-    border-radius: 20px;
-    background: var(--white);
-    color: var(--secondary);
-    white-space: nowrap;
-    pointer-events: none;
-}
-
-.feedback-comments-panel {
-    position: relative;
-    margin-top: 18px;
-    border: 1px solid var(--primary-lighter);
-    border-radius: 12px;
-    padding: 12px;
-    background: var(--text-light);
-}
-
-.feedback-comments-panel::before {
-    content: 'Comments';
-    position: absolute;
-    top: -11px;
-    left: 12px;
-    font-size: 0.65em;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    padding: 2px 10px;
-    border-radius: 20px;
-    background: var(--white);
-    color: var(--primary);
-    white-space: nowrap;
-    pointer-events: none;
-}
-
-.feedback-comments {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.feedback-comment {
-    position: relative;
-    border: 1px solid var(--bg-page);
-    border-radius: 10px;
-    padding: 10px;
-    padding-bottom: 24px;
-    background: var(--white);
-    margin-bottom: 10px;
-}
-
-.feedback-comment-badge {
-    position: absolute;
-    top: -8px;
-    right: 15px;
-    background-color: var(--white);
-    color: var(--danger);
-    font-size: 0.55em;
-    font-weight: 700;
-    padding: 2px 8px;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    pointer-events: none;
-}
-
-.feedback-comment-author {
-    font-weight: 700;
-    color: var(--text-dark);
-    margin-bottom: 4px;
-}
-
-.feedback-empty {
-    text-align: center;
-    color: var(--secondary-dark);
-    padding: 12px;
-}
-
-.feedback-error {
-    color: var(--danger);
-    padding: 10px;
-    background: var(--accent-lighter);
-    border-radius: 8px;
-}
-
-.feedback-form {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 8px;
-}
-
-.feedback-form label {
-    font-weight: 700;
-    color: var(--text-dark);
-}
-
 .primary-btn {
     color: var(--primary);
     background: none;
@@ -14540,100 +14591,6 @@ transform: scale(1.2);
 .primary-btn:hover {
     color: var(--primary-hover);
     transform: scale(1.2);
-}
-
-.feedback-submit {
-    width: 100%;
-    padding: 14px 24px;
-    border-radius: 12px;
-    box-shadow: 0 2px 12px var(--shadow-lg);
-    color: white;
-    font-size: 18px;
-    font-weight: 600;
-    transition: 0.2s;
-    cursor: pointer;
-    margin: 10px auto;
-    background-color: var(--primary);
-    border: none;
-}
-
-.feedback-submit:hover {
-    box-shadow: 0 4px 16px var(--shadow-lg);
-    transform: translateY(-1px);
-    background-color: var(--primary-hover);
-}
-
-.feedback-submit:active {
-    box-shadow: 0 1px 8px var(--shadow-lg);
-    transform: translateY(0);
-}
-
-.feedback-vote-btn {
-    background: var(--primary-lighter);
-    color: var(--text-dark);
-    border: 1px solid var(--primary-lighter);
-    border-radius: 10px;
-    padding: 8px 12px;
-    cursor: pointer;
-}
-
-.feedback-vote-btn.voted {
-    background: var(--primary);
-    border-color: var(--primary);
-    color: var(--text-light);
-}
-
-.feedback-fab {
-    position: fixed;
-    right: 20px;
-    bottom: 20px;
-    z-index: 120;
-    width: 56px;
-    height: 56px;
-    border: none;
-    border-radius: 50%;
-    background: var(--primary);
-    color: var(--text-light);
-    box-shadow: 0 4px 16px var(--shadow-lg);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    transition: all 0.2s ease;
-}
-
-.feedback-fab:hover {
-    transform: scale(1.2);
-}
-
-.feedback-modal-content {
-    max-width: 520px;
-}
-
-.feedback-quick-list-header {
-    margin-top: 12px;
-    font-weight: 700;
-    color: var(--text-dark);
-}
-
-.feedback-status {
-    margin-top: 10px;
-    font-size: 0.95em;
-    color: var(--text-dark);
-}
-
-.feedback-status.success {
-    color: var(--primary);
-}
-
-@media (max-width: 900px) {
-    .feedback-wrapper {
-        grid-template-columns: 1fr;
-    }
-    .feedback-left, .feedback-right {
-        min-height: auto;
-    }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -15355,10 +15312,6 @@ transform: scale(1.2);
     display: none;
 }
 
-#feedback-page .profile-section::before {
-    display: none;
-}
-
 .faq-header {
     display: flex;
     flex-direction: column;
@@ -15381,39 +15334,6 @@ transform: scale(1.2);
 }
 
 .faq-subtitle {
-    font-size: 0.95rem;
-    color: var(--secondary-dark);
-    margin: 0;
-}
-
-.feedback-header {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    padding: 0px 20px 25px;
-    grid-column: 1 / -1;
-}
-
-.feedback-header i{
-    height: 48px;
-    width: 48px;
-}
-
-.feedback-header-icon {
-    font-size: 2.5rem;
-    color: var(--primary);
-    margin-bottom: 12px;
-}
-
-.feedback-title {
-    font-size: 1.7rem;
-    font-weight: 700;
-    color: var(--text-dark);
-    margin: 0 0 8px;
-}
-
-.feedback-subtitle {
     font-size: 0.95rem;
     color: var(--secondary-dark);
     margin: 0;
