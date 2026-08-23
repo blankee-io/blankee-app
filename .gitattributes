@@ -5,3 +5,7 @@
 # an upstream release that is wrong twice over - it makes the working copy differ
 # from what was committed, and it edits a licence file.
 static/fontawesome-free/** -text
+
+# The licence text, verbatim from gnu.org. Same reasoning: git should not be
+# rewriting the bytes of a licence.
+LICENSE -text
