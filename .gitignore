@@ -25,6 +25,12 @@ build/
 # Ignore all uploads except the default picture
 static/uploads
 
+# Font Awesome Pro. Commercial, per-seat software that cannot be redistributed -
+# static/fontawesome/LICENSE.txt says so itself. Keep your own build here and the
+# app picks it up automatically; without it the bundled Free build in
+# static/fontawesome-free/ takes over. See the Icons section of the README.
+static/fontawesome/
+
 # Ignore python cache
 __pycache__/
 *.pyc
