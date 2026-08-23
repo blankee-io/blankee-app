@@ -347,6 +347,35 @@ def _email_delivery_verified():
 app.jinja_env.globals['email_delivery_verified'] = _email_delivery_verified
 
 
+def _fontawesome_pro_available():
+    """
+    True when a Font Awesome Pro build is present in static/fontawesome/.
+
+    Pro is commercial, per-seat software, so it is not distributed with this
+    application - see THIRD-PARTY-NOTICES.md. An operator who owns a licence
+    drops their build into that directory and it is used automatically;
+    otherwise the bundled Free build plus static/css/fa-pro-fallback.css takes
+    over, which is what keeps every icon rendering either way.
+
+    Checked on every render rather than cached: one os.path.exists is cheaper
+    than the confusion of dropping a Pro build in and finding it ignored until
+    somebody restarts Apache.
+
+    Fails to FREE. If this cannot be determined the fallback still renders every
+    icon, whereas guessing Pro would render blank boxes for the 36 glyphs that
+    only exist there.
+    """
+    try:
+        return os.path.exists(os.path.join(
+            app.root_path, 'static', 'fontawesome', 'css', 'all.min.css'))
+    except Exception as e:
+        log_error(app.logger, 'CONFIG', f'Could not check for a Font Awesome Pro build: {e}')
+        return False
+
+
+app.jinja_env.globals['fontawesome_pro_available'] = _fontawesome_pro_available
+
+
 @app.context_processor
 def inject_unread_notifications():
     """Inject unread notification count and user info into all templates for the nav"""
