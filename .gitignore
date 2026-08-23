@@ -74,10 +74,15 @@ htmlcov/
 *.egg-info/
 .venv/
 
-# Scratch migration and test scripts. Everything in migrations/ that starts with
-# an underscore is a throwaway - a runner, a probe, a one-off check - and none of
-# it is part of the schema history.
-migrations/_*
+# Internal working documents and machine-specific scripts. None of these are
+# part of the application: checklists are progress trackers, integrations
+# documents vendors that were removed, and server-scripts holds commands for one
+# particular host. migrations/ is ignored because the SQL a fresh install needs
+# now lives in install/sql/ - anything left in migrations/ is scratch.
+checklists/
+integrations/
+server-scripts/
+migrations/
 
 # NOTE: the '.env' rule above matches only that exact name, so
 # .env.docker.example is still committed. Do not change it to '.env*' - the
