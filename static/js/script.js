@@ -294,10 +294,10 @@ function showConfirmModal(opts) {
             checkboxRow.style.display = 'none';
         }
 
-        modal.style.display = 'flex';
+        modal.classList.add('modal--open');
 
         function cleanup(result) {
-            modal.style.display = 'none';
+            modal.classList.remove('modal--open');
             confirmBtn.removeEventListener('click', onConfirm);
             cancelBtn.removeEventListener('click', onCancel);
             closeBtn.removeEventListener('click', onCancel);
@@ -327,14 +327,14 @@ function showConfirmModal(opts) {
     });
 }
 
-// ===== Quiltt Reconnection Alert =====
+// ===== Bank Reconnection Alert =====
 // Check for bank connections needing reconnection on page load
 (function() {
     // Only run on pages that have the reconnect modal
-    if (!document.getElementById('quiltt-reconnect-modal')) return;
+    if (!document.getElementById('bank-reconnect-modal')) return;
     
     // Check localStorage to see if user already saw this today
-    const dismissedKey = 'quiltt_reconnect_dismissed_date';
+    const dismissedKey = 'bank_reconnect_dismissed_date';
     const dismissedDate = localStorage.getItem(dismissedKey);
     const today = new Date().toDateString();
     if (dismissedDate === today) {
@@ -342,7 +342,7 @@ function showConfirmModal(opts) {
     }
     
     // Check for connections needing reconnection
-    fetch('/api/check-quiltt-reconnect')
+    fetch('/api/bank/check-reconnect')
         .then(response => response.json())
         .then(data => {
             if (data.needs_reconnect && data.connections && data.connections.length > 0) {
@@ -355,12 +355,12 @@ function showConfirmModal(opts) {
 })();
 
 // Store reconnect data globally for the modal
-window._quilttReconnectData = null;
+window._bankReconnectData = null;
 
 function showReconnectModal(connections) {
-    window._quilttReconnectData = connections;
+    window._bankReconnectData = connections;
     
-    const modal = document.getElementById('quiltt-reconnect-modal');
+    const modal = document.getElementById('bank-reconnect-modal');
     const detailsDiv = document.getElementById('reconnect-modal-details');
     const messageEl = document.getElementById('reconnect-modal-message');
     
@@ -384,28 +384,28 @@ function showReconnectModal(connections) {
     }
     
     // Show modal
-    modal.style.display = 'flex';
+    modal.classList.add('modal--open');
 }
 
 function dismissReconnectModal() {
-    const modal = document.getElementById('quiltt-reconnect-modal');
+    const modal = document.getElementById('bank-reconnect-modal');
     if (modal) {
-        modal.style.display = 'none';
+        modal.classList.remove('modal--open');
     }
     // Already marked as shown for today when modal appeared
 }
 
 function goToReconnect() {
-    if (window._quilttReconnectData && window._quilttReconnectData.length > 0) {
+    if (window._bankReconnectData && window._bankReconnectData.length > 0) {
         // Go to profile page with reconnect parameter for first connection
-        const connectionId = window._quilttReconnectData[0].connection_id;
+        const connectionId = window._bankReconnectData[0].connection_id;
         window.location.href = '/bank_accounts?reconnect=' + encodeURIComponent(connectionId);
     } else {
         window.location.href = '/profile';
     }
 }
 
-// ===== End Quiltt Reconnection Alert =====
+// ===== End Bank Reconnection Alert =====
 
 // Calendarnav shadow on scroll
 (function() {
@@ -1072,8 +1072,8 @@ function showMismatchModal(m, recurringTable) {
     }
 
     var paymentInfo = '';
-    if (m.ntropy_latest_payment_date) {
-        paymentInfo = '<p class="mismatch-payment-info">Last detected payment: ' + _escHtml(m.ntropy_latest_payment_date) + '</p>';
+    if (m.enrichment_last_payment_date) {
+        paymentInfo = '<p class="mismatch-payment-info">Last detected payment: ' + _escHtml(m.enrichment_last_payment_date) + '</p>';
     }
 
     var modal = document.createElement('div');
@@ -1097,14 +1097,14 @@ function showMismatchModal(m, recurringTable) {
         '</div>';
 
     document.body.appendChild(modal);
-    modal.style.display = 'flex';
+    modal.classList.add('modal--open');
 
     var closeBtn = modal.querySelector('.mismatch-close');
     var updateBtn = document.getElementById('mismatch-update-btn');
     var dismissBtn = document.getElementById('mismatch-dismiss-btn');
 
     function closeModal() {
-        modal.style.display = 'none';
+        modal.classList.remove('modal--open');
         modal.remove();
     }
 
@@ -1429,3 +1429,126 @@ function _handleSuggestionDismiss(suggestionId) {
             showToast('Error dismissing suggestion.', 'error');
         });
 }
+
+// ===== Styled Select Dropdown =====
+// Gives a native <select> the same look as the add-entry fields on the daily
+// dashboard: a compact trigger plus a real .category-dropdown list, so the open
+// list matches (a native select's option list is drawn by the OS and cannot be
+// styled at all, which is why the markup has to be replaced rather than themed).
+//
+// The <select> stays in the DOM and remains the source of truth. Choosing from
+// the custom list sets select.value and dispatches a `change` event, so whatever
+// handlers the page already assigned - including .onchange - keep working and no
+// existing logic needs to know this enhancement exists.
+//
+// Idempotent: call it again after the select is repopulated and it just refreshes
+// the label rather than building a second trigger.
+function enhanceSelectAsDropdown(select) {
+    if (typeof select === 'string') select = document.getElementById(select);
+    if (!select) return;
+
+    let wrap = select.closest('.styled-dropdown');
+    let trigger, list;
+
+    function syncLabel() {
+        const opt = select.options[select.selectedIndex];
+        // Fall back to the raw value so the trigger is never blank - a blank
+        // one collapses to a caret-width sliver that cannot be clicked.
+        trigger.textContent = opt ? opt.textContent : (select.value || '...');
+    }
+
+    function buildList() {
+        list.innerHTML = '';
+        Array.from(select.options).forEach(function (opt) {
+            const item = document.createElement('div');
+            item.className = 'category-dropdown-item';
+            if (opt.selected) item.classList.add('is-selected');
+            item.textContent = opt.textContent;
+            item.addEventListener('click', function (e) {
+                e.stopPropagation();
+                select.value = opt.value;
+                syncLabel();
+                wrap.classList.remove('is-open');
+                // Let the page's own handler react exactly as it would to a
+                // real user interaction with the native control.
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            list.appendChild(item);
+        });
+    }
+
+    if (wrap) {
+        trigger = wrap.querySelector('.styled-dropdown-trigger');
+        list = wrap.querySelector('.styled-dropdown-list');
+        syncLabel();
+        return;
+    }
+
+    wrap = document.createElement('div');
+    wrap.className = 'styled-dropdown';
+    select.parentNode.insertBefore(wrap, select);
+    wrap.appendChild(select);
+    select.classList.add('styled-dropdown-native');
+
+    trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'styled-dropdown-trigger';
+    wrap.appendChild(trigger);
+
+    list = document.createElement('div');
+    list.className = 'category-dropdown styled-dropdown-list';
+    wrap.appendChild(list);
+
+    trigger.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const wasOpen = wrap.classList.contains('is-open');
+        // Only one of these open at a time.
+        document.querySelectorAll('.styled-dropdown.is-open').forEach(function (w) {
+            w.classList.remove('is-open');
+        });
+        if (!wasOpen) {
+            // Re-read the options every time rather than trusting a cached
+            // render: these selects are repopulated on every view change.
+            syncLabel();
+            buildList();
+            wrap.classList.add('is-open');
+        }
+    });
+
+    trigger.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') wrap.classList.remove('is-open');
+    });
+
+    document.addEventListener('click', function (e) {
+        if (!wrap.contains(e.target)) wrap.classList.remove('is-open');
+    });
+
+    // Keep the label correct if the value is changed from elsewhere.
+    select.addEventListener('change', syncLabel);
+
+    // ...and when the options themselves are replaced. The dashboards rebuild
+    // these lists on every view change, and the order in which that happens
+    // relative to this enhancement is not guaranteed - without this the label
+    // can be left empty, which renders as an unclickable sliver.
+    if (typeof MutationObserver === 'function') {
+        new MutationObserver(syncLabel).observe(select, { childList: true });
+    }
+
+    syncLabel();
+}
+// Safety net. The month/year pickers are enhanced from each dashboard's own
+// populate function, but on the weekly and 3-month views that function only
+// runs when updateView() is passed a section list containing "monthYearHeader",
+// so a code path that updates other sections would leave the picker native.
+// Enhancing again here on load is idempotent and makes the result independent
+// of which path ran first.
+document.addEventListener('DOMContentLoaded', function () {
+    ['month-dropdown',
+     'year-dropdown',
+     'dashboard-m-month-dropdown',
+     'dashboard-m-year-dropdown'].forEach(function (id) {
+        if (document.getElementById(id)) enhanceSelectAsDropdown(id);
+    });
+});
+
+// ===== End Styled Select Dropdown =====

@@ -1,5 +1,5 @@
 """
-Email utility functions for sending verification emails and other notifications.
+Email utility functions for password resets and notifications.
 """
 import os
 import smtplib
@@ -11,12 +11,14 @@ from log_config import get_logger, log_info, log_error
 
 logger = get_logger(__name__)
 
-# Email configuration - these should be set in environment variables
-SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
-SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')
-SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
-FROM_EMAIL = os.getenv('FROM_EMAIL', SMTP_USERNAME)
+# SMTP configuration is NOT read here any more. It is resolved per send by
+# instance_settings.get_smtp_config(), which reads the instance_settings table
+# and nothing else - there is no environment fallback, so mail is configured in
+# the app or not at all. Resolving per send is also what lets a settings change
+# take effect without restarting the process.
+#
+# APP_URL stays here: it is a link base rather than mail transport, and it is
+# not a secret.
 APP_URL = os.getenv('APP_URL', 'http://localhost:5000')
 
 def send_email(to_email, subject, html_content, text_content=None):
@@ -32,15 +34,24 @@ def send_email(to_email, subject, html_content, text_content=None):
     Returns:
         bool: True if email sent successfully, False otherwise
     """
-    if not SMTP_USERNAME or not SMTP_PASSWORD:
-        log_error(logger, 'EMAIL', 'Email credentials not configured. Set SMTP_USERNAME and SMTP_PASSWORD environment variables.')
+    from instance_settings import get_smtp_config
+    cfg = get_smtp_config()
+
+    if not cfg['configured']:
+        log_error(logger, 'EMAIL',
+                  'Email is not configured, so nothing was sent. Add the mail server, '
+                  'address, username and password under Email Delivery on the settings page.')
         return False
-    
+
+    if not to_email:
+        log_error(logger, 'EMAIL', 'No recipient address; nothing sent.')
+        return False
+
     try:
         # Create message
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
-        msg['From'] = FROM_EMAIL
+        msg['From'] = cfg['from_email']
         msg['To'] = to_email
         
         # Add plain text version if provided, otherwise strip HTML
@@ -53,37 +64,20 @@ def send_email(to_email, subject, html_content, text_content=None):
         msg.attach(part2)
         
         # Send email
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        with smtplib.SMTP(cfg['server'], cfg['port']) as server:
+            if cfg['use_tls']:
+                server.starttls()
+            server.login(cfg['username'], cfg['password'])
             server.send_message(msg)
-        
-        log_info(logger, 'EMAIL', f'Email sent successfully to {to_email}')
+
+        # No source to report any more - there is only one.
+        log_info(logger, 'EMAIL',
+                 f"Email sent successfully to {to_email} via {cfg['server']}:{cfg['port']}")
         return True
         
     except Exception as e:
         log_error(logger, 'EMAIL', f'Failed to send email to {to_email}: {str(e)}')
         return False
-
-
-def generate_verification_token():
-    """
-    Generate a secure random token for email verification.
-    
-    Returns:
-        str: A secure random token
-    """
-    return secrets.token_urlsafe(32)
-
-
-def get_verification_token_expiry():
-    """
-    Get the expiration datetime for a verification token (24 hours from now).
-    
-    Returns:
-        datetime: Expiration datetime
-    """
-    return datetime.now() + timedelta(hours=24)
 
 
 def generate_password_reset_token():
@@ -104,240 +98,6 @@ def get_password_reset_token_expiry():
         datetime: Expiration datetime
     """
     return datetime.now() + timedelta(hours=1)
-
-
-def send_verification_email(to_email, username, verification_token):
-    """
-    Send an email verification link to a new user.
-    
-    Args:
-        to_email (str): User's email address
-        username (str): User's username
-        verification_token (str): Unique verification token
-        
-    Returns:
-        bool: True if email sent successfully, False otherwise
-    """
-    verification_url = f"{APP_URL}/verify-email?token={verification_token}"
-    
-    subject = "Verify Your Blankee Account"
-    
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{
-                font-family: 'Nunito', Arial, sans-serif;
-                line-height: 1.6;
-                color: #333;
-                max-width: 600px;
-                margin: 0 auto;
-                padding: 20px;
-            }}
-            .header {{
-                background-color: #2aaaa8;
-                color: white;
-                padding: 30px;
-                text-align: center;
-                border-radius: 10px 10px 0 0;
-            }}
-            .content {{
-                background-color: #f5fffe;
-                padding: 30px;
-                border-radius: 0 0 10px 10px;
-            }}
-            .button {{
-                display: inline-block;
-                background-color: #2aaaa8;
-                color: white;
-                padding: 15px 30px;
-                text-decoration: none;
-                border-radius: 5px;
-                margin: 20px 0;
-                font-weight: bold;
-            }}
-            .footer {{
-                text-align: center;
-                margin-top: 20px;
-                color: #666;
-                font-size: 12px;
-            }}
-            .warning {{
-                background-color: #fff3cd;
-                border-left: 4px solid #ffc107;
-                padding: 15px;
-                margin: 20px 0;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h1>Welcome to Blankee!</h1>
-        </div>
-        <div class="content">
-            <p>Hi {username},</p>
-            
-            <p>Thank you for registering with Blankee! We're excited to help you manage your budget.</p>
-            
-            <p>To complete your registration and start using your account, please verify your email address by clicking the button below:</p>
-            
-            <center>
-                <a href="{verification_url}" class="button">Verify Email Address</a>
-            </center>
-            
-            <p>Or copy and paste this link into your browser:</p>
-            <p style="word-break: break-all; color: #2aaaa8;">{verification_url}</p>
-            
-            <div class="warning">
-                <strong>⏰ Important:</strong> This verification link will expire in 24 hours.
-            </div>
-            
-            <p>If you didn't create an account with Blankee, you can safely ignore this email.</p>
-            
-            <p>Best regards,<br>The Blankee Team</p>
-        </div>
-        <div class="footer">
-            <p>This is an automated email. Please do not reply to this message.</p>
-        </div>
-    </body>
-    </html>
-    """
-    
-    text_content = f"""
-    Welcome to Blankee!
-    
-    Hi {username},
-    
-    Thank you for registering with Blankee! To complete your registration and start using your account, 
-    please verify your email address by visiting this link:
-    
-    {verification_url}
-    
-    This verification link will expire in 24 hours.
-    
-    If you didn't create an account with Blankee, you can safely ignore this email.
-    
-    Best regards,
-    The Blankee Team
-    """
-    
-    return send_email(to_email, subject, html_content, text_content)
-
-
-def send_email_change_verification_email(to_email, current_email, verification_token):
-    """
-    Send a verification link specifically for confirming an email address change.
-
-    Args:
-        to_email (str): The new email address to verify
-        current_email (str): The currently active email on the account
-        verification_token (str): Unique verification token
-
-    Returns:
-        bool: True if email sent successfully, False otherwise
-    """
-    verification_url = f"{APP_URL}/verify-email?token={verification_token}"
-
-    subject = "Confirm Your Blankee Email Change"
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{
-                font-family: 'Nunito', Arial, sans-serif;
-                line-height: 1.6;
-                color: #333;
-                max-width: 600px;
-                margin: 0 auto;
-                padding: 20px;
-            }}
-            .header {{
-                background-color: #2aaaa8;
-                color: white;
-                padding: 30px;
-                text-align: center;
-                border-radius: 10px 10px 0 0;
-            }}
-            .content {{
-                background-color: #f5fffe;
-                padding: 30px;
-                border-radius: 0 0 10px 10px;
-            }}
-            .button {{
-                display: inline-block;
-                background-color: #2aaaa8;
-                color: #ffffff !important;
-                padding: 15px 30px;
-                text-decoration: none;
-                border-radius: 5px;
-                margin: 20px 0;
-                font-weight: bold;
-            }}
-            .footer {{
-                text-align: center;
-                margin-top: 20px;
-                color: #666;
-                font-size: 12px;
-            }}
-            .notice {{
-                background-color: #fff3cd;
-                border-left: 4px solid #ffc107;
-                padding: 15px;
-                margin: 20px 0;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h1>Email Change Verification</h1>
-        </div>
-        <div class="content">
-            <p>Hi,</p>
-
-            <p>You requested to change your Blankee login email from <strong>{current_email}</strong> to <strong>{to_email}</strong>.</p>
-
-            <p>To confirm this email change, click the button below:</p>
-
-            <center>
-                <a href="{verification_url}" class="button" style="color: #ffffff !important;">Confirm Email Change</a>
-            </center>
-
-            <p>Or copy and paste this link into your browser:</p>
-            <p style="word-break: break-all; color: #2aaaa8;">{verification_url}</p>
-
-            <div class="notice">
-                <strong>Important:</strong> This link expires in 24 hours. If you did not request this change, you can ignore this email and your current login email will stay the same.
-            </div>
-
-            <p>Best regards,<br>The Blankee Team</p>
-        </div>
-        <div class="footer">
-            <p>This is an automated email. Please do not reply to this message.</p>
-        </div>
-    </body>
-    </html>
-    """
-
-    text_content = f"""
-    Blankee Email Change Verification
-
-    You requested to change your Blankee login email from {current_email} to {to_email}.
-
-    Confirm this email change by visiting:
-
-    {verification_url}
-
-    This link expires in 24 hours.
-    If you did not request this change, ignore this email and your current login email will remain active.
-
-    Best regards,
-    The Blankee Team
-    """
-
-    return send_email(to_email, subject, html_content, text_content)
 
 
 def send_password_reset_email(to_email, username, reset_token):
@@ -593,3 +353,71 @@ def send_notification_email(to_email, user_name, message, notification_date):
     """
     
     return send_email(to_email, subject, html_content, text_content)
+
+
+def send_notification_email_for_user(user, message, notification_date):
+    """
+    Send one notification email, if this user has opted in and a destination
+    exists. Returns True when a message was actually handed to SMTP.
+
+    This exists because the opt-in check, the recipient decision and the send
+    were previously duplicated in app.py and bucket_utils.py. Two copies of the
+    same rule is how they drift, and the recipient rule in particular is the one
+    most likely to change (see instance_settings.get_notification_recipient).
+
+    Recipient is the instance mailbox, not user['email']: notifications are sent
+    from and to the configured address. The per-user opt-in still gates it.
+    """
+    if not user or not user.get('email_notifications'):
+        return False
+
+    from instance_settings import get_notification_recipient, get_smtp_config
+    recipient = get_notification_recipient()
+    if not recipient:
+        # Two different causes, and telling them apart in the log saves a real
+        # debugging session: nothing filled in, versus filled in but never
+        # proven to receive mail.
+        if get_smtp_config()['configured']:
+            log_error(logger, 'EMAIL',
+                      'Notification not emailed: the mail settings have not been verified. '
+                      'Save them under Email Delivery in Settings and enter the code.')
+        else:
+            log_error(logger, 'EMAIL',
+                      'Notification not emailed: no mail settings are configured. '
+                      'Add them under Email Delivery in Settings.')
+        return False
+
+    user_name = user.get('first_name') or 'User'
+    return send_notification_email(recipient, user_name, message, notification_date)
+def send_smtp_verification_email(to_email, code):
+    """
+    Email the verification code to the address being configured.
+
+    Sent through the settings that were just saved, which is the whole design:
+    arrival proves the configuration works, so there is no separate "test" step
+    that could pass while real delivery fails.
+
+    Note this does NOT go through get_notification_recipient() - that refuses
+    until verification succeeds, which would make verification impossible. The
+    address comes straight from the saved config instead.
+    """
+    subject = 'Your Blankee email verification code'
+    html = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; color: #333;">
+        <h2 style="color: #6665DD;">Verify this address</h2>
+        <p>Enter this code in Blankee to confirm that notification emails
+           reach this mailbox:</p>
+        <p style="font-size: 32px; font-weight: bold; letter-spacing: 6px;
+                  color: #6665DD; margin: 24px 0;">{code}</p>
+        <p>The code is valid for about five minutes. If you did not just save
+           email settings in Blankee, you can ignore this message - but you may
+           want to check who has access to the instance.</p>
+      </body>
+    </html>
+    """
+    text = (f'Your Blankee verification code is {code}\n\n'
+            'Enter it in Blankee to confirm that notification emails reach this '
+            'mailbox. It is valid for about five minutes.')
+    return send_email(to_email, subject, html, text)
+

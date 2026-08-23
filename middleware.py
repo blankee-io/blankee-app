@@ -12,6 +12,7 @@ import json
 import time
 from functools import wraps
 from flask import request, session, jsonify, g, current_app, redirect, url_for
+from werkzeug.exceptions import HTTPException
 from flask_login import current_user
 from log_config import generate_request_id, get_logger, log_info, log_error, log_warning, log_exception
 from redis_manager import (
@@ -113,7 +114,7 @@ def init_redis_middleware(app):
             '/check_has_categories',
             '/check_handle',
             '/save_setup_name',
-            '/quiltt/',
+            '/bank/',
             '/static/',
             '/api/data-version',
             '/logout',
@@ -123,6 +124,10 @@ def init_redis_middleware(app):
             '/verify_email',
             '/forgot_password',
             '/reset_password',
+            # Clearing an account sets member_since back to NULL, so a second
+            # attempt would otherwise be bounced into setup before it reached
+            # the route - and silently do nothing.
+            '/clear-account',
         )
         
         if any(request.path.startswith(p) for p in allowed_prefixes):
@@ -186,9 +191,18 @@ def init_redis_middleware(app):
 
     @app.errorhandler(Exception)
     def handle_unhandled_exception(e):
-        """Catch all unhandled exceptions and log them as structured JSON."""
+        """
+        Log genuinely unhandled exceptions as structured JSON and return a 500.
+
+        HTTPException subclasses are returned untouched. They are not failures -
+        they carry their own status code, and Flask raises them as the normal way
+        of expressing 404/403/405/401. Before this check existed, this handler
+        caught them too and rewrote every one as a 500, so a merely missing file
+        was reported as an internal server error (and logged at ERROR level).
+        """
+        if isinstance(e, HTTPException):
+            return e
         log_exception(logger, 'UNHANDLED', f"{request.method} {request.path} raised {type(e).__name__}: {e}")
-        # Re-raise so Flask's default 500 handling still applies
         return jsonify({'error': 'Internal server error'}), 500
 
     @app.after_request
@@ -205,10 +219,10 @@ def init_redis_middleware(app):
         if response.status_code < 200 or response.status_code >= 300:
             return response
         # Skip polling/read endpoints that happen to use POST
-        # Also skip setup-flow Quiltt endpoints that don't represent user data mutations
+        # Also skip setup-flow bank endpoints that do not represent user data mutations
         skip_paths = (
-            '/api/data-version', '/health/', '/api/feedback/',
-            '/quiltt/sync-profile', '/quiltt/analyze-transactions-for-categories',
+            '/api/data-version', '/health/',
+            '/bank/analyze-transactions-for-categories',
         )
         if any(request.path.startswith(p) for p in skip_paths):
             return response

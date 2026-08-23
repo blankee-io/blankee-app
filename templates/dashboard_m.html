@@ -129,8 +129,8 @@
         let totals_remainders_d = {{ totals_remainders_d|tojson }};
         const balance_threshold = {{ balance_threshold|tojson }};
         let member_since = {{ member_since | tojson | safe }};
-        let quiltt_flags = {{ quiltt_flags | tojson | safe }};
-        let quiltt_last_txn_date = {{ quiltt_last_txn_date | tojson | safe }};
+        let bank_sync_flags = {{ bank_sync_flags | tojson | safe }};
+        let bank_last_txn_date = {{ bank_last_txn_date | tojson | safe }};
         let savingsEntries = {{ savings_entries | tojson }};
         let ca_balances_d = {{ c_a_balances_d|tojson }};
         const credit_accounts = {{ credit_accounts|tojson }};
@@ -269,6 +269,12 @@
                 }
                 yearDropdown.appendChild(option);
             }
+
+            // Give the picker the same look as the add-entry fields on the daily
+            // dashboard. Called at the end of the one function that populates it,
+            // so it survives every repopulation. Idempotent.
+            enhanceSelectAsDropdown(monthDropdown);
+            enhanceSelectAsDropdown(yearDropdown);
         }
 
         function generateCalendar(goofyWeekMode, selectedDate) {
@@ -384,13 +390,13 @@
                     dateNumberDiv.classList.add('dashboard-m-date-number');
                     dateNumberDiv.textContent = currentDay.getDate();
                     
-                    // Add Quiltt sync marker above the date (absolute positioned on dayDiv)
-                    if (quiltt_last_txn_date && quiltt_flags && dateStr === quiltt_last_txn_date) {
-                        const txnDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+                    // Add bank sync marker above the date (absolute positioned on dayDiv)
+                    if (bank_last_txn_date && bank_sync_flags && dateStr === bank_last_txn_date) {
+                        const txnDate = new Date(bank_last_txn_date + 'T00:00:00');
                         const marker = document.createElement('span');
-                        marker.className = 'quiltt-sync-marker';
+                        marker.className = 'bank-sync-marker';
                         marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-                        marker.innerHTML = '<span class="quiltt-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
+                        marker.innerHTML = '<span class="bank-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
                         dayDiv.appendChild(marker);
                     }
 

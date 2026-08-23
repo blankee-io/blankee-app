@@ -1,0 +1,90 @@
+# Blankee, all in one: application, MySQL and Redis.
+#
+#   cp .env.docker.example .env
+#   # fill in the three secrets it asks for
+#   docker compose up -d
+#
+# Then open http://localhost:18420 and create the first account - it becomes the
+# administrator, and registration closes behind it.
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${DB_NAME:-blankee}
+      MYSQL_USER: ${DB_USER:-blankee}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    # utf8mb4 to match the schema. Without this MySQL 8 still defaults to
+    # utf8mb4 but the collation differs from the dump's, which shows up later as
+    # "Illegal mix of collations" on a join.
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      # -p is intentional here: this runs inside the container, where the
+      # password is already in the environment.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Redis is a cache and a write-ahead buffer here, not the system of record:
+    # the flush worker persists to MySQL every 15 seconds. appendonly keeps the
+    # window between a write and that flush from being lost on a restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_NAME: ${DB_NAME:-blankee}
+      DB_USER: ${DB_USER:-blankee}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      APP_URL: ${APP_URL:-http://localhost:18420}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
+      BLANKEE_CONFIG: /config/blankee.conf
+      BANK_PROVIDER: null
+      ENRICHMENT_PROVIDER: null
+    ports:
+      # Uncommon on purpose: clear of the 3000/5000/8000/9000 range other
+      # dev tools sit on, and below 32768 where the kernel starts handing out
+      # ephemeral ports. The container itself always listens on 8000.
+      - "${HTTP_PORT:-18420}:8000"
+    volumes:
+      # Profile pictures. Without this they vanish when the container is
+      # replaced, and the database still references them.
+      - uploads:/app/static/uploads
+      # blankee.conf lives here. It must persist, because it is where the
+      # administrator password-reset flag is set - and that is needed precisely
+      # when nobody can get in to fix anything else.
+      - config:/config
+
+volumes:
+  db_data:
+  redis_data:
+  uploads:
+  config:
