@@ -36,7 +36,7 @@ fi
 # The bank-provider cron scripts (connection checker, auto-confirm, nightly
 # sync) were removed along with the Quiltt integration, so these logs no longer
 # get written. Left commented rather than deleted because the crontabs on
-# 192.0.2.44/.45 and EC2 are not in this repo and must be cleaned separately -
+# on your hosts are not in this repo and must be cleaned separately -
 # if any of them is still scheduled, re-enable the matching line.
 # rotate_log "/var/log/apache2/quiltt_checker.log" "quiltt_checker"
 # rotate_log "/var/log/apache2/auto_confirm.log" "auto_confirm"

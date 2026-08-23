@@ -12,7 +12,7 @@
 --     category per user", because MySQL UNIQUE indexes allow multiple NULLs
 --     but only one non-NULL value per group.
 --
--- Run on: dev1 (192.0.2.44), dev2 (192.0.2.45), prod (after approval)
+-- Run on: each environment in turn, production last
 -- =========================================================================
 
 -- ----- expense_categories -----

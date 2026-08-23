@@ -20,7 +20,7 @@
 --   - quiltt_category_mappings
 --   - quiltt_transactions
 --
--- Run on: dev1 (192.0.2.44), dev2 (192.0.2.45), prod (after approval)
+-- Run on: each environment in turn, production last
 -- =========================================================================
 
 -- -------------------------------------------------------------------------
