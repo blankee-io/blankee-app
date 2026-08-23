@@ -6,8 +6,7 @@
     <title>Blankee - Registration Successful</title>
     <!-- Link to the external stylesheet for custom styles -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
+    {% include '_fontawesome.html' %}
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Blankee">

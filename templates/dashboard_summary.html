@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Blankee - Summary</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.css') }}">
+    {% include '_fontawesome.html' %}
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <!-- PWA Setup -->
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">

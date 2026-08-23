@@ -7,8 +7,7 @@
     <!-- Link to the external stylesheet for styling the page -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <!-- Link to Font Awesome for icons -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/custom-icons.min.css') }}">
+    {% include '_fontawesome.html' %}
     <!-- Link to jQuery library for JavaScript functionality -->
     <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
     <!-- Google reCAPTCHA -->
