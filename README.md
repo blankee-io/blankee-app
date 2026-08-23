@@ -2,6 +2,10 @@
 
 Budget tracking and forecasting. Flask + MySQL + Redis, self-hosted.
 
+Licensed under the [GNU Affero General Public License v3.0](LICENSE). Bundled
+third-party components are listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
 ---
 
 ## Install
@@ -78,6 +82,55 @@ sudo systemctl restart apache2
 ```
 
 To check the schema without touching it, add `--verify-only`.
+
+---
+
+## Icons
+
+Blankee ships with **Font Awesome Free**, so it works out of the box.
+
+If you own a **Font Awesome Pro** licence, drop your build in and the app uses it
+automatically — no setting to flip, and no restart. It looks for
+`static/fontawesome/css/all.min.css` on each page load:
+
+```
+static/fontawesome/
+    css/all.min.css
+    css/custom-icons.min.css     # only if you use a Font Awesome Kit
+    webfonts/
+```
+
+Remove the directory and it falls straight back to Free. That directory is
+gitignored, because Pro is commercial per-seat software and cannot be
+redistributed.
+
+Roughly 35 icons exist only in Pro, so the Free path maps each to a Free
+equivalent via `static/css/fa-pro-fallback.css`. **That file is generated — do
+not edit it.** To change which Free icon stands in for a Pro one, edit the map
+and regenerate:
+
+```bash
+$EDITOR install/fa_fallback_map.json
+python3 install/build_fa_fallback.py
+```
+
+### Adding a Pro icon later
+
+Nothing stops you using a new Pro icon — but if it has no fallback, anyone
+without a Pro licence sees a blank box. This catches that:
+
+```bash
+python3 install/build_fa_fallback.py --check
+```
+
+It exits non-zero and names any Pro icon used without a mapping, along with the
+files using it. Worth running before you commit.
+
+Two things it cannot see. Class names assembled at runtime — such as
+`'fa-chevron-' + direction` — are invisible to a static scan; there is an
+`ignore` list in the map for those. And a mapping is only as good as the icon it
+points at: `--check` verifies the target exists in Free, but not that it means
+the right thing.
 
 ---
 
