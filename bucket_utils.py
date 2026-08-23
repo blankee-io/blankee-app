@@ -614,13 +614,13 @@ def _create_bucket_depleted_notification(user_id, table, category_id, bucket_dat
         
         log_info(logger, 'BUCKET_NOTIFICATION', f"Created notification {notification_id}: {message}")
         
-        # Send email notification if enabled
-        if user and user.get('email_notifications') and user.get('email'):
+        # Send email notification if enabled - same helper as app.py's
+        # add_notification, so both paths apply identical rules.
+        if user:
             try:
-                from email_utils import send_notification_email
-                user_name = user.get('first_name', 'User')
-                send_notification_email(user['email'], user_name, message, notification_date)
-                log_info(logger, 'BUCKET_NOTIFICATION', f"Email sent to {user['email']}")
+                from email_utils import send_notification_email_for_user
+                if send_notification_email_for_user(user, message, notification_date):
+                    log_info(logger, 'BUCKET_NOTIFICATION', 'Notification email sent')
             except Exception as e:
                 log_error(logger, 'BUCKET_NOTIFICATION', f"Failed to send email: {e}")
                 

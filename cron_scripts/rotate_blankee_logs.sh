@@ -33,12 +33,18 @@ else
 fi
 
 # Rotate cron job logs
-rotate_log "/var/log/apache2/quiltt_checker.log" "quiltt_checker"
-rotate_log "/var/log/apache2/auto_confirm.log" "auto_confirm"
-rotate_log "/var/log/apache2/nightly_sync.log" "nightly_sync"
+# The bank-provider cron scripts (connection checker, auto-confirm, nightly
+# sync) were removed along with the Quiltt integration, so these logs no longer
+# get written. Left commented rather than deleted because the crontabs on
+# 192.0.2.44/.45 and EC2 are not in this repo and must be cleaned separately -
+# if any of them is still scheduled, re-enable the matching line.
+# rotate_log "/var/log/apache2/quiltt_checker.log" "quiltt_checker"
+# rotate_log "/var/log/apache2/auto_confirm.log" "auto_confirm"
+# rotate_log "/var/log/apache2/nightly_sync.log" "nightly_sync"
 
 # Clean up logs older than 180 days (6 months)
 find "$LOG_DIR" -name "blankee_app_*.log" -type f -mtime +180 -delete
+# Keep purging any already-rotated files from the removed cron scripts.
 find "$LOG_DIR" -name "quiltt_checker_*.log" -type f -mtime +180 -delete
 find "$LOG_DIR" -name "auto_confirm_*.log" -type f -mtime +180 -delete
 find "$LOG_DIR" -name "nightly_sync_*.log" -type f -mtime +180 -delete

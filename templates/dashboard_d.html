@@ -185,12 +185,42 @@
         
         const memberSince = {{ member_since | tojson }};
 
-        // Quiltt account flags for entry locking
-        let quiltt_flags = {{ quiltt_flags | tojson | safe }};
-        let quiltt_last_txn_date = {{ quiltt_last_txn_date | tojson | safe }};
+        // member_since arrives either as YYYY-MM-DD or as a full GMT string;
+        // normalise once so date comparisons are plain string compares. This
+        // mirrors the inline normalisation used further down when dimming
+        // pre-start-date days.
+        function getNormalizedMemberSince() {
+            if (!memberSince) return null;
+            if (memberSince.length > 10 || memberSince.includes('GMT')) {
+                const msDate = new Date(memberSince);
+                if (!isNaN(msDate)) return msDate.toISOString().split('T')[0];
+            }
+            return memberSince;
+        }
+
+        // True when the earliest navigable day on screen is the earliest the
+        // account start date allows, i.e. there is nothing valid before it.
+        // Keyboard navigation uses this to stop instead of paging back into days
+        // that predate the account.
+        function isFirstNavigableDayShown() {
+            const ms = getNormalizedMemberSince();
+            if (!ms) return false;                       // no start date, no clamp
+            const navigable = Array.from(document.querySelectorAll('.dashboard-d-container'))
+                .filter(c => !c.classList.contains('before-member-since'));
+            if (navigable.length === 0) return true;     // nothing navigable at all
+            const firstDate = navigable[0].getAttribute('data-date');
+            if (!firstDate) return false;
+            const prevDay = new Date(firstDate + 'T00:00:00Z');
+            prevDay.setUTCDate(prevDay.getUTCDate() - 1);
+            return prevDay.toISOString().split('T')[0] < ms;
+        }
+
+        // bank account flags for entry locking
+        let bank_sync_flags = {{ bank_sync_flags | tojson | safe }};
+        let bank_last_txn_date = {{ bank_last_txn_date | tojson | safe }};
 
         /**
-         * Check if an entry should be locked due to Quiltt bank account sync.
+         * Check if an entry should be locked due to bank account sync.
          * Locked entries are on or before the last synced transaction date.
          * @param {string} entryDate - The date of the entry (YYYY-MM-DD format)
          * @param {number|string} categoryId - The category ID of the entry
@@ -198,9 +228,9 @@
          * @param {number|string} [accountId] - For CA entries, the credit account ID
          * @returns {boolean} - True if entry should be locked
          */
-        function isEntryLockedByQuiltt(entryDate, categoryId, entryType, accountId = null) {
-            // If no quiltt flags or no last txn date, nothing is locked
-            if (!quiltt_flags || !quiltt_last_txn_date) return false;
+        function isEntryLockedByBankSync(entryDate, categoryId, entryType, accountId = null) {
+            // If no bank_sync flags or no last txn date, nothing is locked
+            if (!bank_sync_flags || !bank_last_txn_date) return false;
             
             // Get today's date string for reliable comparison (avoids UTC vs local timezone bugs)
             const today = new Date();
@@ -210,27 +240,27 @@
             if (entryDate >= todayStr) return false;
             
             // Lock entries on or before the last synced transaction date
-            if (entryDate > quiltt_last_txn_date) return false;
+            if (entryDate > bank_last_txn_date) return false;
             
-            // Credit account entries - check if this specific account is Quiltt-linked
+            // Credit account entries - check if this specific account is bank-linked
             if (entryType === 'ca' && accountId !== null) {
                 const accountIdNum = parseInt(accountId, 10);
-                return quiltt_flags.quiltt_credit_ids && 
-                       quiltt_flags.quiltt_credit_ids.includes(accountIdNum);
+                return bank_sync_flags.linked_credit_ids && 
+                       bank_sync_flags.linked_credit_ids.includes(accountIdNum);
             }
             
             // If user has checking account linked, ALL income/expense entries are locked
-            if (quiltt_flags.has_checking && (entryType === 'income' || entryType === 'expense')) {
+            if (bank_sync_flags.has_checking && (entryType === 'income' || entryType === 'expense')) {
                 return true;
             }
             
             // If user has savings account linked, only Savings category entries are locked
-            if (quiltt_flags.has_savings) {
+            if (bank_sync_flags.has_savings) {
                 const catIdNum = parseInt(categoryId, 10);
-                if (entryType === 'income' && catIdNum === quiltt_flags.savings_income_category_id) {
+                if (entryType === 'income' && catIdNum === bank_sync_flags.savings_income_category_id) {
                     return true;
                 }
-                if (entryType === 'expense' && catIdNum === quiltt_flags.savings_expense_category_id) {
+                if (entryType === 'expense' && catIdNum === bank_sync_flags.savings_expense_category_id) {
                     return true;
                 }
             }
@@ -240,13 +270,13 @@
 
         /**
          * Check if we should show the add button for a given date.
-         * For dates today or before, only show if there are non-Quiltt entry options.
+         * For dates today or before, only show if there are non-bank entry options.
          * @param {string} dateStr - The date string (YYYY-MM-DD format)
          * @returns {boolean} - True if add button should be shown
          */
         function shouldShowAddButton(dateStr) {
-            // If no quiltt flags, always show
-            if (!quiltt_flags) return true;
+            // If no bank_sync flags, always show
+            if (!bank_sync_flags) return true;
             
             // Get today's date string in YYYY-MM-DD format for reliable comparison
             const today = new Date();
@@ -257,20 +287,20 @@
             if (dateStr >= todayStr) return true;
             
             // Dates after the last synced transaction date are not locked
-            if (!quiltt_last_txn_date || dateStr > quiltt_last_txn_date) return true;
+            if (!bank_last_txn_date || dateStr > bank_last_txn_date) return true;
             
             // For locked past dates, check if there are any valid entry options
             
             // If no checking account linked, income/expense are available
-            if (!quiltt_flags.has_checking) return true;
+            if (!bank_sync_flags.has_checking) return true;
             
-            // Check if there are any non-Quiltt credit accounts
-            const hasNonQuilttCreditAccounts = credit_accounts.some(account => {
-                return !quiltt_flags.quiltt_credit_ids || 
-                       !quiltt_flags.quiltt_credit_ids.includes(account.id);
+            // Check if there are any non-bank-linked credit accounts
+            const hasNonBankLinkedCreditAccounts = credit_accounts.some(account => {
+                return !bank_sync_flags.linked_credit_ids || 
+                       !bank_sync_flags.linked_credit_ids.includes(account.id);
             });
             
-            return hasNonQuilttCreditAccounts;
+            return hasNonBankLinkedCreditAccounts;
         }
 
         const savingsEntries = {{ savings_entries | tojson }};
@@ -849,20 +879,20 @@
                     memberSinceIcon = '<div class="member-since-badge" title="Member Since"><i class="fa-solid fa-flag-checkered"></i></div>';
                 }
                 
-                // Hide add button if date is before member_since OR if no valid entry types available (Quiltt locking)
+                // Hide add button if date is before member_since OR if no valid entry types available (bank sync locking)
                 const isBeforeMemberSince = normalizedMemberSinceDate && date < normalizedMemberSinceDate;
                 const hasValidEntryTypes = shouldShowAddButton(date);
                 const addButton = (isBeforeMemberSince || !hasValidEntryTypes) ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-kit fa-solid-money-bill-transfer-circle-plus-bl fa-flip-horizontal"></i><span class="nav-tooltip">Add New Entry</span></button>`;
                 
                 dayHeader.innerHTML = `${formattedDate} ${addButton}${memberSinceIcon}`;
                 
-                // Add Quiltt sync marker above the date (absolute positioned)
-                if (quiltt_last_txn_date && date === quiltt_last_txn_date) {
-                    const txnDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+                // Add bank sync marker above the date (absolute positioned)
+                if (bank_last_txn_date && date === bank_last_txn_date) {
+                    const txnDate = new Date(bank_last_txn_date + 'T00:00:00');
                     const marker = document.createElement('span');
-                    marker.className = 'quiltt-sync-marker';
+                    marker.className = 'bank-sync-marker';
                     marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-                    marker.innerHTML = '<span class="quiltt-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
+                    marker.innerHTML = '<span class="bank-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
                     dayHeader.appendChild(marker);
                 }
                 
@@ -933,8 +963,8 @@
                     const catObj = incomeCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
                     const isStartingBalance = entry.category_name === 'Starting Balance' || (catObj && catObj.name === 'Starting Balance');
-                    const isQuilttLocked = isEntryLockedByQuiltt(date, entry.category_id, 'income');
-                    const isReadonly = isBud || isStartingBalance || isQuilttLocked;
+                    const isBankLocked = isEntryLockedByBankSync(date, entry.category_id, 'income');
+                    const isReadonly = isBud || isStartingBalance || isBankLocked;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                     if (isStartingBalance) {
                         iconHtml = '<i class="fa-solid fa-flag-checkered category-icon"></i>';
@@ -1011,8 +1041,8 @@
                     
                     const catObj = expenseCategories.find(cat => String(cat.id) === String(entry.category_id));
                     const isBud = catObj && catObj.is_bud;
-                    const isExpenseQuilttLocked = isEntryLockedByQuiltt(date, entry.category_id, 'expense');
-                    const isExpenseReadonly = isBud || isExpenseQuilttLocked;
+                    const isExpenseBankLocked = isEntryLockedByBankSync(date, entry.category_id, 'expense');
+                    const isExpenseReadonly = isBud || isExpenseBankLocked;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                     if (catObj) {
                         if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
@@ -1134,8 +1164,8 @@
                         const catObj = c_expense_categories.find(cat => cat.id == entry.category_id);
                         if (catObj && catObj.name === "Starting Balance") return;
                         const isBud = catObj && catObj.is_bud;
-                        const isCaQuilttLocked = isEntryLockedByQuiltt(date, entry.category_id, 'ca', account.id);
-                        const isCaReadonly = isBud || isCaQuilttLocked;
+                        const isCaBankLocked = isEntryLockedByBankSync(date, entry.category_id, 'ca', account.id);
+                        const isCaReadonly = isBud || isCaBankLocked;
                         let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                         if (catObj) {
                             if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
@@ -2401,8 +2431,8 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                     tableType = 'expense';
                 }
 
-                // Block toggle if entry is locked by Quiltt
-                if (isEntryLockedByQuiltt(entryDateStr, categoryId, tableType, accountId)) {
+                // Block toggle if entry is locked by bank sync
+                if (isEntryLockedByBankSync(entryDateStr, categoryId, tableType, accountId)) {
                     return;
                 }
 
@@ -2460,7 +2490,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                         return;
                     }
 
-                    // Check Quiltt lock before showing context menu
+                    // Check bank lock before showing context menu
                     const row = targetCell.closest('.dashboard-d-row');
                     if (row) {
                         const categoryId = row.getAttribute('data-category-id');
@@ -2474,7 +2504,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                         } else {
                             tableType = 'expense';
                         }
-                        if (isEntryLockedByQuiltt(entryDateStr, categoryId, tableType, accountId)) {
+                        if (isEntryLockedByBankSync(entryDateStr, categoryId, tableType, accountId)) {
                             return; // Allow default context menu for locked entries
                         }
                     }
@@ -2500,7 +2530,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                         return;
                     }
 
-                    // Check Quiltt lock before allowing long-press toggle
+                    // Check bank lock before allowing long-press toggle
                     const row = targetCell.closest('.dashboard-d-row');
                     if (row) {
                         const categoryId = row.getAttribute('data-category-id');
@@ -2514,7 +2544,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                         } else {
                             tableType = 'expense';
                         }
-                        if (isEntryLockedByQuiltt(entryDateStr, categoryId, tableType, accountId)) {
+                        if (isEntryLockedByBankSync(entryDateStr, categoryId, tableType, accountId)) {
                             return;
                         }
                     }
@@ -2894,8 +2924,15 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                             const currentContainer = input.closest('.dashboard-d-container');
                             const containerIndex = containers.indexOf(currentContainer);
 
+                            // Days before the account start date are dimmed with
+                            // .before-member-since but their inputs are only
+                            // `readonly`, not `disabled` - and .focus() works on a
+                            // readonly input. Skip those containers so navigation
+                            // cannot walk into them and simply stops at the first
+                            // real cell instead.
                             let allInputs = [];
                             containers.forEach(container => {
+                                if (container.classList.contains('before-member-since')) return;
                                 allInputs = allInputs.concat(Array.from(container.querySelectorAll('.dashboard-d-amount-cell input')));
                             });
 
@@ -2917,6 +2954,11 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                             } else if (event.key === 'ArrowUp') {
                                 if (currentIndex > 0) {
                                     targetInput = allInputs[currentIndex - 1];
+                                } else if (isFirstNavigableDayShown()) {
+                                    // Already on the earliest cell the account
+                                    // start date allows - stay here rather than
+                                    // paging into days that predate it.
+                                    return;
                                 } else {
                                     previousWeek();
                                     setTimeout(() => {
@@ -2993,28 +3035,28 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             dashboardDEntryTypeDropdown.style.display = 'none';
             
             // A date is "locked" only when it falls on or before the latest synced
-            // (posted) Quiltt transaction date — dates after that, including today
+            // (posted) bank transaction date — dates after that, including today
             // and any future date, are unlocked.
             let isLockedDate = false;
-            if (quiltt_flags && dateStr && quiltt_last_txn_date) {
-                isLockedDate = dateStr <= quiltt_last_txn_date;
+            if (bank_sync_flags && dateStr && bank_last_txn_date) {
+                isLockedDate = dateStr <= bank_last_txn_date;
             }
             
             // For future dates or if no checking linked, show Income/Expense options
-            if (!isLockedDate || !quiltt_flags || !quiltt_flags.has_checking) {
+            if (!isLockedDate || !bank_sync_flags || !bank_sync_flags.has_checking) {
                 dashboardDEntryTypes.push({ id: 'income', name: 'Income' });
                 dashboardDEntryTypes.push({ id: 'expense', name: 'Expense' });
             }
             
             // Add each credit account as an option
-            // For locked dates, only show non-Quiltt credit accounts
+            // For locked dates, only show non-bank-linked credit accounts
             credit_accounts.forEach(account => {
-                const isQuilttLinked = quiltt_flags && 
-                                       quiltt_flags.quiltt_credit_ids && 
-                                       quiltt_flags.quiltt_credit_ids.includes(account.id);
+                const isBankLinked = bank_sync_flags && 
+                                       bank_sync_flags.linked_credit_ids && 
+                                       bank_sync_flags.linked_credit_ids.includes(account.id);
                 
-                // Show if: future date, OR not a Quiltt-linked account
-                if (!isLockedDate || !isQuilttLinked) {
+                // Show if: future date, OR not a bank-linked account
+                if (!isLockedDate || !isBankLinked) {
                     dashboardDEntryTypes.push({ id: `ca_${account.id}`, name: account.name });
                 }
             });

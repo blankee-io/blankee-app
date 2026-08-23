@@ -102,45 +102,6 @@
         </div>
     </div>
 
-    <!-- Bank Connection Modal -->
-    <div id="bank-connection-modal-setup" class="modal-setup-profile">
-        <div class="modal-content-setup-profile">
-            <h2>Connect Your Bank (Optional)</h2>
-            <p>Connect your bank accounts and Blankee will automatically retrieve your balances and set up your budget. This makes getting started quick and easy!</p>
-            <div class="bank-connection-benefits">
-                <ul class="bank-connection-benefits-list">
-                    <li><i class="fa-solid fa-circle-check"></i> Automatically import your account balances</li>
-                    <li><i class="fa-solid fa-circle-check"></i> Skip manual data entry</li>
-                    <li><i class="fa-solid fa-circle-check"></i> Sync transactions automatically</li>
-                    <li><i class="fa-solid fa-circle-check"></i> Always stay up-to-date</li>
-                </ul>
-            </div>
-            <p class="bank-connection-security-note">Your data is secure and encrypted. You can manage or disconnect at any time.</p>
-            <div class="setup-profile-button-container">
-                <button type="button" class="setup-profile-previous-button" id="bank-connection-prev-btn">Previous</button>
-                <button type="button" class="setup-profile-next-button" id="connect-bank-button">Connect</button>
-            </div>
-            <div class="setup-skip-link-container">
-                <a href="#" class="setup-skip-link" id="skip-bank-connection">Skip for Now</a>
-            </div>
-        </div>
-    </div>
-
-    <!-- Account Selection Modal -->
-    <div id="account-selection-modal-setup" class="modal-setup-profile">
-        <div class="modal-content-setup-profile">
-            <h2>Select Accounts to Sync</h2>
-            <p>Choose which accounts you'd like to sync with Blankee. Only selected accounts will have their transactions imported.</p>
-            <div id="account-selection-list" class="account-selection-list">
-                <!-- Accounts will be dynamically populated here -->
-            </div>
-            <div class="setup-profile-button-container">
-                <button type="button" class="setup-profile-previous-button" id="account-selection-prev-btn">Previous</button>
-                <button type="button" class="setup-profile-next-button" id="confirm-account-selection">Continue</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Category Recommendations Modal -->
     <div id="category-recommendations-modal-setup" class="modal-setup-profile">
         <div class="modal-content-setup-profile modal-content-category-recommendations">
@@ -373,16 +334,6 @@
                     <input type="text" id="setup-profile-first-name" name="first_name" placeholder="First Name" autocomplete="chrome-off" data-1p-ignore readonly required>
                     <input type="text" id="setup-profile-last-name" name="last_name" placeholder="Last Name" autocomplete="chrome-off" data-1p-ignore readonly required>
                 </div>
-                <label for="setup-profile-handle" style="margin-top: 12px;">Choose a unique handle for your account.</label>
-                <div style="position: relative; width: 100%;">
-                    <div class="currency-input-container">
-                        <input type="text" id="setup-profile-handle" name="handle" placeholder="user_handle" autocomplete="chrome-off" data-1p-ignore readonly required maxlength="30">
-                    </div>
-                    <div id="setup-handle-requirements" class="profile-email-requirements" style="display: none;">
-                        <p id="setup-handle-format-req"><span class="profile-requirement-icon">&#10007;</span> 3-30 chars: lowercase letters, numbers, _ or -</p>
-                        <p id="setup-handle-availability-req"><span class="profile-requirement-icon">&#10007;</span> Handle is available</p>
-                    </div>
-                </div>
                 <div class="setup-profile-button-container">
                     <button type="button" class="setup-profile-previous-button" id="name-modal-prev-btn">Previous</button>
                     <button type="submit" class="setup-profile-next-button" id="name-modal-continue-btn" disabled>Continue</button>
@@ -476,11 +427,9 @@
         window._disableDataVersionReload = true;
 
         // Track if bank was connected
-        let bankConnected = {{ 'true' if bank_connected else 'false' }};
         let mfaAlreadyEnabled = {{ 'true' if mfa_enabled else 'false' }};
         let mfaVerifiedThisSession = false;
         let savedSetupStep = {{ setup_step|default(0) }};
-        let savedBankFlow = {{ 'true' if saved_bank_flow else 'false' }};
         let bankBalances = {
             checking: 0,
             savings: 0
@@ -489,7 +438,6 @@
         // Saved form data for prefilling on resume
         let savedFirstName = {{ saved_first_name|tojson }};
         let savedLastName = {{ saved_last_name|tojson }};
-        let savedHandle = {{ saved_handle|tojson }};
         let savedCurrencyType = {{ saved_currency_type|tojson }};
         let savedStartingBalance = {{ saved_starting_balance|tojson }};
         let savedStartingSavings = {{ saved_starting_savings|tojson }};
@@ -533,40 +481,31 @@
         // ============================================================================
         // STEP COUNTER
         // ============================================================================
-        // Default flow (no bank): 7 steps
+        // One flow, 7 steps. There used to be two - a 7-step "no bank" flow and
+        // an 8-step "bank connected" flow - and switchToBankFlow() swapped
+        // between them. That was already broken: skipping the bank step called
+        // showFallbackCategories(), which showed the categories modal, whose
+        // .show() override called setSetupStep(), which auto-detected a
+        // "bank-only" modal and silently switched the user into the 8-step
+        // counter. So the step counter disagreed with the actual flow for every
+        // user who skipped. Collapsing to one flow fixes that as well.
         let setupStepFlow = [
             'welcome-modal-setup',
             'mfa-setup-modal-setup',
-            'bank-connection-modal-setup',
+            'category-recommendations-modal-setup',
             'name-modal-setup',
             'currency-modal-setup',
             'starting-balance-modal-setup',
             'balance-threshold-modal-setup'
         ];
         let setupCurrentStep = 0;
-        let setupBankFlow = false;
 
         function switchToBankFlow() {
-            if (setupBankFlow) return;
-            setupBankFlow = true;
-            // Bank flow: 8 steps (currency skipped, accounts + categories added)
-            setupStepFlow = [
-                'welcome-modal-setup',
-                'mfa-setup-modal-setup',
-                'bank-connection-modal-setup',
-                'account-selection-modal-setup',
-                'category-recommendations-modal-setup',
-                'name-modal-setup',
-                'starting-balance-modal-setup',
-                'balance-threshold-modal-setup'
-            ];
+            // No-op: there is only one flow now. Kept as a seam so a future
+            // provider can reintroduce its own steps in one place.
         }
 
         function setSetupStep(modalId) {
-            // Auto-detect bank flow when bank-only modals appear
-            if (modalId === 'account-selection-modal-setup' || modalId === 'category-recommendations-modal-setup') {
-                switchToBankFlow();
-            }
             const stepIndex = setupStepFlow.indexOf(modalId);
             if (stepIndex === -1) return; // Not a tracked step (e.g. confirmation sub-modal)
             setupCurrentStep = stepIndex;
@@ -632,32 +571,14 @@
             $('#' + stepModalId).show();
         }
 
-        // Remove bank connection when going back — clears ALL quiltt data
+        // Reset any setup-time bank state when going back
         function removeBankConnection() {
-            bankConnected = false;
-            setupBankFlow = false;
-            // Revert to default flow
-            setupStepFlow = [
-                'welcome-modal-setup',
-                'mfa-setup-modal-setup',
-                'bank-connection-modal-setup',
-                'name-modal-setup',
-                'currency-modal-setup',
-                'starting-balance-modal-setup',
-                'balance-threshold-modal-setup'
-            ];
-            // Reset bank balances
+            // Nothing to remove: no provider means no setup-time connections.
+            // Returns a resolved jQuery promise because callers chain .always().
             bankBalances = { checking: 0, savings: 0 };
             window.setupSelectedAccountIds = [];
             selectedAccountIdsForCategories = [];
-            // Delete ALL connections and accounts on the server
-            // Returns a promise so callers can wait for completion
-            return $.ajax({
-                url: '/quiltt/delete-all-setup-connections',
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({}),
-            });
+            return $.when();
         }
         
         $(document).ready(function () {
@@ -678,18 +599,12 @@
 
             // Remove readonly from name fields after a short delay to prevent 1Password detection
             setTimeout(function() {
-                $('#setup-profile-first-name, #setup-profile-last-name, #setup-profile-handle').removeAttr('readonly');
+                $('#setup-profile-first-name, #setup-profile-last-name').removeAttr('readonly');
             }, 100);
-
-            // If resuming with bank connected or saved bank flow, switch to bank flow
-            if (bankConnected || savedBankFlow) {
-                switchToBankFlow();
-            }
 
             // Prefill form fields from saved data
             if (savedFirstName) $('#setup-profile-first-name').val(savedFirstName);
             if (savedLastName) $('#setup-profile-last-name').val(savedLastName);
-            if (savedHandle) $('#setup-profile-handle').val(savedHandle);
             if (savedCurrencyType && savedCurrencyType !== 'USD') {
                 $('#setup-profile-currency-type').val(savedCurrencyType);
                 updateCurrencySymbols(savedCurrencyType);
@@ -705,51 +620,47 @@
             // Restore name JS vars if set
             if (savedFirstName) window.setupFirstName = savedFirstName;
             if (savedLastName) window.setupLastName = savedLastName;
-            if (savedHandle) window.setupHandle = savedHandle;
             // Restore saved categories if available
             if (savedCategories) {
                 recommendedCategories = JSON.parse(JSON.stringify(savedCategories));
                 window.pendingCategoriesToCreate = JSON.parse(JSON.stringify(savedCategories));
             }
 
-            // Resume at a saved step using unified step numbers (0-8)
-            // 0=welcome, 1=MFA, 2=bank, 3=accounts, 4=categories,
-            // 5=name, 6=currency, 7=starting-balance, 8=threshold
+            // Resume at a saved step using unified step numbers (0-6)
+            // 0=welcome, 1=MFA, 2=categories, 3=name, 4=currency,
+            // 5=starting-balance, 6=threshold
+            //
+            // The wizard used to have 8 steps. A legacy saved value of 5 or 6
+            // means "name" or "currency" under the old numbering but
+            // "starting-balance"/"threshold" under the new one, and no
+            // frontend check can tell those apart - so the migration clears
+            // setup_step for anyone mid-wizard. The guard below still catches
+            // legacy 7/8 and any step whose modal no longer exists.
             function resumeAtStep(stepNumber) {
                 var STEP_TO_MODAL = {
                     1: 'mfa-setup-modal-setup',
-                    2: 'bank-connection-modal-setup',
-                    3: 'account-selection-modal-setup',
-                    4: 'category-recommendations-modal-setup',
-                    5: 'name-modal-setup',
-                    6: 'currency-modal-setup',
-                    7: 'starting-balance-modal-setup',
-                    8: 'balance-threshold-modal-setup'
+                    2: 'category-recommendations-modal-setup',
+                    3: 'name-modal-setup',
+                    4: 'currency-modal-setup',
+                    5: 'starting-balance-modal-setup',
+                    6: 'balance-threshold-modal-setup'
                 };
+                // Never leave the user on a blank overlay: if the saved step
+                // points at a modal that is not in this build, restart cleanly.
+                var _targetModal = STEP_TO_MODAL[stepNumber];
+                if (stepNumber > 0 && (!_targetModal || !document.getElementById(_targetModal))) {
+                    goToStep('welcome-modal-setup');
+                    saveSetupStep(0);
+                    return;
+                }
                 switch (stepNumber) {
                     case 1:
                         showMfaModal();
                         break;
-                    case 3:
-                        loadAccountSelection();
-                        break;
-                    case 4:
-                        if (savedCategories) {
-                            // Restore previously saved categories and display for editing
-                            recommendedCategories = JSON.parse(JSON.stringify(savedCategories));
-                            displayCategoryRecommendations(recommendedCategories, !bankConnected);
-                        } else {
-                            showFallbackCategories();
-                        }
-                        break;
-                    case 7:
-                        if (bankConnected) {
-                            // Re-sync from Quiltt API and fetch fresh balances
-                            document.getElementById('category-analysis-loading-modal').style.display = 'flex';
-                            pollForSyncedBalances();
-                        } else {
-                            goToStep('starting-balance-modal-setup');
-                        }
+                    case 2:
+                        // Third copy of this restore-or-fallback logic, now the
+                        // same one call as every other route in.
+                        enterCategoryStep();
                         break;
                     default:
                         var modalId = STEP_TO_MODAL[stepNumber];
@@ -794,14 +705,14 @@
                         } else {
                             showToast('Failed to set up MFA. You can enable it later in your profile.', 'error');
                             $('#mfa-setup-modal-setup').hide();
-                            goToStep('bank-connection-modal-setup');
+                            enterCategoryStep();
                             saveSetupStep(2);
                         }
                     }).fail(function() {
                         $('#mfa-setup-loading').hide();
                         showToast('Failed to set up MFA. You can enable it later in your profile.', 'error');
                         $('#mfa-setup-modal-setup').hide();
-                        goToStep('bank-connection-modal-setup');
+                        enterCategoryStep();
                         saveSetupStep(2);
                     });
                 }
@@ -821,7 +732,7 @@
                 e.preventDefault();
                 $.post('/cancel_mfa');
                 $('#mfa-setup-modal-setup').hide();
-                goToStep('bank-connection-modal-setup');
+                enterCategoryStep();
                 saveSetupStep(2);
             });
 
@@ -841,7 +752,7 @@
             });
             $('#mfa-configured-continue-btn').on('click', function() {
                 $('#mfa-setup-modal-setup').hide();
-                goToStep('bank-connection-modal-setup');
+                enterCategoryStep();
                 saveSetupStep(2);
             });
 
@@ -937,7 +848,7 @@
                         showMfaSetupMessage('MFA enabled!', 'success');
                         setTimeout(function() {
                             $('#mfa-setup-modal-setup').hide();
-                            goToStep('bank-connection-modal-setup');
+                            enterCategoryStep();
                             saveSetupStep(2);
                         }, 1200);
                     } else {
@@ -953,323 +864,10 @@
 
             // ==================== END MFA SETUP STEP ====================
 
-            // Handle skip bank connection link - skips both bank AND account selection
-            $('#skip-bank-connection').on('click', function (e) {
-                e.preventDefault();
-                bankConnected = false;
-                $('#bank-connection-modal-setup').hide();
-                
-                // Show fallback (generic) categories instead of going to name modal
-                showFallbackCategories();
-                saveSetupStep(4, { setup_bank_flow: false, setup_selected_account_ids: [] });
-            });
-
-            // Handle previous from bank connection - go back to MFA
-            $('#bank-connection-prev-btn').on('click', function() {
-                saveSetupStep(1);
-                $('#bank-connection-modal-setup').hide();
-                showMfaModal();
-            });
-
-            // Handle connect bank button
-            $('#connect-bank-button').on('click', function () {
-                const connectorId = '{{ connector_id|default("") }}';
-                
-                if (!connectorId || connectorId === '') {
-                    showToast('Bank connection is not configured. Please skip for now and set up manually.', 'warning');
-                    return;
-                }
-
-                // Show loading screen while fetching session token
-                $('#loading-screen').show();
-
-                // Fetch session token and open Quiltt Connector
-                $.ajax({
-                    url: '/quiltt/get-session-token',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    success: function(response) {
-                        if (response.status === 'success' && response.session_token) {
-                            // Hide loading screen before opening connector
-                            $('#loading-screen').hide();
-                            loadQuilttConnectorSetup(response.session_token, connectorId);
-                        } else {
-                            $('#loading-screen').hide();
-                            showToast('Unable to connect bank. Please skip for now.', 'warning');
-                        }
-                    },
-                    error: function() {
-                        $('#loading-screen').hide();
-                        showToast('Error connecting to bank service. Please skip for now.', 'warning');
-                    }
-                });
-            });
-
-            function loadQuilttConnectorSetup(sessionToken, connectorId) {
-                // Load Quiltt SDK if not already loaded
-                if (typeof Quiltt === 'undefined') {
-                    const script = document.createElement('script');
-                    script.src = 'https://cdn.quiltt.io/v1/connector.js';
-                    script.onload = function() {
-                        openQuilttConnectorSetup(sessionToken, connectorId);
-                    };
-                    script.onerror = function() {
-                        showToast('Failed to load bank connection tool.', 'error');
-                    };
-                    document.head.appendChild(script);
-                } else {
-                    openQuilttConnectorSetup(sessionToken, connectorId);
-                }
-            }
-
-            function pollForConnectionSync(attempt = 0, maxAttempts = 360) {
-                // Poll Quiltt API to check if connection is fully SYNCED (up to 360 attempts = 3 minutes at 500ms)
-                $.ajax({
-                    url: '/quiltt/connections?exclude_liability=true',
-                    method: 'GET',
-                    success: function(response) {
-                        if (response.status === 'success' && response.connections && response.connections.length > 0) {
-                            const allSynced = response.connections.every(function(conn) {
-                                return conn.status === 'SYNCED';
-                            });
-                            
-                            if (allSynced) {
-                                // All connections synced - now sync to our database
-                                $.ajax({
-                                    url: '/quiltt/sync-profile',
-                                    method: 'POST',
-                                    contentType: 'application/json',
-                                    data: JSON.stringify({ exclude_liability: true }),
-                                    success: function(syncResponse) {
-                                        if (syncResponse.status === 'success') {
-                                            // Give Redis a moment to stabilize
-                                            setTimeout(function() {
-                                                loadAccountSelection();
-                                            }, 500);
-                                        } else {
-                                            showToast('Connection successful but sync failed. Continuing with manual setup.', 'error');
-                                            $('#name-modal-setup').show();
-                                        }
-                                    },
-                                    error: function() {
-                                        showToast('Connection successful but sync failed. Continuing with manual setup.', 'error');
-                                        $('#name-modal-setup').show();
-                                    }
-                                });
-                            } else if (attempt < maxAttempts) {
-                                // Not synced yet, try again in 500ms
-                                setTimeout(function() {
-                                    pollForConnectionSync(attempt + 1, maxAttempts);
-                                }, 500);
-                            } else {
-                                // Max attempts reached — delete stuck connections and go back to bank connection step
-                                $('#setup-profile-loading-modal').hide();
-                                showToast('There was an issue with the bank connector. Please try again.', 'error', 6000);
-                                saveSetupStep(2);
-                                
-                                // Delete any stuck connections
-                                $.ajax({
-                                    url: '/quiltt/connections?exclude_liability=true',
-                                    method: 'GET',
-                                    success: function(connResponse) {
-                                        if (connResponse.status === 'success' && connResponse.connections) {
-                                            const stuck = connResponse.connections.filter(function(conn) {
-                                                return ['SYNCING', 'INITIALIZING', 'PENDING'].includes(conn.status);
-                                            });
-                                            if (stuck.length > 0) {
-                                                const deletePromises = stuck.map(function(conn) {
-                                                    return $.ajax({
-                                                        url: '/quiltt/delete',
-                                                        method: 'POST',
-                                                        contentType: 'application/json',
-                                                        data: JSON.stringify({ connection_id: conn.connection_id })
-                                                    });
-                                                });
-                                                Promise.all(deletePromises).finally(function() {
-                                                    $('#bank-connection-modal-setup').show();
-                                                });
-                                            } else {
-                                                $('#bank-connection-modal-setup').show();
-                                            }
-                                        } else {
-                                            $('#bank-connection-modal-setup').show();
-                                        }
-                                    },
-                                    error: function() {
-                                        $('#bank-connection-modal-setup').show();
-                                    }
-                                });
-                            }
-                        } else {
-                            showToast('Unable to verify connection status. Continuing with manual setup.', 'error');
-                            $('#name-modal-setup').show();
-                        }
-                    },
-                    error: function() {
-                        showToast('Error checking connection status. Continuing with manual setup.', 'error');
-                        $('#name-modal-setup').show();
-                    }
-                });
-            }
-
-            function openQuilttConnectorSetup(sessionToken, connectorId) {
-                try {
-                    // Authenticate with session token
-                    Quiltt.authenticate(sessionToken);
-                    
-                    // Connect with the connector ID
-                    const connector = Quiltt.connect(connectorId, {
-                        onLoad: function(metadata) {
-                            // Connector loaded - hide the bank connection modal immediately
-                            $('#bank-connection-modal-setup').hide();
-                        },
-                        onExitSuccess: function(metadata) {
-                            // Bank connected successfully — mark step complete NOW
-                            bankConnected = true;
-                            saveSetupStep(3, { setup_bank_flow: true });
-
-                            // Show loading, sync profile and wait for liability data flush
-                            $('#setup-profile-loading-modal').show();
-                            
-                            $.ajax({
-                                url: '/quiltt/sync-profile',
-                                method: 'POST',
-                                contentType: 'application/json',
-                                data: JSON.stringify({ exclude_liability: true }),
-                                success: function(response) {
-                                    if (response.status === 'success') {
-                                        // Wait for Redis flush to MySQL to complete (liability data)
-                                        setTimeout(function() {
-                                            $('#setup-profile-loading-modal').hide();
-                                            loadAccountSelection();
-                                        }, 2000);
-                                    } else {
-                                        $('#setup-profile-loading-modal').hide();
-                                        showToast('Connection successful but sync failed. Continuing with manual setup.', 'error');
-                                        $('#name-modal-setup').show();
-                                    }
-                                },
-                                error: function() {
-                                    $('#setup-profile-loading-modal').hide();
-                                    showToast('Connection successful but sync failed. Continuing with manual setup.', 'error');
-                                    $('#name-modal-setup').show();
-                                }
-                            });
-                        },
-                        onExitAbort: function(metadata) {
-                            // User cancelled - show bank connection modal again
-                            $('#bank-connection-modal-setup').show();
-                        },
-                        onExitError: function(metadata) {
-                            showToast('Failed to connect bank. Please try again or skip.', 'warning');
-                            $('#bank-connection-modal-setup').show();
-                        },
-                        onEvent: function(eventType, metadata) {
-                            // Connector event
-                        }
-                    });
-                    
-                    connector.open();
-                } catch (error) {
-                    showToast('Error opening bank connection: ' + error.message, 'error');
-                }
-            }
-
             function loadAccountSelection() {
-                $.ajax({
-                    url: '/quiltt/connections?exclude_liability=true',
-                    method: 'GET',
-                    success: function(response) {
-                        if (response.status === 'success' && response.connections) {
-                            const accountList = $('#account-selection-list');
-                            accountList.empty();
-                            
-                            // Count already synced checking/savings accounts across ALL connections
-                            let hasSyncedChecking = false;
-                            let hasSyncedSavings = false;
-                            
-                            response.connections.forEach(function(conn) {
-                                if (conn.accounts) {
-                                    conn.accounts.forEach(function(acc) {
-                                        if (acc.sync_transactions) {
-                                            const isChecking = acc.account_type === 'DEPOSITORY' && 
-                                                acc.account_name.toLowerCase().includes('checking');
-                                            const isSavings = acc.account_type === 'DEPOSITORY' && 
-                                                acc.account_name.toLowerCase().includes('savings');
-                                            if (isChecking) hasSyncedChecking = true;
-                                            if (isSavings) hasSyncedSavings = true;
-                                        }
-                                    });
-                                }
-                            });
-                            
-                            let hasAccounts = false;
-                            let checkingCount = 0;
-                            let savingsCount = 0;
-                            
-                            response.connections.forEach(function(conn) {
-                                if (conn.accounts && conn.accounts.length > 0) {
-                                    conn.accounts.forEach(function(account) {
-                                        const isChecking = account.account_type === 'DEPOSITORY' && 
-                                            account.account_name.toLowerCase().includes('checking');
-                                        const isSavings = account.account_type === 'DEPOSITORY' && 
-                                            account.account_name.toLowerCase().includes('savings');
-                                        const isCredit = account.account_type === 'CREDIT';
-                                        const isLiability = account.account_type === 'LIABILITY';
-                                        
-                                        // Filter out CREDIT and LIABILITY accounts (mortgages, loans, credit cards)
-                                        if (isCredit || isLiability) return;
-                                        
-                                        // Only allow depository (checking/savings) accounts
-                                        if (!isChecking && !isSavings) return;
-                                        
-                                        hasAccounts = true;
-                                        const mask = account.mask ? `<div class="account-mask">...${(account.mask || '').slice(-4)}</div>` : '';
-                                        
-                                        // Auto-check the first of each type; leave others unchecked
-                                        let isChecked = false;
-                                        if (isChecking) {
-                                            checkingCount++;
-                                            if (!hasSyncedChecking && checkingCount === 1) isChecked = true;
-                                        } else if (isSavings) {
-                                            savingsCount++;
-                                            if (!hasSyncedSavings && savingsCount === 1) isChecked = true;
-                                        }
-                                        
-                                        const accountItem = $(`
-                                            <div class="account-selection-item">
-                                                <input type="checkbox" 
-                                                       class="account-checkbox" 
-                                                       data-account-id="${account.account_id}"
-                                                       data-account-type="${isChecking ? 'checking' : 'savings'}"
-                                                       ${isChecked ? 'checked' : ''}>
-                                                <div class="account-selection-info">
-                                                    <div class="account-selection-name">${account.account_name || 'Account'}</div>
-                                                    ${mask}
-                                                </div>
-                                            </div>
-                                        `);
-                                        accountList.append(accountItem);
-                                    });
-                                }
-                            });
-                            
-                            // Apply initial disabled state for same-type accounts
-                            updateAccountCheckboxStates();
-                            
-                            if (hasAccounts) {
-                                $('#account-selection-modal-setup').show();
-                            } else {
-                                showToast('No accounts found. Continuing with manual setup.', 'info');
-                                $('#name-modal-setup').show();
-                            }
-                        }
-                    },
-                    error: function() {
-                        showToast('Failed to load accounts. Continuing with manual setup.', 'error');
-                        $('#name-modal-setup').show();
-                    }
-                });
+                // No provider means no accounts to pick from - go straight to
+                // the category step, which is where this used to hand off.
+                showFallbackCategories();
             }
 
             // Enforce one-per-type selection for checking and savings accounts
@@ -1305,127 +903,20 @@
                 showToast(`Only one ${label} account can be synced in Blankee. Uncheck the current one first to switch.`, 'info');
             });
 
-            // Handle account selection confirmation
-            $('#confirm-account-selection').on('click', function() {
-                const selectedAccounts = [];
-                $('.account-checkbox:checked').each(function() {
-                    selectedAccounts.push($(this).data('account-id'));
-                });
-                
-                if (selectedAccounts.length === 0) {
-                    showToast('Please select at least one account to continue, or skip bank connection.', 'warning');
-                    return;
-                }
-                
-                // Update accounts and sync transactions
-                updateAccountsAndSync(selectedAccounts);
-                saveSetupStep(4, { setup_bank_flow: true, setup_selected_account_ids: selectedAccounts });
-            });
-
-            // Handle previous from account selection - remove connection and go back to bank connect
-            $('#account-selection-prev-btn').on('click', function() {
-                const $btn = $(this);
-                $btn.prop('disabled', true).text('Removing...');
-                removeBankConnection().always(function() {
-                    $btn.prop('disabled', false).text('Previous');
-                    saveSetupStep(2, { setup_bank_flow: false, setup_selected_account_ids: [] });
-                    goToStep('bank-connection-modal-setup');
-                });
-            });
-
             function updateAccountsAndSync(selectedAccountIds) {
-                // Store selected account IDs in JS
-                window.setupSelectedAccountIds = selectedAccountIds;
-
-                // Persist sync_transactions for each selected account in Redis
-                var updatePromises = selectedAccountIds.map(function(accountId) {
-                    return $.ajax({
-                        url: '/quiltt/update-account',
-                        method: 'POST',
-                        contentType: 'application/json',
-                        data: JSON.stringify({ account_id: accountId, is_active: 1, sync_transactions: 1 })
-                    });
-                });
-
-                // Wait for all account updates, then proceed to category analysis
-                $.when.apply($, updatePromises).always(function() {
-                    analyzeCategoriesForSetup(selectedAccountIds);
-                });
+                // No provider accounts to enable for sync; go on to categories.
+                window.setupSelectedAccountIds = selectedAccountIds || [];
+                analyzeCategoriesForSetup(window.setupSelectedAccountIds);
             }
 
             function fetchBankBalancesForSelectedAccounts(selectedAccountIds) {
-                $.ajax({
-                    url: '/quiltt/connections?exclude_liability=true',
-                    method: 'GET',
-                    success: function(response) {
-                        if (response.status === 'success' && response.connections) {
-                            // Extract checking and savings balances only for selected accounts
-                            response.connections.forEach(function(conn) {
-                                (conn.accounts || []).forEach(function(account) {
-                                    // Only include balance if account is selected (use account_id not id)
-                                    if (selectedAccountIds.includes(account.account_id)) {
-                                        const accountName = (account.account_name || '').toLowerCase();
-                                        const balance = parseFloat(account.current_balance || 0);
-                                        
-                                        if (accountName.includes('checking') && balance > 0) {
-                                            bankBalances.checking = Math.max(bankBalances.checking, balance);
-                                        } else if (accountName.includes('savings') && balance > 0) {
-                                            bankBalances.savings = Math.max(bankBalances.savings, balance);
-                                        }
-                                    }
-                                });
-                            });
-                            
-                            bankConnected = true;
-                            
-                            // Go to name modal, then skip currency and pre-fill balances
-                            $('#account-selection-modal-setup').hide();
-                            $('#name-modal-setup').show();
-                            $('#setup-profile-first-name').focus();
-                        }
-                    },
-                    error: function() {
-                        showToast('Connected but failed to fetch balances. Continuing with manual setup.', 'error');
-                        $('#account-selection-modal-setup').hide();
-                        $('#name-modal-setup').show();
-                    }
-                });
+                // No provider means no live balances. Starting balances are
+                // entered by hand on the starting-balance step instead.
+                bankBalances = { checking: 0, savings: 0 };
             }
-
             function fetchBankBalances() {
-                $.ajax({
-                    url: '/quiltt/connections?exclude_liability=true',
-                    method: 'GET',
-                    success: function(response) {
-                        if (response.status === 'success' && response.connections) {
-                            // Extract checking and savings balances
-                            response.connections.forEach(function(conn) {
-                                (conn.accounts || []).forEach(function(account) {
-                                    const accountName = (account.account_name || '').toLowerCase();
-                                    const balance = parseFloat(account.current_balance || 0);
-                                    
-                                    if (accountName.includes('checking') && balance > 0) {
-                                        bankBalances.checking = Math.max(bankBalances.checking, balance);
-                                    } else if (accountName.includes('savings') && balance > 0) {
-                                        bankBalances.savings = Math.max(bankBalances.savings, balance);
-                                    }
-                                });
-                            });
-                            
-                            bankConnected = true;
-                            
-                            // Go to name modal, then skip currency and pre-fill balances
-                            $('#account-selection-modal-setup').hide();
-                            $('#name-modal-setup').show();
-                            $('#setup-profile-first-name').focus();
-                        }
-                    },
-                    error: function() {
-                        showToast('Connected but failed to fetch balances. Continuing with manual setup.', 'error');
-                        $('#account-selection-modal-setup').hide();
-                        $('#name-modal-setup').show();
-                    }
-                });
+                // No provider means no balances to fetch.
+                bankBalances = { checking: 0, savings: 0 };
             }
 
             // ============================================================================
@@ -1434,46 +925,9 @@
 
             // Analyze transactions and show category recommendations
             function analyzeCategoriesForSetup(selectedAccountIds) {
-                selectedAccountIdsForCategories = selectedAccountIds;
-                
-                // Hide account selection, show loading
-                $('#account-selection-modal-setup').hide();
-                $('#category-analysis-loading-modal').show();
-                
-                // Add click handler to close loading modal (for testing)
-                $('#category-analysis-loading-modal .modal-content').one('click', function(e) {
-                    e.stopPropagation();
-                });
-                $('#category-analysis-loading-modal').one('click', function() {
-                    $(this).hide();
-                    showFallbackCategories();
-                });
-                
-                // Call backend to analyze transactions
-                $.ajax({
-                    url: '/quiltt/analyze-transactions-for-categories',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({
-                        account_ids: selectedAccountIds
-                    }),
-                    success: function(response) {
-                        $('#category-analysis-loading-modal').off('click').hide();
-                        
-                        if (response.status === 'success') {
-                            recommendedCategories = response.recommendations;
-                            displayCategoryRecommendations(response.recommendations, response.fallback || false);
-                        } else {
-                            // Error - show fallback generic categories
-                            showFallbackCategories();
-                        }
-                    },
-                    error: function() {
-                        $('#category-analysis-loading-modal').off('click').hide();
-                        // Error - show fallback generic categories
-                        showFallbackCategories();
-                    }
-                });
+                // Category recommendations were derived from synced transactions.
+                // With no provider there are none, so use the built-in defaults.
+                showFallbackCategories();
             }
 
             // Display category recommendations in the modal
@@ -2098,6 +1552,29 @@
             }
 
             // Show generic starter categories for new users
+            // Every route into the category step goes through here.
+            //
+            // The bug this replaces: HEAD reached this step by calling
+            // showFallbackCategories(), which populated the list and showed the
+            // modal in one go. The vendor removal swapped those calls for
+            // goToStep('category-recommendations-modal-setup'), which only shows
+            // it - so the step appeared with nothing in it. Anything that needs
+            // to land on this step calls this instead of navigating directly.
+            function enterCategoryStep() {
+                var pending = window.pendingCategoriesToCreate;
+                if (pending && ((pending.income || []).length || (pending.expense || []).length)) {
+                    // Edits made earlier in this session win: coming back must
+                    // not discard them for the generic template.
+                    recommendedCategories = JSON.parse(JSON.stringify(pending));
+                    displayCategoryRecommendations(recommendedCategories, true);
+                } else if (savedCategories) {
+                    recommendedCategories = JSON.parse(JSON.stringify(savedCategories));
+                    displayCategoryRecommendations(recommendedCategories, true);
+                } else {
+                    showFallbackCategories();
+                }
+            }
+
             function showFallbackCategories() {
                 const genericRecommendations = {
                     income: [
@@ -2124,21 +1601,27 @@
             $('#skip-category-recommendations').on('click', function(e) {
                 e.preventDefault();
                 $('#category-recommendations-modal-setup').hide();
-                // Fetch balances and proceed to name modal
-                fetchBankBalancesForSelectedAccounts(selectedAccountIdsForCategories);
-                saveSetupStep(5);
+                // Navigate explicitly. This used to happen inside
+                // fetchBankBalancesForSelectedAccounts()'s AJAX success, so
+                // stubbing that out left the modal hidden and nothing shown -
+                // a blank page. saveSetupStep only records where you are; it
+                // does not move you.
+                goToStep('name-modal-setup');
+                $('#setup-profile-first-name').focus();
+                saveSetupStep(3);
             });
 
-            // Handle previous from category recommendations
-            // Clear all connections and go back to bank connection step
+            // Handle previous from category recommendations -> back to MFA.
+            //
+            // This used to go to the bank connection step, which the vendor
+            // removal deleted; the replacement pointed at the category modal
+            // itself, so Previous did nothing at all. MFA is step 1, the step
+            // actually before this one. The old "Removing..." button text went
+            // with it - there is no connection to remove.
             $('#category-recommendations-prev-btn').on('click', function() {
-                const $btn = $(this);
-                $btn.prop('disabled', true).text('Removing...');
-                removeBankConnection().always(function() {
-                    $btn.prop('disabled', false).text('Previous');
-                    saveSetupStep(2, { setup_bank_flow: false, setup_selected_account_ids: [] });
-                    goToStep('bank-connection-modal-setup');
-                });
+                $('#category-recommendations-modal-setup').hide();
+                saveSetupStep(1);
+                showMfaModal();
             });
 
             // Handle create categories button - Store data and proceed to name modal
@@ -2156,10 +1639,16 @@
                 // Hide category recommendations modal and proceed to name modal
                 $('#category-recommendations-modal-setup').hide();
                 
-                // Fetch balances and proceed to name modal (same as skip button)
+                // Reset balance state, then navigate. The navigation is here
+                // rather than inside fetchBankBalancesForSelectedAccounts
+                // because that function is about balances - burying the step
+                // transition in it is what made this a blank page when it
+                // became a no-op.
                 fetchBankBalancesForSelectedAccounts(selectedAccountIdsForCategories);
+                goToStep('name-modal-setup');
+                $('#setup-profile-first-name').focus();
                 // Save categories to Redis so they persist across reloads/browsers
-                saveSetupStep(5, { setup_categories: window.pendingCategoriesToCreate });
+                saveSetupStep(3, { setup_categories: window.pendingCategoriesToCreate });
             });
 
             // Display category confirmation summary
@@ -2258,308 +1747,48 @@
                 event.preventDefault();
                 window.setupFirstName = $('#setup-profile-first-name').val().trim();
                 window.setupLastName = $('#setup-profile-last-name').val().trim();
-                window.setupHandle = $('#setup-profile-handle').val().trim().toLowerCase();
 
                 if (!window.setupFirstName || !window.setupLastName) {
                     showToast('Please enter your first and last name.', 'warning');
                     return;
                 }
 
-                if (!window.setupHandle || !window.setupHandleValid) {
-                    showToast('Please enter a valid, available handle.', 'warning');
-                    return;
-                }
-
                 $('#name-modal-setup').hide();
 
-                if (bankConnected) {
-                    // Show loading modal while we wait for Quiltt to finish syncing balances
-                    document.getElementById('category-analysis-loading-modal').style.display = 'flex';
-                    saveSetupStep(7, { first_name: window.setupFirstName, last_name: window.setupLastName, handle: window.setupHandle });
-
-                    // Poll for synced balances, then show balance page
-                    pollForSyncedBalances();
-                } else {
-                    // Normal flow - go to currency selection
-                    saveSetupStep(6, { first_name: window.setupFirstName, last_name: window.setupLastName, handle: window.setupHandle });
-                    $('#currency-modal-setup').show();
-                    $('#setup-profile-currency-type').focus();
-                }
+                saveSetupStep(4, { first_name: window.setupFirstName, last_name: window.setupLastName });
+                $('#currency-modal-setup').show();
+                $('#setup-profile-currency-type').focus();
             });
 
-            // Handle input validation for setup handle field
-            window.setupHandleValid = false;
-            // If resuming with a saved valid handle, mark as valid immediately
-            if (savedHandle && /^[a-z0-9_-]{3,30}$/.test(savedHandle)) {
-                window.setupHandleValid = true;
-            }
+// Continue-button gating for the name step
             (function() {
-                var handleInput = $('#setup-profile-handle');
-                var formatReq = $('#setup-handle-format-req .profile-requirement-icon');
-                var availReq = $('#setup-handle-availability-req .profile-requirement-icon');
-                var reqBox = $('#setup-handle-requirements');
                 var continueBtn = $('#name-modal-continue-btn');
-                var handlePattern = /^[a-z0-9_-]{3,30}$/;
-                var debounceTimer = null;
 
                 function checkNameFormReady() {
                     var firstName = $('#setup-profile-first-name').val().trim();
                     var lastName = $('#setup-profile-last-name').val().trim();
-                    if (firstName && lastName && window.setupHandleValid) {
-                        continueBtn.prop('disabled', false);
-                    } else {
-                        continueBtn.prop('disabled', true);
-                    }
+                    continueBtn.prop('disabled', !(firstName && lastName));
                 }
 
                 $('#setup-profile-first-name, #setup-profile-last-name').on('input', checkNameFormReady);
-
-                var blurTimer = null;
-
-                handleInput.on('input', function() {
-                    var handle = handleInput.val().trim().toLowerCase();
-                    handleInput.val(handle);  // Force lowercase in the input
-
-                    if (!handle) {
-                        reqBox.css('display', 'none');
-                        window.setupHandleValid = false;
-                        checkNameFormReady();
-                        return;
-                    }
-
-                    reqBox.css({'display': 'block', 'opacity': '1'});
-                    window.setupHandleValid = false;
-
-                    if (handlePattern.test(handle)) {
-                        formatReq.text('\u2713').addClass('valid');
-                    } else {
-                        formatReq.text('\u2717').removeClass('valid');
-                        availReq.text('\u2717').removeClass('valid');
-                        checkNameFormReady();
-                        // Position floating above the input
-                        reqBox.css({
-                            bottom: handleInput.outerHeight() + 5 + 'px',
-                            left: '0',
-                            width: handleInput.outerWidth() + 'px',
-                            borderRadius: handleInput.css('border-radius')
-                        });
-                        return;
-                    }
-
-                    // Debounce availability check
-                    if (debounceTimer) clearTimeout(debounceTimer);
-                    debounceTimer = setTimeout(function() {
-                        $.ajax({
-                            url: "{{ url_for('check_handle') }}",
-                            method: 'POST',
-                            data: { handle: handle },
-                            success: function(resp) {
-                                if (resp.status === 'available') {
-                                    availReq.text('\u2713').addClass('valid');
-                                    window.setupHandleValid = true;
-                                } else {
-                                    availReq.text('\u2717').removeClass('valid');
-                                    window.setupHandleValid = false;
-                                }
-                                checkNameFormReady();
-                            },
-                            error: function() {
-                                availReq.text('\u2717').removeClass('valid');
-                                window.setupHandleValid = false;
-                                checkNameFormReady();
-                            }
-                        });
-                    }, 300);
-
-                    // Position floating above the input
-                    reqBox.css({
-                        bottom: handleInput.outerHeight() + 5 + 'px',
-                        left: '0',
-                        width: handleInput.outerWidth() + 'px',
-                        borderRadius: handleInput.css('border-radius')
-                    });
-                });
-
-                // Hide requirements on blur after 1 second
-                handleInput.on('focusout', function() {
-                    if (blurTimer) clearTimeout(blurTimer);
-                    blurTimer = setTimeout(function() {
-                        reqBox.css('opacity', '0');
-                        setTimeout(function() {
-                            reqBox.css('display', 'none');
-                        }, 300);
-                    }, 1000);
-                });
             })();
-
             function pollForSyncedBalances(attempt = 0, maxAttempts = 60) {
-                // Poll Quiltt to check if balances are synced (up to 60 attempts = 30 seconds)
-                
-                $.ajax({
-                    url: '/quiltt/connections?exclude_liability=true',
-                    method: 'GET',
-                    success: function(response) {
-                        
-                        if (response.status === 'success' && response.connections && response.connections.length > 0) {
-                            const statuses = response.connections.map(c => c.status);
-                            
-                            const allSynced = response.connections.every(function(conn) {
-                                return conn.status === 'SYNCED';
-                            });
-                            
-                            if (allSynced) {
-                                // All connections synced - sync to our database one more time to get latest balances
-                                $.ajax({
-                                    url: '/quiltt/sync-profile',
-                                    method: 'POST',
-                                    contentType: 'application/json',
-                                    data: JSON.stringify({ exclude_liability: true }),
-                                    success: function(syncResponse) {
-                                        // Always fetch balances regardless of sync status
-                                        fetchBankBalancesForBalancePage();
-                                    },
-                                    error: function() {
-                                        fetchBankBalancesForBalancePage();
-                                    }
-                                });
-                            } else if (attempt < maxAttempts) {
-                                // Not synced yet, try again in 500ms
-                                setTimeout(function() {
-                                    pollForSyncedBalances(attempt + 1, maxAttempts);
-                                }, 500);
-                            } else {
-                                // Max attempts reached, try one more sync anyway
-                                $.ajax({
-                                    url: '/quiltt/sync-profile',
-                                    method: 'POST',
-                                    contentType: 'application/json',
-                                    data: JSON.stringify({ exclude_liability: true }),
-                                    success: function(syncResponse) {
-                                        fetchBankBalancesForBalancePage();
-                                    },
-                                    error: function() {
-                                        fetchBankBalancesForBalancePage();
-                                    }
-                                });
-                            }
-                        } else {
-                            // No connections or error, proceed anyway
-                            fetchBankBalancesForBalancePage();
-                        }
-                    },
-                    error: function() {
-                        fetchBankBalancesForBalancePage();
-                    }
-                });
+                // Nothing to poll for without a provider syncing balances.
             }
-
             function fetchBankBalancesForBalancePage() {
-                // Fetch latest balances for selected accounts
-                $.ajax({
-                    url: '/quiltt/connections?exclude_liability=true',
-                    method: 'GET',
-                    success: function(response) {
-                        
-                        if (response.status === 'success' && response.connections) {
-                            // Get selected account IDs (those with is_active=1)
-                            const selectedAccountIds = [];
-                            const allAccounts = [];
-                            
-                            response.connections.forEach(function(conn) {
-                                (conn.accounts || []).forEach(function(account) {
-                                    allAccounts.push(account);
-                                    
-                                    if (account.is_active === 1) {
-                                        selectedAccountIds.push(account.account_id);
-                                    }
-                                });
-                            });
-                            
-                            
-                            // If no accounts selected, use all DEPOSITORY accounts as fallback
-                            const accountsToProcess = selectedAccountIds.length > 0 
-                                ? allAccounts.filter(acc => selectedAccountIds.includes(acc.account_id))
-                                : allAccounts.filter(acc => acc.account_type === 'DEPOSITORY');
-                            
-                            
-                            // Extract checking and savings balances
-                            accountsToProcess.forEach(function(account) {
-                                const accountName = (account.account_name || '').toLowerCase();
-                                const balance = parseFloat(account.current_balance || 0);
-                                
-                                
-                                // Match by name
-                                if (accountName.includes('checking')) {
-                                    bankBalances.checking = Math.max(bankBalances.checking, balance);
-                                } else if (accountName.includes('savings')) {
-                                    bankBalances.savings = Math.max(bankBalances.savings, balance);
-                                }
-                            });
-                            
-                        }
-                        
-                        // Hide loading and show balance page
-                        document.getElementById('category-analysis-loading-modal').style.display = 'none';
-                        
-                        // Pre-fill and disable fields based on fetched balances
-                        if (bankBalances.checking > 0) {
-                            $('#setup-profile-starting-balance').val(bankBalances.checking.toFixed(2))
-                                .prop('readonly', true)
-                                .css({'background-color': '#f0f0f0', 'cursor': 'not-allowed'});
-                            $('#checking-auto-filled-indicator').addClass('visible');
-                        } else {
-                            $('#setup-profile-starting-balance').val('')
-                                .prop('readonly', false)
-                                .css({'background-color': '', 'cursor': ''});
-                            $('#checking-auto-filled-indicator').removeClass('visible');
-                        }
-                        
-                        if (bankBalances.savings > 0) {
-                            $('#setup-profile-starting-savings').val(bankBalances.savings.toFixed(2))
-                                .prop('readonly', true)
-                                .css({'background-color': '#f0f0f0', 'cursor': 'not-allowed'});
-                            $('#savings-auto-filled-indicator').addClass('visible');
-                        } else {
-                            $('#setup-profile-starting-savings').val('')
-                                .prop('readonly', false)
-                                .css({'background-color': '', 'cursor': ''});
-                            $('#savings-auto-filled-indicator').removeClass('visible');
-                        }
-                        
-                        $('#starting-balance-modal-setup').show();
-                        $('#setup-profile-balance-threshold').focus();
-                    },
-                    error: function(xhr, status, error) {
-                        // Error fetching balances, show page anyway
-                        document.getElementById('category-analysis-loading-modal').style.display = 'none';
-                        $('#starting-balance-modal-setup').show();
-                        $('#setup-profile-balance-threshold').focus();
-                    }
-                });
+                // No provider means no balances to prefill; the user types them.
             }
 
             // Handle previous button on name modal
             $('#name-modal-prev-btn').on('click', function () {
                 $('#name-modal-setup').hide();
-                if (setupBankFlow) {
-                    saveSetupStep(4);
-                    // Re-display saved categories for editing
-                    if (window.pendingCategoriesToCreate && 
-                        (window.pendingCategoriesToCreate.income.length > 0 || window.pendingCategoriesToCreate.expense.length > 0)) {
-                        recommendedCategories = JSON.parse(JSON.stringify(window.pendingCategoriesToCreate));
-                        displayCategoryRecommendations(recommendedCategories, !bankConnected);
-                    } else {
-                        goToStep('category-recommendations-modal-setup');
-                    }
-                } else {
-                    saveSetupStep(2);
-                    goToStep('bank-connection-modal-setup');
-                }
+                saveSetupStep(2);
+                enterCategoryStep();
             });
 
             // Handle previous button click on the currency modal
             $('#currency-modal-prev-btn').on('click', function () {
-                saveSetupStep(5);
+                saveSetupStep(3);
                 goToStep('name-modal-setup');
                 $('#setup-profile-first-name').focus();
             });
@@ -2568,24 +1797,16 @@
                 event.preventDefault();
                 const currencyType = $('#setup-profile-currency-type').val();
                 updateCurrencySymbols(currencyType);
-                saveSetupStep(7, { currency_type: currencyType });
+                saveSetupStep(5, { currency_type: currencyType });
                 goToStep('starting-balance-modal-setup');
                 $('#setup-profile-starting-balance').focus();
             });
 
             // Handle previous button click on the starting balance modal
             $('#starting-balance-prev-btn').on('click', function () {
-                if (bankConnected) {
-                    // Go back to name modal if bank was connected (skipped currency)
-                    saveSetupStep(5);
-                    goToStep('name-modal-setup');
-                    $('#setup-profile-last-name').focus();
-                } else {
-                    // Normal flow - go back to currency
-                    saveSetupStep(6);
-                    goToStep('currency-modal-setup');
-                    $('#setup-profile-currency-type').focus();
-                }
+                saveSetupStep(4);
+                goToStep('currency-modal-setup');
+                $('#setup-profile-currency-type').focus();
             });
 
             $('#setup-profile-balance-form').on('submit', function(event) {
@@ -2594,23 +1815,16 @@
                     setup_starting_balance: $('#setup-profile-starting-balance').val(),
                     starting_savings: parseFloat($('#setup-profile-starting-savings').val()) || 0
                 };
-                saveSetupStep(8, balData);
+                saveSetupStep(6, balData);
                 goToStep('balance-threshold-modal-setup');
                 $('#setup-profile-balance-threshold').focus();
             });
 
             // Handle previous button click on the balance threshold modal
             $('#balance-threshold-prev-btn').on('click', function () {
-                saveSetupStep(7);
-                if (bankConnected) {
-                    // Re-sync from Quiltt API and fetch fresh balances
-                    $('#balance-threshold-modal-setup').hide();
-                    document.getElementById('category-analysis-loading-modal').style.display = 'flex';
-                    pollForSyncedBalances();
-                } else {
-                    goToStep('starting-balance-modal-setup');
-                    $('#setup-profile-starting-balance').focus();
-                }
+                saveSetupStep(5);
+                goToStep('starting-balance-modal-setup');
+                $('#setup-profile-starting-balance').focus();
             });
 
             // Handle form submission for balance threshold (final step)
@@ -2622,7 +1836,7 @@
 
                 setTimeout(function() {
                     // Get all the form data
-                    const currencyType = bankConnected ? 'USD' : $('#setup-profile-currency-type').val();
+                    const currencyType = $('#setup-profile-currency-type').val();
                     const startingBalance = $('#setup-profile-starting-balance').val();
                     const balanceThreshold = $('#setup-profile-balance-threshold').val();
                     const startingSavings = $('#setup-profile-starting-savings').val();
@@ -2649,7 +1863,6 @@
                             income_entry_date: incomeEntryDate,
                             first_name: window.setupFirstName || '',
                             last_name: window.setupLastName || '',
-                            handle: window.setupHandle || '',
                             selected_account_ids: window.setupSelectedAccountIds || []
                         }),
                         success: function (response) {
@@ -2693,7 +1906,7 @@
                     };
                     
                     $.ajax({
-                        url: '/quiltt/create-recommended-categories',
+                        url: '/bank/create-recommended-categories',
                         method: 'POST',
                         contentType: 'application/json',
                         data: JSON.stringify(categoriesToCreate),

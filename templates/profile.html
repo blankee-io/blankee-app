@@ -103,20 +103,6 @@
                                     </button>
                                 </div>
                             </form>
-                            <!-- Form for changing the handle -->
-                            <form method="POST" action="{{ url_for('update_handle') }}" class="profile-form">
-                                <div class="input-group">
-                                    <label for="handle">Change Handle:</label>
-                                    <input type="text" name="handle" id="profile-handle" class="login-input" value="{{ handle }}" required maxlength="30">
-                                    <button type="submit" id="profile-handle-submit-button" class="submit-button submit-unchanged" disabled>
-                                        <i id="profile-handle-submit-icon" class="fas fa-check"></i>
-                                    </button>
-                                    <div id="profile-handle-requirements" class="profile-email-requirements" style="display: none;">
-                                        <p id="profile-handle-format-requirement"><span class="profile-requirement-icon">&#10007;</span> 3-30 chars: lowercase letters, numbers, _ or -</p>
-                                        <p id="profile-handle-availability-requirement"><span class="profile-requirement-icon">&#10007;</span> Handle is available</p>
-                                    </div>
-                                </div>
-                            </form>          
                             <!-- Form for changing the email -->
                             <form method="POST" action="{{ url_for('update_username') }}" class="profile-form">
                                 <div class="input-group">
@@ -133,23 +119,7 @@
                                     </div>
                                 </div>
                             </form>
-                            {% if pending_email %}
-                            <div class="pending-email-banner">
-                                <div class="pending-email-header">
-                                    <i class="fas fa-hourglass-half"></i>
-                                    <strong>Pending Email Change:</strong>
-                                </div>
-                                <small>Verification email sent to <strong>{{ pending_email }}</strong>. Please check that inbox to complete the change. Your current email ({{ current_username }}) remains active until verified.</small>
-                                <div class="pending-email-actions">
-                                    <a href="{{ url_for('resend_pending_email_verification') }}" class="resend-verification-btn">
-                                        <i class="fas fa-envelope"></i> Resend verification email
-                                    </a>
-                                    <a href="{{ url_for('cancel_pending_email_change') }}" class="cancel-pending-email-btn">
-                                        <i class="fas fa-times"></i> Cancel
-                                    </a>
-                                </div>
-                            </div>
-                            {% endif %}            
+
                             <!-- Button to change password -->
                             <form id="password-change-form" class="profile-form">
                                 <div class="input-group">
@@ -170,9 +140,22 @@
                                     </button>
                                 </div>
                             </form>
-                            <button class="delete-account-button" data-url="{{ url_for('delete_user', user_id=current_user.id) }}">
+                            {# The administrator gets a reset instead of a deletion:
+                               removing that account closes registration behind
+                               itself and leaves nobody who can administer the
+                               instance. data-mode drives the wording and where
+                               the browser goes afterwards. #}
+                            {% if current_user.is_admin %}
+                            <button class="delete-account-button" data-mode="clear"
+                                    data-url="{{ url_for('clear_account') }}">
+                                Clear Account
+                            </button>
+                            {% else %}
+                            <button class="delete-account-button" data-mode="delete"
+                                    data-url="{{ url_for('delete_user', user_id=current_user.id) }}">
                                 Delete Account
                             </button>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -227,33 +210,6 @@
                 <input type="hidden" id="mfa-code" name="mfa-code">
                 <button type="submit" class="submit-button">Verify</button>
             </form>
-        </div>
-    </div>
-
-    <div id="resend-verification-modal" class="modal">
-        <div class="modal-content">
-            <h2>✓ Verification Email Sent</h2>
-            <p>
-                The verification email has been resent to your pending email address. Please check your inbox.
-            </p>
-            <div class="modal-buttons">
-                <button id="close-resend-success-btn" class="confirm-delete-category-btn">OK</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="email-pending-modal" class="modal">
-        <div class="modal-content">
-            <h2>✓ Verification Email Sent</h2>
-            <p>
-                A verification email has been sent to your new email address. Please check that inbox and click the verification link to complete your email change.
-            </p>
-            <p class="profile-delete-info">
-                Your current email address will remain active until you verify the new one.
-            </p>
-            <div class="modal-buttons">
-                <button id="close-email-pending-btn" class="confirm-delete-category-btn">OK</button>
-            </div>
         </div>
     </div>
 
@@ -806,108 +762,6 @@
                 });
             });
 
-            // Handle field validation
-            (function() {
-                const handleInput = $('#profile-handle');
-                const handleSubmitBtn = $('#profile-handle-submit-button');
-                const handleSubmitIcon = $('#profile-handle-submit-icon');
-                const handleReqs = $('#profile-handle-requirements');
-                const handleFormatReq = $('#profile-handle-format-requirement .profile-requirement-icon');
-                const handleAvailReq = $('#profile-handle-availability-requirement .profile-requirement-icon');
-                const initialHandle = handleInput.val();
-                const handlePattern = /^[a-z0-9_-]{3,30}$/;
-                let isHandleValid = false;
-                let debounceTimer = null;
-
-                let blurTimer = null;
-
-                handleInput.on('input', function() {
-                    let handle = handleInput.val().trim().toLowerCase();
-                    handleInput.val(handle);
-
-                    if (handle === initialHandle) {
-                        handleReqs.css('display', 'none');
-                        isHandleValid = false;
-                        disableButton(handleSubmitBtn, handleSubmitIcon);
-                        return;
-                    }
-
-                    if (!handle) {
-                        handleReqs.css('display', 'none');
-                        isHandleValid = false;
-                        disableButton(handleSubmitBtn, handleSubmitIcon);
-                        return;
-                    }
-
-                    handleReqs.css({'display': 'block', 'opacity': '1'});
-                    isHandleValid = false;
-
-                    if (handlePattern.test(handle)) {
-                        handleFormatReq.text('\u2713').addClass('valid');
-                    } else {
-                        handleFormatReq.text('\u2717').removeClass('valid');
-                        handleAvailReq.text('\u2717').removeClass('valid');
-                        disableButton(handleSubmitBtn, handleSubmitIcon);
-                        // Position above input
-                        const handleOffset = handleInput.position();
-                        handleReqs.css({
-                            top: handleOffset.top - handleReqs.outerHeight() - 5 + 'px',
-                            left: handleOffset.left + 'px',
-                            width: handleInput.outerWidth() + 'px',
-                            position: 'absolute',
-                            borderRadius: handleInput.css('border-radius')
-                        });
-                        return;
-                    }
-
-                    if (debounceTimer) clearTimeout(debounceTimer);
-                    debounceTimer = setTimeout(function() {
-                        $.ajax({
-                            url: "{{ url_for('check_handle') }}",
-                            method: 'POST',
-                            data: { handle: handle },
-                            success: function(resp) {
-                                if (resp.status === 'available') {
-                                    handleAvailReq.text('\u2713').addClass('valid');
-                                    isHandleValid = true;
-                                    enableButton(handleSubmitBtn, handleSubmitIcon);
-                                } else {
-                                    handleAvailReq.text('\u2717').removeClass('valid');
-                                    isHandleValid = false;
-                                    disableButton(handleSubmitBtn, handleSubmitIcon);
-                                }
-                            },
-                            error: function() {
-                                handleAvailReq.text('\u2717').removeClass('valid');
-                                isHandleValid = false;
-                                disableButton(handleSubmitBtn, handleSubmitIcon);
-                            }
-                        });
-                    }, 300);
-
-                    // Position above input
-                    const handleOffset = handleInput.position();
-                    handleReqs.css({
-                        top: handleOffset.top - handleReqs.outerHeight() - 5 + 'px',
-                        left: handleOffset.left + 'px',
-                        width: handleInput.outerWidth() + 'px',
-                        position: 'absolute',
-                        borderRadius: handleInput.css('border-radius')
-                    });
-                });
-
-                // Hide requirements on blur after 1 second
-                handleInput.on('focusout', function() {
-                    if (blurTimer) clearTimeout(blurTimer);
-                    blurTimer = setTimeout(function() {
-                        handleReqs.css('opacity', '0');
-                        setTimeout(function() {
-                            handleReqs.css('display', 'none');
-                        }, 300);
-                    }, 1000);
-                });
-            })();
-
             // Event listener for changes in the password input field
             passwordInput.on('input', function() {
                 const password = passwordInput.val();  // Get the password input value
@@ -1279,11 +1133,21 @@
         });
 
         $(document).ready(function() {
-            let deleteUrl = $('.delete-account-button').data('url');
+            const $accountButton = $('.delete-account-button');
+            const accountUrl = $accountButton.data('url');
+            const isClear = $accountButton.data('mode') === 'clear';
 
-            $('.delete-account-button').on('click', async function(e) {
+            $accountButton.on('click', async function(e) {
                 e.preventDefault();
-                const confirmed = await showConfirmModal({
+                const confirmed = await showConfirmModal(isClear ? {
+                    title: 'Clear Account',
+                    message: 'This deletes all of your entries, categories, credit accounts '
+                           + 'and settings, then starts profile setup again. Your login stays '
+                           + 'the same. This cannot be undone.',
+                    confirmText: 'Clear',
+                    cancelText: 'Cancel',
+                    danger: true
+                } : {
                     title: 'Delete Account',
                     message: 'Are you sure you want to delete your account? This action cannot be undone.',
                     confirmText: 'Delete',
@@ -1293,44 +1157,47 @@
                 if (!confirmed) return;
 
                 $.ajax({
-                    url: deleteUrl,
+                    url: accountUrl,
                     method: 'POST',
                     success: function(response) {
-                        if (response.status === 'success') {
-                            $('#deleteSuccessModal').css('display', 'flex');
-                            setTimeout(function() {
-                                window.location.href = "{{ url_for('login') }}";
-                            }, 3000);
-                        } else {
-                            showToast('Error deleting account: ' + response.message, 'error');
+                        if (response.status !== 'success') {
+                            showToast('Error: ' + (response.message || 'unknown'), 'error');
+                            return;
                         }
+                        if (isClear) {
+                            // Straight to setup - the session survives because the
+                            // account keeps its id. No success modal: the setup
+                            // wizard appearing is the confirmation.
+                            window.location.href = response.redirect
+                                || "{{ url_for('setup_profile') }}";
+                            return;
+                        }
+                        $('#deleteSuccessModal').css('display', 'flex');
+                        setTimeout(function() {
+                            window.location.href = "{{ url_for('login') }}";
+                        }, 3000);
                     },
-                    error: function() {
-                        showToast('An error occurred while deleting your account.', 'error');
+                    error: function(xhr) {
+                        const res = (xhr && xhr.responseJSON) || {};
+                        showToast(res.message
+                            || (isClear ? 'An error occurred while clearing your account.'
+                                        : 'An error occurred while deleting your account.'),
+                            'error');
                     }
                 });
             });
         });
 
-        // Handle resend verification email click with success modal
+        // Post-action success messages
         $(document).ready(function() {
-            const resendModal = $('#resend-verification-modal');
-            const emailPendingModal = $('#email-pending-modal');
             const successModal = $('#successModal');
             const successMessage = $('#successMessage');
 
-            // Check if we're returning from a resend action
             const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('resend') === 'success') {
-                resendModal.css('display', 'flex');
-                // Remove the query parameter from URL without reload
-                window.history.replaceState({}, document.title, window.location.pathname);
-            }
-            
-            // Check if we're returning from an email change request
-            if (urlParams.get('success') === 'email_pending') {
-                emailPendingModal.css('display', 'flex');
-                // Remove the query parameter from URL without reload
+
+            // Check if we're returning from an email change
+            if (urlParams.get('success') === 'email') {
+                showSuccessMessage('Email address updated successfully');
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
             
@@ -1360,26 +1227,6 @@
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
 
-            $('#close-resend-success-btn').on('click', function() {
-                resendModal.css('display', 'none');
-            });
-            
-            $('#close-email-pending-btn').on('click', function() {
-                emailPendingModal.css('display', 'none');
-            });
-
-            // Close modals on blur (clicking outside)
-            resendModal.on('click', function(e) {
-                if (e.target === this) {
-                    resendModal.css('display', 'none');
-                }
-            });
-
-            emailPendingModal.on('click', function(e) {
-                if (e.target === this) {
-                    emailPendingModal.css('display', 'none');
-                }
-            });
         });
 
         // Handle password change with MFA verification

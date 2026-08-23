@@ -74,12 +74,12 @@ USER_TABLES = [
     'c_a_balances_m',
     'buds',
     'bud_items',
-    # Quiltt integration tables
-    'quiltt_profiles',
-    'quiltt_connections',
-    'quiltt_accounts',
-    'quiltt_transactions',
-    'quiltt_category_mappings',
+    # bank-link integration tables
+    'linked_provider_profiles',
+    'linked_connections',
+    'linked_accounts',
+    'linked_transactions',
+    'category_memory',
     # Additional user tables
     'notifications',
     'password_resets',
@@ -99,6 +99,17 @@ class DecimalEncoder(json.JSONEncoder):
         if isinstance(obj, date):
             return obj.isoformat()
         return super(DecimalEncoder, self).default(obj)
+
+
+def _coerce(value, default):
+    """None-safe default for numeric columns.
+
+    A cached users blob can legitimately carry None for a nullable column. Passing
+    that straight into float()/int() raises TypeError, which aborts the ENTIRE users
+    flush for that user — so name/email edits silently never reach MySQL. Note this
+    differs from dict.get(key, default), which only applies when the key is absent.
+    """
+    return default if value is None else value
 
 
 def init_redis_manager(redis_client):
@@ -199,6 +210,61 @@ def is_user_hydrated(user_id: int) -> bool:
 def _get_redis_key(table: str, user_id: int) -> str:
     """Generate Redis key for a table and user"""
     return f"{table}:{REDIS_KEY_VERSION}:{user_id}"
+
+
+def get_table_cache(table: str, user_id: int):
+    """
+    Read a user's cached rows for one table out of Redis.
+
+    Returns None when Redis is unavailable, the user is not hydrated, or the key
+    is absent - callers treat None as "cache miss, fall back to MySQL".
+
+    This is the single implementation shared by redis_crud and the bank-link
+    CRUD modules. It reads the module-global client at CALL time, so it works
+    regardless of whether the caller was imported before init_redis_manager().
+    """
+    if not _redis_client or not is_user_hydrated(user_id):
+        return None
+
+    cached = _redis_client.get(_get_redis_key(table, user_id))
+    if cached:
+        return json.loads(cached)
+    return None
+
+
+def set_table_cache(table: str, user_id: int, data, mark_dirty: bool = True) -> bool:
+    """
+    Write a user's rows for one table into Redis.
+
+    mark_dirty controls which persistence model the caller is using, and getting
+    it wrong is silent either way - so it is always explicit at the call site:
+
+    - mark_dirty=True (Redis-first): Redis is the source of truth and the flush
+      worker must carry this table to MySQL. Adds the table to
+      dirty_tables:{user_id}. This is what every write path needs.
+    - mark_dirty=False: the caller already wrote MySQL itself (redis_crud) or is
+      staging a delete that a separate pending-delete key handles. Refreshing the
+      cache here must NOT queue a flush.
+    """
+    if not _redis_client:
+        log_error(logger, 'REDIS', f"Redis client not available for {table}")
+        return False
+
+    try:
+        redis_key = _get_redis_key(table, user_id)
+        _redis_client.setex(
+            redis_key,
+            INACTIVITY_TIMEOUT + 60,
+            json.dumps(data, cls=DecimalEncoder)
+        )
+
+        if mark_dirty:
+            _redis_client.sadd(f"dirty_tables:{user_id}", table)
+
+        return True
+    except Exception as e:
+        log_exception(logger, 'REDIS', f"Error setting Redis data for {table}: {e}")
+        return False
 
 
 def _hydrate_user_data(user_id: int):
@@ -518,8 +584,8 @@ def _dehydrate_user_data(user_id: int):
                 'users',  # User settings (goofy_week_mode, landing_page, etc.)
                 'notifications',  # User notifications
                 'setup_state',  # Setup wizard temporary state
-                'recurring_mismatches',  # Ntropy recurring mismatch detection
-                'recurring_suggestions',  # Ntropy suggested recurring entries
+                'recurring_mismatches',  # provider recurring mismatch detection
+                'recurring_suggestions',  # the enrichment provider suggested recurring entries
             ]
             
             flushed_count = 0
@@ -557,7 +623,7 @@ def _dehydrate_user_data(user_id: int):
                           'recurring_income_buckets', 'recurring_expense_buckets', 'recurring_c_expense_buckets']:
                 pending_key = f"pending_deletes:{table}:{user_id}"
                 _redis_client.delete(pending_key)
-            # Clean up Quiltt-related keys
+            # Clean up the bank provider-related keys
             
             elapsed = time.time() - start_time
             log_info(logger, 'DEHYDRATION', f"✓ User {user_id} dehydrated: {len(keys_to_delete)} Redis keys deleted in {elapsed:.2f}s")
@@ -658,18 +724,18 @@ def _flush_redis_to_mysql():
             'bud_items',
             'users',  # User settings (balance_threshold, starting_savings)
             'notifications',  # User notifications
-            'quiltt_profiles',  # Quiltt session tokens and profile info
-            'quiltt_connections',  # Quiltt bank connections
-            'quiltt_accounts',  # Quiltt bank accounts
-            'quiltt_transactions',  # Quiltt transactions
-            'quiltt_category_mappings',  # Quiltt category mappings
+            'linked_provider_profiles',  # provider session tokens and profile info
+            'linked_connections',  # the bank provider bank connections
+            'linked_accounts',  # the bank provider bank accounts
+            'linked_transactions',  # linked transactions
+            'category_memory',  # the bank provider category mappings
             'setup_state',  # Setup wizard temporary state
-            'recurring_mismatches',  # Ntropy recurring mismatch detection
-            'recurring_suggestions',  # Ntropy suggested recurring entries
+            'recurring_mismatches',  # provider recurring mismatch detection
+            'recurring_suggestions',  # the enrichment provider suggested recurring entries
             # Deletion handlers (must run after updates)
-            'quiltt_connections_deleted',
-            'quiltt_accounts_deleted',
-            'quiltt_transactions_deleted',
+            'linked_connections_deleted',
+            'linked_accounts_deleted',
+            'linked_transactions_deleted',
         ]
         
         for user_id in users_to_flush:
@@ -752,14 +818,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
     
     try:
         # Handle special deletion tables first (they don't have Redis data)
-        if table == 'quiltt_connections_deleted':
-            # Handle deletion of Quiltt connections
-            log_info(logger, 'FLUSH', f"Processing quiltt_connections_deleted for user {user_id}")
+        if table == 'linked_connections_deleted':
+            # Handle deletion of linked connections
+            log_info(logger, 'FLUSH', f"Processing linked_connections_deleted for user {user_id}")
             
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
                 
-                delete_key = f"quiltt_connections_to_delete:{user_id}"
+                delete_key = f"linked_connections_to_delete:{user_id}"
                 connection_ids = _redis_client.smembers(delete_key)
                 
                 log_info(logger, 'FLUSH', f"Found {len(connection_ids) if connection_ids else 0} connections to delete")
@@ -777,41 +843,41 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     # Delete accounts first (foreign key constraint)
                     cursor.execute("""
-                        DELETE FROM quiltt_accounts 
+                        DELETE FROM linked_accounts 
                         WHERE user_id = %s AND connection_id IN (
-                            SELECT id FROM quiltt_connections WHERE connection_id = %s
+                            SELECT id FROM linked_connections WHERE connection_id = %s
                         )
                     """, (user_id, conn_id_str))
                     
                     # Delete connection
                     cursor.execute("""
-                        DELETE FROM quiltt_connections 
+                        DELETE FROM linked_connections 
                         WHERE user_id = %s AND connection_id = %s
                     """, (user_id, conn_id_str))
                     
                     deleted_count += cursor.rowcount
-                    log_info(logger, 'FLUSH', f"Deleted Quiltt connection {conn_id_str} for user {user_id}")
+                    log_info(logger, 'FLUSH', f"Deleted linked connection {conn_id_str} for user {user_id}")
                 
                 conn.commit()
                 
                 # Clear the deletion set
                 _redis_client.delete(delete_key)
                 
-                # Also clear quiltt_connections dirty flag since deletes are now processed
+                # Also clear linked_connections dirty flag since deletes are now processed
                 dirty_key = f"dirty_tables:{user_id}"
-                _redis_client.srem(dirty_key, 'quiltt_connections')
-                log_info(logger, 'FLUSH', f"Cleared quiltt_connections dirty flag after delete processing")
+                _redis_client.srem(dirty_key, 'linked_connections')
+                log_info(logger, 'FLUSH', f"Cleared linked_connections dirty flag after delete processing")
                 
                 cursor.close()
                 return deleted_count
         
-        elif table == 'quiltt_accounts_deleted':
-            # This is handled by quiltt_connections_deleted (cascade delete)
+        elif table == 'linked_accounts_deleted':
+            # This is handled by linked_connections_deleted (cascade delete)
             # Just return 0
             return 0
         
-        elif table == 'quiltt_transactions_deleted':
-            # This is handled by quiltt_accounts_deleted (cascade delete via FK)
+        elif table == 'linked_transactions_deleted':
+            # This is handled by linked_accounts_deleted (cascade delete via FK)
             # Just return 0
             return 0
         
@@ -933,12 +999,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         row.get('date'),
                         float(row.get('amount', 0)),
                         row.get('description'),
-                        row.get('quiltt_account_id')
+                        row.get('linked_account_id')
                     ))
                 
                 if batch_data:
                     cursor.executemany("""
-                        INSERT INTO savings_adjustments (user_id, date, amount, description, quiltt_account_id)
+                        INSERT INTO savings_adjustments (user_id, date, amount, description, linked_account_id)
                         VALUES (%s, %s, %s, %s, %s)
                     """, batch_data)
                 
@@ -2774,39 +2840,41 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             starting_savings = %s,
                             password = %s,
                             username = %s,
+                            email = %s,
                             mfa_secret = %s,
                             email_notifications = %s,
                             first_name = %s,
                             last_name = %s,
-                            handle = %s,
                             goofy_week_mode = %s,
                             landing_page = %s,
                             profile_picture = %s,
                             currency_type = %s,
-                            quiltt_enabled = %s,
-                            quiltt_auto_import = %s,
+                            bank_sync_enabled = %s,
+                            bank_auto_import = %s,
                             member_since = %s,
                             setup_step = %s,
                             completed_tutorials = %s
                         WHERE id = %s
                     """, (
-                        float(user_data.get('balance_threshold', 0)),
-                        float(user_data.get('starting_savings', 0)),
+                        float(_coerce(user_data.get('balance_threshold'), 0)),
+                        float(_coerce(user_data.get('starting_savings'), 0)),
                         user_data.get('password'),
                         user_data.get('username'),
+                        # Older cached blobs predate `email` being flushed; fall back to
+                        # username rather than NULLing the column (they are kept identical).
+                        user_data.get('email') or user_data.get('username'),
                         user_data.get('mfa_secret'),
-                        int(user_data.get('email_notifications', 0)),
+                        int(_coerce(user_data.get('email_notifications'), 0)),
                         user_data.get('first_name'),
                         user_data.get('last_name'),
-                        user_data.get('handle'),
-                        int(user_data.get('goofy_week_mode', 0)),
+                        int(_coerce(user_data.get('goofy_week_mode'), 0)),
                         user_data.get('landing_page', 'dashboard_3m'),
                         user_data.get('profile_picture'),
                         user_data.get('currency_type', 'USD'),
-                        int(user_data.get('quiltt_enabled', 0)),
-                        int(user_data.get('quiltt_auto_import', 1)),
+                        int(_coerce(user_data.get('bank_sync_enabled'), 0)),
+                        int(_coerce(user_data.get('bank_auto_import'), 1)),
                         user_data.get('member_since'),
-                        int(user_data.get('setup_step', 0)),
+                        int(_coerce(user_data.get('setup_step'), 0)),
                         user_data.get('completed_tutorials'),
                         user_id
                     ))
@@ -2818,14 +2886,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 return 0
                 
-            elif table == 'quiltt_profiles':
-                # Quiltt profiles table
+            elif table == 'linked_provider_profiles':
+                # provider profiles table
                 if not rows or len(rows) == 0:
                     return 0
                 
                 profile = rows[0]  # Should only be one profile per user
                 cursor.execute("""
-                    INSERT INTO quiltt_profiles (user_id, profile_id, session_token, session_expires_at)
+                    INSERT INTO linked_provider_profiles (user_id, profile_id, session_token, session_expires_at)
                     VALUES (%s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         profile_id = VALUES(profile_id),
@@ -2840,29 +2908,29 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                log_info(logger, 'FLUSH', f"→ quiltt_profiles: Updated profile for user {user_id}")
+                log_info(logger, 'FLUSH', f"→ linked_provider_profiles: Updated profile for user {user_id}")
                 return 1
                 
-            elif table == 'quiltt_connections':
+            elif table == 'linked_connections':
                 # Check if there are pending deletes - if so, skip this flush
-                # The deletes will be processed by quiltt_connections_deleted
-                delete_key = f"quiltt_connections_to_delete:{user_id}"
+                # The deletes will be processed by linked_connections_deleted
+                delete_key = f"linked_connections_to_delete:{user_id}"
                 pending_deletes = _redis_client.smembers(delete_key) if _redis_client else set()
                 if pending_deletes:
-                    log_info(logger, 'FLUSH', f"quiltt_connections: Skipping flush - {len(pending_deletes)} pending deletes")
+                    log_info(logger, 'FLUSH', f"linked_connections: Skipping flush - {len(pending_deletes)} pending deletes")
                     # Don't clear the dirty flag - let the delete handler process first
                     return -1  # Return -1 to indicate skip, don't clear dirty flag
                 
-                # Quiltt connections table
+                # linked connections table
                 if not rows:
-                    log_info(logger, 'FLUSH', f"quiltt_connections: No rows in Redis for user {user_id}")
+                    log_info(logger, 'FLUSH', f"linked_connections: No rows in Redis for user {user_id}")
                     return 0
                 
-                log_info(logger, 'FLUSH', f"quiltt_connections: Found {len(rows)} rows in Redis for user {user_id}")
+                log_info(logger, 'FLUSH', f"linked_connections: Found {len(rows)} rows in Redis for user {user_id}")
                 
                 batch_data = []
-                quiltt_id_to_row_idx = {}  # Map Quiltt connection_id to row index
-                temp_id_to_quiltt_id = {}  # Map temp ID to Quiltt connection_id
+                provider_id_to_row_idx = {}  # Map linked connection_id to row index
+                temp_id_to_provider_id = {}  # Map temp ID to linked connection_id
                 
                 for idx, row in enumerate(rows):
                     batch_data.append((
@@ -2873,16 +2941,16 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         row.get('status', 'ACTIVE'),
                         row.get('last_synced_at')
                     ))
-                    quiltt_id_to_row_idx[row.get('connection_id')] = idx
+                    provider_id_to_row_idx[row.get('connection_id')] = idx
                     # Track temp ID if present
                     temp_id = row.get('id')
                     if temp_id and temp_id >= 100000:  # Looks like a temp ID
-                        temp_id_to_quiltt_id[temp_id] = row.get('connection_id')
+                        temp_id_to_provider_id[temp_id] = row.get('connection_id')
                 
-                log_info(logger, 'FLUSH', f"quiltt_connections: Executing batch insert of {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"linked_connections: Executing batch insert of {len(batch_data)} rows")
                 
                 cursor.executemany("""
-                    INSERT INTO quiltt_connections 
+                    INSERT INTO linked_connections 
                     (user_id, connection_id, institution_name, institution_id, status, last_synced_at)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
@@ -2892,18 +2960,18 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 """, batch_data)
                 
                 rows_affected = cursor.rowcount
-                log_info(logger, 'FLUSH', f"quiltt_connections: MySQL rowcount = {rows_affected}")
+                log_info(logger, 'FLUSH', f"linked_connections: MySQL rowcount = {rows_affected}")
                 
                 # Get the real MySQL IDs and update Redis cache
                 cursor.execute(
-                    "SELECT id, connection_id FROM quiltt_connections WHERE user_id = %s",
+                    "SELECT id, connection_id FROM linked_connections WHERE user_id = %s",
                     (user_id,)
                 )
                 
                 temp_to_real_id = {}  # Map temp ID to real MySQL ID
-                for mysql_id, quiltt_conn_id in cursor.fetchall():
-                    if quiltt_conn_id in quiltt_id_to_row_idx:
-                        idx = quiltt_id_to_row_idx[quiltt_conn_id]
+                for mysql_id, provider_conn_id in cursor.fetchall():
+                    if provider_conn_id in provider_id_to_row_idx:
+                        idx = provider_id_to_row_idx[provider_conn_id]
                         old_id = rows[idx].get('id')
                         rows[idx]['id'] = mysql_id  # Update Redis data with real MySQL ID
                         
@@ -2921,8 +2989,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 # Update accounts' connection_id fields if they have temp IDs
                 if temp_to_real_id:
-                    log_info(logger, 'FLUSH', f"quiltt_connections: Found temp ID mappings: {temp_to_real_id}")
-                    accounts_key = _get_redis_key('quiltt_accounts', user_id)
+                    log_info(logger, 'FLUSH', f"linked_connections: Found temp ID mappings: {temp_to_real_id}")
+                    accounts_key = _get_redis_key('linked_accounts', user_id)
                     accounts_data = _redis_client.get(accounts_key)
                     
                     if accounts_data:
@@ -2943,26 +3011,26 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 json.dumps(accounts, cls=DecimalEncoder)
                             )
                             # Mark accounts as dirty so they get flushed with correct connection_id
-                            _redis_client.sadd(f"dirty_tables:{user_id}", 'quiltt_accounts')
-                            log_info(logger, 'FLUSH', f"Updated {len(accounts)} accounts with real connection IDs, marked quiltt_accounts dirty")
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'linked_accounts')
+                            log_info(logger, 'FLUSH', f"Updated {len(accounts)} accounts with real connection IDs, marked linked_accounts dirty")
                 else:
-                    log_info(logger, 'FLUSH', f"quiltt_connections: No temp ID mappings needed")
+                    log_info(logger, 'FLUSH', f"linked_connections: No temp ID mappings needed")
                 
                 conn.commit()
                 cursor.close()
-                log_info(logger, 'FLUSH', f"→ quiltt_connections: {len(batch_data)} rows flushed successfully")
+                log_info(logger, 'FLUSH', f"→ linked_connections: {len(batch_data)} rows flushed successfully")
                 return len(batch_data)
                 
-            elif table == 'quiltt_accounts':
-                # Quiltt accounts table
+            elif table == 'linked_accounts':
+                # linked accounts table
                 if not rows:
-                    log_info(logger, 'FLUSH', f"quiltt_accounts: No rows in Redis for user {user_id}")
+                    log_info(logger, 'FLUSH', f"linked_accounts: No rows in Redis for user {user_id}")
                     return 0
                 
-                log_info(logger, 'FLUSH', f"quiltt_accounts: Found {len(rows)} rows in Redis for user {user_id}")
+                log_info(logger, 'FLUSH', f"linked_accounts: Found {len(rows)} rows in Redis for user {user_id}")
                 
                 # Get connection mapping from Redis (should have real MySQL IDs after connection flush)
-                connections_key = _get_redis_key('quiltt_connections', user_id)
+                connections_key = _get_redis_key('linked_connections', user_id)
                 connections_data = _redis_client.get(connections_key)
                 
                 connection_map = {}  # Map from temp ID to real MySQL ID
@@ -2973,7 +3041,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         if conn_row.get('id'):
                             connection_map[conn_row.get('id')] = conn_row.get('id')
                 
-                log_info(logger, 'FLUSH', f"quiltt_accounts connection_map has {len(connection_map)} entries")
+                log_info(logger, 'FLUSH', f"linked_accounts connection_map has {len(connection_map)} entries")
                 
                 batch_data = []
                 updated_rows = []
@@ -3049,19 +3117,19 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     updated_rows.append(row_copy)
                 
                 if skipped_count > 0:
-                    log_info(logger, 'FLUSH', f"quiltt_accounts: Skipped {skipped_count} accounts waiting for connection flush")
+                    log_info(logger, 'FLUSH', f"linked_accounts: Skipped {skipped_count} accounts waiting for connection flush")
                 
                 if not batch_data:
-                    log_info(logger, 'FLUSH', f"quiltt_accounts: No accounts ready to flush (all waiting for connections)")
+                    log_info(logger, 'FLUSH', f"linked_accounts: No accounts ready to flush (all waiting for connections)")
                     # Still return 0 so dirty flag stays (accounts need to wait for connections)
                     return 0
                 
                 # Debug: log connection IDs being used
                 conn_ids_used = set(item[1] for item in batch_data)
-                log_info(logger, 'FLUSH', f"quiltt_accounts: Flushing {len(batch_data)} accounts with connection_ids: {conn_ids_used}")
+                log_info(logger, 'FLUSH', f"linked_accounts: Flushing {len(batch_data)} accounts with connection_ids: {conn_ids_used}")
                 
                 cursor.executemany("""
-                    INSERT INTO quiltt_accounts
+                    INSERT INTO linked_accounts
                     (user_id, connection_id, account_id, account_name, alias, account_type, account_subtype,
                      mask, current_balance, available_balance, is_active, sync_transactions,
                      interest_rate, origination_principal, origination_date, maturity_date, loan_term,
@@ -3090,7 +3158,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 """, batch_data)
                 
                 rows_affected = cursor.rowcount
-                log_info(logger, 'FLUSH', f"quiltt_accounts: MySQL rowcount = {rows_affected}")
+                log_info(logger, 'FLUSH', f"linked_accounts: MySQL rowcount = {rows_affected}")
                 
                 # Update Redis with corrected connection_ids
                 redis_key = _get_redis_key(table, user_id)
@@ -3102,11 +3170,11 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                log_info(logger, 'FLUSH', f"→ quiltt_accounts: {len(batch_data)} rows flushed successfully")
+                log_info(logger, 'FLUSH', f"→ linked_accounts: {len(batch_data)} rows flushed successfully")
                 return len(batch_data)
                 
-            elif table == 'quiltt_transactions':
-                # Quiltt transactions table
+            elif table == 'linked_transactions':
+                # linked transactions table
                 if not rows:
                     return 0
                 
@@ -3126,47 +3194,47 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         row.get('imported_to_entry_id'),
                         row.get('imported_entry_type'),
                         row.get('imported_at'),
-                        # Ntropy enrichment fields
-                        row.get('ntropy_labels'),
-                        row.get('ntropy_merchant_id'),
-                        row.get('ntropy_logo'),
-                        row.get('ntropy_website'),
-                        row.get('ntropy_mcc'),
-                        row.get('ntropy_location'),
-                        row.get('ntropy_location_city'),
-                        row.get('ntropy_location_state'),
-                        row.get('ntropy_location_country'),
-                        row.get('ntropy_recurrence'),
-                        row.get('ntropy_recurrence_group_id'),
-                        row.get('ntropy_periodicity'),
-                        row.get('ntropy_periodicity_days'),
-                        row.get('ntropy_avg_amount'),
-                        row.get('ntropy_first_payment_date'),
-                        row.get('ntropy_latest_payment_date'),
-                        row.get('ntropy_person'),
-                        row.get('ntropy_transaction_type'),
-                        row.get('ntropy_enriched_at'),
-                        # Custom category suggestion fields (from direct Ntropy API)
+                        # provider enrichment fields
+                        row.get('enrichment_labels'),
+                        row.get('enrichment_merchant_id'),
+                        row.get('enrichment_logo'),
+                        row.get('enrichment_website'),
+                        row.get('enrichment_mcc'),
+                        row.get('enrichment_location'),
+                        row.get('enrichment_location_city'),
+                        row.get('enrichment_location_state'),
+                        row.get('enrichment_location_country'),
+                        row.get('enrichment_recurrence'),
+                        row.get('enrichment_recurrence_group_id'),
+                        row.get('enrichment_periodicity'),
+                        row.get('enrichment_periodicity_days'),
+                        row.get('enrichment_avg_amount'),
+                        row.get('enrichment_first_payment_date'),
+                        row.get('enrichment_last_payment_date'),
+                        row.get('enrichment_person'),
+                        row.get('enrichment_transaction_type'),
+                        row.get('enriched_at'),
+                        # Custom category suggestion fields (from direct the enrichment provider API)
                         row.get('custom_category_suggestion'),
                         row.get('custom_category_id'),
                         row.get('custom_category_type'),
                         row.get('custom_category_confidence'),
                         row.get('custom_suggestion_at'),
                         # Finicity metadata
-                        row.get('finicity_created_date')
+                        row.get('provider_created_date')
                     ))
                 
                 cursor.executemany("""
-                    INSERT INTO quiltt_transactions
+                    INSERT INTO linked_transactions
                     (user_id, account_id, transaction_id, date, description, amount, category, pending, merchant_name,
                      transaction_type, imported_to_entry_id, imported_entry_type, imported_at,
-                     ntropy_labels, ntropy_merchant_id, ntropy_logo, ntropy_website, ntropy_mcc,
-                     ntropy_location, ntropy_location_city, ntropy_location_state, ntropy_location_country,
-                     ntropy_recurrence, ntropy_recurrence_group_id, ntropy_periodicity, ntropy_periodicity_days,
-                     ntropy_avg_amount, ntropy_first_payment_date, ntropy_latest_payment_date,
-                     ntropy_person, ntropy_transaction_type, ntropy_enriched_at,
+                     enrichment_labels, enrichment_merchant_id, enrichment_logo, enrichment_website, enrichment_mcc,
+                     enrichment_location, enrichment_location_city, enrichment_location_state, enrichment_location_country,
+                     enrichment_recurrence, enrichment_recurrence_group_id, enrichment_periodicity, enrichment_periodicity_days,
+                     enrichment_avg_amount, enrichment_first_payment_date, enrichment_last_payment_date,
+                     enrichment_person, enrichment_transaction_type, enriched_at,
                      custom_category_suggestion, custom_category_id, custom_category_type, custom_category_confidence, custom_suggestion_at,
-                     finicity_created_date)
+                     provider_created_date)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         description = VALUES(description),
@@ -3178,39 +3246,39 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         imported_to_entry_id = VALUES(imported_to_entry_id),
                         imported_entry_type = VALUES(imported_entry_type),
                         imported_at = VALUES(imported_at),
-                        ntropy_labels = VALUES(ntropy_labels),
-                        ntropy_merchant_id = VALUES(ntropy_merchant_id),
-                        ntropy_logo = VALUES(ntropy_logo),
-                        ntropy_website = VALUES(ntropy_website),
-                        ntropy_mcc = VALUES(ntropy_mcc),
-                        ntropy_location = VALUES(ntropy_location),
-                        ntropy_location_city = VALUES(ntropy_location_city),
-                        ntropy_location_state = VALUES(ntropy_location_state),
-                        ntropy_location_country = VALUES(ntropy_location_country),
-                        ntropy_recurrence = VALUES(ntropy_recurrence),
-                        ntropy_recurrence_group_id = VALUES(ntropy_recurrence_group_id),
-                        ntropy_periodicity = VALUES(ntropy_periodicity),
-                        ntropy_periodicity_days = VALUES(ntropy_periodicity_days),
-                        ntropy_avg_amount = VALUES(ntropy_avg_amount),
-                        ntropy_first_payment_date = VALUES(ntropy_first_payment_date),
-                        ntropy_latest_payment_date = VALUES(ntropy_latest_payment_date),
-                        ntropy_person = VALUES(ntropy_person),
-                        ntropy_transaction_type = VALUES(ntropy_transaction_type),
-                        ntropy_enriched_at = VALUES(ntropy_enriched_at),
+                        enrichment_labels = VALUES(enrichment_labels),
+                        enrichment_merchant_id = VALUES(enrichment_merchant_id),
+                        enrichment_logo = VALUES(enrichment_logo),
+                        enrichment_website = VALUES(enrichment_website),
+                        enrichment_mcc = VALUES(enrichment_mcc),
+                        enrichment_location = VALUES(enrichment_location),
+                        enrichment_location_city = VALUES(enrichment_location_city),
+                        enrichment_location_state = VALUES(enrichment_location_state),
+                        enrichment_location_country = VALUES(enrichment_location_country),
+                        enrichment_recurrence = VALUES(enrichment_recurrence),
+                        enrichment_recurrence_group_id = VALUES(enrichment_recurrence_group_id),
+                        enrichment_periodicity = VALUES(enrichment_periodicity),
+                        enrichment_periodicity_days = VALUES(enrichment_periodicity_days),
+                        enrichment_avg_amount = VALUES(enrichment_avg_amount),
+                        enrichment_first_payment_date = VALUES(enrichment_first_payment_date),
+                        enrichment_last_payment_date = VALUES(enrichment_last_payment_date),
+                        enrichment_person = VALUES(enrichment_person),
+                        enrichment_transaction_type = VALUES(enrichment_transaction_type),
+                        enriched_at = VALUES(enriched_at),
                         custom_category_suggestion = VALUES(custom_category_suggestion),
                         custom_category_id = VALUES(custom_category_id),
                         custom_category_type = VALUES(custom_category_type),
                         custom_category_confidence = VALUES(custom_category_confidence),
                         custom_suggestion_at = VALUES(custom_suggestion_at),
-                        finicity_created_date = VALUES(finicity_created_date)
+                        provider_created_date = VALUES(provider_created_date)
                 """, batch_data)
                 
                 conn.commit()
                 cursor.close()
-                log_info(logger, 'FLUSH', f"→ quiltt_transactions: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ linked_transactions: {len(batch_data)} rows")
                 return len(batch_data)
                 
-            elif table == 'quiltt_category_mappings':
+            elif table == 'category_memory':
                 # Category memory: user-confirmed merchant→category mappings
                 # Unique key is (user_id, description, category_type)
                 if not rows:
@@ -3229,7 +3297,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     ))
                 
                 cursor.executemany("""
-                    INSERT INTO quiltt_category_mappings
+                    INSERT INTO category_memory
                     (user_id, merchant_id, description, category_id, category_type, account_id, times_confirmed)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
@@ -3241,7 +3309,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 conn.commit()
                 cursor.close()
-                log_info(logger, 'FLUSH', f"→ quiltt_category_mappings: {len(batch_data)} rows")
+                log_info(logger, 'FLUSH', f"→ category_memory: {len(batch_data)} rows")
                 return len(batch_data)
                 
             elif table == 'income_categories':
@@ -4060,18 +4128,18 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     if is_temp:
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
-                            INSERT INTO credit_accounts (id, user_id, name, mask, quiltt_account_id, interest_rate, starting_balance, is_card, is_line, is_quiltt, display_order)
+                            INSERT INTO credit_accounts (id, user_id, name, mask, linked_account_id, interest_rate, starting_balance, is_card, is_line, is_linked, display_order)
                             VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
                             row.get('name'),
                             row.get('mask'),
-                            row.get('quiltt_account_id'),
+                            row.get('linked_account_id'),
                             float(row.get('interest_rate', 0)) if row.get('interest_rate') else None,
                             float(row.get('starting_balance', 0)),
                             int(row.get('is_card', 0)),
                             int(row.get('is_line', 0)),
-                            int(row.get('is_quiltt', 0)),
+                            int(row.get('is_linked', 0)),
                             int(row.get('display_order', 0))
                         ))
                         new_id = cursor.lastrowid
@@ -4080,29 +4148,29 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
-                            INSERT INTO credit_accounts (id, user_id, name, mask, quiltt_account_id, interest_rate, starting_balance, is_card, is_line, is_quiltt, display_order)
+                            INSERT INTO credit_accounts (id, user_id, name, mask, linked_account_id, interest_rate, starting_balance, is_card, is_line, is_linked, display_order)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 mask = VALUES(mask),
-                                quiltt_account_id = VALUES(quiltt_account_id),
+                                linked_account_id = VALUES(linked_account_id),
                                 interest_rate = VALUES(interest_rate),
                                 starting_balance = VALUES(starting_balance),
                                 is_card = VALUES(is_card),
                                 is_line = VALUES(is_line),
-                                is_quiltt = VALUES(is_quiltt),
+                                is_linked = VALUES(is_linked),
                                 display_order = VALUES(display_order)
                         """, (
                             old_id,
                             user_id,
                             row.get('name'),
                             row.get('mask'),
-                            row.get('quiltt_account_id'),
+                            row.get('linked_account_id'),
                             float(row.get('interest_rate', 0)) if row.get('interest_rate') else None,
                             float(row.get('starting_balance', 0)),
                             int(row.get('is_card', 0)),
                             int(row.get('is_line', 0)),
-                            int(row.get('is_quiltt', 0)),
+                            int(row.get('is_linked', 0)),
                             int(row.get('display_order', 0))
                         ))
                 
@@ -4395,7 +4463,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 return len(rows)
                 
             elif table == 'recurring_mismatches':
-                # Recurring mismatches table — tracks Ntropy-detected bill/wage changes
+                # Recurring mismatches table — tracks the enrichment provider-detected bill/wage changes
                 # First, handle pending deletes
                 pending_key = f"pending_deletes:recurring_mismatches:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
@@ -4490,7 +4558,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 return len(rows)
             
             elif table == 'recurring_suggestions':
-                # Recurring suggestions table — Ntropy-detected suggested recurring entries
+                # Recurring suggestions table — the enrichment provider-detected suggested recurring entries
                 # First, handle pending deletes
                 pending_key = f"pending_deletes:recurring_suggestions:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
@@ -4935,8 +5003,8 @@ def flush_dirty_tables_for_user(user_id: int):
             'users',  # User settings (balance_threshold, starting_savings)
             'notifications',  # User notifications
             'setup_state',  # Setup wizard temporary state
-            'recurring_mismatches',  # Ntropy recurring mismatch detection
-            'recurring_suggestions',  # Ntropy suggested recurring entries
+            'recurring_mismatches',  # provider recurring mismatch detection
+            'recurring_suggestions',  # the enrichment provider suggested recurring entries
         ]
         
         # Get dirty tables for this user

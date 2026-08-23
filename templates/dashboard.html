@@ -779,12 +779,12 @@
         // Add this near the other server-side variables
         let member_since = {{ member_since | tojson | safe }};
 
-        // Quiltt account flags for entry locking
-        let quiltt_flags = {{ quiltt_flags | tojson | safe }};
-        let quiltt_last_txn_date = {{ quiltt_last_txn_date | tojson | safe }};
+        // bank account flags for entry locking
+        let bank_sync_flags = {{ bank_sync_flags | tojson | safe }};
+        let bank_last_txn_date = {{ bank_last_txn_date | tojson | safe }};
 
         /**
-         * Check if an entry should be locked due to Quiltt bank account sync.
+         * Check if an entry should be locked due to bank account sync.
          * Locked entries are on or before the last synced transaction date.
          * @param {Date|string} entryDate - The date of the entry
          * @param {number|string} categoryId - The category ID of the entry
@@ -792,16 +792,16 @@
          * @param {number|string} [accountId] - For CA entries, the credit account ID
          * @returns {boolean} - True if entry should be locked
          */
-        function isEntryLockedByQuiltt(entryDate, categoryId, entryType, accountId = null) {
-            // If no quiltt flags or no last txn date, nothing is locked
-            if (!quiltt_flags || !quiltt_last_txn_date) return false;
+        function isEntryLockedByBankSync(entryDate, categoryId, entryType, accountId = null) {
+            // If no bank_sync flags or no last txn date, nothing is locked
+            if (!bank_sync_flags || !bank_last_txn_date) return false;
             
             // Get today's date at midnight for comparison
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             
             // Parse the lock cutoff date (last synced transaction date)
-            const lockDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+            const lockDate = new Date(bank_last_txn_date + 'T00:00:00');
             
             // Parse entry date
             const entryDateObj = typeof entryDate === 'string' ? new Date(entryDate) : new Date(entryDate);
@@ -821,25 +821,25 @@
             // Lock entries on or before the last synced transaction date
             if (compareDate > lockDate) return false;
             
-            // Credit account entries - check if this specific account is Quiltt-linked
+            // Credit account entries - check if this specific account is bank-linked
             if (entryType === 'ca' && accountId !== null) {
                 const accountIdNum = parseInt(accountId, 10);
-                return quiltt_flags.quiltt_credit_ids && 
-                       quiltt_flags.quiltt_credit_ids.includes(accountIdNum);
+                return bank_sync_flags.linked_credit_ids && 
+                       bank_sync_flags.linked_credit_ids.includes(accountIdNum);
             }
             
             // If user has checking account linked, ALL income/expense entries are locked
-            if (quiltt_flags.has_checking && (entryType === 'income' || entryType === 'expense')) {
+            if (bank_sync_flags.has_checking && (entryType === 'income' || entryType === 'expense')) {
                 return true;
             }
             
             // If user has savings account linked, only Savings category entries are locked
-            if (quiltt_flags.has_savings) {
+            if (bank_sync_flags.has_savings) {
                 const catIdNum = parseInt(categoryId, 10);
-                if (entryType === 'income' && catIdNum === quiltt_flags.savings_income_category_id) {
+                if (entryType === 'income' && catIdNum === bank_sync_flags.savings_income_category_id) {
                     return true;
                 }
-                if (entryType === 'expense' && catIdNum === quiltt_flags.savings_expense_category_id) {
+                if (entryType === 'expense' && catIdNum === bank_sync_flags.savings_expense_category_id) {
                     return true;
                 }
             }
@@ -1434,6 +1434,12 @@
                 currentMonthIndex = (parseInt(yearDropdown.value) - baseYear) * 12 + parseInt(monthDropdown.value);
                 updateView();
             };
+
+            // Give both dropdowns the daily-dashboard field look. Called here,
+            // at the end of the one function that creates and repopulates them,
+            // so it stays correct across every view change. Idempotent.
+            enhanceSelectAsDropdown(monthDropdown);
+            enhanceSelectAsDropdown(yearDropdown);
         }
 
         function setupFridays(year, monthIndex) {
@@ -1497,9 +1503,9 @@
                     }
                 }
                 
-                // Add Quiltt sync marker if last synced transaction date falls within this week
-                if (quiltt_last_txn_date && quiltt_flags) {
-                    const lastTxnDate = new Date(quiltt_last_txn_date + 'T00:00:00');
+                // Add bank sync marker if last synced transaction date falls within this week
+                if (bank_last_txn_date && bank_sync_flags) {
+                    const lastTxnDate = new Date(bank_last_txn_date + 'T00:00:00');
                     let wsStart, wsEnd;
                     if (goofyWeekMode) {
                         wsStart = new Date(friday);
@@ -1514,10 +1520,10 @@
                     wsEnd.setUTCHours(23, 59, 59, 999);
                     if (lastTxnDate >= wsStart && lastTxnDate <= wsEnd) {
                         const marker = document.createElement('span');
-                        marker.className = 'quiltt-sync-marker quiltt-sync-marker--alternate';
+                        marker.className = 'bank-sync-marker bank-sync-marker--alternate';
                         marker.title = `Last bank sync: ${lastTxnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-                        marker.innerHTML = `<span class="quiltt-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i><span class="quiltt-sync-marker-date">${lastTxnDate.getUTCDate()}</span></span>`;
-                        const mDateSpan = marker.querySelector('.quiltt-sync-marker-date');
+                        marker.innerHTML = `<span class="bank-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i><span class="bank-sync-marker-date">${lastTxnDate.getUTCDate()}</span></span>`;
+                        const mDateSpan = marker.querySelector('.bank-sync-marker-date');
                         const mIcon = marker.querySelector('i');
                         mDateSpan.style.display = 'none';
                         marker.addEventListener('animationiteration', function() {
@@ -2095,12 +2101,12 @@
                 input.style.textAlign = 'right';
 
                 const weekEndDate = goofyWeekMode ? new Date(Date.UTC(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth(), fridayDate.getUTCDate() + 6)) : fridayDate;
-                const isQuilttLocked = isEntryLockedByQuiltt(friday, categoryId, 'income');
+                const isBankLocked = isEntryLockedByBankSync(friday, categoryId, 'income');
                 if (weekEndDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
                     input.disabled = true;
                     input.classList.add('auto-disable');
                     td.classList.add('readonly-cell');
-                } else if (isQuilttLocked) {
+                } else if (isBankLocked) {
                     input.readOnly = true;
                     input.classList.add('auto-disable');
                     td.classList.add('readonly-cell');
@@ -2312,12 +2318,12 @@
                 input.style.textAlign = 'right';
 
                 const expWeekEndDate = goofyWeekMode ? new Date(Date.UTC(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth(), fridayDate.getUTCDate() + 6)) : fridayDate;
-                const isExpenseQuilttLocked = isEntryLockedByQuiltt(friday, categoryId, 'expense');
+                const isExpenseBankLocked = isEntryLockedByBankSync(friday, categoryId, 'expense');
                 if (expWeekEndDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
                     input.disabled = true;
                     input.classList.add('auto-disable');
                     td.classList.add('readonly-cell');
-                } else if (isExpenseQuilttLocked) {
+                } else if (isExpenseBankLocked) {
                     input.readOnly = true;
                     input.classList.add('auto-disable');
                     td.classList.add('readonly-cell');
@@ -2538,12 +2544,12 @@
                 input.style.textAlign = 'right';
 
                 const caWeekEndDate = goofyWeekMode ? new Date(Date.UTC(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth(), fridayDate.getUTCDate() + 6)) : fridayDate;
-                const isCaQuilttLocked = isEntryLockedByQuiltt(friday, categoryId, 'ca', accountId);
+                const isCaBankLocked = isEntryLockedByBankSync(friday, categoryId, 'ca', accountId);
                 if (caWeekEndDate < cutoffDate || isWeekBeforeMemberSince(friday)) {
                     input.disabled = true;
                     input.classList.add('auto-disable');
                     td.classList.add('readonly-cell');
-                } else if (isCaQuilttLocked) {
+                } else if (isCaBankLocked) {
                     input.readOnly = true;
                     input.classList.add('auto-disable');
                     td.classList.add('readonly-cell');
@@ -3996,9 +4002,9 @@
 
             input.addEventListener('blur', function () {
                 
-                // If a Quiltt error just restored the value, sync originalValue and skip processing
-                if (input.dataset.quilttErrorReset === '1') {
-                    delete input.dataset.quilttErrorReset;
+                // If a bank lock error just restored the value, sync originalValue and skip processing
+                if (input.dataset.bankLockErrorReset === '1') {
+                    delete input.dataset.bankLockErrorReset;
                     originalValue = input.value.trim().replace(currencySymbol, '').replace(/,/g, '').trim();
                     entryProcessed = false;
                     return;
@@ -4134,6 +4140,22 @@
             // Helper to move to next/previous month and focus the correct cell
             function focusCellInOtherMonth(direction) {
                 // direction: 1 for next month, -1 for previous month
+
+                // Do not page backwards past the account start date. The column
+                // immediately left of the leftmost visible one is the first
+                // thing we would land on; if that week already ends before
+                // member_since then every earlier week does too, so there is
+                // nothing valid to reach and focus should simply stay put.
+                if (direction === -1) {
+                    const firstCell = row.children[0];
+                    const firstDateStr = firstCell && firstCell.getAttribute('data-date');
+                    if (firstDateStr) {
+                        const prevAnchor = new Date(firstDateStr + 'T00:00:00Z');
+                        prevAnchor.setUTCDate(prevAnchor.getUTCDate() - 7);
+                        if (isWeekBeforeMemberSince(prevAnchor)) return;
+                    }
+                }
+
                 // Save current category id and cell index
                 const categoryId = row.getAttribute('data-category-id');
                 // Try to get the correct table body selector for this row
@@ -4195,18 +4217,36 @@
                     if (nextInput) break;
                 }
             } else if (event.key === 'ArrowLeft') {
-                if (currentCellIndex > 0) {
-                    nextInput = row.children[currentCellIndex - 1].querySelector('input');
-                } else {
-                    // Move to previous month, rightmost cell
+                // Walk left past any disabled cells. Columns for dates before the
+                // account start date sit on the left of the table and their inputs
+                // are disabled; taking one as the target used to blur the current
+                // cell and then silently fail to focus it, leaving nothing
+                // selected at all. Only `disabled` is skipped - bank-locked cells
+                // are `readOnly` and remain navigable.
+                for (let i = currentCellIndex - 1; i >= 0; i--) {
+                    const candidate = row.children[i].querySelector('input');
+                    if (candidate && !candidate.disabled) {
+                        nextInput = candidate;
+                        break;
+                    }
+                }
+                if (!nextInput) {
+                    // Nothing valid to the left in this view. focusCellInOtherMonth
+                    // refuses to page back past the start date, in which case
+                    // focus stays exactly where it is - note we have not blurred.
                     focusCellInOtherMonth(-1);
                     event.preventDefault();
                     return;
                 }
             } else if (event.key === 'ArrowRight') {
-                if (currentCellIndex < row.children.length - 1) {
-                    nextInput = row.children[currentCellIndex + 1].querySelector('input');
-                } else {
+                for (let i = currentCellIndex + 1; i < row.children.length; i++) {
+                    const candidate = row.children[i].querySelector('input');
+                    if (candidate && !candidate.disabled) {
+                        nextInput = candidate;
+                        break;
+                    }
+                }
+                if (!nextInput) {
                     // Move to next month, leftmost cell
                     focusCellInOtherMonth(1);
                     event.preventDefault();
@@ -4228,6 +4268,38 @@
                         }
                     }
                     nextInput.focus();
+
+                    // Scrolling after a vertical move needs help in two cases.
+                    //
+                    // 1. A wrap around either end of the table is a long jump;
+                    //    centre it so the landing place is obvious.
+                    // 2. Moving up, the browser declines to scroll at all.
+                    //    .nav-bar and .calendarnav are sticky, so a row can sit
+                    //    *behind* them while still being geometrically inside the
+                    //    scrollport - the browser considers it visible and does
+                    //    nothing. Downward movement has no equivalent obstruction,
+                    //    which is why only upward navigation looked broken. The
+                    //    fix is the scroll-margin-top on these inputs in
+                    //    style.css, which makes "behind the header" count as out
+                    //    of view; this call is what applies it.
+                    const targetRow = nextInput.closest('tr');
+                    const targetRowIndex = allRows.indexOf(targetRow);
+                    const isVertical = (event.key === 'ArrowUp' || event.key === 'ArrowDown');
+                    const wrapped =
+                        (event.key === 'ArrowDown' && targetRowIndex < currentRowIndex) ||
+                        (event.key === 'ArrowUp' && targetRowIndex > currentRowIndex);
+
+                    if (isVertical && targetRowIndex !== -1) {
+                        // 'nearest' honours the scroll-margin-top declared on
+                        // these inputs, so a row sitting behind the sticky header
+                        // counts as out of view and gets scrolled clear of it.
+                        // Note this must be scrollIntoView rather than
+                        // window.scrollBy: `body, html { height: 100%;
+                        // overflow-y: auto }` means the document may scroll on
+                        // body, which window.scrollBy does not touch, whereas
+                        // scrollIntoView finds whichever ancestor really scrolls.
+                        nextInput.scrollIntoView({ block: wrapped ? 'center' : 'nearest' });
+                    }
                 });
                 event.preventDefault();
             }
@@ -5173,22 +5245,22 @@
                 entryDateStr = thursdayDate.toISOString().split('T')[0];
             }
 
-            // Quiltt partial edit/delete: check if this category has Quiltt-protected past entries in this period
+            // bank partial edit/delete: check if this category has bank-protected past entries in this period
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const todayStr = today.toISOString().split('T')[0];
-            let useQuilttPartial = false;
-            if (quiltt_flags && startDate < todayStr && endDate >= todayStr) {
-                // Period spans today - check if this category/account is Quiltt-protected
+            let useBankPartial = false;
+            if (bank_sync_flags && startDate < todayStr && endDate >= todayStr) {
+                // Period spans today - check if this category/account is bank-protected
                 const yesterday = new Date(today);
                 yesterday.setDate(yesterday.getDate() - 1);
                 // For CA entries, get the accountId from the table
-                let accountIdForQuiltt = null;
+                let accountIdForLock = null;
                 if (type === 'ca') {
                     const caTable = td.closest('table[id^="ca-categories-table-"]');
-                    accountIdForQuiltt = caTable ? caTable.id.replace('ca-categories-table-', '') : null;
+                    accountIdForLock = caTable ? caTable.id.replace('ca-categories-table-', '') : null;
                 }
-                useQuilttPartial = isEntryLockedByQuiltt(yesterday, categoryId, type, accountIdForQuiltt);
+                useBankPartial = isEntryLockedByBankSync(yesterday, categoryId, type, accountIdForLock);
             }
 
             if (newValue === "") {
@@ -5200,8 +5272,8 @@
                         end_date: endDate,
                         type: type
                     };
-                    if (useQuilttPartial) {
-                        data.quiltt_partial = true;
+                    if (useBankPartial) {
+                        data.bank_partial = true;
                         data.today_date = todayStr;
                     }
                 $.ajax({
@@ -5212,8 +5284,8 @@
                     success: function(response) {
                         localStorage.setItem('totalsNeedRefresh', 'true');
                         if (response.status === 'success') {
-                            // Quiltt partial: show remaining past_sum instead of clearing
-                            if (useQuilttPartial && response.past_sum > 0) {
+                            // bank partial: show remaining past_sum instead of clearing
+                            if (useBankPartial && response.past_sum > 0) {
                                 input.value = currencySymbol + formatNumberWithCommas(response.past_sum);
                                 updateLocalState(type, categoryId, fridayDateStr, response.past_sum, false, fridayDateStr);
                             } else {
@@ -5325,8 +5397,8 @@
                 });
                 } // end proceedWithDelete
 
-                // Quiltt partial: show confirmation via generic modal
-                if (useQuilttPartial) {
+                // bank partial: show confirmation via generic modal
+                if (useBankPartial) {
                     showDashboardSpinner(false);
                     const confirmed = await showConfirmModal({
                         title: 'Bank-Connected Account',
@@ -5370,8 +5442,8 @@
                     amount: amount,
                     type: type
                 };
-                if (useQuilttPartial) {
-                    data.quiltt_partial = true;
+                if (useBankPartial) {
+                    data.bank_partial = true;
                     data.today_date = todayStr;
                 }
                 $.ajax({
@@ -5493,7 +5565,7 @@
                     },
                     error: function(xhr) {
                         showDashboardSpinner(false);
-                        // Quiltt partial: show error message if past entries exceed new amount
+                        // bank partial: show error message if past entries exceed new amount
                         if (xhr.responseJSON && xhr.responseJSON.message) {
                             // Restore original value and flag input so blur handler skips re-triggering modal
                             const entryList = type === 'income' ? incomeEntries : (type === 'expense' ? expenseEntries : c_expense_entries);
@@ -5502,7 +5574,7 @@
                                 const origVal = parseFloat(existingEntry.total_amount ?? existingEntry.amount ?? 0);
                                 input.value = origVal > 0 ? currencySymbol + formatNumberWithCommas(origVal) : '';
                             }
-                            input.dataset.quilttErrorReset = '1';
+                            input.dataset.bankLockErrorReset = '1';
                             showConfirmModal({ title: 'Cannot Update Entry', message: xhr.responseJSON.message, confirmText: 'OK', hideCancel: true });
                         }
                     }
@@ -6480,8 +6552,8 @@
                     accountId = tbody.id.replace('ca-categories-body-', '');
                 }
 
-                // Block toggle if entry is locked by Quiltt
-                if (isEntryLockedByQuiltt(cellDateStr, categoryId, tableType, accountId)) {
+                // Block toggle if entry is locked by bank sync
+                if (isEntryLockedByBankSync(cellDateStr, categoryId, tableType, accountId)) {
                     return;
                 }
 
@@ -6537,7 +6609,7 @@
                         return; // Not a cell, ignore
                     }
 
-                    // Check Quiltt lock before showing context menu
+                    // Check bank lock before showing context menu
                     const categoryId = targetCell.closest('tr')?.getAttribute('data-category-id');
                     const cellDateStr = targetCell.getAttribute('data-date');
                     let accountId = null;
@@ -6545,7 +6617,7 @@
                         const tbody = targetCell.closest('tbody');
                         accountId = tbody ? tbody.id.replace('ca-categories-body-', '') : null;
                     }
-                    if (isEntryLockedByQuiltt(cellDateStr, categoryId, tableType, accountId)) {
+                    if (isEntryLockedByBankSync(cellDateStr, categoryId, tableType, accountId)) {
                         return; // Allow default context menu for locked entries
                     }
 
@@ -6572,7 +6644,7 @@
                         return;
                     }
 
-                    // Check Quiltt lock before allowing long-press toggle
+                    // Check bank lock before allowing long-press toggle
                     const categoryId = targetCell.closest('tr')?.getAttribute('data-category-id');
                     const cellDateStr = targetCell.getAttribute('data-date');
                     let lockTableType = null;
@@ -6586,7 +6658,7 @@
                         lockTableType = 'ca';
                         accountId = tbody.id.replace('ca-categories-body-', '');
                     }
-                    if (isEntryLockedByQuiltt(cellDateStr, categoryId, lockTableType, accountId)) {
+                    if (isEntryLockedByBankSync(cellDateStr, categoryId, lockTableType, accountId)) {
                         return;
                     }
 
