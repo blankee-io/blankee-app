@@ -658,7 +658,7 @@ curl -H "Cookie: session=..." http://localhost:5000/pool-status
 ```
 
 ### Apache/WSGI Deployment
-- Application running at 192.0.2.45
+- Application running on the app host
 - Connection pool initializes on first request
 - Shared across all WSGI worker threads
 - No connection leaks observed
