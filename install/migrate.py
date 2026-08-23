@@ -2,7 +2,7 @@
 """
 Bring a database up to date. Used by both install paths and safe to re-run.
 
-WHY THIS EXISTS RATHER THAN "just load schema.sql": migrations/schema.sql is a
+WHY THIS EXISTS RATHER THAN "just load schema.sql": install/sql/schema.sql is a
 dump from a point in the past. It is missing nine later migrations - is_savings,
 the recurring_* tables, the category_type unification, the decimal widening,
 instance_settings, the SMTP verification columns, users.is_admin, and the
@@ -33,7 +33,7 @@ import subprocess
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MIGRATIONS_DIR = os.path.join(REPO_ROOT, 'migrations')
+MIGRATIONS_DIR = os.path.join(REPO_ROOT, 'install', 'sql')
 
 # Order matters. schema.sql is the baseline; everything after it is applied on
 # top, oldest first.
@@ -51,19 +51,12 @@ MIGRATIONS = [
     'add_totals_remainders_m_fk.sql',
 ]
 
-# Deliberately not applied, and why:
-#   *_rollback.sql            - undo scripts, run by hand if ever needed
-#   remove_quiltt_ntropy.sql  - a one-time purge of vendor tables a fresh
-#                               database never had
-#   category_groups_phase1.sql, drop_users_handle.sql,
-#   drop_email_verification.sql
-#                             - already reflected in schema.sql
-SKIPPED = (
-    'remove_quiltt_ntropy.sql',
-    'category_groups_phase1.sql',
-    'drop_users_handle.sql',
-    'drop_email_verification.sql',
-)
+# This directory holds only what a fresh install applies. The rollback scripts
+# and the one-off purges that used to sit beside them are gone: they were written
+# against particular database states, a new database has never been in any of
+# them, and keeping them invited someone to run one.
+#
+# Anything genuinely needed later belongs here, in MIGRATIONS, in order.
 
 # What must be true when this finishes. Checked against the live schema, so a
 # migration that silently did nothing is caught here rather than by a 500 later.
@@ -286,8 +279,6 @@ def main():
             else:
                 print(f'  {name}: applied')
             record(cfg, name)
-
-        print(f'  skipped by design: {", ".join(SKIPPED)}')
 
     print()
     print('verifying the schema...')
