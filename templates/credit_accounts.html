@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Credit Accounts</title>
+    <!-- Link to the external stylesheet for styling the page -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Link to Font Awesome for icons -->
+    {% include '_fontawesome.html' %}
+    <!-- Link to jQuery library for JavaScript functionality -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/jquery-ui.css') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="credit-accounts-body">
+    <!-- Include the navigation bar -->
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <!-- Calendar navigation section (currently empty) -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <div class="credit-accounts-title">
+            <span><i class="fa-solid fa-credit-card"></i> Credit Accounts</span>
+             <button id="add-cas-btn" class="add-cas-btn" type="button" title="Add Credit Account"><i class="fa-kit fa-solid-credit-card-circle-plus"></i></button>
+        </div>
+            {% if credit_accounts and credit_accounts|length > 0 %}
+            <div class="credit-accounts-container">
+                <div class="credit-accounts-header">
+                </div>
+                <table class="credit-accounts-table">
+                    <thead>
+                        <tr>
+                            <th class="credit-account-sort-col"></th>
+                            <th class="credit-account-name-col">Account Name</th>
+                            <th class="credit-account-interest-col">Interest Rate</th>
+                            <th class="credit-account-type-col">Account Type</th>
+                            <th class="credit-account-bal-col">Today's Balance</th>
+                            <th class="credit-account-action-col"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for account in credit_accounts %}
+                            {% set recurring_info = ca_recurring_info.get(account.id, {}) %}
+                            <tr data-account-id="{{ account.id }}" 
+                                data-name="{{ account.name }}" 
+                                data-interest="{{ account.interest_rate }}"
+                                data-type="{% if account.is_card %}card{% elif account.is_line %}line{% else %}other{% endif %}"
+                                data-recurring="{{ 'true' if recurring_info.get('enabled') else 'false' }}"
+                                data-payment-amount="{{ recurring_info.get('amount', 0) }}"
+                                data-due-date="{{ recurring_info.get('monthly_days', '1') }}"
+                                data-bank-linked="{{ account.is_linked|default(0) }}">
+                                <td class="credit-account-sort-cell">
+                                    <span class="sort-handle"><i class="fa fa-bars"></i></span>
+                                </td>
+                                <td>{{ account.name }}</td>
+                                <td>
+                                    {% if account.interest_rate is not none %}
+                                        {{ account.interest_rate }}%
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if account.is_card %}
+                                        Card
+                                    {% elif account.is_line %}
+                                        Line
+                                    {% else %}
+                                        Other
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% set currency_symbol = '$' if currency_type == 'USD' else '€' if currency_type == 'EUR' else currency_type %}
+                                    {% if account.id in ca_balances_today and ca_balances_today[account.id] is not none %}
+                                        {{ currency_symbol }}{{ "%.2f"|format(ca_balances_today[account.id]) }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                </td>
+                                <td class="credit-account-action-cell">
+                                    {% if account.is_linked == 1 %}
+                                        <button class="bank-linked-btn" title="Linked to bank account">
+                                            <i class="fa-solid fa-building-columns"></i>
+                                        </button>
+                                    {% else %}
+                                        <button class="edit-credit-account-btn" data-account-id="{{ account.id }}">
+                                            <i class="fa-solid fa-pen-to-square"></i>
+                                        </button>
+                                        <button class="delete-credit-account-btn" data-account-id="{{ account.id }}">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="6"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        {% else %}
+            <div class="cas-empty-info">
+                <h3>You don't have any Credit Accounts!</h3>
+                <p>
+                    <strong>Credit Accounts</strong> let you track balances, payments, and interest for your cards and lines of credit.
+                </p>
+                <p>
+                    To get started, click the <strong><i class="fa-kit fa-solid-credit-card-circle-plus"></i></strong> button above.
+                </p>
+            </div>
+        {% endif %}
+    </div> 
+
+    <!-- Add this modal just after your main-container div, before scripts -->
+    <div id="add-credit-account-modal" class="footer-modal">
+        <div class="add-credit-account-modal-content">
+            <span class="add-credit-account-close-modal" id="add-credit-account-close">&times;</span>
+            <h3>Add Credit Account</h3>
+            <form id="add-credit-account-form">
+                <div class="footer-form-group">
+                    <label for="credit-account-name">Account Name:</label>
+                    <input type="text" id="credit-account-name" name="name" required placeholder="Account name">
+                </div>
+                <div class="footer-form-group">
+                    <label for="credit-account-interest">Interest Rate (%):</label>
+                    <input type="number" id="credit-account-interest" name="interest_rate" min="0" max="100" step="0.001" required inputmode="decimal" placeholder="0.000">
+                </div>
+                <div class="footer-form-group">
+                    <label for="credit-account-type">Account Type:</label>
+                    <select id="credit-account-type" name="type" required>
+                        <option value="card" selected>Card</option>
+                        <option value="line">Line</option>
+                    </select>
+                </div>
+                <div class="footer-form-group">
+                    <label for="credit-account-balance">Today's Balance:</label>
+                    <div class="currency-input-container">
+                        <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                        <input type="number" id="credit-account-balance" name="starting_balance" min="0" step="0.01" required inputmode="decimal" placeholder="0.00">
+                    </div>
+                </div>
+                <div class="footer-form-group">
+                    <button type="submit">Add Account</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for editing credit account -->
+    <div id="edit-credit-account-modal" class="footer-modal">
+        <div class="add-credit-account-modal-content">
+            <span class="add-credit-account-close-modal" id="edit-credit-account-close">&times;</span>
+            <h3>Edit Credit Account</h3>
+            <form id="edit-credit-account-form">
+                <input type="hidden" id="edit-credit-account-id" name="id">
+                <div class="footer-form-group">
+                    <label for="edit-credit-account-name">Account Name:</label>
+                    <input type="text" id="edit-credit-account-name" name="name" required placeholder="Account name">
+                </div>
+                <div class="footer-form-group">
+                    <label for="edit-credit-account-interest">Interest Rate (%):</label>
+                    <input type="number" id="edit-credit-account-interest" name="interest_rate" min="0" max="100" step="0.001" required inputmode="decimal" placeholder="0.000">
+                </div>
+                <div class="footer-form-group">
+                    <label for="edit-credit-account-type">Account Type:</label>
+                    <select id="edit-credit-account-type" name="type" required>
+                        <option value="card">Card</option>
+                        <option value="line">Line</option>
+                    </select>
+                </div>
+                <div class="footer-form-group">
+                    <button type="submit">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <!-- Link to the external JavaScript file -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('loading-screen').style.display = 'none';
+        });
+
+        // Helper function to show success messages
+        function showSuccessMessage(message) {
+            const successMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: #2aaaa8; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">' + message + '</div>');
+            $('body').append(successMsg);
+            setTimeout(function() {
+                successMsg.fadeOut(300, function() { $(this).remove(); });
+            }, 2000);
+        }
+
+        $(function() {
+            // Show modal when Add Credit Account button is clicked
+            $('#add-cas-btn').on('click', function() {
+                $('#add-credit-account-modal').show();
+                $('#credit-account-name').focus();
+            });
+
+            // Limit decimal places for interest rate (3 decimals)
+            $('#credit-account-interest').on('input', function() {
+                let value = $(this).val();
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    $(this).val(parts[0] + '.' + parts.slice(1).join(''));
+                    value = $(this).val();
+                }
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1].length > 3) {
+                        $(this).val(decimals[0] + '.' + decimals[1].substring(0, 3));
+                    }
+                }
+            });
+
+            // Limit decimal places for balance (2 decimals)
+            $('#credit-account-balance').on('input', function() {
+                let value = $(this).val();
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    $(this).val(parts[0] + '.' + parts.slice(1).join(''));
+                    value = $(this).val();
+                }
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1].length > 2) {
+                        $(this).val(decimals[0] + '.' + decimals[1].substring(0, 2));
+                    }
+                }
+            });
+
+            // Open edit modal when edit button is clicked
+            $('.credit-accounts-table').on('click', '.edit-credit-account-btn', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const $row = $(this).closest('tr');
+                const isBankLinked = $row.data('bank-linked') == 1;
+                
+                // Don't allow editing bank-linked accounts
+                if (isBankLinked) {
+                    return;
+                }
+                
+                const accountId = $row.data('account-id');
+                const name = $row.data('name');
+                const interest = $row.data('interest');
+                const type = $row.data('type');
+                
+                // Populate the edit form
+                $('#edit-credit-account-id').val(accountId);
+                $('#edit-credit-account-name').val(name);
+                $('#edit-credit-account-interest').val(interest);
+                $('#edit-credit-account-type').val(type);
+                
+                $('#edit-credit-account-modal').show();
+                $('#edit-credit-account-name').focus();
+            });
+
+            // Close edit modal
+            $('#edit-credit-account-close').on('click', function() {
+                $('#edit-credit-account-modal').hide();
+            });
+            $('#edit-credit-account-modal').on('mousedown', function(e) {
+                if (e.target === this) {
+                    $(this).hide();
+                }
+            });
+
+            // Submit edit form
+            $('#edit-credit-account-form').on('submit', function(e) {
+                e.preventDefault();
+                $('#loading-screen').show();
+                const formData = {
+                    id: $('#edit-credit-account-id').val(),
+                    name: $('#edit-credit-account-name').val().trim(),
+                    interest_rate: $('#edit-credit-account-interest').val().trim(),
+                    type: $('#edit-credit-account-type').val()
+                };
+                $.ajax({
+                    url: '/update-credit-account',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(formData),
+                    success: function(data) {
+                        $('#loading-screen').hide();
+                        $('#edit-credit-account-modal').hide();
+                        if (data.status === 'success') {
+                            showSuccessMessage('Credit account updated successfully');
+                            setTimeout(function() {
+                                location.reload();
+                            }, 500);
+                        } else {
+                            showToast(data.message || 'Error updating credit account.', 'error');
+                        }
+                    },
+                    error: function() {
+                        $('#loading-screen').hide();
+                        $('#edit-credit-account-modal').hide();
+                        showToast('Error updating credit account.', 'error');
+                    }
+                });
+            });
+
+            // Limit decimal places for edit interest rate
+            $('#edit-credit-account-interest').on('input', function() {
+                let value = $(this).val();
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    $(this).val(parts[0] + '.' + parts.slice(1).join(''));
+                    value = $(this).val();
+                }
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1].length > 3) {
+                        $(this).val(decimals[0] + '.' + decimals[1].substring(0, 3));
+                    }
+                }
+            });
+
+            // Close modal on X click or clicking outside modal content
+            $('#add-credit-account-close').on('click', function() {
+                $('#add-credit-account-modal').hide();
+            });
+            $('#add-credit-account-modal').on('mousedown', function(e) {
+                if (e.target === this) {
+                    $(this).hide();
+                }
+            });
+
+            // Submit form via AJAX (submit button or Enter key)
+            $('#add-credit-account-form').on('submit', function(e) {
+                e.preventDefault();
+                $('#loading-screen').show();
+                const formData = {
+                    name: $('#credit-account-name').val().trim(),
+                    interest_rate: $('#credit-account-interest').val().trim(),
+                    type: $('#credit-account-type').val(),
+                    starting_balance: $('#credit-account-balance').val().trim()
+                };
+                $.ajax({
+                    url: '/add-credit-account',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(formData),
+                    success: function(data) {
+                        $('#loading-screen').hide();
+                        $('#add-credit-account-modal').hide();
+                        if (data.status === 'success') {
+                            location.reload();
+                        } else {
+                            showToast(data.message || 'Error adding credit account.', 'error');
+                        }
+                    },
+                    error: function() {
+                        $('#loading-screen').hide();
+                        $('#add-credit-account-modal').hide();
+                        showToast('Error adding credit account.', 'error');
+                    }
+                });
+            });
+
+            // Allow Enter key to submit from any input in the modal
+            $('#add-credit-account-form input, #add-credit-account-form select').on('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    $('#add-credit-account-form').submit();
+                }
+            });
+        });
+
+        // ===================== SORTABLE (Drag and Drop) =====================
+        $(function() {
+            $(".credit-accounts-table tbody").sortable({
+                containment: "parent",
+                axis: "y",
+                scroll: true,
+                scrollSensitivity: 30,
+                scrollSpeed: 5,
+                handle: ".sort-handle",
+                helper: function(e, tr) {
+                    var $originals = tr.children();
+                    var $helper = tr.clone();
+                    $helper.children().each(function(index) {
+                        $(this).width($originals.eq(index).width());
+                    });
+                    $helper.css({ display: 'table', background: '#fff', 'z-index': 1000, margin: 0 });
+                    return $helper;
+                },
+                cursor: "move",
+                appendTo: document.body,
+                start: function(event, ui) {
+                    var mouseY = event.pageY;
+                    var offsetY = ui.helper.height() / 2;
+                    ui.helper.css({ position: 'absolute', top: mouseY - offsetY, left: event.pageX });
+                },
+                sort: function(event, ui) {
+                    var mouseY = event.pageY;
+                    var offsetY = ui.helper.height() / 2;
+                    ui.helper.css({ top: mouseY - offsetY, left: event.pageX });
+                },
+                stop: function() {
+                    saveCreditAccountOrder();
+                }
+            }).disableSelection();
+        });
+
+        function saveCreditAccountOrder() {
+            let order = [];
+            const rows = $(".credit-accounts-table tbody tr").get().reverse();
+            let orderNum = 1;
+            rows.forEach(function(element) {
+                order.push({
+                    id: $(element).data('account-id'),
+                    order: orderNum++
+                });
+            });
+            $.ajax({
+                url: "{{ url_for('update_credit_account_order') }}",
+                method: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ order: order }),
+                success: function(response) {
+                    if (response.status !== 'success') {
+                        showToast('Failed to save order.', 'error');
+                    }
+                },
+                error: function() {
+                    showToast('Failed to save order.', 'error');
+                }
+            });
+        }
+
+        $(function() {
+            // Delete credit account with confirmation
+            $('.credit-accounts-table').on('click', '.delete-credit-account-btn', async function(e) {
+                e.preventDefault();
+                const $row = $(this).closest('tr');
+                const isBankLinked = $row.data('bank-linked') == 1;
+
+                if (isBankLinked) return;
+
+                const accountId = $(this).data('account-id');
+                const confirmed = await showConfirmModal({
+                    title: 'Delete Credit Account',
+                    message: 'Are you sure you want to delete this item? If the date for this item is in the past, the amount will be moved to Uncategorized for that date.',
+                    confirmText: 'Delete',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
+
+                $('#loading-screen').show();
+                $.ajax({
+                    url: '/delete-credit-account',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ id: accountId }),
+                    success: function(response) {
+                        $('#loading-screen').hide();
+                        if (response.status === 'success') {
+                            location.reload();
+                        } else {
+                            showToast(response.message || 'Error deleting credit account.', 'error');
+                        }
+                    },
+                    error: function() {
+                        $('#loading-screen').hide();
+                        showToast('Error deleting credit account.', 'error');
+                    }
+                });
+            });
+        });
+    </script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            fetch('/api/tutorial/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.completed && data.completed['tutorial_credit_accounts']) return;
+
+                    var cs = '{{ "$" if currency_type == "USD" else "\u20ac" if currency_type == "EUR" else currency_type }}';
+                    var emptyInfo = document.querySelector('.cas-empty-info');
+                    var mainContainer = document.getElementById('main-container');
+                    var existingContainer = document.querySelector('.credit-accounts-container');
+                    var createdContainer = false;
+
+                    if (!existingContainer) {
+                        if (emptyInfo) emptyInfo.style.display = 'none';
+                        existingContainer = document.createElement('div');
+                        existingContainer.className = 'credit-accounts-container tutorial-temp-container';
+                        existingContainer.innerHTML =
+                            '<div class="credit-accounts-header"></div>' +
+                            '<table class="credit-accounts-table">' +
+                                '<thead><tr>' +
+                                    '<th class="credit-account-sort-col"></th>' +
+                                    '<th class="credit-account-name-col">Account Name</th>' +
+                                    '<th class="credit-account-interest-col">Interest Rate</th>' +
+                                    '<th class="credit-account-type-col">Account Type</th>' +
+                                    '<th class="credit-account-bal-col">Today\'s Balance</th>' +
+                                    '<th class="credit-account-action-col"></th>' +
+                                '</tr></thead>' +
+                                '<tbody></tbody>' +
+                                '<tfoot><tr><td colspan="6"></td></tr></tfoot>' +
+                            '</table>';
+                        mainContainer.appendChild(existingContainer);
+                        createdContainer = true;
+                    }
+
+                    // Inject temp rows at top of tbody
+                    var tbody = existingContainer.querySelector('.credit-accounts-table tbody');
+                    var row1 = document.createElement('tr');
+                    row1.className = 'tutorial-temp-row';
+                    row1.innerHTML =
+                        '<td class="credit-account-sort-cell"><span class="sort-handle"><i class="fa fa-bars"></i></span></td>' +
+                        '<td>Example Visa</td>' +
+                        '<td>19.990%</td>' +
+                        '<td>Card</td>' +
+                        '<td>' + cs + '1,250.00</td>' +
+                        '<td class="credit-account-action-cell">' +
+                            '<button class="edit-credit-account-btn tutorial-temp-btn"><i class="fa-solid fa-pen-to-square"></i></button>' +
+                            '<button class="delete-credit-account-btn tutorial-temp-btn"><i class="fa-solid fa-trash"></i></button>' +
+                        '</td>';
+
+                    var row2 = document.createElement('tr');
+                    row2.className = 'tutorial-temp-row';
+                    row2.innerHTML =
+                        '<td class="credit-account-sort-cell"><span class="sort-handle"><i class="fa fa-bars"></i></span></td>' +
+                        '<td>Example HELOC</td>' +
+                        '<td>7.500%</td>' +
+                        '<td>Line</td>' +
+                        '<td>' + cs + '8,400.00</td>' +
+                        '<td class="credit-account-action-cell">' +
+                            '<button class="bank-linked-btn tutorial-temp-btn" title="Linked to bank account"><i class="fa-solid fa-building-columns"></i></button>' +
+                        '</td>';
+
+                    if (tbody) {
+                        tbody.insertBefore(row2, tbody.firstChild);
+                        tbody.insertBefore(row1, tbody.firstChild);
+                    }
+
+                    function cleanup() {
+                        document.querySelectorAll('.tutorial-temp-row').forEach(function(r) { r.remove(); });
+                        var tempC = document.querySelector('.tutorial-temp-container');
+                        if (tempC) tempC.remove();
+                        if (emptyInfo) emptyInfo.style.display = '';
+                    }
+
+                    startTutorial('tutorial_credit_accounts', [
+                        {
+                            selector: '.credit-accounts-title',
+                            text: 'Track your <b>credit cards and lines of credit</b> here \u2014 balances, interest rates, and account types.'
+                        },
+                        {
+                            selector: '.tutorial-temp-row',
+                            text: 'Each row shows an account with its <b>name</b>, <b>interest rate</b>, <b>type</b> (Card or Line), and <b>today\u2019s balance</b>.'
+                        },
+                        {
+                            selector: '.tutorial-temp-row:first-of-type .sort-handle',
+                            text: 'Drag the <b>\u2261 handle</b> to reorder accounts. This order is used across all dashboards.',
+                            padding: 6
+                        },
+                        {
+                            selector: '#add-cas-btn',
+                            text: 'Tap to <b>add a new credit account</b>.',
+                            padding: 6
+                        },
+                        {
+                            selector: '.tutorial-temp-row:first-of-type .edit-credit-account-btn',
+                            text: 'Tap the <b>pencil</b> to edit or the <b>trash</b> to delete an account.',
+                            padding: 6
+                        },
+                        {
+                            selector: '.tutorial-temp-row .bank-linked-btn',
+                            text: 'The <b>bank icon</b> means this account is linked to your bank. Linked accounts sync automatically and cannot be manually edited.',
+                            padding: 6
+                        }
+                    ], { delay: 500, onComplete: cleanup });
+                })
+                .catch(function() {});
+        }, 600);
+    });
+    </script>
+</body>
+</html>

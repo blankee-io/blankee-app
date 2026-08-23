@@ -1,0 +1,44 @@
+<!-- 
+  Redis Refresh Handler Template Snippet
+  
+  Add this to your base template (e.g., in the <head> or before </body>)
+  to enable automatic page refresh when Redis hydration occurs.
+  
+  This should only be included for authenticated users.
+-->
+
+{% if current_user.is_authenticated %}
+<!-- Redis Hydration Auto-Refresh -->
+<script src="{{ url_for('static', filename='js/redis_refresh.js') }}"></script>
+
+<!-- Optional: Add authentication marker to body tag -->
+<script>
+    // This helps the refresh handler detect authenticated state
+    document.body.classList.add('authenticated');
+    document.body.setAttribute('data-user-authenticated', 'true');
+</script>
+{% endif %}
+
+<!-- 
+  Alternative: If you want more control, you can initialize manually:
+  
+  <script>
+    // Only start refresh checking after user interaction
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof RedisRefreshHandler !== 'undefined') {
+        RedisRefreshHandler.start();
+      }
+    });
+  </script>
+  
+  Or start conditionally based on page:
+  
+  <script>
+    {% if request.endpoint in ['dashboard', 'dashboard_d', 'dashboard_m', 'dashboard_y'] %}
+      // Only enable on dashboard pages
+      if (typeof RedisRefreshHandler !== 'undefined') {
+        RedisRefreshHandler.start();
+      }
+    {% endif %}
+  </script>
+-->

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Support</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="support-page">
+    {% include 'nav.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <div class="profile-box">
+            <div class="profile-content">
+                <div class="profile-actions">
+
+                    <div class="faq-header">
+                        <i class="fa-regular fa-circle-question faq-header-icon"></i>
+                        <h1 class="faq-title">Frequently Asked Questions</h1>
+                        <p class="faq-subtitle">Everything you need to know about Blankee</p>
+                    </div>
+
+                    <!-- Getting Started -->
+                    <div class="profile-section faq-section">
+                        <div class="section-liner">
+                            <div class="faq-section-title">
+                                <i class="fa-solid fa-rocket"></i>
+                                Getting Started
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What is Blankee and what does it do?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Blankee is a personal budgeting app that helps you track your income and expenses on a weekly, daily, monthly, or yearly basis. You set up income and expense categories, log entries as you earn and spend, and see your running balance (your "remainder") update in real time. You can also connect your bank accounts to import transactions automatically.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How do I set up my budget for the first time?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>After registering, you'll be guided through a setup flow where you can connect a bank account or skip that step, add your income and expense categories, and choose a starting savings balance. Once complete, you'll land on your main dashboard where you can start logging entries right away.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item faq-item-dashboard-views">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What are the different dashboard views?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Blankee offers four dashboard views to match how you think about money:</p>
+                                    <ul>
+                                        <li><strong>Weekly (3-month)</strong> — See the last 12 weeks side-by-side. Great for spotting trends.</li>
+                                        <li><strong>Daily</strong> — Drill into a single day to see every entry.</li>
+                                        <li><strong>Monthly</strong> — See each month's totals across several months.</li>
+                                        <li><strong>Yearly</strong> — High-level annual overview.</li>
+                                    </ul>
+                                    <p>You can set any view as your home page from your Profile settings.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What is the "remainder" shown on the dashboard?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>The remainder is your net balance for a given period — total income minus total expenses. A positive remainder means you came in under budget; a negative number means you spent more than you earned. Each period's remainder also carries forward to the next as a starting point, so your balance stays connected across weeks.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Categories & Entries -->
+                    <div class="profile-section faq-section">
+                        <div class="section-liner">
+                            <div class="faq-section-title">
+                                <i class="fa-solid fa-tags"></i>
+                                Categories &amp; Entries
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How do I add income or expense categories?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Go to <strong>Manage Categories</strong> from your profile or the dashboard. From there you can add, rename, reorder, or hide income and expense categories. You can also group related categories together for a cleaner dashboard view.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What is a recurring entry, and how does it work?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>A recurring entry is automatically added to your budget on a schedule you define — weekly, biweekly, monthly, yearly, or on specific days. For example, you might set up a $1,200 rent expense that recurs on the 1st of every month. Blankee will populate that amount on the right date every period, so you don't have to enter it manually.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What are "buckets" in recurring entries?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Buckets let you split a recurring entry across multiple periods or adjust individual occurrences without changing the whole recurring schedule. For example, if you receive a paycheck that varies slightly, you can tweak a single bucket's amount without affecting future occurrences. Buckets are shown with a filled indicator on the dashboard.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>Can I hide a category without deleting it?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Yes. In Manage Categories, each category has a hide option. Hidden categories are removed from your dashboard view but all historical entries are preserved. You can unhide them at any time.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What happens if I delete a category?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Deleting a category permanently removes it and all of its entries from your budget. This action cannot be undone. If you think you might need the category again later, consider hiding it instead.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bank Connections -->
+                    <div class="profile-section faq-section">
+                        <div class="section-liner">
+                            <div class="faq-section-title">
+                                <i class="fa-solid fa-building-columns"></i>
+                                Bank Connections
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How do I connect my bank account?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Bank connections are temporarily unavailable while we move to a new Open Banking provider. In the meantime you can enter income and expenses manually, and everything you have already recorded stays exactly as it is. We'll re-enable connections from the <strong>Bank Accounts</strong> page as soon as the new provider is live.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How do I import a bank transaction into my budget?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Go to <strong>Pending Transactions</strong> in the nav menu. You'll see a list of unimported transactions from your connected bank accounts. For each one, you can select an existing budget category and click <strong>Import</strong> to add it as a budget entry. Imported transactions are marked so you won't be prompted to import them again.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What does it mean when a bank connection shows an error?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Banks occasionally require you to re-authenticate, especially after a password change or security update on their end. When this happens, you'll receive a notification with a <strong>Reconnect</strong> link. Clicking it will take you to the Bank Accounts page where you can re-authorize the connection without losing any of your existing transaction history.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>Will Blankee automatically update my credit card balances?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Yes. When your bank syncs, Blankee compares the live balance from your bank with your manually entered expenses and automatically creates a balance adjustment entry if there's a discrepancy. This keeps your credit account balance accurate without any manual effort.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>Is my banking data secure?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Yes. Bank connections are handled by a dedicated Open Banking provider — Blankee never stores your bank username or password. Connections use OAuth-based token authentication, and you can revoke access at any time from the Bank Accounts page. We are currently between providers, so new connections are temporarily unavailable.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Credit Accounts -->
+                    <div class="profile-section faq-section">
+                        <div class="section-liner">
+                            <div class="faq-section-title">
+                                <i class="fa-solid fa-credit-card"></i>
+                                Credit Accounts
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What is a credit account in Blankee?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>A credit account lets you track spending on a credit card or line of credit separately from your regular expense categories. You add expense categories under the credit account (e.g., Dining, Shopping), log charges against those categories, and track the running balance including interest. Payments to the credit account reduce the balance.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How do I record a payment to my credit card?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>On the weekly dashboard, find the credit account section at the bottom. Click on a cell in the <strong>Payment</strong> row to enter the amount you paid toward that card. The balance will update automatically to reflect the payment.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What is a "Bud" account?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>A Bud is a dedicated budget project for a specific goal — like tracking a home renovation, a vacation, or any large planned expense. You create a Bud, add line items with amounts and due dates, and Blankee helps you track progress toward the total. Buds connect to expense categories so costs flow into your regular budget too.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Savings & Balance -->
+                    <div class="profile-section faq-section">
+                        <div class="section-liner">
+                            <div class="faq-section-title">
+                                <i class="fa-solid fa-piggy-bank"></i>
+                                Savings &amp; Balance
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How does savings tracking work?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Blankee calculates your savings by accumulating the remainder from each week. Your starting savings balance is set during profile setup and can be updated in your profile settings. If you connect a bank account, Blankee can also auto-import your actual bank balance as an adjustment to keep your savings figure accurate.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What is the balance threshold alert?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>You can set a balance threshold in your Profile settings. When your weekly remainder drops below this number, Blankee will send you a notification so you know to keep an eye on spending. Set it to 0 to disable the alert.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Profile & Settings -->
+                    <div class="profile-section faq-section">
+                        <div class="section-liner">
+                            <div class="faq-section-title">
+                                <i class="fa-solid fa-gear"></i>
+                                Profile &amp; Settings
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How do I change my home page (landing page)?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>In your Profile, scroll to the Settings section and select your preferred view from the <strong>Home Page</strong> dropdown. Options include the weekly 3-month view, daily view, monthly view, and yearly view. Your selection takes effect immediately.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What is "Friday Start Week" mode?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>By default, budget weeks run Saturday → Friday. If you toggle <strong>Friday Start Week</strong> in your profile settings, weeks will run Friday → Thursday instead. This is useful if your pay cycle or personal planning starts on a Friday. All dashboards and totals will update to reflect the new week boundary.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How do I set up two-factor authentication (MFA)?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>In your Profile, scroll to the <strong>Two-Factor Authentication</strong> section. Click <strong>Set Up MFA</strong>, scan the QR code with an authenticator app (such as Google Authenticator or Authy), then enter the 6-digit code to confirm. Once enabled, you'll be asked for a code each time you log in.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How do I change my email address?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>In your Profile, enter your new email address in the email field and save. The change takes effect immediately, and you'll use the new address to sign in from then on.</p>
+                                </div>
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>How do I change my currency?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>In your Profile settings, find the <strong>Currency</strong> dropdown and select your preferred currency. The symbol will update across all dashboards and entry fields.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Notifications -->
+                    <div class="profile-section faq-section">
+                        <div class="section-liner">
+                            <div class="faq-section-title">
+                                <i class="fa-solid fa-bell"></i>
+                                Notifications
+                            </div>
+
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What kinds of notifications does Blankee send?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Blankee sends in-app notifications for events like your balance dropping below your threshold, a bank connection needing to be re-authorized, and account-related activity like email or password changes. You can view all notifications by clicking the bell icon in the top navigation bar.</p>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <div class="faq-header support-request-header">
+                        <i class="fa-solid fa-headset faq-header-icon"></i>
+                        <h2 class="faq-title">Support</h2>
+                        <p class="faq-subtitle">Need help with something specific? Send us a support request.</p>
+                    </div>
+
+                    <div class="profile-section support-request-section">
+                        <div class="section-liner">
+                            <form id="support-request-form" class="support-request-form" method="POST" action="{{ url_for('support_request') }}" autocomplete="off">
+                                <!-- Honeypot fields to absorb browser/password-manager autofill -->
+                                <input type="text" name="fake_username" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;height:0;width:0;opacity:0;">
+                                <input type="password" name="fake_password" autocomplete="current-password" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;height:0;width:0;opacity:0;">
+
+                                <div class="support-form-row">
+                                    <label for="support-title">Subject</label>
+                                    <input type="text" id="support-title" name="title" class="login-input" maxlength="150" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-form-type="other" data-1p-ignore="true" readonly required>
+                                </div>
+
+                                <div class="support-form-row">
+                                    <label for="support-email">Your Email</label>
+                                    <input type="email" id="support-email" name="email" class="login-input" value="{{ support_email }}" readonly>
+                                </div>
+
+                                <div class="support-form-row">
+                                    <label for="support-message">How can we help?</label>
+                                    <textarea id="support-message" name="message" class="support-message-input" rows="6" maxlength="5000" placeholder="Describe your issue" required></textarea>
+                                </div>
+
+                                <button type="submit" class="confirm-delete-category-btn support-submit-btn">
+                                    Send Support Request
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include 'footer.html' %}
+
+    <script>
+        {% if support_success %}
+        document.addEventListener('DOMContentLoaded', function() {
+            showConfirmModal({
+                title: 'Support Request Sent',
+                message: 'Your support request has been sent. Blankee will respond by email.',
+                confirmText: 'OK',
+                hideCancel: true
+            });
+        });
+        {% endif %}
+
+        // Clear any browser autofill on the Subject field
+        (function clearSubjectAutofill() {
+            var el = document.getElementById('support-title');
+            if (!el) return;
+            // Remove readonly on first interaction so user can type
+            var unlock = function() {
+                el.removeAttribute('readonly');
+                el.value = '';
+                el.removeEventListener('focus', unlock);
+                el.removeEventListener('mousedown', unlock);
+                el.removeEventListener('touchstart', unlock);
+            };
+            el.addEventListener('focus', unlock);
+            el.addEventListener('mousedown', unlock);
+            el.addEventListener('touchstart', unlock);
+            // Also clear anything that slipped in
+            var clear = function() { el.value = ''; };
+            clear();
+            window.addEventListener('load', function() { setTimeout(clear, 0); setTimeout(clear, 150); });
+        })();
+
+        document.querySelectorAll('.faq-question').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var item = this.closest('.faq-item');
+                var answer = item.querySelector('.faq-answer');
+                var isOpen = this.getAttribute('aria-expanded') === 'true';
+
+                // Close all other open items in the same section
+                var section = item.closest('.faq-section');
+                section.querySelectorAll('.faq-item').forEach(function(otherItem) {
+                    if (otherItem !== item) {
+                        var otherBtn = otherItem.querySelector('.faq-question');
+                        var otherAnswer = otherItem.querySelector('.faq-answer');
+                        otherBtn.setAttribute('aria-expanded', 'false');
+                        otherAnswer.style.maxHeight = null;
+                    }
+                });
+
+                if (isOpen) {
+                    this.setAttribute('aria-expanded', 'false');
+                    answer.style.maxHeight = null;
+                } else {
+                    this.setAttribute('aria-expanded', 'true');
+                    answer.style.maxHeight = answer.scrollHeight + 'px';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

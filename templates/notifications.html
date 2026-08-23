@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Notifications</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="notifications-body">
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+            {% if notifications %}
+                <div class="nav-buttons">
+                    <button class="nav-button mark-all-read-button" onclick="markAllAsRead()">
+                        <span class="stacked-envelopes">
+                            <i class="fa-solid fa-envelope-open envelope-back"></i>
+                            <i class="fa-solid fa-envelope-open envelope-front"></i>
+                        </span>
+                        <span class="nav-tooltip">Mark All Read</span>
+                    </button>
+                    <button class="nav-button clear-read-button" onclick="clearReadNotifications()">
+                        <i class="fa-solid fa-broom-wide"></i>
+                        <span class="nav-tooltip">Clear Read</span>
+                    </button>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <div class="profile-box" id="notifications-box">
+            <div class="profile-content">
+                <div class="profile-actions">
+                    {% if notifications %}
+                        {% for notification in notifications %}
+                            <div class="profile-section notification-section notification-item {% if notification.is_read %}notification-read{% endif %}" data-notification-id="{{ notification.id }}" id="notification-section">
+                                <div class="notification-header">
+                                    <span class="notification-date">
+                                        {{ notification.date.strftime('%b %d, %Y at %I:%M %p') }}
+                                    </span>
+                                    <div class="notification-buttons">
+                                        <button class="mark-read-button {% if notification.is_read %}is-read{% endif %}" onclick="toggleReadStatus({{ notification.id }})">
+                                            <i class="fa-solid {% if notification.is_read %}fa-envelope-open{% else %}fa-envelope{% endif %}"></i>
+                                        </button>
+                                        <button class="delete-notification-button" onclick="deleteNotification({{ notification.id }})">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="notification-message">
+                                    {{ notification.message | safe }}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="profile-section no-notifications-message">
+                            <i class="fa-solid fa-circle-check"></i>
+                            <h3>All caught up!</h3>
+                            <p>You have no notifications.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include 'loading_modals.html' %}
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script type="text/javascript">
+        document.getElementById('loading-screen').style.display = 'none';
+
+        // Helper function to update the notification badge in nav
+        function updateNotificationBadge() {
+            const unreadCount = $('.notification-item:not(.notification-read)').length;
+            const badge = $('.notification-badge');
+            
+            if (unreadCount === 0) {
+                // Remove the badge if no unread notifications
+                badge.remove();
+            } else if (badge.length === 0) {
+                // Add badge if it doesn't exist and there are unread notifications
+                $('.nav-notifications').append('<span class="notification-badge"></span>');
+            }
+        }
+
+        function toggleReadStatus(notificationId) {
+            $.ajax({
+                url: '/mark-notification-read',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ notification_id: notificationId }),
+                success: function(response) {
+                    if (response.success) {
+                        const notificationItem = $('[data-notification-id="' + notificationId + '"]');
+                        const markReadBtn = notificationItem.find('.mark-read-button');
+                        
+                        if (response.is_read === 1) {
+                            // Now read - show open envelope
+                            notificationItem.addClass('notification-read');
+                            markReadBtn.addClass('is-read');
+                            markReadBtn.find('i').removeClass('fa-envelope').addClass('fa-envelope-open');
+                        } else {
+                            // Now unread - show closed envelope
+                            notificationItem.removeClass('notification-read');
+                            markReadBtn.removeClass('is-read');
+                            markReadBtn.find('i').removeClass('fa-envelope-open').addClass('fa-envelope');
+                        }
+                        
+                        // Update the notification badge
+                        updateNotificationBadge();
+                    }
+                },
+                error: function() {
+                    showToast('Failed to update notification status.', 'error');
+                }
+            });
+        }
+
+        function markAllAsRead() {
+            const unreadCount = $('.notification-item:not(.notification-read)').length;
+            
+            if (unreadCount === 0) {
+                // Show a simple message without making a request
+                const messageDiv = $('<div class="profile-section" style="background-color: #d4edda; border-color: #c3e6cb; color: #155724; text-align: center; padding: 15px; margin: 10px 0;">All notifications are already read.</div>');
+                $('.profile-actions').prepend(messageDiv);
+                setTimeout(function() {
+                    messageDiv.fadeOut(300, function() { $(this).remove(); });
+                }, 2000);
+                return;
+            }
+            
+            $.ajax({
+                url: '/mark-all-notifications-read',
+                method: 'POST',
+                contentType: 'application/json',
+                success: function(response) {
+                    if (response.success) {
+                        // Update UI for all unread notifications
+                        $('.notification-item:not(.notification-read)').each(function() {
+                            $(this).addClass('notification-read');
+                            // Change button to read state
+                            const markReadBtn = $(this).find('.mark-read-button');
+                            markReadBtn.addClass('is-read');
+                            markReadBtn.find('i').removeClass('fa-envelope').addClass('fa-envelope-open');
+                        });
+                        
+                        // Update the notification badge
+                        updateNotificationBadge();
+                    }
+                },
+                error: function() {
+                    showToast('Failed to mark all notifications as read.', 'error');
+                }
+            });
+        }
+
+        async function deleteNotification(notificationId) {
+            const confirmed = await showConfirmModal({
+                title: 'Delete Notification',
+                message: 'Are you sure you want to delete this notification?',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
+
+            const notificationItem = $('[data-notification-id="' + notificationId + '"]');
+            const wasUnread = !notificationItem.hasClass('notification-read');
+
+            notificationItem.fadeOut(300, function() {
+                $(this).remove();
+                if ($('.notification-item').length === 0) {
+                    $('.profile-actions').html('<div class="profile-section no-notifications-message"><i class="fa-solid fa-circle-check"></i><h3>All caught up!</h3><p>You have no notifications to review.</p></div>');
+                    $('.clear-read-button').hide();
+                    $('.mark-all-read-button').hide();
+                }
+                if (wasUnread) {
+                    updateNotificationBadge();
+                }
+            });
+
+            $.ajax({
+                url: '/delete-notification',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ notification_id: notificationId }),
+                error: function() {
+                    location.reload();
+                }
+            });
+        }
+
+        async function clearReadNotifications() {
+            const readCount = $('.notification-item.notification-read').length;
+
+            if (readCount === 0) {
+                showToast('No read notifications to clear.', 'info');
+                return;
+            }
+
+            const confirmed = await showConfirmModal({
+                title: 'Clear Read Notifications',
+                message: 'Are you sure you want to delete all ' + readCount + ' read notification' + (readCount > 1 ? 's' : '') + '?',
+                confirmText: 'Delete All',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
+
+            $.ajax({
+                url: '/clear-read-notifications',
+                method: 'POST',
+                contentType: 'application/json',
+                success: function(response) {
+                    if (response.success) {
+                        $('.notification-item.notification-read').fadeOut(300, function() {
+                            $(this).remove();
+                            if ($('.notification-item').length === 0) {
+                                $('.profile-actions').html('<div class="profile-section no-notifications-message"><i class="fa-solid fa-circle-check"></i><h3>All caught up!</h3><p>You have no notifications to review.</p></div>');
+                                $('.clear-read-button').hide();
+                                $('.mark-all-read-button').hide();
+                            }
+                        });
+                    }
+                },
+                error: function() {
+                    showToast('Failed to clear read notifications.', 'error');
+                }
+            });
+        }
+
+    </script>
+</body>
+</html>

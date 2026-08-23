@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Pending Transactions</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="pending-transactions-body">
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+            {% if pending_transactions %}
+                <div class="nav-buttons">
+                    <button class="nav-button mark-all-read-button" onclick="confirmAllTransactions()">
+                        <i class="fa-solid fa-check-double"></i>
+                        <span class="nav-tooltip">Confirm All</span>
+                    </button>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <div class="profile-box" id="pending-transactions-box">
+            <div class="profile-content">
+                <div class="profile-actions" id="transactions-container">
+                    {% if pending_transactions %}
+                        {% for txn in pending_transactions %}
+                            <div class="profile-section pending-transaction-item{% if txn.is_auto_confirmed %} auto-confirmed-item{% endif %}" 
+                                 data-transaction-id="{{ txn.transaction_id }}"
+                                 data-entry-id="{{ txn.imported_to_entry_id }}"
+                                 data-entry-type="{{ txn.imported_entry_type }}"
+                                 data-auto-confirmed="{{ 'true' if txn.is_auto_confirmed else 'false' }}">
+                                <div class="transaction-header">
+                                    <div class="transaction-info">
+                                        <div class="transaction-merchant">
+                                            {{ txn.merchant_name or txn.description or 'Unknown Merchant' }}
+                                            <span class="account-badge">{{ txn.account_name or 'Account' }}</span>
+                                        </div>
+                                        {% if txn.merchant_name and txn.description and txn.merchant_name != txn.description %}
+                                            <div class="transaction-description">{{ txn.description }}</div>
+                                        {% endif %}
+                                        <div class="transaction-date">{{ txn.date }}</div>
+                                        {% if txn.is_auto_confirmed %}
+                                            <div class="auto-confirmed-badge">
+                                                <i class="fa-solid fa-robot"></i> Auto-categorized by Blankee • Please review
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="transaction-amount {{ 'expense' if txn.is_expense else 'income' }}">
+                                        {{ currency_symbol }}{{ "%.2f"|format(txn.amount|abs) }}
+                                    </div>
+                                </div>
+                                
+                                <div class="category-select-row">
+                                    <label>Category:</label>
+                                    <div class="category-input-wrapper">
+                                        <input type="text" class="category-input" 
+                                               data-transaction-id="{{ txn.transaction_id }}"
+                                               data-is-expense="{{ 'true' if txn.is_expense else 'false' }}"
+                                               data-entry-type="{{ txn.imported_entry_type }}"
+                                               data-account-id="{{ txn.account_id or '' }}"
+                                               data-credit-account-id="{{ txn.credit_account_id or '' }}"
+                                               data-suggested-category="{{ txn.custom_category_suggestion or '' }}"
+                                               data-suggested-category-id="{{ txn.custom_category_id or '' }}"
+                                               data-suggested-confidence="{{ txn.custom_category_confidence or '' }}"
+                                               placeholder="Type to search..."
+                                               autocomplete="off"
+                                               value="{{ txn.custom_category_suggestion if (txn.custom_category_suggestion and txn.custom_category_id and (not txn.current_category_name or txn.current_category_name == 'Uncategorized')) else (txn.current_category_name or '') }}">
+                                        <input type="hidden" class="category-hidden" 
+                                               data-transaction-id="{{ txn.transaction_id }}"
+                                               value="{{ txn.custom_category_id if (txn.custom_category_id and (not txn.current_category_id or txn.current_category_name == 'Uncategorized')) else ((txn.current_canonical_category_id or '') if txn.imported_entry_type == 'c_expense' else (txn.current_category_id or '')) }}">
+                                        <div class="pending-transactions-category-dropdown" style="display: none;"></div>
+                                    </div>
+                                    <button class="confirm-btn" onclick="confirmTransaction('{{ txn.transaction_id }}')">
+                                        <i class="fa-solid fa-check"></i>
+                                        Confirm
+                                    </button>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% elif not has_bank_accounts %}
+                        <div class="profile-section no-pending-message">
+                            <i class="fa-solid fa-building-columns"></i>
+                            <h3>No bank connected</h3>
+                            <p>Connect a bank account and imported transactions will appear here for review.</p>
+                        </div>
+                    {% else %}
+                        <div class="profile-section no-pending-message">
+                            <i class="fa-solid fa-circle-check"></i>
+                            <h3>All caught up!</h3>
+                            <p>You have no pending transactions to review.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include 'loading_modals.html' %}
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script type="text/javascript">
+        document.getElementById('loading-screen').style.display = 'none';
+
+        // Store categories from server
+        const incomeCategories = {{ income_categories | tojson | safe }};
+        const expenseCategories = {{ expense_categories | tojson | safe }};
+        const cExpenseCategories = {{ c_expense_categories | tojson | safe }};
+
+        // Get the appropriate categories based on entry type.
+        // c_expense uses the canonical expense_categories list (account-agnostic);
+        // confirm_transaction translates the chosen canonical id back to the
+        // per-account c_expense_categories.id at apply time.
+        function getCategoriesForInput(input) {
+            const entryType = input.dataset.entryType;
+            
+            let cats;
+            if (entryType === 'c_expense' || entryType === 'expense') {
+                cats = expenseCategories.filter(cat => cat.name !== 'Interest Charge');
+            } else {
+                cats = incomeCategories.slice();
+            }
+            // Sort by display_order descending
+            return cats.sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
+        }
+
+        // Category dropdown functionality
+        function showCategoryDropdown(input, searchText = '', isTyping = false) {
+            const wrapper = input.closest('.category-input-wrapper');
+            const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
+            const hiddenInput = wrapper.querySelector('.category-hidden');
+            const categories = getCategoriesForInput(input);
+            
+            // Get AI suggestion from data attributes
+            const suggestedCategory = input.dataset.suggestedCategory;
+            const suggestedCategoryId = input.dataset.suggestedCategoryId;
+            const suggestedConfidence = input.dataset.suggestedConfidence;
+            
+            dropdown.innerHTML = '';
+            const searchLower = searchText.toLowerCase().trim();
+            
+            // Separate matching and non-matching categories
+            const matchingCategories = searchLower.length > 0 
+                ? categories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+                : [];
+            const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+            const nonMatchingCategories = searchLower.length > 0
+                ? categories.filter(cat => !matchingIds.has(cat.id))
+                : categories;
+
+            // Check if there's an exact match for "Create new" option
+            const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
+
+            // Show AI suggestion at the top if we have one and no search text (or search matches suggestion)
+            const showAiSuggestion = suggestedCategory && suggestedCategoryId && 
+                (searchLower.length === 0 || suggestedCategory.toLowerCase().includes(searchLower));
+            
+            if (showAiSuggestion) {
+                dropdown.style.display = 'block';
+                const aiDiv = document.createElement('div');
+                aiDiv.className = 'pending-transactions-category-dropdown-item ai-suggestion';
+                // Show confidence level in badge
+                const isMemory = suggestedConfidence === 'memory';
+                const confidenceClass = isMemory ? 'confidence-high' : (suggestedConfidence === 'high' ? 'confidence-high' : 'confidence-medium');
+                const confidenceLabel = isMemory ? '<i class="fa-solid fa-brain"></i>' : (suggestedConfidence === 'high' ? 'AI' : 'AI ?');
+                const icon = '<i class="fa-solid fa-robot"></i>';
+                aiDiv.innerHTML = `${icon} ${suggestedCategory} <span class="ai-badge ${confidenceClass}">${confidenceLabel}</span>`;
+                aiDiv.addEventListener('click', function() {
+                    input.value = suggestedCategory;
+                    hiddenInput.value = suggestedCategoryId;
+                    dropdown.style.display = 'none';
+                });
+                dropdown.appendChild(aiDiv);
+            }
+
+            // Show search results with magnifying glass (if user is typing)
+            if (searchLower.length > 0 && matchingCategories.length > 0) {
+                // Add separator after AI suggestion if present
+                if (showAiSuggestion) {
+                    const separator = document.createElement('div');
+                    separator.className = 'dropdown-separator';
+                    dropdown.appendChild(separator);
+                }
+                
+                dropdown.style.display = 'block';
+                matchingCategories.forEach(cat => {
+                    // Skip the AI suggested category since it's already shown
+                    if (suggestedCategoryId && String(cat.id) === String(suggestedCategoryId)) {
+                        return;
+                    }
+                    const div = document.createElement('div');
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${getCategoryIcon(cat)} ${cat.name}`;
+                    div.className = 'pending-transactions-category-dropdown-item search-result';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+            }
+
+            // Show "Create new..." option right after search results
+            if (searchLower.length > 0 && !exactMatch) {
+                // Add separator after AI suggestion if no search results
+                if (showAiSuggestion && matchingCategories.length === 0) {
+                    const separator = document.createElement('div');
+                    separator.className = 'dropdown-separator';
+                    dropdown.appendChild(separator);
+                }
+                dropdown.style.display = 'block';
+                const createDiv = document.createElement('div');
+                createDiv.className = 'pending-transactions-category-dropdown-item create-new-category';
+                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+                createDiv.addEventListener('click', function() {
+                    createPendingCategory(input, searchText);
+                });
+                dropdown.appendChild(createDiv);
+            }
+
+            // Add separator before remaining categories if there's content above
+            if (dropdown.children.length > 0 && (nonMatchingCategories.length > 0 || (searchLower.length === 0 && categories.length > 0))) {
+                if (searchLower.length > 0 || showAiSuggestion) {
+                    const separator = document.createElement('div');
+                    separator.className = 'dropdown-separator';
+                    dropdown.appendChild(separator);
+                }
+            }
+
+            // Show all other categories (non-matching or all if no search)
+            if (nonMatchingCategories.length > 0 || (searchLower.length === 0 && categories.length > 0)) {
+                const catsToShow = searchLower.length > 0 ? nonMatchingCategories : categories;
+                dropdown.style.display = 'block';
+                catsToShow.forEach(cat => {
+                    // Skip the suggested category since it's already at the top
+                    if (suggestedCategoryId && String(cat.id) === String(suggestedCategoryId) && searchLower.length === 0) {
+                        return;
+                    }
+                    const div = document.createElement('div');
+                    div.innerHTML = getCategoryIcon(cat) + ' ' + cat.name;
+                    div.className = 'pending-transactions-category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+            }
+
+            if (dropdown.children.length === 0) {
+                dropdown.style.display = 'none';
+            } else {
+                // Position dropdown above or below based on available space
+                // On mobile, the keyboard reduces visible area significantly
+                dropdown.classList.remove('dropdown-above');
+                dropdown.style.top = '';
+                dropdown.style.bottom = '';
+                requestAnimationFrame(() => {
+                    const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                    const inputRect = input.getBoundingClientRect();
+                    const spaceBelow = viewportHeight - inputRect.bottom - 10;
+                    const spaceAbove = inputRect.top - 10;
+                    const dropdownHeight = dropdown.scrollHeight;
+                    if (dropdownHeight > spaceBelow && spaceAbove > spaceBelow) {
+                        dropdown.classList.add('dropdown-above');
+                        dropdown.style.maxHeight = Math.min(spaceAbove, window.innerHeight * 0.6) + 'px';
+                    } else {
+                        dropdown.style.maxHeight = Math.min(spaceBelow, window.innerHeight * 0.6) + 'px';
+                    }
+                });
+            }
+        }
+
+        // Create new category
+        function createPendingCategory(input, categoryName) {
+            if (!categoryName || categoryName.trim().length === 0) return;
+            
+            const wrapper = input.closest('.category-input-wrapper');
+            const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
+            const hiddenInput = wrapper.querySelector('.category-hidden');
+            const entryType = input.dataset.entryType;
+            
+            // Duplicate check safety net
+            let dupCats = entryType === 'income' ? incomeCategories : expenseCategories;
+            if (checkCategoryDuplicate(input, dupCats)) return;
+
+            // c_expense and expense both create canonical expense_categories
+            // (which auto-syncs to all credit accounts via add_expense_category).
+            let url, categoriesArray;
+            if (entryType === 'income') {
+                url = "{{ url_for('add_income_category') }}";
+                categoriesArray = incomeCategories;
+            } else {
+                url = "{{ url_for('add_expense_category') }}";
+                categoriesArray = expenseCategories;
+            }
+            
+            const postData = { name: categoryName.trim() };
+            
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: postData,
+                success: function(response) {
+                    const newCanonicalId = response.id || response.new_category_id;
+                    if (newCanonicalId) {
+                        // Add canonical id to the appropriate array.
+                        const newCat = { id: newCanonicalId, name: categoryName.trim() };
+                        categoriesArray.push(newCat);
+                        categoriesArray.sort((a, b) => a.name.localeCompare(b.name));
+                        // Set the input values (canonical id; backend translates for c_expense).
+                        input.value = categoryName.trim();
+                        hiddenInput.value = newCanonicalId;
+                        dropdown.style.display = 'none';
+                    } else {
+                        showToast(response.message || 'Failed to create category', 'error');
+                    }
+                },
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Failed to create category';
+                    showToast(msg, 'error');
+                }
+            });
+        }
+
+        // Initialize event listeners for all category inputs
+        document.querySelectorAll('.category-input').forEach(input => {
+            // Store the original/suggested value so we can restore it
+            input.dataset.originalValue = input.value;
+            input.dataset.originalCategoryId = input.closest('.category-input-wrapper').querySelector('.category-hidden').value;
+            // Track whether user has started typing since focus
+            input.dataset.clearedOnType = 'false';
+
+            input.addEventListener('input', function() {
+                const wrapper = this.closest('.category-input-wrapper');
+                const hiddenInput = wrapper.querySelector('.category-hidden');
+                
+                // First keystroke after focus: clear was already handled by keydown
+                // If input is now empty, restore the original suggestion
+                if (this.value.length === 0) {
+                    hiddenInput.value = this.dataset.originalCategoryId || '';
+                    this.value = this.dataset.originalValue || '';
+                    this.dataset.clearedOnType = 'false';
+                    showCategoryDropdown(this, '');
+                    return;
+                }
+                
+                hiddenInput.value = '';
+                showCategoryDropdown(this, this.value);
+            });
+
+            input.addEventListener('keydown', function(e) {
+                // While showing the default suggestion, block Backspace/Delete
+                // so the user can't erase it character by character
+                if (this.dataset.clearedOnType === 'false' &&
+                    (e.key === 'Backspace' || e.key === 'Delete')) {
+                    e.preventDefault();
+                    return;
+                }
+                // On first real character keystroke, clear the input so user starts fresh
+                // Ignore control keys (Tab, arrows, etc.)
+                if (this.dataset.clearedOnType === 'false' && 
+                    !e.ctrlKey && !e.metaKey && !e.altKey &&
+                    e.key.length === 1) {
+                    this.dataset.clearedOnType = 'true';
+                    this.value = '';
+                    const wrapper = this.closest('.category-input-wrapper');
+                    wrapper.querySelector('.category-hidden').value = '';
+                }
+            });
+
+            input.addEventListener('focus', function() {
+                // Close all other dropdowns first
+                document.querySelectorAll('.pending-transactions-category-dropdown').forEach(dropdown => {
+                    dropdown.style.display = 'none';
+                });
+                
+                // Raise z-index of parent transaction item when dropdown is active
+                document.querySelectorAll('.pending-transaction-item').forEach(item => {
+                    item.style.zIndex = '';
+                });
+                const parentItem = this.closest('.pending-transaction-item');
+                if (parentItem) {
+                    parentItem.style.zIndex = '100';
+                }
+                // Reset the typing flag so next keystroke clears
+                this.dataset.clearedOnType = 'false';
+                // On focus, show all categories (don't treat pre-filled value as search)
+                showCategoryDropdown(this, '');
+
+                // Scroll input into view after keyboard appears (mobile)
+                const inputEl = this;
+                setTimeout(() => {
+                    inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 350);
+            });
+        });
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.category-input-wrapper')) {
+                document.querySelectorAll('.pending-transactions-category-dropdown').forEach(dropdown => {
+                    dropdown.style.display = 'none';
+                });
+                // Reset z-index on all transaction items
+                document.querySelectorAll('.pending-transaction-item').forEach(item => {
+                    item.style.zIndex = '';
+                });
+            }
+        });
+
+        function confirmTransaction(transactionId) {
+            const item = $(`[data-transaction-id="${transactionId}"].pending-transaction-item`);
+            const entryId = item.data('entry-id');
+            const entryType = item.data('entry-type');
+            const categoryId = item.find('.category-hidden').val();
+            const confirmBtn = item.find('.confirm-btn');
+            
+            if (!categoryId) {
+                showToast('Please select a category', 'warning');
+                return;
+            }
+            
+            // Disable button while processing
+            confirmBtn.prop('disabled', true);
+            confirmBtn.html('<i class="fa-solid fa-spinner fa-spin"></i> Confirming...');
+            
+            const payload = {
+                transaction_id: transactionId,
+                entry_id: entryId,
+                entry_type: entryType,
+                category_id: categoryId
+            };
+            
+            $.ajax({
+                url: '/bank/confirm-transaction',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(payload),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Mark as confirmed with animation
+                        item.addClass('confirmed');
+                        confirmBtn.html('<i class="fa-solid fa-check"></i> Confirmed');
+                        confirmBtn.addClass('confirmed');
+                        
+                        // Fade out after a moment
+                        setTimeout(function() {
+                            item.fadeOut(300, function() {
+                                $(this).remove();
+                                checkIfEmpty();
+                            });
+                        }, 1000);
+                    } else {
+                        showToast('Error: ' + response.message, 'error');
+                        confirmBtn.prop('disabled', false);
+                        confirmBtn.html('<i class="fa-solid fa-check"></i> Confirm');
+                    }
+                },
+                error: function(xhr, status, err) {
+                    showToast('Failed to confirm transaction. Please try again.', 'warning');
+                    confirmBtn.prop('disabled', false);
+                    confirmBtn.html('<i class="fa-solid fa-check"></i> Confirm');
+                }
+            });
+        }
+        
+        function confirmAllTransactions() {
+            const items = $('.pending-transaction-item:not(.confirmed)');
+            
+            if (items.length === 0) {
+                return;
+            }
+            
+            // Collect all transaction data
+            const transactions = [];
+            items.each(function() {
+                const item = $(this);
+                transactions.push({
+                    transaction_id: item.data('transaction-id'),
+                    entry_id: item.data('entry-id'),
+                    entry_type: item.data('entry-type'),
+                    category_id: item.find('.category-hidden').val()
+                });
+            });
+            
+            // Disable all confirm buttons
+            items.find('.confirm-btn').prop('disabled', true);
+            
+            $.ajax({
+                url: '/bank/confirm-all-transactions',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ transactions: transactions }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Mark all as confirmed
+                        items.each(function() {
+                            const item = $(this);
+                            item.addClass('confirmed');
+                            item.find('.confirm-btn').html('<i class="fa-solid fa-check"></i> Confirmed');
+                        });
+                        
+                        // Fade out all
+                        setTimeout(function() {
+                            items.fadeOut(300, function() {
+                                $(this).remove();
+                                checkIfEmpty();
+                            });
+                        }, 1000);
+                    } else {
+                        showToast('Error: ' + response.message, 'error');
+                        items.find('.confirm-btn').prop('disabled', false);
+                    }
+                },
+                error: function() {
+                    showToast('Failed to confirm transactions. Please try again.', 'warning');
+                    items.find('.confirm-btn').prop('disabled', false);
+                }
+            });
+        }
+        
+        function checkIfEmpty() {
+            if ($('.pending-transaction-item').length === 0) {
+                $('#transactions-container').html(`
+                    <div class="profile-section no-pending-message">
+                        <i class="fa-solid fa-circle-check"></i>
+                        <h3>All caught up!</h3>
+                        <p>You have no pending transactions to review.</p>
+                    </div>
+                `);
+                // Hide confirm all button
+                $('.confirm-all-btn').hide();
+            }
+        }
+        
+        // Suggestions are now pre-loaded from server via cached enrichment data
+        // No need to call API on page load - instant page render!
+    </script>
+</body>
+</html>

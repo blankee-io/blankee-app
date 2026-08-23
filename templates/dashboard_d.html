@@ -1,0 +1,3415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Day View</title>
+    <!-- Link to the custom stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Include Font Awesome for icons -->
+    {% include '_fontawesome.html' %}
+    <!-- Include jQuery for easier DOM manipulation and AJAX -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <!-- Include jQuery UI for date picker and other UI interactions -->
+    <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
+    <!-- Link to the jQuery UI CSS for styling UI elements -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/jquery-ui.css') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+    {% include 'redis_auto_refresh.html' %}
+</head>
+<body id="dashboard-d-body">
+    <!-- Include the navigation bar -->
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <!-- Calendar navigation for moving between months -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <!-- Single button with repeat icon -->
+            <div class="nav-dash-container">
+                <!-- Link to Recurring Summary -->
+                <a href="{{ url_for('dashboard_summary') }}" class="nav-button">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Recurring Summary</span>
+                </a>
+                <!-- Inline nav buttons (icons only) -->
+                <div id="nav-inline-buttons">
+                    <div class="nav-button nav-button-focus">
+                        <i class="fa-solid fa-calendar-day"></i>
+                        <span class="nav-tooltip">Day View</span>
+                    </div>
+                    <a href="{{ url_for('dashboard') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-week"></i>
+                        <span class="nav-tooltip">Week View</span>
+                    </a>
+                    <a href="{{ url_for('dashboard_3m') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <span class="nav-tooltip">Month View</span>
+                    </a>
+                    <a href="{{ url_for('dashboard_m') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-exclamation"></i>
+                        <span class="nav-tooltip">Month Overview</span>
+                    </a>
+                    <a href="{{ url_for('dashboard_y') }}" class="nav-button">
+                        <i class="fa-solid fa-calendars"></i>
+                        <span class="nav-tooltip">Year Overview</span>
+                    </a>
+                </div>
+            </div>
+            <div class="calendarnavbuttons"> 
+                <a id="previous-nav-btn" class="nav-button" href="javascript:previousWeek()"><i class="fa-solid fa-left"></i><span class="nav-tooltip">Previous Week</span></a>
+                <a id="current-nav-btn" class="nav-button" href="javascript:goToCurrentWeek()"><i class="fa-kit fa-solid-calendar-day-circle-arrow-down-tl"></i><span class="nav-tooltip">Go to Current Week</span></a>
+                <a id="next-nav-btn" class="nav-button" href="javascript:nextWeek()"><i class="fa-solid fa-right"></i><span class="nav-tooltip">Next Week</span></a>
+                <div id="next-indicator" style="display:none;text-align:center;">
+                    <span class="indicator-dot">!</span>
+                    <span class="nav-tooltip">An entry in the future is negative/below threshold!</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <!-- Dashboard wrapper to contain the banner and all dashboard-d-containers -->
+        <div id="dashboard-wrapper" class="dashboard-wrapper">
+            <!-- Floating Today Banner -->
+            <div id="today-floating-banner" class="today-floating-banner" style="display: none;">
+                <span class="today-banner-text">Today</span>
+                <i id="today-banner-arrow" class="fa-solid fa-arrow-up"></i>
+            </div>
+            <!-- The dashboard-d-containers will be dynamically generated here by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Add Entry Modal -->
+    <div id="dashboard-d-addEntryModal" class="dashboard-d-modal">
+        <div class="dashboard-d-modal-content">
+            <span class="dashboard-d-close-modal" onclick="dashboardDCloseModal()">&times;</span>
+            <h3>Add Entry</h3>
+            <form id="dashboard-d-addEntryForm">
+                <!-- Select Income or Expense -->
+                <div class="dashboard-d-form-group">
+                    <label for="dashboard-d-entryType">Entry Type:</label>
+                    <input type="text" id="dashboard-d-entryType-input" placeholder="Type to search..." autocomplete="off">
+                    <input type="hidden" id="dashboard-d-entryType" name="entryType">
+                    <div id="dashboard-d-entryType-dropdown" class="category-dropdown" style="display: none;"></div>
+                </div>
+
+                <!-- Select Category -->
+                <div class="dashboard-d-form-group">
+                    <label for="dashboard-d-category">Category:</label>
+                    <input type="text" id="dashboard-d-category-input" placeholder="Type to search..." disabled autocomplete="off">
+                    <input type="hidden" id="dashboard-d-category" name="category">
+                    <div id="dashboard-d-category-dropdown" class="category-dropdown" style="display: none;"></div>
+                </div>
+
+                <!-- Enter Amount -->
+                <div class="dashboard-d-form-group">
+                    <label for="dashboard-d-amount">Amount:</label>
+                    <div class="currency-input-container">
+                        <span class="d-d-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                        <input type="number" id="dashboard-d-amount" name="amount" step="0.01" min="0.01" required inputmode="decimal" placeholder="0.00">
+                    </div>
+                </div>
+
+                <!-- Hidden date field -->
+                <input type="hidden" id="dashboard-d-entryDate" name="entryDate">
+
+                <!-- Submit Button -->
+                <div class="dashboard-d-form-group">
+                    <button type="submit">Submit Entry</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="move-date-modal" class="dashboard-d-modal" style="display:none;">
+    <div class="dashboard-d-modal-content">
+        <label for="move-date-input">Move to:</label>
+        <div class="move-date-row">
+        <input type="date" id="move-date-input">
+        <button id="move-date-confirm-btn" type="button"><i class="fa-solid fa-up-down-left-right"></i></button>
+        </div>
+    </div>
+    </div>
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <div id="dashboard-context-menu" class="dashboard-context-menu" style="display: none; position: absolute;">
+        <ul>
+            <li id="dashboard-context-menu-set-processed">Set to Paid</li>
+        </ul>
+    </div>    
+
+    <!-- Include the navigation bar -->
+
+    <!-- Link to the external JavaScript file -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+
+    <script>
+
+        const expenseCategories = {{ expense_categories | tojson }};
+        const incomeCategories = {{ income_categories | tojson }};
+        const currencyType = "{{ currency_type }}";
+        const currencySymbols = { USD: "$", EUR: "€" };
+        const currencySymbol = currencySymbols[currencyType] || currencyType;
+
+        // Get the date passed from Flask in UTC
+        const selectedDateStr = "{{ selected_date }}";  // This is in 'YYYY-MM-DD' format
+        let selectedDate = new Date(Date.UTC(
+            parseInt(selectedDateStr.split('-')[0]),   // Year
+            parseInt(selectedDateStr.split('-')[1]) - 1, // Month (0-based)
+            parseInt(selectedDateStr.split('-')[2])    // Day
+        ));
+
+        const goofyWeekMode = {{ goofy_week_mode | tojson }};
+
+        // Flag to track if a new category was created (only declare if not already declared by footer)
+        if (typeof newCategoryCreated === 'undefined') {
+            var newCategoryCreated = false;
+        }
+
+        // Pass the income and expense entries from the Flask backend
+        const incomeEntries = {{ income_entries | tojson }};
+        const expenseEntries = {{ expense_entries | tojson }};
+        
+        const recurringIncome = {{ recurring_income | tojson }};
+        const recurringExpense = {{ recurring_expense | tojson }};
+        
+        const memberSince = {{ member_since | tojson }};
+
+        // member_since arrives either as YYYY-MM-DD or as a full GMT string;
+        // normalise once so date comparisons are plain string compares. This
+        // mirrors the inline normalisation used further down when dimming
+        // pre-start-date days.
+        function getNormalizedMemberSince() {
+            if (!memberSince) return null;
+            if (memberSince.length > 10 || memberSince.includes('GMT')) {
+                const msDate = new Date(memberSince);
+                if (!isNaN(msDate)) return msDate.toISOString().split('T')[0];
+            }
+            return memberSince;
+        }
+
+        // True when the earliest navigable day on screen is the earliest the
+        // account start date allows, i.e. there is nothing valid before it.
+        // Keyboard navigation uses this to stop instead of paging back into days
+        // that predate the account.
+        function isFirstNavigableDayShown() {
+            const ms = getNormalizedMemberSince();
+            if (!ms) return false;                       // no start date, no clamp
+            const navigable = Array.from(document.querySelectorAll('.dashboard-d-container'))
+                .filter(c => !c.classList.contains('before-member-since'));
+            if (navigable.length === 0) return true;     // nothing navigable at all
+            const firstDate = navigable[0].getAttribute('data-date');
+            if (!firstDate) return false;
+            const prevDay = new Date(firstDate + 'T00:00:00Z');
+            prevDay.setUTCDate(prevDay.getUTCDate() - 1);
+            return prevDay.toISOString().split('T')[0] < ms;
+        }
+
+        // bank account flags for entry locking
+        let bank_sync_flags = {{ bank_sync_flags | tojson | safe }};
+        let bank_last_txn_date = {{ bank_last_txn_date | tojson | safe }};
+
+        /**
+         * Check if an entry should be locked due to bank account sync.
+         * Locked entries are on or before the last synced transaction date.
+         * @param {string} entryDate - The date of the entry (YYYY-MM-DD format)
+         * @param {number|string} categoryId - The category ID of the entry
+         * @param {string} entryType - 'income', 'expense', or 'ca' (credit account)
+         * @param {number|string} [accountId] - For CA entries, the credit account ID
+         * @returns {boolean} - True if entry should be locked
+         */
+        function isEntryLockedByBankSync(entryDate, categoryId, entryType, accountId = null) {
+            // If no bank_sync flags or no last txn date, nothing is locked
+            if (!bank_sync_flags || !bank_last_txn_date) return false;
+            
+            // Get today's date string for reliable comparison (avoids UTC vs local timezone bugs)
+            const today = new Date();
+            const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD in local time
+            
+            // Today is always editable
+            if (entryDate >= todayStr) return false;
+            
+            // Lock entries on or before the last synced transaction date
+            if (entryDate > bank_last_txn_date) return false;
+            
+            // Credit account entries - check if this specific account is bank-linked
+            if (entryType === 'ca' && accountId !== null) {
+                const accountIdNum = parseInt(accountId, 10);
+                return bank_sync_flags.linked_credit_ids && 
+                       bank_sync_flags.linked_credit_ids.includes(accountIdNum);
+            }
+            
+            // If user has checking account linked, ALL income/expense entries are locked
+            if (bank_sync_flags.has_checking && (entryType === 'income' || entryType === 'expense')) {
+                return true;
+            }
+            
+            // If user has savings account linked, only Savings category entries are locked
+            if (bank_sync_flags.has_savings) {
+                const catIdNum = parseInt(categoryId, 10);
+                if (entryType === 'income' && catIdNum === bank_sync_flags.savings_income_category_id) {
+                    return true;
+                }
+                if (entryType === 'expense' && catIdNum === bank_sync_flags.savings_expense_category_id) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+
+        /**
+         * Check if we should show the add button for a given date.
+         * For dates today or before, only show if there are non-bank entry options.
+         * @param {string} dateStr - The date string (YYYY-MM-DD format)
+         * @returns {boolean} - True if add button should be shown
+         */
+        function shouldShowAddButton(dateStr) {
+            // If no bank_sync flags, always show
+            if (!bank_sync_flags) return true;
+            
+            // Get today's date string in YYYY-MM-DD format for reliable comparison
+            const today = new Date();
+            const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD
+            
+            // Simple string comparison works because YYYY-MM-DD sorts correctly
+            // Future dates and today - always show add button
+            if (dateStr >= todayStr) return true;
+            
+            // Dates after the last synced transaction date are not locked
+            if (!bank_last_txn_date || dateStr > bank_last_txn_date) return true;
+            
+            // For locked past dates, check if there are any valid entry options
+            
+            // If no checking account linked, income/expense are available
+            if (!bank_sync_flags.has_checking) return true;
+            
+            // Check if there are any non-bank-linked credit accounts
+            const hasNonBankLinkedCreditAccounts = credit_accounts.some(account => {
+                return !bank_sync_flags.linked_credit_ids || 
+                       !bank_sync_flags.linked_credit_ids.includes(account.id);
+            });
+            
+            return hasNonBankLinkedCreditAccounts;
+        }
+
+        const savingsEntries = {{ savings_entries | tojson }};
+
+        let baseTotalsRemainders = {{ totals_remainders_d | tojson }};
+
+        const credit_accounts = {{ credit_accounts|tojson }};
+        const c_expense_categories = {{ c_expense_categories|tojson }};
+        const c_expense_entries = {{ c_expense_entries|tojson }};
+        const c_a_balances_d = {{ c_a_balances_d|tojson }};
+
+        // Bucket records for progress bar original_amount lookup
+        const recurring_income_buckets = {{ recurring_income_buckets|tojson }};
+        const recurring_expense_buckets = {{ recurring_expense_buckets|tojson }};
+        const recurring_c_expense_buckets = {{ recurring_c_expense_buckets|tojson }};
+
+        let totalsRemaindersData  = baseTotalsRemainders.map(item => [
+            item.id,
+            item.user_id,
+            item.date,
+            item.total_income,
+            item.total_expenses,
+            item.remainder,
+            item.last_day_remainder
+        ]);
+        const balance_threshold = {{ balance_threshold | tojson }};
+
+        let touchStartX = null;
+        let touchEndX = null;
+        let isAnimating = false;
+        let containerWidth = null;
+
+        let moveEntryId = null;
+        let moveEntryType = null;
+        let moveOriginalDate = null;
+
+        const mainContainer = document.getElementById('main-container');
+
+        // Function to handle the start of a touch event
+        function handleTouchStart(event) {
+            if (isAnimating) return;
+
+            touchStartX = event.touches[0].screenX;
+            touchStartY = event.touches[0].screenY; // Capture the vertical start point
+
+            containerWidth = mainContainer.offsetWidth;
+            isHorizontalSwipe = false; // Reset the swipe direction flag
+        }
+
+        // Function to handle touch movement
+        function handleTouchMove(event) {
+            if (!touchStartX || isAnimating) return;
+
+            touchCurrentX = event.touches[0].screenX;
+            const touchCurrentY = event.touches[0].screenY;
+            const swipeDistanceX = touchCurrentX - touchStartX;
+            const swipeDistanceY = touchCurrentY - touchStartY;
+
+            // Detect if the movement is primarily horizontal
+            if (Math.abs(swipeDistanceX) > Math.abs(swipeDistanceY)) {
+                isHorizontalSwipe = true; // Mark this as a horizontal swipe
+                event.preventDefault(); // Prevent scrolling on horizontal swipes
+
+                // Move the main container based on swipe distance
+                mainContainer.style.transform = `translateX(${swipeDistanceX}px)`;
+            }
+        }
+
+        // Function to handle the end of a touch event
+        function handleTouchEnd() {
+            if (!touchStartX || !isHorizontalSwipe) return; // Ignore if not a horizontal swipe
+
+            const swipeDistanceX = touchCurrentX - touchStartX;
+            const swipePercentage = Math.abs(swipeDistanceX) / containerWidth;
+
+            if (swipePercentage > 0.2) {
+                if (swipeDistanceX > 0) {
+                    // Swipe right - move to the previous week
+                    slideWithAnimation('right');
+                } else if (swipeDistanceX < 0) {
+                    // Swipe left - move to the next week
+                    slideWithAnimation('left');
+                }
+            } else {
+                // Reset the container position if swipe is less than 20%
+                mainContainer.style.transform = 'translateX(0)';
+            }
+
+            // Reset touch positions
+            touchStartX = null;
+            touchCurrentX = null;
+            isHorizontalSwipe = false; // Reset the swipe flag
+        }
+
+        // Function to animate the slide effect
+        function slideWithAnimation(direction) {
+            isAnimating = true;
+
+            if (direction === 'left') {
+                mainContainer.style.transition = 'transform 0.3s ease';
+                mainContainer.style.transform = `translateX(-${containerWidth}px)`;
+            } else if (direction === 'right') {
+                mainContainer.style.transition = 'transform 0.3s ease';
+                mainContainer.style.transform = `translateX(${containerWidth}px)`;
+            }
+
+            setTimeout(() => {
+                if (direction === 'left') {
+                    nextWeek();
+                } else if (direction === 'right') {
+                    previousWeek();
+                }
+
+                mainContainer.style.transition = 'none';
+                mainContainer.style.transform = 'translateX(0)';
+                isAnimating = false;
+            }, 300);  // Match the CSS transition duration
+        }
+
+        // Function to open the modal and set the date
+        function addEntry(date) {
+            populateEntryTypeDropdown(date);
+            document.getElementById('dashboard-d-entryDate').value = date;
+            document.getElementById('dashboard-d-addEntryModal').style.display = 'flex';
+            document.body.classList.add('modal-open');
+            document.documentElement.classList.add('modal-open');
+        }
+
+        // Function to close the add entry modal
+        function dashboardDCloseModal() {
+            document.getElementById('dashboard-d-addEntryModal').style.display = 'none';
+            document.body.classList.remove('modal-open');
+            document.documentElement.classList.remove('modal-open');
+        }
+
+        // Close dashboard-d-addEntryModal when clicking outside the modal content (blur)
+        document.getElementById('dashboard-d-addEntryModal').addEventListener('mousedown', function(event) {
+            if (event.target === this) {
+                this.style.display = 'none';
+                document.body.classList.remove('modal-open');
+                document.documentElement.classList.remove('modal-open');
+            }
+        });
+
+        let dashboardDCategories = [];
+
+        function dashboardDUpdateCategoryOptions() {
+            const entryType = document.getElementById('dashboard-d-entryType').value;
+            const categoryInput = document.getElementById('dashboard-d-category-input');
+            const categoryHidden = document.getElementById('dashboard-d-category');
+            const dropdown = document.getElementById('dashboard-d-category-dropdown');
+            
+            dashboardDCategories = [];
+            categoryInput.value = '';
+            categoryHidden.value = '';
+            dropdown.style.display = 'none';
+
+            if (!entryType) {
+                categoryInput.disabled = true;
+                return;
+            }
+            categoryInput.disabled = false;
+
+            if (entryType === 'income') {
+                incomeCategories.forEach(category => {
+                    if (!category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
+                        dashboardDCategories.push({ id: category.id, name: category.name, display_order: category.display_order, is_recurring: category.is_recurring, is_auto_adjustment: category.is_auto_adjustment });
+                    }
+                });
+            } else if (entryType === 'expense') {
+                expenseCategories.forEach(category => {
+                    if (!category.hidden && !category.is_bud && category.name !== 'Interest Charge') {
+                        dashboardDCategories.push({ id: category.id, name: category.name, display_order: category.display_order, is_recurring: category.is_recurring, is_credit_account: category.is_credit_account, is_auto_adjustment: category.is_auto_adjustment });
+                    }
+                });
+            } else if (entryType.startsWith('ca_')) {
+                const accountId = parseInt(entryType.split('_')[1]);
+                c_expense_categories.forEach(category => {
+                    if (category.account_id === accountId && !category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
+                        dashboardDCategories.push({ id: category.id, name: category.name, display_order: category.display_order, is_recurring: category.is_recurring, is_interest: category.is_interest, is_auto_adjustment: category.is_auto_adjustment });
+                    }
+                });
+            }
+
+            // Sort by display_order descending
+            dashboardDCategories.sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
+        }
+
+        // Category search and dropdown functionality for dashboard_d
+        const dashboardDCategoryInput = document.getElementById('dashboard-d-category-input');
+        const dashboardDCategoryHidden = document.getElementById('dashboard-d-category');
+        const dashboardDDropdown = document.getElementById('dashboard-d-category-dropdown');
+
+        function positionDashboardDDropdown() {
+            // Calculate available space below the input
+            const inputRect = dashboardDCategoryInput.getBoundingClientRect();
+            const availableBelow = window.innerHeight - inputRect.bottom - 20; // 20px padding from bottom
+            
+            // Set max-height to available space, minimum 150px
+            const maxHeight = Math.max(150, availableBelow);
+            dashboardDDropdown.style.maxHeight = maxHeight + 'px';
+        }
+
+        function showDashboardDCategoryDropdown(searchText = '') {
+            dashboardDDropdown.innerHTML = '';
+            const searchLower = searchText.toLowerCase().trim();
+            
+            // Separate matching and non-matching categories
+            const matchingCategories = searchLower.length > 0 
+                ? dashboardDCategories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+                : [];
+            const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+            const nonMatchingCategories = searchLower.length > 0
+                ? dashboardDCategories.filter(cat => !matchingIds.has(cat.id))
+                : dashboardDCategories;
+
+            // Check if there's an exact match
+            const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
+
+            // Show search results with magnifying glass (if user is typing)
+            if (searchLower.length > 0 && matchingCategories.length > 0) {
+                dashboardDDropdown.style.display = 'block';
+                matchingCategories.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${getCategoryIcon(cat)} ${cat.name}`;
+                    div.className = 'category-dropdown-item search-result';
+                    div.addEventListener('click', function() {
+                        dashboardDCategoryInput.value = cat.name;
+                        dashboardDCategoryHidden.value = cat.id;
+                        dashboardDDropdown.style.display = 'none';
+                    });
+                    dashboardDDropdown.appendChild(div);
+                });
+            }
+
+            // Show "Create new..." option right after search results
+            if (searchText.length > 0 && !exactMatch) {
+                dashboardDDropdown.style.display = 'block';
+                const createDiv = document.createElement('div');
+                createDiv.className = 'category-dropdown-item create-new-category';
+                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+                createDiv.addEventListener('click', function() {
+                    createDashboardDCategory(searchText);
+                });
+                dashboardDDropdown.appendChild(createDiv);
+            }
+
+            // Add separator before remaining categories if there's content above
+            if (searchLower.length > 0 && dashboardDDropdown.children.length > 0 && nonMatchingCategories.length > 0) {
+                const separator = document.createElement('div');
+                separator.className = 'dropdown-separator';
+                dashboardDDropdown.appendChild(separator);
+            }
+
+            // Show all other categories (non-matching or all if no search)
+            if (nonMatchingCategories.length > 0 || (searchLower.length === 0 && dashboardDCategories.length > 0)) {
+                const catsToShow = searchLower.length > 0 ? nonMatchingCategories : dashboardDCategories;
+                dashboardDDropdown.style.display = 'block';
+                catsToShow.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.innerHTML = getCategoryIcon(cat) + ' ' + cat.name;
+                    div.className = 'category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        dashboardDCategoryInput.value = cat.name;
+                        dashboardDCategoryHidden.value = cat.id;
+                        dashboardDDropdown.style.display = 'none';
+                    });
+                    dashboardDDropdown.appendChild(div);
+                });
+            }
+
+            if (dashboardDDropdown.children.length === 0) {
+                dashboardDDropdown.style.display = 'none';
+            } else {
+                // Position dropdown based on available screen space
+                positionDashboardDDropdown();
+            }
+        }
+
+        dashboardDCategoryInput.addEventListener('input', function() {
+            if (this.value.length === 0) {
+                dashboardDCategoryHidden.value = '';
+            }
+            showDashboardDCategoryDropdown(this.value);
+        });
+
+        dashboardDCategoryInput.addEventListener('focus', function() {
+            if (dashboardDCategories.length > 0) {
+                // On focus, show all categories (don't treat pre-filled value as search)
+                showDashboardDCategoryDropdown('');
+            }
+        });
+
+        // Close all dropdowns when clicking outside
+        document.addEventListener('click', function(e) {
+            // Close category dropdown if clicking outside
+            if (!dashboardDCategoryInput.contains(e.target) && !dashboardDDropdown.contains(e.target)) {
+                dashboardDDropdown.style.display = 'none';
+            }
+            // Close entry type dropdown if clicking outside
+            if (!dashboardDEntryTypeInput.contains(e.target) && !dashboardDEntryTypeDropdown.contains(e.target)) {
+                dashboardDEntryTypeDropdown.style.display = 'none';
+            }
+        });
+
+        // Function to create a new category from dashboard_d modal
+        function createDashboardDCategory(categoryName) {
+            const entryType = document.getElementById('dashboard-d-entryType').value;
+            
+            if (!categoryName || categoryName.trim().length === 0) return;
+
+            // Duplicate check safety net
+            let dupCats;
+            if (entryType === 'income') dupCats = incomeCategories;
+            else if (entryType === 'expense') dupCats = expenseCategories;
+            else dupCats = expense_categories;
+            if (checkCategoryDuplicate(dashboardDCategoryInput, dupCats)) return;
+            
+            let url, categoriesArray;
+            if (entryType === 'income') {
+                url = "{{ url_for('add_income_category') }}";
+                categoriesArray = incomeCategories;
+            } else if (entryType === 'expense') {
+                url = "{{ url_for('add_expense_category') }}";
+                categoriesArray = expenseCategories;
+            } else if (entryType.startsWith('ca_')) {
+                const accountId = parseInt(entryType.split('_')[1]);
+                // NOTE: Creates an expense_category which auto-syncs to all credit accounts
+                url = "{{ url_for('add_expense_category') }}";
+                // For credit accounts, we'll handle differently
+                $.ajax({
+                    url: url,
+                    method: "POST",
+                    data: { 
+                        name: categoryName.trim()
+                    },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            // Set flag that new category was created
+                            newCategoryCreated = true;
+                            
+                            // Get the c_expense_category_id for this specific account
+                            let cExpenseCategoryId = response.new_category_id;
+                            if (response.c_expense_categories && response.c_expense_categories[accountId]) {
+                                cExpenseCategoryId = response.c_expense_categories[accountId];
+                            }
+                            
+                            // Add to c_expense_categories array with correct ID
+                            c_expense_categories.push({ 
+                                id: cExpenseCategoryId, 
+                                name: categoryName.trim(),
+                                account_id: accountId,
+                                hidden: false,
+                                is_bud: false
+                            });
+                            
+                            // Also add to expense_categories since they're synced
+                            expense_categories.push({
+                                id: response.new_category_id,
+                                name: categoryName.trim(),
+                                hidden: false,
+                                is_bud: false
+                            });
+                            
+                            // Refresh the categories list first
+                            dashboardDUpdateCategoryOptions();
+                            
+                            // Then update the input and hidden field with the new category
+                            dashboardDCategoryInput.value = categoryName.trim();
+                            dashboardDCategoryHidden.value = cExpenseCategoryId;
+                            dashboardDDropdown.style.display = 'none';
+                        } else {
+                            showToast(response.message || 'Failed to create category', 'error');
+                        }
+                    },
+                    error: function(xhr) {
+                        const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Error creating category';
+                        showToast(msg, 'error');
+                    }
+                });
+                return;
+            } else {
+                return;
+            }
+            
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: { name: categoryName.trim() },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Set flag that new category was created
+                        newCategoryCreated = true;
+                        
+                        // Add to appropriate categories array
+                        categoriesArray.push({ 
+                            id: response.new_category_id, 
+                            name: categoryName.trim(),
+                            hidden: false,
+                            is_bud: false
+                        });
+                        
+                        // Refresh the categories list first
+                        dashboardDUpdateCategoryOptions();
+                        
+                        // Then update the input and hidden field with the new category
+                        dashboardDCategoryInput.value = categoryName.trim();
+                        dashboardDCategoryHidden.value = response.new_category_id;
+                        dashboardDDropdown.style.display = 'none';
+                    } else {
+                        showToast(response.message || 'Failed to create category', 'error');
+                    }
+                },
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Error creating category';
+                    showToast(msg, 'error');
+                }
+            });
+        }
+        
+        function calculateWeek(selectedDate, goofyWeekMode) {
+
+            let startOfWeek, endOfWeek;
+
+            // Handle all dates in UTC
+            const selectedDateUTC = new Date(Date.UTC(
+                selectedDate.getUTCFullYear(),
+                selectedDate.getUTCMonth(),
+                selectedDate.getUTCDate()
+            ));
+
+            if (goofyWeekMode) {
+                // Goofy week mode: week starts on the selected Friday, ends on the next Thursday
+                startOfWeek = new Date(selectedDateUTC);  // Start on the selected Friday
+                endOfWeek = new Date(startOfWeek);
+                endOfWeek.setUTCDate(startOfWeek.getUTCDate() + 6);  // End on Thursday
+            } else {
+                // Non-goofy week mode: week starts on the Saturday before the selected Friday and ends on that Friday
+                endOfWeek = new Date(selectedDateUTC);  // End on the selected Friday
+                startOfWeek = new Date(endOfWeek);
+                const dayOfWeek = endOfWeek.getUTCDay(); // Get the day of the week (0 = Sunday, 6 = Saturday)
+                
+                // Set startOfWeek to the previous Saturday
+                const daysSinceSaturday = (dayOfWeek === 6) ? 0 : (dayOfWeek + 1);
+                startOfWeek.setUTCDate(endOfWeek.getUTCDate() - daysSinceSaturday);
+            }
+
+            return { startOfWeek, endOfWeek };
+        }
+
+        // Function to generate the week dates array (UTC) using both startOfWeek and endOfWeek
+        function generateWeekDates(startOfWeek, endOfWeek) {
+
+            const weekDates = [];
+            let currentDate = new Date(Date.UTC(
+                startOfWeek.getUTCFullYear(),
+                startOfWeek.getUTCMonth(),
+                startOfWeek.getUTCDate()
+            ));
+
+            // Ensure we're correctly looping through the week from start to end
+            while (currentDate <= endOfWeek) {
+                weekDates.push(currentDate.toISOString().split('T')[0]);  // Format as 'YYYY-MM-DD'
+                currentDate.setUTCDate(currentDate.getUTCDate() + 1);  // Move to the next day
+            }
+            return weekDates;
+        }
+
+        function storeLastViewedFriday(fridayDate) {
+            const fiveMinutesFromNow = new Date().getTime() + 5 * 60 * 1000;  // Current time + 5 minutes in milliseconds
+            const data = {
+                fridayDate: fridayDate.toISOString(),  // Store the date as a string
+                expiration: fiveMinutesFromNow         // Store the expiration time
+            };
+            localStorage.setItem('lastViewedFriday', JSON.stringify(data));  // Save in localStorage
+        }
+
+        function loadLastViewedFriday() {
+            const storedData = localStorage.getItem('lastViewedFriday');
+            
+            if (storedData) {
+                const { fridayDate, expiration } = JSON.parse(storedData);
+                const now = new Date().getTime();
+                
+                if (now < expiration) {
+                    const lastFriday = new Date(fridayDate);  // Convert back to Date object
+                    selectedDate = lastFriday;  // Set this as the selected date
+                    // Calculate the week for the stored Friday
+                    const { startOfWeek, endOfWeek } = calculateWeek(lastFriday, goofyWeekMode);
+                    const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+                    createDashboardContainers(weekDates);
+                    setupDashboardDInputFocus();
+                    
+                    // Set a timer to navigate to the current week after 5 minutes
+                    setTimeout(goToCurrentWeek, expiration - now);  // Remaining time until expiration
+                } else {
+                    // If the stored date has expired, navigate to the current week
+                    goToCurrentWeek();
+                }
+            } else {
+                // If no date is stored, navigate to the current week
+                goToCurrentWeek();
+            }
+        }
+
+        function createDashboardContainers(weekDates) {
+            const dashboardWrapper = document.getElementById('dashboard-wrapper');
+            if (!dashboardWrapper) return;
+            
+            // Clear only the containers, preserve the banner
+            const banner = document.getElementById('today-floating-banner');
+            dashboardWrapper.innerHTML = '';
+            if (banner) {
+                dashboardWrapper.appendChild(banner);
+            }
+
+            // Use latest AJAX-fetched data if available, otherwise fallback to initial data from backend
+            const totalsRemaindersArr = (window.totalsRemaindersData && Array.isArray(window.totalsRemaindersData)) ? window.totalsRemaindersData : baseTotalsRemainders;
+            const caBalancesArr = (window.c_a_balances_d && Array.isArray(window.c_a_balances_d)) ? window.c_a_balances_d : c_a_balances_d;
+            const savingsArr = (window.savingsEntries && Array.isArray(window.savingsEntries)) ? window.savingsEntries : savingsEntries;
+            const incomeArr = (window.incomeEntries && Array.isArray(window.incomeEntries)) ? window.incomeEntries : incomeEntries;
+            const expenseArr = (window.expenseEntries && Array.isArray(window.expenseEntries)) ? window.expenseEntries : expenseEntries;
+            const caExpenseArr = (window.c_expense_entries && Array.isArray(window.c_expense_entries)) ? window.c_expense_entries : c_expense_entries;
+
+            weekDates.forEach((date, idx) => {
+                const zebraWrapper = document.createElement('div');
+                zebraWrapper.classList.add('dashboard-d-zebra-wrapper');
+                if (idx % 2 === 1) zebraWrapper.classList.add('dashboard-d-zebra');
+
+                const container = document.createElement('div');
+                container.classList.add('dashboard-d-container');
+                container.classList.add('dashboard-d-date-container');
+                container.setAttribute('data-date', date);
+
+                // Check if date is before member_since and add class for dimming
+                let normalizedMemberSinceDate = null;
+                if (memberSince) {
+                    normalizedMemberSinceDate = memberSince;
+                    if (memberSince.length > 10 || memberSince.includes('GMT')) {
+                        const msDate = new Date(memberSince);
+                        if (!isNaN(msDate)) {
+                            normalizedMemberSinceDate = msDate.toISOString().split('T')[0];
+                        }
+                    }
+                    if (date < normalizedMemberSinceDate) {
+                        container.classList.add('before-member-since');
+                    }
+                }
+
+                // Highlight today
+                const currentLocalDate = new Date();
+                const currentLocalDateString = currentLocalDate.toLocaleDateString('en-CA');
+                if (date === currentLocalDateString) {
+                    container.classList.add('today-outline');
+                    const todayFlag = document.createElement('div');
+                    todayFlag.className = 'dashboard-d-today-flag';
+                    todayFlag.textContent = 'Today';
+                    container.appendChild(todayFlag);
+                }
+
+                // Day header
+                const dayHeader = document.createElement('div');
+                dayHeader.classList.add('dashboard-d-day-header');
+                dayHeader.setAttribute('data-date', date);
+                const formattedDate = new Date(date).toLocaleDateString('en-US', {
+                    timeZone: 'UTC',
+                    weekday: 'long',
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+                
+                // Check if this date is the member_since date
+                let memberSinceIcon = '';
+                if (normalizedMemberSinceDate && date === normalizedMemberSinceDate) {
+                    memberSinceIcon = '<div class="member-since-badge" title="Member Since"><i class="fa-solid fa-flag-checkered"></i></div>';
+                }
+                
+                // Hide add button if date is before member_since OR if no valid entry types available (bank sync locking)
+                const isBeforeMemberSince = normalizedMemberSinceDate && date < normalizedMemberSinceDate;
+                const hasValidEntryTypes = shouldShowAddButton(date);
+                const addButton = (isBeforeMemberSince || !hasValidEntryTypes) ? '' : `<button class="dashboard-d-add-entry-btn" onclick="addEntry('${date}')"><i class="fa-kit fa-solid-money-bill-transfer-circle-plus-bl fa-flip-horizontal"></i><span class="nav-tooltip">Add New Entry</span></button>`;
+                
+                dayHeader.innerHTML = `${formattedDate} ${addButton}${memberSinceIcon}`;
+                
+                // Add bank sync marker above the date (absolute positioned)
+                if (bank_last_txn_date && date === bank_last_txn_date) {
+                    const txnDate = new Date(bank_last_txn_date + 'T00:00:00');
+                    const marker = document.createElement('span');
+                    marker.className = 'bank-sync-marker';
+                    marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+                    marker.innerHTML = '<span class="bank-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
+                    dayHeader.appendChild(marker);
+                }
+                
+                container.appendChild(dayHeader);
+
+                // Create content wrapper for border styling
+                const contentWrapper = document.createElement('div');
+                contentWrapper.classList.add('dashboard-d-content-wrapper');
+
+                // --- Use latest AJAX-fetched data ---
+                let lastRemainderValue = '0.00';
+                let totalIncomeValue = '0.00';
+                let totalExpensesValue = '0.00';
+                let remainderValue = '0.00';
+
+                // Use totalsRemaindersArr for up-to-date values
+                const totalsForDate = totalsRemaindersArr.find(item => {
+                    const dateString = item.date || item[2];
+                    const itemDateParsed = Date.parse(dateString);
+                    if (isNaN(itemDateParsed)) return false;
+                    const itemDate = new Date(itemDateParsed);
+                    const formattedItemDate = itemDate.toISOString().split('T')[0];
+                    return formattedItemDate === date;
+                });
+
+                if (totalsForDate) {
+                    lastRemainderValue = parseFloat(totalsForDate.last_day_remainder ?? totalsForDate[6] ?? 0).toFixed(2);
+                    totalIncomeValue = parseFloat(totalsForDate.total_income ?? totalsForDate[3] ?? 0).toFixed(2);
+                    totalExpensesValue = parseFloat(totalsForDate.total_expenses ?? totalsForDate[4] ?? 0).toFixed(2);
+                    remainderValue = parseFloat(totalsForDate.remainder ?? totalsForDate[5] ?? 0).toFixed(2);
+                }
+
+                // Calculate display income (income - last remainder)
+                const displayIncomeValue = (parseFloat(totalIncomeValue) - parseFloat(lastRemainderValue)).toFixed(2);
+
+                // Last remainder
+                const lastRemainder = document.createElement('div');
+                lastRemainder.classList.add('dashboard-d-lastremainder');
+                lastRemainder.innerHTML = `
+                    <div class="dashboard-d-label-cell">Last remainder:</div>
+                    <div class="dashboard-d-amount-cell">${formatCurrency(lastRemainderValue)}</div>`;
+                contentWrapper.appendChild(lastRemainder);
+
+                // Income entries
+                const incomeEntriesDiv = document.createElement('div');
+                incomeEntriesDiv.classList.add('dashboard-d-income-entries');
+                incomeEntriesDiv.setAttribute('data-date', date);
+
+                const filteredIncomeEntries = incomeArr.filter(entry => {
+                    const entryDate = new Date(entry.date).toISOString().split('T')[0];
+                    return entryDate === date;
+                });
+
+                // Calculate actual income for this day from entries
+                const actualDayIncome = filteredIncomeEntries.reduce((sum, entry) => sum + parseFloat(entry.amount || 0), 0);
+
+                filteredIncomeEntries.forEach(entry => {
+                    const incomeRow = document.createElement('div');
+                    incomeRow.classList.add('dashboard-d-row');
+                    incomeRow.setAttribute('data-entry-id', entry.id);
+                    incomeRow.setAttribute('data-category-id', entry.category_id);
+                    incomeRow.setAttribute('data-date', date);
+                    const dataProcessed = entry.processed == 1 ? '1' : '0';
+                    const isPending = Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1;
+                    const paidClass = isPending ? 'pending-entry' : (entry.processed == 1 ? 'paid' : '');
+                    const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
+                    
+                    const catObj = incomeCategories.find(cat => String(cat.id) === String(entry.category_id));
+                    const isBud = catObj && catObj.is_bud;
+                    const isStartingBalance = entry.category_name === 'Starting Balance' || (catObj && catObj.name === 'Starting Balance');
+                    const isBankLocked = isEntryLockedByBankSync(date, entry.category_id, 'income');
+                    const isReadonly = isBud || isStartingBalance || isBankLocked;
+                    let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
+                    if (isStartingBalance) {
+                        iconHtml = '<i class="fa-solid fa-flag-checkered category-icon"></i>';
+                    } else if (catObj) {
+                        if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                        else if (Number(catObj.is_savings) === 1 && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
+                        else if (Number(catObj.is_savings) === 1) iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
+                        else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
+                        else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
+                    }
+                    incomeRow.innerHTML = `
+                        ${!isReadonly ? `<span class="dashboard-d-move-btn" title="Move to date">
+                            <span class="calendar-icon">
+                            <i class="fa-solid fa-up-down-left-right"></i>
+                            </span>
+                        </span>` : ''}
+                        <div class="dashboard-d-label-cell">
+                            ${iconHtml}
+                            ${entry.category_name}
+                        </div>
+                        <div class="dashboard-d-amount-cell ${paidClass}" ${paidTitle ? `title="${paidTitle}"` : ''}>
+                            <input type="text"
+                                class="income-cell-input${isReadonly ? ' auto-disable' : ''}"
+                                data-processed="${dataProcessed}"
+                                value="${formatCurrency(entry.amount)}"
+                                data-entry-id="${entry.id}"
+                                data-category-id="${entry.category_id}"
+                                data-date="${date}"
+                                ${isReadonly ? 'readonly tabindex="-1"' : ''}
+                            />
+                        </div>
+                    `;
+                    incomeEntriesDiv.appendChild(incomeRow);
+                    
+                    // Add progress bar and late badge for bucket entries
+                    if (entry.is_bucket == 1) {
+                        const amountCell = incomeRow.querySelector('.dashboard-d-amount-cell');
+                        if (amountCell) {
+                            updateBucketProgressBar(amountCell, entry, 'income');
+                            addBucketLateBadge(amountCell, entry);
+                        }
+                    }
+                });
+                if (filteredIncomeEntries.length > 0) contentWrapper.appendChild(incomeEntriesDiv);
+
+                // Total income
+                const incomeTotal = document.createElement('div');
+                incomeTotal.classList.add('dashboard-d-income-total');
+                incomeTotal.innerHTML = `
+                    <div class="dashboard-d-label-cell">Total Income:</div>
+                    <div class="dashboard-d-amount-cell">${formatCurrency(actualDayIncome)}</div>`;
+                contentWrapper.appendChild(incomeTotal);
+
+                // Expense entries
+                const expenseEntriesDiv = document.createElement('div');
+                expenseEntriesDiv.classList.add('dashboard-d-expense-entries');
+                expenseEntriesDiv.setAttribute('data-date', date);
+
+                const filteredExpenseEntries = expenseArr.filter(entry => {
+                    const entryDate = new Date(entry.date).toISOString().split('T')[0];
+                    return entryDate === date;
+                });
+
+                filteredExpenseEntries.forEach(entry => {
+                    const expenseRow = document.createElement('div');
+                    expenseRow.classList.add('dashboard-d-row');
+                    expenseRow.setAttribute('data-entry-id', entry.id);
+                    expenseRow.setAttribute('data-category-id', entry.category_id);
+                    expenseRow.setAttribute('data-date', date);
+                    const dataProcessed = entry.processed == 1 ? '1' : '0';
+                    const isPending = Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1;
+                    const paidClass = isPending ? 'pending-entry' : (entry.processed == 1 ? 'paid' : '');
+                    const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
+                    
+                    const catObj = expenseCategories.find(cat => String(cat.id) === String(entry.category_id));
+                    const isBud = catObj && catObj.is_bud;
+                    const isExpenseBankLocked = isEntryLockedByBankSync(date, entry.category_id, 'expense');
+                    const isExpenseReadonly = isBud || isExpenseBankLocked;
+                    let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
+                    if (catObj) {
+                        if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                        else if (catObj.is_credit_account && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
+                        else if (Number(catObj.is_savings) === 1 && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
+                        else if (Number(catObj.is_savings) === 1) iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
+                        else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
+                        else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
+                        else if (catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
+                    }
+                    expenseRow.innerHTML = `
+                        ${!isExpenseReadonly ? `<span class="dashboard-d-move-btn" title="Move to date">
+                            <span class="calendar-icon">
+                            <i class="fa-solid fa-up-down-left-right"></i>
+                            </span>
+                        </span>` : ''}
+                        <div class="dashboard-d-label-cell">
+                            ${iconHtml}
+                            ${entry.category_name}
+                        </div>
+                        <div class="dashboard-d-amount-cell ${paidClass}" ${paidTitle ? `title="${paidTitle}"` : ''}>
+                            <input type="text"
+                                class="expense-cell-input${isExpenseReadonly ? ' auto-disable' : ''}"
+                                data-processed="${dataProcessed}"
+                                value="${formatCurrency(entry.amount)}"
+                                data-entry-id="${entry.id}"
+                                data-category-id="${entry.category_id}"
+                                data-date="${date}"
+                                ${isExpenseReadonly ? 'readonly tabindex="-1"' : ''}
+                            />
+                        </div>
+                    `;
+                    expenseEntriesDiv.appendChild(expenseRow);
+                    
+                    // Add progress bar and late badge for bucket entries
+                    if (entry.is_bucket == 1) {
+                        const amountCell = expenseRow.querySelector('.dashboard-d-amount-cell');
+                        if (amountCell) {
+                            updateBucketProgressBar(amountCell, entry, 'expense');
+                            addBucketLateBadge(amountCell, entry);
+                        }
+                    }
+                });
+                if (filteredExpenseEntries.length > 0) contentWrapper.appendChild(expenseEntriesDiv);
+
+                // Total expenses
+                const expenseTotal = document.createElement('div');
+                expenseTotal.classList.add('dashboard-d-expense-total');
+                expenseTotal.innerHTML = `
+                    <div class="dashboard-d-label-cell">Total Expenses:</div>
+                    <div class="dashboard-d-amount-cell">${formatCurrency(totalExpensesValue)}</div>`;
+                contentWrapper.appendChild(expenseTotal);
+
+                // Remainder
+                const remainder = document.createElement('div');
+                remainder.classList.add('dashboard-d-remainder');
+                remainder.innerHTML = `
+                    <div class="dashboard-d-label-cell">Remainder:</div>
+                    <div class="dashboard-d-amount-cell">${formatCurrency(remainderValue)}</div>`;
+                const remainderValueCell = remainder.querySelector('.dashboard-d-amount-cell');
+                let applyThresholdClasses = true;
+                let normalizedMemberSince = memberSince;
+                if (memberSince) {
+                    if (memberSince.length > 10 || memberSince.includes('GMT')) {
+                        const msDate = new Date(memberSince);
+                        if (!isNaN(msDate)) {
+                            normalizedMemberSince = msDate.toISOString().split('T')[0];
+                        }
+                    }
+                    applyThresholdClasses = (String(date) >= String(normalizedMemberSince));
+                }
+                if (applyThresholdClasses) {
+                    const remainderNumericValue = parseFloat(remainderValue);
+                    if (remainderNumericValue < 0) {
+                        remainderValueCell.classList.add('negative');
+                    } else if (remainderNumericValue < balance_threshold) {
+                        remainderValueCell.classList.add('below-threshold');
+                    } else {
+                        remainderValueCell.classList.add('above-threshold');
+                    }
+                }
+                contentWrapper.appendChild(remainder);
+
+                // --- Add teal divider with "Credit Accounts" label ---
+                const creditDivider = document.createElement('div');
+                creditDivider.className = 'dashboard-d-credit-divider';
+                creditDivider.innerHTML = `<span class="dashboard-d-credit-divider-text">Credit Accounts</span>`;
+                contentWrapper.appendChild(creditDivider);
+
+                // Credit accounts
+                credit_accounts.forEach(account => {
+                    const caDiv = document.createElement('div');
+                    caDiv.classList.add('dashboard-d-credit-account');
+                    caDiv.setAttribute('data-account-id', account.id);
+
+                    // Account name row
+                    const accountNameRow = document.createElement('div');
+                    accountNameRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-name-row');
+                    const maskDisplay = account.mask ? '...' + account.mask.slice(-4) : '';
+                    accountNameRow.innerHTML = `
+                        <div class="dashboard-d-label-cell">${account.name}</div>
+                        <div class="dashboard-d-amount-cell">${maskDisplay}</div>
+                    `;
+                    caDiv.appendChild(accountNameRow);
+
+                    // Expense entries for credit account
+                    const entriesForDate = caExpenseArr.filter(entry => {
+                        let entryDateStr;
+                        if (entry.date.includes('GMT')) {
+                            entryDateStr = new Date(entry.date).toISOString().split('T')[0];
+                        } else {
+                            entryDateStr = entry.date;
+                        }
+                        const catObj = c_expense_categories.find(cat => cat.id == entry.category_id);
+                        return entryDateStr === date && catObj && catObj.account_id == account.id;
+                    });
+
+                    entriesForDate.forEach(entry => {
+                        const catObj = c_expense_categories.find(cat => cat.id == entry.category_id);
+                        if (catObj && catObj.name === "Starting Balance") return;
+                        const isBud = catObj && catObj.is_bud;
+                        const isCaBankLocked = isEntryLockedByBankSync(date, entry.category_id, 'ca', account.id);
+                        const isCaReadonly = isBud || isCaBankLocked;
+                        let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
+                        if (catObj) {
+                            if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                            else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
+                            else if (catObj.is_interest) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
+                            else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
+                            else if (catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
+                        }
+                        const entryRow = document.createElement('div');
+                        entryRow.classList.add('dashboard-d-credit-row', 'dashboard-d-row');
+                        entryRow.setAttribute('data-entry-id', entry.id);
+                        entryRow.setAttribute('data-category-id', entry.category_id);
+                        entryRow.setAttribute('data-date', date);
+                        entryRow.setAttribute('data-account-id', catObj ? catObj.account_id : '');
+                        const dataProcessed = entry.processed == 1 ? '1' : '0';
+                        const isPending = Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1;
+                        const paidClass = isPending ? 'pending-entry' : (entry.processed == 1 ? 'paid' : '');
+                        const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
+                        entryRow.innerHTML = `
+                            ${!isCaReadonly ? `<span class="dashboard-d-move-btn" title="Move to date">
+                                <span class="calendar-icon">
+                                    <i class="fa-solid fa-up-down-left-right"></i>
+                                </span>
+                            </span>` : ''}
+                            <div class="dashboard-d-label-cell">
+                                ${iconHtml}
+                                ${catObj ? catObj.name : 'Category'}
+                            </div>
+                            <div class="dashboard-d-amount-cell ${paidClass}" ${paidTitle ? `title="${paidTitle}"` : ''}>
+                                <input type="text"
+                                    class="ca-cell-input${isCaReadonly ? ' auto-disable' : ''}"
+                                    data-processed="${dataProcessed}"
+                                    value="${formatCurrency(entry.amount)}"
+                                    data-entry-id="${entry.id}"
+                                    data-category-id="${entry.category_id}"
+                                    data-date="${date}"
+                                    ${isCaReadonly ? 'readonly tabindex="-1"' : ''}
+                                />
+                            </div>
+                        `;
+                        caDiv.appendChild(entryRow);
+                        
+                        // Add progress bar and late badge for bucket entries
+                        if (entry.is_bucket == 1) {
+                            const amountCell = entryRow.querySelector('.dashboard-d-amount-cell');
+                            if (amountCell) {
+                                updateBucketProgressBar(amountCell, entry, 'c_expense');
+                                addBucketLateBadge(amountCell, entry);
+                            }
+                        }
+                    });
+
+                    // Balance row
+                    const balanceObj = caBalancesArr.find(bal => {
+                        let balDateStr;
+                        if (bal.date.includes('GMT')) {
+                            balDateStr = new Date(bal.date).toISOString().split('T')[0];
+                        } else {
+                            balDateStr = bal.date;
+                        }
+                        return balDateStr === date && bal.account_id == account.id;
+                    });
+                    const balanceRow = document.createElement('div');
+                    balanceRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-balance');
+                    balanceRow.innerHTML = `
+                        <div class="dashboard-d-label-cell">Balance:</div>
+                        <div class="dashboard-d-amount-cell">${formatCurrency(balanceObj ? balanceObj.balance : 0)}</div>
+                    `;
+                    caDiv.appendChild(balanceRow);
+
+                    contentWrapper.appendChild(caDiv);
+                });
+
+                const creditDividerAfter = document.createElement('div');
+                creditDividerAfter.className = 'dashboard-d-credit-divider';
+                creditDividerAfter.innerHTML = `<span class="dashboard-d-credit-divider-text">Savings</span>`;
+                contentWrapper.appendChild(creditDividerAfter);
+
+                // Savings
+                const savingsEntry = savingsArr.find(e => {
+                    const entryDate = new Date(e.date).toISOString().split('T')[0];
+                    return entryDate === date;
+                });
+                const savingsAmount = savingsEntry ? parseFloat(savingsEntry.amount) : 0.0;
+                const savingsDiv = document.createElement('div');
+                savingsDiv.classList.add('dashboard-d-savings');
+                savingsDiv.innerHTML = `
+                    <div class="dashboard-d-label-cell">Savings:</div>
+                    <div class="dashboard-d-amount-cell">${currencySymbol}${savingsAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                `;
+                contentWrapper.appendChild(savingsDiv);
+
+                // Append content wrapper to container
+                container.appendChild(contentWrapper);
+
+                zebraWrapper.appendChild(container);
+                dashboardWrapper.appendChild(zebraWrapper);
+            });
+
+            document.querySelectorAll('.dashboard-d-amount-cell[contenteditable="true"]').forEach(cell => {
+                enableCellHighlightingAndSubmission(cell);
+            });
+
+            updateNextWeekIndicator();
+            document.getElementById('loading-screen').style.display = 'none';
+            
+            // Update today banner after containers are created
+            setTimeout(updateTodayBanner, 100);
+            
+            // Fit text to containers after rendering
+            setTimeout(fitTextToContainer, 150);
+        }
+
+        function saveDailyTotalsAndRemainders(startDate = null) {
+            let data = {};
+            if (startDate) {
+                data.start_date = startDate;
+            }
+
+            $.ajax({
+                url: "/save_totals_remainders_d", // Back-end route
+                type: "POST", // Or "GET" depending on your method
+                contentType: "application/json",
+                //async: false,  // Make the request synchronous
+                success: function(response) {
+                    if (response.status === "success") {
+                        // Refresh notification badge in case new notifications were created
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
+                        }
+                        updateDashboardDView()
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                },
+                complete: function() {
+                    // Hide the loading screen after the AJAX request completes
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            });
+        }
+
+        function updateTotalsAndRemaindersUI(data) {
+            // Assuming 'data' contains the totals and remainders array from the backend
+            // Update savingsEntries if provided
+            if (updatedSavings) {
+                savingsEntries.length = 0;
+                updatedSavings.forEach(entry => savingsEntries.push(entry));
+            }
+
+            // Existing logic for updating totals/remainders
+            const updatedTotalsRemainders = data.updated_totals_remainders;
+
+            if (!updatedTotalsRemainders || updatedTotalsRemainders.length === 0) {
+                return;
+            }
+
+            updatedTotalsRemainders.forEach(item => {
+                // Ensure values are properly initialized (fallback to 0 if undefined or null)
+                const totalIncome = item.total_income ? parseFloat(item.total_income) : 0;
+                const totalExpenses = item.total_expenses ? parseFloat(item.total_expenses) : 0;
+                const remainder = item.remainder ? parseFloat(item.remainder) : 0;
+
+                // Example: Update the UI with formatted totals and remainders
+                const totalIncomeFormatted = totalIncome;
+                const totalExpensesFormatted = totalExpenses;
+                const remainderFormatted = remainder;
+                // Update your UI elements here with the formatted values
+            });
+        }
+
+        function updateEntry(input, type) {
+            if (input._updating) return; // Prevent double update
+            input._updating = true;
+
+            showDashboardSpinner(true);
+            const newValue = input.value.trim();
+
+            // Get the necessary data attributes
+            const row = input.closest('.dashboard-d-row');
+            const categoryId = row.getAttribute('data-category-id');
+            const date = new Date(row.getAttribute('data-date'));
+            const formattedDate = date.toISOString().split('T')[0];
+            const entryId = row.getAttribute('data-entry-id');
+
+            // Use the same value for start_date and end_date
+            const startDate = formattedDate;
+            const endDate = formattedDate;
+
+            if (newValue === "") {
+                // Delete entry locally before AJAX
+                let entriesArray;
+                if (type === 'income') {
+                    entriesArray = incomeEntries;
+                } else if (type === 'expense') {
+                    entriesArray = expenseEntries;
+                } else if (type === 'ca') {
+                    entriesArray = c_expense_entries;
+                }
+                // Remove only the specific entry by ID (not all entries for category+date)
+                if (entryId && entryId !== 'new') {
+                    for (let i = entriesArray.length - 1; i >= 0; i--) {
+                        if (String(entriesArray[i].id) === String(entryId)) {
+                            entriesArray.splice(i, 1);
+                            break;
+                        }
+                    }
+                } else {
+                    // Fallback: remove by category+date
+                    for (let i = entriesArray.length - 1; i >= 0; i--) {
+                        let entryDateString = new Date(entriesArray[i].date).toISOString().split('T')[0];
+                        if (String(entriesArray[i].category_id) === String(categoryId) && entryDateString === endDate) {
+                            entriesArray.splice(i, 1);
+                        }
+                    }
+                }
+
+                // Remove the row from the UI immediately
+                const row = input.closest('.dashboard-d-row');
+                if (row) {
+                    // Check if this is the last entry in its section
+                    const entriesDiv = row.parentElement;
+                    row.remove();
+                    
+                    // If this was the last row, remove the entire entries section
+                    if (entriesDiv && entriesDiv.children.length === 0) {
+                        if (entriesDiv.classList.contains('dashboard-d-income-entries') || 
+                            entriesDiv.classList.contains('dashboard-d-expense-entries')) {
+                            entriesDiv.remove();
+                        } 
+                        // For credit accounts, check if we only have the account name and balance rows left
+                        else if (entriesDiv.classList.contains('dashboard-d-credit-account')) {
+                            // Don't remove credit account div itself, as it should always show balance
+                            // even if there are no transactions
+                        }
+                    }
+                }
+
+                const data = {
+                    category_id: categoryId,
+                    start_date: startDate,
+                    end_date: endDate,
+                    type: type, // 'income', 'expense', or 'ca'
+                    entry_id: (entryId && entryId !== 'new') ? entryId : null
+                };
+
+                $.ajax({
+                    url: "/delete-entry",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify(data),
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            // Update bucket entries in local state if returned from server
+                            // Note: DOM update is handled by saveDailyTotalsAndRemainders -> updateDashboardDView
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    // Match by category_id, date, and is_bucket flag (not ID since recreated buckets have new IDs)
+                                    const bucketEntry = entriesArray.find(e => 
+                                        String(e.category_id) === String(categoryId) && 
+                                        e.date === bucket.date && 
+                                        e.is_bucket == 1
+                                    );
+                                    if (bucketEntry) {
+                                        if (bucket.amount > 0) {
+                                            // Update existing bucket
+                                            bucketEntry.amount = bucket.amount;
+                                            bucketEntry.original_amount = bucket.original_amount;
+                                        } else {
+                                            // Bucket depleted - remove from local state
+                                            const index = entriesArray.indexOf(bucketEntry);
+                                            if (index > -1) {
+                                                entriesArray.splice(index, 1);
+                                            }
+                                        }
+                                    } else if (bucket.amount > 0) {
+                                        // Bucket was recreated - add it to local state
+                                        entriesArray.push({
+                                            id: bucket.id,
+                                            category_id: parseInt(categoryId),
+                                            date: bucket.date,
+                                            amount: bucket.amount,
+                                            original_amount: bucket.original_amount,
+                                            is_bucket: 1,
+                                            processed: 0
+                                        });
+                                    }
+                                });
+                            }
+                            saveDailyTotalsAndRemainders(endDate);
+                        } else {
+                            // If delete failed on server, restore the UI by refreshing
+                            updateDashboardDView();
+                        }
+                    },
+                    error: function() {
+                        // If delete failed due to an error, restore the UI by refreshing
+                        updateDashboardDView();
+                    }
+                });
+            } else {
+                // Validate and update the entry for the specific date
+                const validValue = newValue.match(/^\d*(\.\d{0,2})?$/);
+                if (!validValue) {
+                    input.value = '';
+                    return;
+                }
+
+                const amount = parseFloat(newValue);
+                if (isNaN(amount)) {
+                    input.value = '';
+                    return;
+                }
+
+                const data = {
+                    category_id: categoryId,
+                    date: endDate,
+                    amount: amount,
+                    type: type, // 'income', 'expense', or 'ca'
+                    entry_id: (entryId && entryId !== 'new') ? entryId : null
+                };
+                $.ajax({
+                    url: "/update-entry",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify(data),
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            input.value = currencySymbol + formatNumberWithCommas(amount);
+
+                            // Update local entry immediately
+                            let entriesArray;
+                            if (type === 'income') {
+                                entriesArray = incomeEntries;
+                            } else if (type === 'expense') {
+                                entriesArray = expenseEntries;
+                            } else if (type === 'ca') {
+                                entriesArray = c_expense_entries;
+                            }
+                            // Find and update the specific entry by ID
+                            let found = false;
+                            if (entryId && entryId !== 'new') {
+                                entriesArray.forEach(entry => {
+                                    if (String(entry.id) === String(entryId)) {
+                                        entry.amount = amount;
+                                        found = true;
+                                    }
+                                });
+                            }
+                            if (!found) {
+                                // Fallback: match by category_id and date
+                                entriesArray.forEach(entry => {
+                                    let entryDateString = new Date(entry.date).toISOString().split('T')[0];
+                                    if (String(entry.category_id) === String(categoryId) && entryDateString === endDate) {
+                                        entry.amount = amount;
+                                        found = true;
+                                    }
+                                });
+                            }
+                            // If not found, add new entry locally
+                            if (!found) {
+                                entriesArray.push({
+                                    category_id: categoryId,
+                                    date: endDate,
+                                    amount: amount
+                                });
+                            }
+
+                            // Update bucket entries in local state if returned from server
+                            // Note: DOM update is handled by saveDailyTotalsAndRemainders -> updateDashboardDView
+                            if (response.updated_buckets && response.updated_buckets.length > 0) {
+                                response.updated_buckets.forEach(bucket => {
+                                    // Find by category_id, date, and is_bucket flag
+                                    const bucketEntry = entriesArray.find(e => 
+                                        String(e.category_id) === String(categoryId) && 
+                                        e.date === bucket.date && 
+                                        e.is_bucket == 1
+                                    );
+                                    if (bucketEntry) {
+                                        bucketEntry.amount = bucket.amount;
+                                        bucketEntry.original_amount = bucket.original_amount;
+                                    }
+                                });
+                            }
+
+                            saveDailyTotalsAndRemainders(endDate);
+                        } else {
+                        }
+                    },
+                    error: function(xhr) {
+                    }
+                });
+            }
+        }
+
+        // Function to select the text within a contentEditable element
+        function selectText(td) {
+            const range = document.createRange();
+            const selection = window.getSelection();
+            range.selectNodeContents(td);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+
+        // Function to enable highlighting, handle submission on Enter, and check for changes
+        function enableCellHighlightingAndSubmission(cell) {
+            let originalValue = cell.textContent.trim(); // Store the original value when the cell is rendered
+            let originalWithDollar = cell.textContent; // Store the original value with the dollar sign
+
+            cell.addEventListener('focus', function () {
+                originalValue = cell.textContent.trim().replace(/^\$/, ''); // Remove $ if present
+                originalWithDollar = cell.textContent;
+                // Remove the dollar sign for editing
+                if (cell.textContent.trim().startsWith('$')) {
+                    cell.textContent = cell.textContent.trim().substring(1).trim();
+                }
+                selectText(cell); // Highlight the text
+            });
+
+            // Add keypress event listener to detect the Enter key
+            cell.addEventListener('keypress', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault(); // Prevent default behavior (inserting a new line)
+                    cell.blur(); // Trigger the blur event to check and submit the entry
+                }
+            });
+
+            // Add blur event listener to submit the data when the user leaves the cell
+            cell.addEventListener('blur', function () {
+                let newValue = cell.textContent.trim(); // Get the current value after editing
+                // Only trigger the update if the value has changed
+                if (newValue !== originalValue) {
+                    const parentSection = cell.closest('.dashboard-d-expense-entries, .dashboard-d-income-entries, .dashboard-d-credit-account');
+                    let entryType;
+                    if (parentSection) {
+                        if (parentSection.classList.contains('dashboard-d-expense-entries')) {
+                            entryType = 'expense';
+                        } else if (parentSection.classList.contains('dashboard-d-income-entries')) {
+                            entryType = 'income';
+                        } else if (parentSection.classList.contains('dashboard-d-credit-account')) {
+                            entryType = 'ca';
+                        }
+                        if (entryType) {
+                            updateEntry(cell, entryType); // Call updateEntry with the correct type
+                            return; // updateEntry will reformat the cell
+                        }
+                    }
+                }
+                // If the value didn't change, revert the text to the original value (with $)
+                if (!cell.textContent.trim().startsWith('$')) {
+                    cell.textContent = originalWithDollar;
+                }
+            });
+        }
+
+        function previousWeek() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-right');
+            setTimeout(() => mainContainer.classList.remove('slide-right'), 300);
+
+            document.getElementById('loading-screen').style.display = 'none';
+            selectedDate.setUTCDate(selectedDate.getUTCDate() - 7);
+            const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+            const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+            createDashboardContainers(weekDates);
+            setupDashboardDInputFocus();
+
+            // Store the current Friday date
+            storeLastViewedFriday(selectedDate);
+            
+            // Update today banner after navigation
+            setTimeout(updateTodayBanner, 100);
+        }
+
+        function nextWeek() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-left');
+            setTimeout(() => mainContainer.classList.remove('slide-left'), 300);
+
+            document.getElementById('loading-screen').style.display = 'none';
+            selectedDate.setUTCDate(selectedDate.getUTCDate() + 7);
+            const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+            const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+            createDashboardContainers(weekDates);
+            setupDashboardDInputFocus();
+
+            // Store the current Friday date
+            storeLastViewedFriday(selectedDate);
+            
+            // Update today banner after navigation
+            setTimeout(updateTodayBanner, 100);
+        }
+
+        function goToCurrentWeek() {
+            document.getElementById('loading-screen').style.display = 'none';
+            let today = new Date();  // Get the current local date
+
+            let currentFriday;
+            const dayOfWeek = today.getDay();  // Get local day of the week (0 = Sunday, 6 = Saturday)
+
+            // Calculate the current Friday based on goofyWeekMode or regular mode
+            if (goofyWeekMode) {
+                // Goofy week mode: week starts on Friday, ends on Thursday
+                if (dayOfWeek >= 5) {
+                    // If today is Friday (5) or Saturday (6), use this Friday
+                    currentFriday = new Date(today);
+                    currentFriday.setDate(today.getDate() - (dayOfWeek - 5));
+                } else {
+                    // If today is Sunday (0) to Thursday (4), use the previous Friday
+                    currentFriday = new Date(today);
+                    currentFriday.setDate(today.getDate() - (dayOfWeek + 2));
+                }
+            } else {
+                // Regular week mode: week starts on Saturday, ends on Friday
+                if (dayOfWeek === 6) {
+                    // If today is Saturday, move forward to the next Friday
+                    currentFriday = new Date(today);
+                    currentFriday.setDate(today.getDate() + 6);  // Move forward to next Friday
+                } else if (dayOfWeek < 5) {
+                    // If today is before Friday (Sunday - Thursday), move forward to the upcoming Friday
+                    currentFriday = new Date(today);
+                    currentFriday.setDate(today.getDate() + (5 - dayOfWeek));  // Move forward to Friday
+                } else {
+                    // If today is Friday, use today
+                    currentFriday = new Date(today);
+                }
+            }
+
+            // Correctly set the selectedDate to currentFriday in UTC format
+            selectedDate = new Date(Date.UTC(
+                currentFriday.getFullYear(),
+                currentFriday.getMonth(),
+                currentFriday.getDate()
+            ));
+
+            // Now calculate the start and end of the week using the correct selectedDate
+            const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+
+            // Generate all dates within the week
+            const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+
+            // Update the UI with the new week data
+            createDashboardContainers(weekDates);
+            setupDashboardDInputFocus();
+
+            // Store the current Friday date
+            storeLastViewedFriday(selectedDate);
+            
+            // Update today banner after navigation
+            setTimeout(updateTodayBanner, 100);
+
+            // Scroll to today's container
+            setTimeout(function() {
+                const todayContainer = document.querySelector('.dashboard-d-container.today-outline');
+                if (todayContainer) {
+                    todayContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 400);
+        }
+
+
+        window.onload = function() {
+
+            // Check if there's a 'date' parameter or 'year/month/day' parameters in the URL
+            const url = new URL(window.location.href);
+            const dateParam = url.searchParams.get("date");
+            const yearParam = url.searchParams.get("year");
+            const monthParam = url.searchParams.get("month");
+            const dayParam = url.searchParams.get("day");
+
+            if (dateParam) {
+                // Remove the 'date' query parameter from the URL
+                window.history.replaceState({}, document.title, "/dashboard_d");
+
+                // Parse YYYY-MM-DD as LOCAL date (new Date("YYYY-MM-DD") parses as UTC,
+                // which shifts the day in non-UTC timezones).
+                const dateParts = dateParam.split('-');
+                const selectedDate = new Date(
+                    parseInt(dateParts[0], 10),
+                    parseInt(dateParts[1], 10) - 1,
+                    parseInt(dateParts[2], 10)
+                );
+                storeLastViewedFriday(selectedDate);
+            } else if (yearParam !== null && monthParam !== null && dayParam !== null) {
+                // Handle year/month/day parameters
+                const year = parseInt(yearParam);
+                const month = parseInt(monthParam); // 0-indexed
+                const day = parseInt(dayParam);
+                
+                if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+                    // Remove the query parameters from the URL
+                    window.history.replaceState({}, document.title, "/dashboard_d");
+                    
+                    // Create a date object for the clicked date
+                    const clickedDate = new Date(year, month, day);
+                    const dayOfWeek = clickedDate.getDay(); // 0 = Sunday, 6 = Saturday
+                    
+                    // Calculate the Friday for the week containing this date
+                    let fridayDate;
+                    if (goofyWeekMode) {
+                        // Goofy week mode: week starts on Friday, ends on Thursday
+                        if (dayOfWeek >= 5) {
+                            // If clicked date is Friday (5) or Saturday (6), use this Friday
+                            fridayDate = new Date(clickedDate);
+                            fridayDate.setDate(clickedDate.getDate() - (dayOfWeek - 5));
+                        } else {
+                            // If clicked date is Sunday (0) to Thursday (4), use the previous Friday
+                            fridayDate = new Date(clickedDate);
+                            fridayDate.setDate(clickedDate.getDate() - (dayOfWeek + 2));
+                        }
+                    } else {
+                        // Regular week mode: week starts on Saturday, ends on Friday
+                        if (dayOfWeek === 6) {
+                            // If clicked date is Saturday, move forward to the next Friday
+                            fridayDate = new Date(clickedDate);
+                            fridayDate.setDate(clickedDate.getDate() + 6);
+                        } else if (dayOfWeek < 5) {
+                            // If before Friday (Sunday - Thursday), move forward to the upcoming Friday
+                            fridayDate = new Date(clickedDate);
+                            fridayDate.setDate(clickedDate.getDate() + (5 - dayOfWeek));
+                        } else {
+                            // If clicked date is Friday, use it
+                            fridayDate = new Date(clickedDate);
+                        }
+                    }
+                    
+                    // Store the calculated Friday
+                    storeLastViewedFriday(fridayDate);
+                    
+                    // Store the clicked date for scrolling after load
+                    sessionStorage.setItem('scrollToDate', clickedDate.toISOString().split('T')[0]);
+                }
+            }
+
+            // Load the last viewed Friday week, or go to the current week
+            loadLastViewedFriday();
+
+            // Calculate start and end of the week based on tempDate, not modifying selectedDate
+            const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+            const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+            
+            // Check if we need to scroll to a specific date
+            const scrollToDate = sessionStorage.getItem('scrollToDate');
+            if (scrollToDate) {
+                sessionStorage.removeItem('scrollToDate');
+                // Wait for the DOM to be fully rendered
+                setTimeout(() => {
+                    const dateContainer = document.querySelector(`.dashboard-d-date-container[data-date="${scrollToDate}"]`);
+                    if (dateContainer) {
+                        dateContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        // Optionally highlight the date briefly
+                        dateContainer.style.transition = 'background-color 0.5s ease';
+                        const originalBg = dateContainer.style.backgroundColor;
+                        dateContainer.style.backgroundColor = 'rgba(228, 95, 28, 0.3)';
+                        setTimeout(() => {
+                            dateContainer.style.backgroundColor = originalBg;
+                        }, 1500);
+                    }
+                }, 500);
+            }
+        };
+
+        // Attach touch event listeners for sliding interaction
+        document.addEventListener('touchstart', handleTouchStart, { passive: false });
+        document.addEventListener('touchmove', handleTouchMove, { passive: false });
+        document.addEventListener('touchend', handleTouchEnd);
+
+        // Handle the form submission via AJAX
+        $('#dashboard-d-addEntryForm').on('submit', function(e) {
+            showDashboardSpinner(true);
+            e.preventDefault();
+
+            const formData = {
+                entryType: $('#dashboard-d-entryType').val(),
+                category: $('#dashboard-d-category').val(),
+                amount: $('#dashboard-d-amount').val(),
+                date: $('#dashboard-d-entryDate').val()
+            };
+
+            if (!formData.entryType || !formData.category || !formData.amount || !formData.date) {
+                return;
+            }
+
+            addEntryAJAX(formData);
+        });
+
+function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuckets = null) {
+    let entriesArray;
+    let categoriesArray;
+    if (entryType === 'income') {
+        entriesArray = incomeEntries;
+        categoriesArray = incomeCategories;
+    } else if (entryType === 'expense') {
+        entriesArray = expenseEntries;
+        categoriesArray = expenseCategories;
+    } else if (entryType === 'ca' || entryType.startsWith('ca')) {
+        entriesArray = c_expense_entries;
+        categoriesArray = c_expense_categories;
+    } else {
+        return;
+    }
+    
+    // Update bucket entries if provided
+    if (updatedBuckets && updatedBuckets.length > 0) {
+        updatedBuckets.forEach(bucket => {
+            const bucketEntry = entriesArray.find(e => e.id === bucket.id && e.is_bucket == 1);
+            if (bucketEntry) {
+                bucketEntry.amount = bucket.amount;
+            }
+        });
+    }
+
+    // Normalize date to YYYY-MM-DD
+    const entryDateObj = new Date(formData.date);
+    entryDateObj.setUTCHours(0, 0, 0, 0);
+    const normalizedDate = entryDateObj.toISOString().split('T')[0];
+    const categoryId = String(formData.category);
+
+    // Get category name from categories array
+    const category = categoriesArray.find(c => String(c.id) === categoryId);
+    const categoryName = category ? category.name : 'Unknown';
+
+    let entry = entriesArray.find(e => {
+        const normalizedEntryDate = new Date(e.date).toISOString().split('T')[0];
+        return String(e.category_id) === categoryId && normalizedEntryDate === normalizedDate;
+    });
+
+    if (isAdd) {
+        if (entry) {
+            let existingAmount = parseFloat(entry.total_amount ?? entry.amount ?? 0);
+            if (isNaN(existingAmount)) existingAmount = 0;
+            const newAmount = Number(formData.amount);
+            const finalValue = existingAmount + newAmount;
+            entry.total_amount = finalValue.toFixed(2);
+            if ('amount' in entry) {
+                entry.amount = finalValue.toFixed(2);
+            }
+            return finalValue.toFixed(2);
+        } else {
+            let newEntry = {
+                category_id: categoryId,
+                category_name: categoryName,
+                date: normalizedDate,
+                total_amount: Number(formData.amount).toFixed(2)
+            };
+            if ((entryType === 'ca' || entryType.startsWith('ca')) && formData.account_id !== undefined) {
+                newEntry.processed = 0;
+                newEntry.account_id = formData.account_id;
+            }
+            entriesArray.push(newEntry);
+            return newEntry.total_amount;
+        }
+    } else {
+        // Substitute the value (replace with new) for the specific date
+        if (entry) {
+            entry.total_amount = Number(formData.amount).toFixed(2);
+            if ('amount' in entry) {
+                entry.amount = Number(formData.amount).toFixed(2);
+            }
+            return entry.total_amount;
+        } else {
+            let newEntry = {
+                category_id: categoryId,
+                category_name: categoryName,
+                date: normalizedDate,
+                total_amount: Number(formData.amount).toFixed(2)
+            };
+            if ((entryType === 'ca' || entryType.startsWith('ca')) && formData.account_id !== undefined) {
+                newEntry.processed = 0;
+                newEntry.account_id = formData.account_id;
+            }
+            entriesArray.push(newEntry);
+            return newEntry.total_amount;
+        }
+    }
+}
+
+        // Function to get the appropriate category array based on entry type
+        function getCategoryArray(entryType) {
+            if (entryType === 'income') {
+                return incomeCategories;
+            } else if (entryType === 'expense') {
+                return expenseCategories;
+            } else if (entryType === 'ca' || entryType.startsWith('ca')) {
+                return c_expense_categories;
+            }
+            return [];
+        }
+        
+        // Function to format currency without .00 when decimals are zero
+        function formatCurrency(value) {
+            const num = parseFloat(value);
+            if (isNaN(num)) return currencySymbol + '0';
+            
+            // Always format with 2 decimal places and thousand separators
+            return currencySymbol + formatNumberWithCommas(num);
+        }
+        
+        // Helper function to create/update bucket progress bar
+        function updateBucketProgressBar(cell, entry, entryType = null) {
+            // Remove any existing progress bar
+            const existingBar = cell.querySelector('.bucket-progress-container');
+            if (existingBar) {
+                existingBar.remove();
+            }
+            
+            // Only add progress bar if entry is a bucket
+            if (!entry || entry.is_bucket != 1) return;
+            
+            const remainingAmount = parseFloat(entry.amount || 0);
+            let originalAmount = parseFloat(entry.original_amount || 0);
+            
+            // If original_amount is not on the entry, look it up from bucket records
+            if (originalAmount <= 0 && entry.category_id && entry.date) {
+                const entryDate = typeof entry.date === 'string' ? entry.date : new Date(entry.date).toISOString().split('T')[0];
+                const categoryId = String(entry.category_id);
+                
+                // Determine which bucket records to search based on entry type
+                let bucketRecords = [];
+                if (entryType === 'income') {
+                    bucketRecords = recurring_income_buckets || [];
+                } else if (entryType === 'expense') {
+                    bucketRecords = recurring_expense_buckets || [];
+                } else if (entryType === 'c_expense') {
+                    bucketRecords = recurring_c_expense_buckets || [];
+                } else {
+                    // Try all bucket records if type not specified
+                    bucketRecords = [
+                        ...(recurring_income_buckets || []),
+                        ...(recurring_expense_buckets || []),
+                        ...(recurring_c_expense_buckets || [])
+                    ];
+                }
+                
+                // Find matching bucket record by category_id and date
+                const matchingBucket = bucketRecords.find(b => {
+                    const bucketDate = typeof b.bucket_date === 'string' ? b.bucket_date : new Date(b.bucket_date).toISOString().split('T')[0];
+                    return String(b.category_id) === categoryId && bucketDate === entryDate;
+                });
+                
+                if (matchingBucket && matchingBucket.original_amount) {
+                    originalAmount = parseFloat(matchingBucket.original_amount);
+                }
+            }
+            
+            // Don't show if no original amount (avoid division by zero)
+            if (originalAmount <= 0) return;
+            
+            // Calculate spent amount and percentage
+            const spentAmount = originalAmount - remainingAmount;
+            const spentPercent = Math.min((spentAmount / originalAmount) * 100, 100);
+            
+            // Create container
+            const container = document.createElement('div');
+            container.className = 'bucket-progress-container';
+            
+            // Create spent (red) bar - what has been used
+            const spentBar = document.createElement('div');
+            spentBar.className = 'bucket-progress-spent';
+            spentBar.style.width = spentPercent + '%';
+            
+            // Create remaining (green) bar - what's left
+            const remainingBar = document.createElement('div');
+            remainingBar.className = 'bucket-progress-remaining';
+            
+            container.appendChild(spentBar);
+            container.appendChild(remainingBar);
+            
+            // Ensure cell has relative positioning
+            cell.style.position = 'relative';
+            cell.appendChild(container);
+        }
+        
+        // Helper: add a "days late" badge to a bucket entry's amount cell
+        function addBucketLateBadge(cell, entry) {
+            if (!entry || entry.is_bucket != 1 || !entry.original_date) return;
+            const origDate = new Date(entry.original_date + 'T00:00:00');
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const daysLate = Math.floor((today - origDate) / 86400000);
+            if (daysLate <= 0) return;
+            cell.style.position = 'relative';
+            const badge = document.createElement('span');
+            badge.className = 'bucket-late-badge';
+            badge.textContent = daysLate;
+            badge.title = `This recurring entry is ${daysLate} day${daysLate > 1 ? 's' : ''} late`;
+            cell.appendChild(badge);
+        }
+        
+        // Function to dynamically create and add an entry row to the dashboard
+        function addEntryRowToDOM(entryType, formData) {
+            const formattedDate = new Date(formData.date).toISOString().split('T')[0];
+            const categoryId = String(formData.category);
+            
+            // Only add the entry if it belongs to a date currently displayed on the dashboard
+            const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+            const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+            if (!weekDates.includes(formattedDate)) {
+                return false; // Date is not in the current view
+            }
+            
+            // First, check if a row for this category and date already exists
+            let existingRowSelector;
+            if (entryType === 'ca' || entryType.startsWith('ca')) {
+                // For credit accounts, we need to check credit rows
+                existingRowSelector = `.dashboard-d-credit-row[data-category-id="${categoryId}"][data-date="${formattedDate}"]`;
+                if (formData.account_id) {
+                    existingRowSelector += `[data-account-id="${formData.account_id}"]`;
+                }
+            } else {
+                // For regular income/expense
+                existingRowSelector = `.dashboard-d-row[data-category-id="${categoryId}"][data-date="${formattedDate}"]`;
+            }
+            const existingRow = document.querySelector(existingRowSelector);
+            
+            // If row exists, just update the amount
+            if (existingRow) {
+                const cell = existingRow.querySelector('.dashboard-d-amount-cell');
+                if (cell) {
+                    const input = cell.querySelector('input');
+                    if (input) {
+                        // Get current value and add new amount
+                        let currentValue = input.value.replace(currencySymbol, '').replace(/,/g, '').trim();
+                        currentValue = parseFloat(currentValue) || 0;
+                        const newValue = currentValue + parseFloat(formData.amount);
+                        input.value = formatCurrency(newValue);
+                        
+                        // Also update the balance row if this is a credit account
+                        if (entryType === 'ca' || entryType.startsWith('ca')) {
+                            // We added an amount, so we should update the balance
+                            const entriesDiv = existingRow.closest('.dashboard-d-credit-account');
+                            if (entriesDiv) {
+                                // Try to find balance row
+                                const balanceRow = entriesDiv.querySelector('.dashboard-d-credit-balance, .dashboard-d-credit-row:last-child');
+                                if (balanceRow && balanceRow.querySelector('.dashboard-d-label-cell').textContent.trim() === 'Balance:') {
+                                    const balanceCell = balanceRow.querySelector('.dashboard-d-amount-cell');
+                                    if (balanceCell) {
+                                        // We'll let saveDailyTotalsAndRemainders update the actual balance
+                                        // as it has all the correct data
+                                    }
+                                }
+                            }
+                        }
+                        
+                        return true; // Successfully updated existing row
+                    }
+                }
+            }
+            
+            // If we reach here, we need to create a new row
+            // Find the container for this date
+            const container = document.querySelector(`.dashboard-d-container .dashboard-d-day-header[data-date="${formattedDate}"]`);
+            if (!container) {
+                return false;
+            }
+            
+            const parentContainer = container.parentElement;
+            
+            // Find or create the entries div based on entry type
+            let entriesDiv;
+            let rowClass, inputClass, categoryArray;
+            
+            if (entryType === 'income') {
+                entriesDiv = parentContainer.querySelector(`.dashboard-d-income-entries[data-date="${formattedDate}"]`);
+                if (!entriesDiv) {
+                    entriesDiv = document.createElement('div');
+                    entriesDiv.classList.add('dashboard-d-income-entries');
+                    entriesDiv.setAttribute('data-date', formattedDate);
+                    
+                    // Find where to insert it (after last remainder or at the beginning)
+                    const lastRemainder = parentContainer.querySelector('.dashboard-d-lastremainder');
+                    if (lastRemainder) {
+                        lastRemainder.after(entriesDiv);
+                    } else {
+                        parentContainer.appendChild(entriesDiv);
+                    }
+                }
+                rowClass = 'dashboard-d-row';
+                inputClass = 'income-cell-input';
+                categoryArray = incomeCategories;
+            } else if (entryType === 'expense') {
+                entriesDiv = parentContainer.querySelector(`.dashboard-d-expense-entries[data-date="${formattedDate}"]`);
+                if (!entriesDiv) {
+                    entriesDiv = document.createElement('div');
+                    entriesDiv.classList.add('dashboard-d-expense-entries');
+                    entriesDiv.setAttribute('data-date', formattedDate);
+                    
+                    // Find where to insert it (after income total or at the end)
+                    const incomeTotal = parentContainer.querySelector('.dashboard-d-income-total');
+                    if (incomeTotal) {
+                        incomeTotal.after(entriesDiv);
+                    } else {
+                        parentContainer.appendChild(entriesDiv);
+                    }
+                }
+                rowClass = 'dashboard-d-row';
+                inputClass = 'expense-cell-input';
+                categoryArray = expenseCategories;
+            } else if (entryType === 'ca' || entryType.startsWith('ca')) {
+                // Handle credit account entries
+                // Find credit account section in this date container
+                const accountId = formData.account_id;
+                entriesDiv = parentContainer.querySelector(`.dashboard-d-credit-account[data-account-id="${accountId}"]`);
+                
+                if (!entriesDiv) {
+                    // The account div might not exist yet if this is the first entry
+                    // Let's check if we have any credit account divider
+                    const creditDivider = parentContainer.querySelector('.dashboard-d-credit-divider');
+                    if (creditDivider) {
+                        // Create a new credit account section
+                        entriesDiv = document.createElement('div');
+                        entriesDiv.classList.add('dashboard-d-credit-account');
+                        entriesDiv.setAttribute('data-account-id', accountId);
+                        
+                        // Find the account info to get the name
+                        const accountInfo = credit_accounts.find(a => String(a.id) === String(accountId));
+                        if (!accountInfo) {
+                            return false;
+                        }
+                        
+                        // Create account name row
+                        const accountNameRow = document.createElement('div');
+                        accountNameRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-name-row');
+                        accountNameRow.innerHTML = `
+                            <div class="dashboard-d-label-cell">${accountInfo.name}</div>
+                            <div class="dashboard-d-amount-cell"></div>
+                        `;
+                        entriesDiv.appendChild(accountNameRow);
+                        
+                        // Add balance row (will be updated when totals are calculated)
+                        const balanceRow = document.createElement('div');
+                        balanceRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-balance');
+                        balanceRow.innerHTML = `
+                            <div class="dashboard-d-label-cell">Balance:</div>
+                            <div class="dashboard-d-amount-cell">${formatCurrency(0)}</div>
+                        `;
+                        
+                        // Insert after credit divider
+                        creditDivider.after(entriesDiv);
+                        
+                        // Balance row will be added after the entry is inserted
+                    } else {
+                        return false; // No credit divider found
+                    }
+                }
+                
+                rowClass = 'dashboard-d-credit-row';
+                inputClass = 'ca-cell-input';
+                categoryArray = [];
+                
+                // Get categories for this credit account
+                c_expense_categories.forEach(cat => {
+                    if (String(cat.account_id) === String(accountId)) {
+                        categoryArray.push(cat);
+                    }
+                });
+            } else {
+                return false; // Unknown entry type
+            }
+            
+            // Find the category object
+            let catObj;
+            
+            if (entryType === 'ca' || entryType.startsWith('ca')) {
+                // For credit accounts, we need to find the category with matching account_id
+                catObj = c_expense_categories.find(cat => {
+                    return String(cat.id) === categoryId && 
+                           String(cat.account_id) === String(formData.account_id);
+                });
+            } else {
+                catObj = categoryArray.find(cat => String(cat.id) === categoryId);
+            }
+            
+            if (!catObj) {
+                return false; // Category not found
+            }
+            
+            // Create the row
+            const row = document.createElement('div');
+            row.classList.add(rowClass);
+            row.setAttribute('data-entry-id', 'new'); // Will be updated after AJAX
+            row.setAttribute('data-category-id', categoryId);
+            row.setAttribute('data-date', formattedDate);
+            
+            // Add account ID attribute for credit account rows3
+            if ((entryType === 'ca' || entryType.startsWith('ca')) && formData.account_id) {
+                row.setAttribute('data-account-id', formData.account_id);
+            }
+            
+            // Determine icon
+            let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
+            const isBud = catObj.is_bud || false;
+            
+            if (catObj) {
+                if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                else if (entryType === 'expense' && catObj.is_credit_account && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
+                else if (Number(catObj.is_savings) === 1 && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
+                else if (Number(catObj.is_savings) === 1) iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
+                else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
+                else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
+                else if (entryType === 'expense' && catObj.is_credit_account) iconHtml = '<i class="fa-regular fa-credit-card category-icon"></i>';
+            }
+            
+            // Build the HTML
+            row.innerHTML = `
+                ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
+                    <span class="calendar-icon">
+                    <i class="fa-light fa-up-down-left-right"></i>
+                    </span>
+                </span>` : ''}
+                <div class="dashboard-d-label-cell">
+                    ${iconHtml}
+                    ${catObj.name}
+                </div>
+                <div class="dashboard-d-amount-cell">
+                    <input type="text"
+                        class="${inputClass}"
+                        data-processed="0"
+                        value="${formatCurrency(formData.amount)}"
+                        data-entry-id="new"
+                        data-category-id="${categoryId}"
+                        data-date="${formattedDate}"
+                        ${isBud ? 'readonly tabindex="-1"' : ''}
+                    />
+                </div>
+            `;
+            
+            // For credit accounts, insert before balance row if it exists
+            if (entryType === 'ca' || entryType.startsWith('ca')) {
+                const balanceRow = entriesDiv.querySelector('.dashboard-d-credit-balance, .dashboard-d-credit-row:last-child');
+                if (balanceRow && balanceRow.querySelector('.dashboard-d-label-cell').textContent.trim() === 'Balance:') {
+                    balanceRow.before(row);
+                } else {
+                    // Create balance row if it doesn't exist
+                    const balanceRow = document.createElement('div');
+                    balanceRow.classList.add('dashboard-d-credit-row', 'dashboard-d-credit-balance');
+                    balanceRow.innerHTML = `
+                        <div class="dashboard-d-label-cell">Balance:</div>
+                        <div class="dashboard-d-amount-cell">${formatCurrency(0)}</div>
+                    `;
+                    
+                    // Add the entry and then the balance row
+                    entriesDiv.appendChild(row);
+                    entriesDiv.appendChild(balanceRow);
+                }
+            } else {
+                // Regular income/expense entry
+                entriesDiv.appendChild(row);
+            }
+            return true; // Successfully added row to DOM
+        }
+
+        function addEntryAJAX(formData, callback) {
+            dashboardDCloseModal();
+            resetDashboardDAddEntryForm();
+            // Normalize entryType for credit accounts
+            let entryType = formData.entryType;
+            let accountId = null;
+            if (entryType.startsWith('ca_')) {
+                entryType = 'ca';
+                accountId = parseInt(formData.entryType.split('_')[1]);
+            }
+
+            // Build the payload for the backend
+            const payload = {
+                entryType: entryType, // 'income', 'expense', or 'ca'
+                category: formData.category,
+                amount: formData.amount,
+                date: formData.date
+            };
+            if (accountId !== null) {
+                payload.account_id = accountId;
+                formData.account_id = accountId; // So updateLocalEntryAfterAdd can use it
+            }
+
+            // Update local entry data BEFORE the AJAX call
+            updateLocalEntryAfterAdd(entryType, formData, true);
+            
+            // Try to add the entry to the DOM immediately
+            const rowAdded = addEntryRowToDOM(entryType, formData);
+            
+            // If we couldn't add the row (maybe date not in view), refresh containers
+            if (!rowAdded) {
+                const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+                const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+                createDashboardContainers(weekDates);
+            }
+            // Always rebind input listeners so new rows get blur/keydown handlers
+            setupDashboardDInputFocus();
+            
+            $.ajax({
+                url: '/dashboard-d/add_entry',
+                type: 'POST',
+                data: JSON.stringify(payload),
+                contentType: 'application/json',
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Update bucket entries if returned from server
+                        if (response.updated_buckets && response.updated_buckets.length > 0) {
+                            updateLocalEntryAfterAdd(entryType, formData, false, response.updated_buckets);
+                        }
+                        // Local entry already updated, just save totals and remainders
+                        saveDailyTotalsAndRemainders(formData.date);
+                        if (typeof callback === "function") callback(response);
+                        
+                        // Refresh notification badge (bucket depletion may have created a notification)
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
+                        }
+                        
+                        // If a new category was created, reload the page
+                        if (newCategoryCreated) {
+                            location.reload();
+                        }
+                    } else {
+                    }
+                },
+                error: function(error) {
+                }
+            });
+        }
+    
+        /////////////////////////// Set to paid menu ////////////////////////////////////////
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const contextMenu = document.getElementById('dashboard-context-menu');
+            const setProcessedOption = document.getElementById('dashboard-context-menu-set-processed');
+            let currentCell = null;
+            let pressTimer; // Timer for detecting long press
+            let longPressTriggered = false; // Flag to track if long press was triggered
+
+            // Ensure the main container is found
+            const mainContainer = document.getElementById('main-container');
+            if (!mainContainer) {
+                return;
+            }
+
+            // Function to toggle "Paid/Unpaid" status directly on long press
+            function togglePaidStatus(targetCell) {
+                currentCell = targetCell;
+                const input = currentCell.querySelector('input');
+                if (!input) return;
+
+                // Gather necessary data for the request
+                const row = currentCell.closest('.dashboard-d-row');
+                const entryId = row.getAttribute('data-entry-id');
+                const categoryId = row.getAttribute('data-category-id');
+                const entryDateStr = row.getAttribute('data-date');
+                const entryDate = new Date(entryDateStr);
+
+                // Detect type: income, expense, or ca
+                let tableType;
+                let accountId = null;
+                if (row.classList.contains('dashboard-d-credit-row')) {
+                    tableType = 'ca';
+                    accountId = row.getAttribute('data-account-id') || (row.closest('.dashboard-d-credit-account')?.getAttribute('data-account-id'));
+                } else if (row.closest('.dashboard-d-income-entries')) {
+                    tableType = 'income';
+                } else {
+                    tableType = 'expense';
+                }
+
+                // Block toggle if entry is locked by bank sync
+                if (isEntryLockedByBankSync(entryDateStr, categoryId, tableType, accountId)) {
+                    return;
+                }
+
+                const processed = input.getAttribute('data-processed') === '1';
+                const newProcessed = processed ? '0' : '1';
+
+                // AJAX call to update the backend with the new processed status
+                $.ajax({
+                    url: '/update-processed-status-d-entry',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        entry_id: entryId,
+                        category_id: categoryId,
+                        category_type: tableType,
+                        entry_date: entryDate.toISOString().split('T')[0],
+                        processed: newProcessed
+                    }),
+                    success: function (response) {
+                        if (response.status === 'success') {
+                            // Update local data
+                            if (tableType === 'income') {
+                                updateLocalProcessedStatus(categoryId, entryDate, Number(newProcessed), 'income');
+                            } else if (tableType === 'expense') {
+                                updateLocalProcessedStatus(categoryId, entryDate, Number(newProcessed), 'expense');
+                            } else if (tableType === 'ca') {
+                                updateLocalProcessedStatus(categoryId, entryDate, Number(newProcessed), 'ca');
+                            }
+
+                            // Update the UI by adding/removing the 'paid' class based on the new processed status
+                            input.setAttribute('data-processed', newProcessed);
+                            if (newProcessed === '1') {
+                                input.classList.add('paid');
+                            } else {
+                                input.classList.remove('paid');
+                            }
+                        } else {
+                        }
+                    },
+                    error: function (error) {
+                    }
+                });
+            }
+
+            // Function to handle right-click event on dashboard-d amount cells (desktop)
+            function addRightClickListener() {
+                mainContainer.addEventListener('contextmenu', function (event) {
+                    const targetCell = event.target.closest('.dashboard-d-amount-cell');
+                    if (!targetCell) {
+                        return;
+                    }
+                    // Allow context menu for cells inside income, expense, or credit account entries
+                    const parentSection = targetCell.closest('.dashboard-d-income-entries, .dashboard-d-expense-entries, .dashboard-d-credit-account');
+                    if (!parentSection) {
+                        return;
+                    }
+
+                    // Check bank lock before showing context menu
+                    const row = targetCell.closest('.dashboard-d-row');
+                    if (row) {
+                        const categoryId = row.getAttribute('data-category-id');
+                        const entryDateStr = row.getAttribute('data-date');
+                        let tableType, accountId = null;
+                        if (row.classList.contains('dashboard-d-credit-row')) {
+                            tableType = 'ca';
+                            accountId = row.getAttribute('data-account-id') || (row.closest('.dashboard-d-credit-account')?.getAttribute('data-account-id'));
+                        } else if (parentSection.classList.contains('dashboard-d-income-entries')) {
+                            tableType = 'income';
+                        } else {
+                            tableType = 'expense';
+                        }
+                        if (isEntryLockedByBankSync(entryDateStr, categoryId, tableType, accountId)) {
+                            return; // Allow default context menu for locked entries
+                        }
+                    }
+
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    currentCell = targetCell;
+
+                    const input = currentCell.querySelector('input');
+                    const processed = input && input.getAttribute('data-processed') === '1';
+                    setProcessedOption.textContent = processed ? 'Set to Unpaid' : 'Set to Paid';
+
+                    showContextMenu(event, contextMenu);
+                });
+            }
+
+            // Function to handle long-press event on dashboard-d amount cells (mobile)
+            function addLongPressListener() {
+                mainContainer.addEventListener('touchstart', function (event) {
+                    const targetCell = event.target.closest('.dashboard-d-amount-cell');
+                    if (!targetCell) {
+                        return;
+                    }
+
+                    // Check bank lock before allowing long-press toggle
+                    const row = targetCell.closest('.dashboard-d-row');
+                    if (row) {
+                        const categoryId = row.getAttribute('data-category-id');
+                        const entryDateStr = row.getAttribute('data-date');
+                        let tableType, accountId = null;
+                        if (row.classList.contains('dashboard-d-credit-row')) {
+                            tableType = 'ca';
+                            accountId = row.getAttribute('data-account-id') || (row.closest('.dashboard-d-credit-account')?.getAttribute('data-account-id'));
+                        } else if (row.closest('.dashboard-d-income-entries')) {
+                            tableType = 'income';
+                        } else {
+                            tableType = 'expense';
+                        }
+                        if (isEntryLockedByBankSync(entryDateStr, categoryId, tableType, accountId)) {
+                            return;
+                        }
+                    }
+
+                    longPressTriggered = false; // Reset the flag
+
+                    pressTimer = setTimeout(() => {
+                        togglePaidStatus(targetCell); // Directly toggle Paid/Unpaid on long press
+                        longPressTriggered = true; // Set the flag when the long press action is triggered
+                    }, 500); // 500ms for long press duration
+                });
+
+                mainContainer.addEventListener('touchend', function (event) {
+                    clearTimeout(pressTimer); // Clear the timer if touch ends before 500ms
+
+                    if (longPressTriggered) {
+                        event.preventDefault(); // Prevent the click event if a long press was triggered
+                    }
+                });
+
+                mainContainer.addEventListener('touchmove', function () {
+                    clearTimeout(pressTimer); // Clear the timer if the user moves their finger
+                });
+            }
+
+            // Prevent click and focus from firing after a long press
+            mainContainer.addEventListener('click', function (event) {
+                if (longPressTriggered) {
+                    event.preventDefault(); // Prevent the default click action if long press was triggered
+                    longPressTriggered = false; // Reset the flag for future interactions
+                }
+            });
+
+            // Prevent focus from triggering after a long press (this avoids contenteditable)
+            mainContainer.addEventListener('focusin', function (event) {
+                if (longPressTriggered) {
+                    event.preventDefault(); // Prevent focus if a long press occurred
+                    event.target.blur(); // Immediately blur to stop contenteditable activation
+                }
+            });
+
+            // Add right-click listener to the dashboard-d cells (for desktop)
+            addRightClickListener();
+
+            // Add long-press listener to the dashboard-d cells (for mobile)
+            addLongPressListener();
+
+            // Hide the context menu when clicking anywhere else
+            document.addEventListener('click', function () {
+                contextMenu.style.display = 'none';
+            });
+
+            // Handle the context menu option click (Set to Paid/Unpaid)
+            setProcessedOption.addEventListener('click', function () {
+                if (currentCell) {
+                    togglePaidStatus(currentCell);
+                    contextMenu.style.display = 'none';
+                }
+            });
+        });
+
+        // Function to update the processed status in the global array and UI
+        function updateLocalProcessedStatus(categoryId, date, isProcessed, type) {
+            // type: 'income', 'expense', or 'ca'
+            let entriesArray;
+            if (type === 'income') {
+                entriesArray = incomeEntries;
+            } else if (type === 'expense') {
+                entriesArray = expenseEntries;
+            } else if (type === 'ca') {
+                entriesArray = c_expense_entries;
+            }
+            let updated = false;
+            // Normalize the date to YYYY-MM-DD
+            const dateObj = date instanceof Date ? date : new Date(date);
+            const dateString = dateObj.toISOString().split('T')[0];
+
+            // Update the processed status in the data array
+            entriesArray.forEach(entry => {
+                let entryDateString;
+                if (entry.date instanceof Date) {
+                    entryDateString = entry.date.toISOString().split('T')[0];
+                } else {
+                    const parsed = new Date(entry.date);
+                    if (!isNaN(parsed)) {
+                        entryDateString = parsed.toISOString().split('T')[0];
+                    } else {
+                        entryDateString = String(entry.date);
+                    }
+                }
+                if (String(entry.category_id) === String(categoryId) && entryDateString === dateString) {
+                    entry.processed = isProcessed;
+                    updated = true;
+                }
+            });
+
+            // Update the UI cell for this entry and date
+            const selector = `.dashboard-d-row[data-category-id="${categoryId}"][data-date="${dateString}"]`;
+            const row = document.querySelector(selector);
+            if (row) {
+                const cell = row.querySelector('.dashboard-d-amount-cell');
+                if (cell) {
+                    const input = cell.querySelector('input');
+                    if (input) {
+                        input.setAttribute('data-processed', isProcessed ? '1' : '0');
+                    }
+                    if (isProcessed) {
+                        cell.classList.add('paid');
+                    } else {
+                        cell.classList.remove('paid');
+                    }
+                }
+            }
+        }
+
+        function updateNextWeekIndicator() {
+            const indicator = document.getElementById('next-indicator');
+            // Find the last displayed date in the current week
+            const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+            let lastDisplayedDate = endOfWeek;
+            let nextDate = new Date(lastDisplayedDate);
+            nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+
+            // Filter future entries after the last displayed date
+            const futureEntries = baseTotalsRemainders
+                .map(item => ({
+                    entryDate: new Date(item.date),
+                    remainder: parseFloat(item.remainder)
+                }))
+                .filter(entry => {
+                    const entryDateStr = entry.entryDate.toISOString().split('T')[0];
+                    const nextDateStr = nextDate.toISOString().split('T')[0];
+                    // Only include entries after the last displayed date and after memberSince (if set)
+                    if (memberSince) {
+                        const memberSinceStr = new Date(memberSince).toISOString().split('T')[0];
+                        if (entryDateStr < memberSinceStr) return false;
+                    }
+                    return entryDateStr >= nextDateStr;
+                })
+                .sort((a, b) => a.entryDate - b.entryDate);
+
+            const belowThresholdEntries = futureEntries.filter(entry => entry.remainder < balance_threshold);
+
+            if (belowThresholdEntries.length > 0) {
+                const negativeEntry = belowThresholdEntries.find(entry => entry.remainder < 0);
+                if (negativeEntry) {
+                    indicator.style.display = 'block';
+                    indicator.classList.remove('below-threshold-indicator');
+                    indicator.classList.add('negative-indicator');
+                } else {
+                    indicator.style.display = 'block';
+                    indicator.classList.remove('negative-indicator');
+                    indicator.classList.add('below-threshold-indicator');
+                }
+            } else {
+                indicator.style.display = 'none';
+                indicator.classList.remove('below-threshold-indicator', 'negative-indicator');
+            }
+        }
+
+        // Function to show the context menu with dynamic position and corner rounding
+        function showContextMenu(event, contextMenu) {
+            // Only allow context menu for amount cells that are NOT in the credit account balance row
+            const cell = event.target.closest('.dashboard-d-amount-cell');
+            if (!cell) return;
+
+            // Exclude credit account balance rows
+            const isBalanceRow = (cell.parentElement.classList.contains('dashboard-d-credit-balance') || 
+                (cell.parentElement.classList.contains('dashboard-d-credit-row') &&
+                cell.previousElementSibling &&
+                cell.previousElementSibling.textContent.trim() === 'Balance:'));
+            if (isBalanceRow) return;
+
+            // Position the menu so its top right corner is at the mouse click
+            const menuWidth = contextMenu.offsetWidth || 160;
+            const menuHeight = contextMenu.offsetHeight || 40;
+            const padding = 8;
+
+            let left = event.pageX - menuWidth;
+            let top = event.pageY;
+
+            // Prevent menu from going off the left edge
+            if (left < 0) left = 0;
+            // Prevent menu from going off the bottom edge
+            const viewportHeight = window.innerHeight + window.scrollY;
+            if (top + menuHeight > viewportHeight) {
+                top = viewportHeight - menuHeight - padding;
+            }
+
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = `${left}px`;
+            contextMenu.style.top = `${top}px`;
+
+            contextMenu.classList.remove('context-top-left-square');
+            contextMenu.classList.remove('context-top-right-square');
+            contextMenu.classList.add('context-top-right-square');
+        }
+
+        // Disable right-click context menu on all dashboard-d-container elements
+        mainContainer.addEventListener('contextmenu', function(event) {
+            if (event.target.closest('.dashboard-d-container')) {
+                event.preventDefault();
+            }
+        }, true);
+
+        $(function() {
+            var $toggle = $('#nav-dropdown-toggle');
+            var $arrow = $('#nav-dropdown-arrow');
+            var $inline = $('#nav-inline-buttons');
+            var $dropdown = $('#nav-dropdown-menu');
+            var open = false;
+            var justClosed = false;
+            var navButtons = [
+                { href: null, icon: 'fa-calendar-day', label: 'Day View', focus: true },
+                { href: "{{ url_for('dashboard') }}", icon: 'fa-calendar-week', label: 'Week View', focus: false },
+                { href: "{{ url_for('dashboard_m') }}", icon: 'fa-calendar-days', label: 'Month View', focus: false },
+                { href: "{{ url_for('dashboard_3m') }}", icon: 'fa-calendar-exclamation', label: 'Month Overview', focus: false },
+                { href: "{{ url_for('dashboard_y') }}", icon: 'fa-calendars', label: 'Year Overview', focus: false }
+            ];
+            $toggle.on('click', function(e) {
+                if (justClosed) {
+                    justClosed = false;
+                    return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                if (!open) {
+                    $inline.hide();
+                    $dropdown.empty();
+                    navButtons.forEach(function(btn) {
+                        var $btn = $('<a></a>').addClass('nav-button').css({width:'100%',display:'flex',alignItems:'center',gap:'10px',padding:'8px 18px'});
+                        if (btn.href) $btn.attr('href', btn.href);
+                        if (btn.focus) $btn.addClass('nav-button-focus');
+                        $btn.append($('<i></i>').addClass('fa-solid').addClass(btn.icon));
+                        $btn.append($('<span></span>').addClass('nav-label').text(btn.label));
+                        $dropdown.append($btn);
+                    });
+                    $dropdown.show();
+                    $arrow.removeClass('fa-caret-right').addClass('fa-caret-down');
+                    $toggle.addClass('active');
+                    open = true;
+                    setTimeout(function() {
+                        $(document).on('mousedown.navdropdown', function(ev) {
+                            if (!$dropdown.is(ev.target) && $dropdown.has(ev.target).length === 0 && !$toggle.is(ev.target)) {
+                                $dropdown.hide();
+                                $inline.show();
+                                $arrow.removeClass('fa-caret-down').addClass('fa-caret-right');
+                                $toggle.removeClass('active');
+                                open = false;
+                                $(document).off('mousedown.navdropdown');
+                                justClosed = true;
+                            }
+                        });
+                    }, 0);
+                } else {
+                    $(document).off('mousedown.navdropdown');
+                    $dropdown.hide();
+                    $inline.show();
+                    $arrow.removeClass('fa-caret-down').addClass('fa-caret-right');
+                    $toggle.removeClass('active');
+                    open = false;
+                }
+            });
+        });
+
+        // Show loading screen on nav button click (inline or dropdown)
+        $(function() {
+            $(document).on('click', '#nav-inline-buttons a.nav-button, #nav-dropdown-menu a.nav-button', function(e) {
+                var href = $(this).attr('href');
+                if (href && href !== '#' && !href.startsWith('javascript:')) {
+                    $('#loading-screen').show();
+                }
+            });
+        });
+
+        function closeMoveDateModal() {
+            document.getElementById('move-date-modal').style.display = 'none';
+            moveEntryId = null;
+            moveEntryType = null;
+            moveOriginalDate = null;
+        }
+
+        // Open modal when clicking the move button
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.dashboard-d-move-btn');
+            if (btn) {
+                const row = btn.closest('.dashboard-d-row');
+                moveEntryId = row.getAttribute('data-entry-id');
+                // Fix: set type to 'ca' for credit account rows
+                if (row.classList.contains('dashboard-d-credit-row')) {
+                    moveEntryType = 'ca';
+                } else if (row.closest('.dashboard-d-income-entries')) {
+                    moveEntryType = 'income';
+                } else {
+                    moveEntryType = 'expense';
+                }
+                moveOriginalDate = row.getAttribute('data-date');
+                document.getElementById('move-date-input').value = moveOriginalDate;
+                document.getElementById('move-date-modal').style.display = 'block';
+            }
+        });
+
+        // Confirm move
+        document.getElementById('move-date-confirm-btn').onclick = function() {
+            const newDate = document.getElementById('move-date-input').value;
+            if (!moveEntryId || !newDate) return;
+            if (String(newDate) === String(moveOriginalDate)) {
+                // Do nothing if the date hasn't changed
+                closeMoveDateModal();
+                return;
+            }
+            showDashboardSpinner(true);
+            document.getElementById('move-date-modal').style.display = 'none';
+            $.ajax({
+                url: '/move_entry_d',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ entry_id: moveEntryId, new_date: newDate, type: moveEntryType }),
+                success: function(response) {
+                    saveDailyTotalsAndRemainders(newDate);
+                    updateDashboardDView();
+                    document.getElementById('loading-screen').style.display = 'none';
+                },
+                error: function() {
+                    showToast('Failed to move entry.', 'error');
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            });
+        };
+
+        document.getElementById('move-date-modal').addEventListener('mousedown', function(event) {
+            if (event.target === this) {
+                closeMoveDateModal();
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', function () {
+            function setupDashboardDInputFocus() {
+                document.querySelectorAll('.income-cell-input, .expense-cell-input, .ca-cell-input').forEach(input => {
+                    let originalValue = '';
+
+                    input.addEventListener('focus', function () {
+                        if (input.hasAttribute('readonly') && input.getAttribute('tabindex') === '-1') {
+                            input.blur();
+                            return;
+                        }
+                        // Strip currency symbol and commas
+                        input.value = input.value.trim().replace(currencySymbol, '').replace(/,/g, '').trim();
+                        originalValue = input.value.trim();
+                        input.select();
+                    });
+
+                    input.addEventListener('input', function () {
+                        // Allow numbers and decimal point
+                        input.value = input.value.replace(/[^0-9.]/g, '');
+                        
+                        // Allow only one decimal point
+                        const parts = input.value.split('.');
+                        if (parts.length > 2) {
+                            input.value = parts[0] + '.' + parts.slice(1).join('');
+                        }
+                        
+                        // Limit to 2 decimal places
+                        if (input.value.includes('.')) {
+                            const decimals = input.value.split('.');
+                            if (decimals[1] && decimals[1].length > 2) {
+                                input.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                            }
+                        }
+                    });
+
+                    input.addEventListener('keydown', function (event) {
+                        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                            event.preventDefault();
+
+                            const containers = Array.from(document.querySelectorAll('.dashboard-d-container'));
+                            const currentContainer = input.closest('.dashboard-d-container');
+                            const containerIndex = containers.indexOf(currentContainer);
+
+                            // Days before the account start date are dimmed with
+                            // .before-member-since but their inputs are only
+                            // `readonly`, not `disabled` - and .focus() works on a
+                            // readonly input. Skip those containers so navigation
+                            // cannot walk into them and simply stops at the first
+                            // real cell instead.
+                            let allInputs = [];
+                            containers.forEach(container => {
+                                if (container.classList.contains('before-member-since')) return;
+                                allInputs = allInputs.concat(Array.from(container.querySelectorAll('.dashboard-d-amount-cell input')));
+                            });
+
+                            const currentIndex = allInputs.indexOf(input);
+
+                            let targetInput = null;
+
+                            if (event.key === 'ArrowDown') {
+                                if (currentIndex < allInputs.length - 1) {
+                                    targetInput = allInputs[currentIndex + 1];
+                                } else {
+                                    nextWeek();
+                                    setTimeout(() => {
+                                        const firstInput = document.querySelector('.dashboard-d-container .dashboard-d-amount-cell input');
+                                        if (firstInput) firstInput.focus();
+                                    }, 350);
+                                    return;
+                                }
+                            } else if (event.key === 'ArrowUp') {
+                                if (currentIndex > 0) {
+                                    targetInput = allInputs[currentIndex - 1];
+                                } else if (isFirstNavigableDayShown()) {
+                                    // Already on the earliest cell the account
+                                    // start date allows - stay here rather than
+                                    // paging into days that predate it.
+                                    return;
+                                } else {
+                                    previousWeek();
+                                    setTimeout(() => {
+                                        const containers = document.querySelectorAll('.dashboard-d-container');
+                                        if (containers.length > 0) {
+                                            const lastContainer = containers[containers.length - 1];
+                                            const lastInputs = lastContainer.querySelectorAll('.dashboard-d-amount-cell input');
+                                            if (lastInputs.length > 0) lastInputs[lastInputs.length - 1].focus();
+                                        }
+                                    }, 350);
+                                    return;
+                                }
+                            }
+
+                            if (targetInput) {
+                                targetInput.focus();
+                            }
+                            return;
+                        }
+
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            const newValue = input.value.trim();
+                            if (newValue !== originalValue) {
+                                let type = input.classList.contains('income-cell-input') ? 'income'
+                                    : input.classList.contains('expense-cell-input') ? 'expense'
+                                    : 'ca';
+                                updateEntry(input, type);
+                            } else {
+                                input.blur();
+                            }
+                        }
+                    });
+
+                    input.addEventListener('blur', function () {
+                        const newValue = input.value.trim();
+                        if (newValue !== originalValue) {
+                            let type = input.classList.contains('income-cell-input') ? 'income'
+                                : input.classList.contains('expense-cell-input') ? 'expense'
+                                : 'ca';
+                            updateEntry(input, type);
+                        } else if (input.value.trim() !== '') {
+                            // Use our new formatCurrency function
+                            input.value = formatCurrency(parseFloat(input.value) || 0);
+                        }
+                    });
+                });
+            }
+
+            // Run once on page load
+            setupDashboardDInputFocus();
+
+            // If you re-render the dashboard, call setupDashboardDInputFocus() again after rendering
+            window.setupDashboardDInputFocus = setupDashboardDInputFocus;
+        });
+
+        // Entry Type dropdown functionality
+        let dashboardDEntryTypes = [];
+        const dashboardDEntryTypeInput = document.getElementById('dashboard-d-entryType-input');
+        const dashboardDEntryTypeHidden = document.getElementById('dashboard-d-entryType');
+        const dashboardDEntryTypeDropdown = document.getElementById('dashboard-d-entryType-dropdown');
+
+        function positionEntryTypeDropdown() {
+            const inputRect = dashboardDEntryTypeInput.getBoundingClientRect();
+            const availableBelow = window.innerHeight - inputRect.bottom - 20;
+            const maxHeight = Math.max(150, availableBelow);
+            dashboardDEntryTypeDropdown.style.maxHeight = maxHeight + 'px';
+        }
+
+        function populateEntryTypeDropdown(dateStr) {
+            dashboardDEntryTypes = [];
+            dashboardDEntryTypeInput.value = '';
+            dashboardDEntryTypeHidden.value = '';
+            dashboardDEntryTypeDropdown.style.display = 'none';
+            
+            // A date is "locked" only when it falls on or before the latest synced
+            // (posted) bank transaction date — dates after that, including today
+            // and any future date, are unlocked.
+            let isLockedDate = false;
+            if (bank_sync_flags && dateStr && bank_last_txn_date) {
+                isLockedDate = dateStr <= bank_last_txn_date;
+            }
+            
+            // For future dates or if no checking linked, show Income/Expense options
+            if (!isLockedDate || !bank_sync_flags || !bank_sync_flags.has_checking) {
+                dashboardDEntryTypes.push({ id: 'income', name: 'Income' });
+                dashboardDEntryTypes.push({ id: 'expense', name: 'Expense' });
+            }
+            
+            // Add each credit account as an option
+            // For locked dates, only show non-bank-linked credit accounts
+            credit_accounts.forEach(account => {
+                const isBankLinked = bank_sync_flags && 
+                                       bank_sync_flags.linked_credit_ids && 
+                                       bank_sync_flags.linked_credit_ids.includes(account.id);
+                
+                // Show if: future date, OR not a bank-linked account
+                if (!isLockedDate || !isBankLinked) {
+                    dashboardDEntryTypes.push({ id: `ca_${account.id}`, name: account.name });
+                }
+            });
+        }
+
+        function showEntryTypeDropdown(searchText = '') {
+            dashboardDEntryTypeDropdown.innerHTML = '';
+            const searchLower = searchText.toLowerCase().trim();
+            
+            // Separate matching and non-matching entry types
+            const matchingTypes = searchLower.length > 0 
+                ? dashboardDEntryTypes.filter(type => type.name.toLowerCase().includes(searchLower))
+                : [];
+            const matchingIds = new Set(matchingTypes.map(type => type.id));
+            const nonMatchingTypes = searchLower.length > 0
+                ? dashboardDEntryTypes.filter(type => !matchingIds.has(type.id))
+                : dashboardDEntryTypes;
+
+            // Show search results with magnifying glass (if user is typing)
+            if (searchLower.length > 0 && matchingTypes.length > 0) {
+                dashboardDEntryTypeDropdown.style.display = 'block';
+                matchingTypes.forEach(type => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${getEntryTypeIcon(type)} ${type.name}`;
+                    div.className = 'category-dropdown-item search-result';
+                    div.addEventListener('click', function() {
+                        dashboardDEntryTypeInput.value = type.name;
+                        dashboardDEntryTypeHidden.value = type.id;
+                        dashboardDEntryTypeDropdown.style.display = 'none';
+                        dashboardDUpdateCategoryOptions();
+                    });
+                    dashboardDEntryTypeDropdown.appendChild(div);
+                });
+                
+                // Add separator between search results and all types
+                if (nonMatchingTypes.length > 0) {
+                    const separator = document.createElement('div');
+                    separator.className = 'dropdown-separator';
+                    dashboardDEntryTypeDropdown.appendChild(separator);
+                }
+            }
+
+            // Show all other entry types (non-matching or all if no search)
+            if (nonMatchingTypes.length > 0 || (searchLower.length === 0 && dashboardDEntryTypes.length > 0)) {
+                const typesToShow = searchLower.length > 0 ? nonMatchingTypes : dashboardDEntryTypes;
+                dashboardDEntryTypeDropdown.style.display = 'block';
+                typesToShow.forEach(type => {
+                    const div = document.createElement('div');
+                    div.innerHTML = getEntryTypeIcon(type) + ' ' + type.name;
+                    div.className = 'category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        dashboardDEntryTypeInput.value = type.name;
+                        dashboardDEntryTypeHidden.value = type.id;
+                        dashboardDEntryTypeDropdown.style.display = 'none';
+                        dashboardDUpdateCategoryOptions();
+                    });
+                    dashboardDEntryTypeDropdown.appendChild(div);
+                });
+            }
+
+            if (dashboardDEntryTypeDropdown.children.length === 0) {
+                dashboardDEntryTypeDropdown.style.display = 'none';
+            } else {
+                positionEntryTypeDropdown();
+            }
+        }
+
+        dashboardDEntryTypeInput.addEventListener('input', function() {
+            if (this.value.length === 0) {
+                dashboardDEntryTypeHidden.value = '';
+                // Reset category dropdown when entry type is cleared
+                dashboardDCategories = [];
+                document.getElementById('dashboard-d-category-input').value = '';
+                document.getElementById('dashboard-d-category-input').disabled = true;
+                document.getElementById('dashboard-d-category').value = '';
+            }
+            showEntryTypeDropdown(this.value);
+        });
+
+        dashboardDEntryTypeInput.addEventListener('focus', function() {
+            if (dashboardDEntryTypes.length > 0) {
+                showEntryTypeDropdown('');
+            }
+        });
+
+        function fetchDashboardDData(selectedDate, callback) {
+            $.ajax({
+                url: "/get_dashboard_d_data",
+                type: "GET",
+                data: { date: selectedDate.toISOString().split('T')[0] },
+                dataType: "json",
+                success: function(response) {
+                    if (response.status === "success") {
+                        // Update all dashboard arrays from backend
+                        window.totalsRemaindersData = response.totals_remainders_d;
+                        window.c_a_balances_d = response.c_a_balances_d;
+                        window.savingsEntries = response.savings_entries;
+                        window.incomeEntries = response.income_entries;
+                        window.expenseEntries = response.expense_entries;
+                        window.c_expense_entries = response.c_expense_entries;
+                        if (typeof callback === "function") callback();
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                }
+            });
+        }
+
+        function updateDashboardDView() {
+            fetchDashboardDData(selectedDate, function() {
+                // Recalculate weekDates before using it
+                const { startOfWeek, endOfWeek } = calculateWeek(selectedDate, goofyWeekMode);
+                const weekDates = generateWeekDates(startOfWeek, endOfWeek);
+
+                // Re-render dashboard containers and inputs
+                createDashboardContainers(weekDates);
+                setupDashboardDInputFocus();
+                showDashboardSpinner(false);
+                
+                // Update today banner after view refresh
+                setTimeout(updateTodayBanner, 100);
+            });
+        }
+
+        function resetDashboardDAddEntryForm() {
+            // Reset entry type dropdown
+            document.getElementById('dashboard-d-entryType-input').value = '';
+            document.getElementById('dashboard-d-entryType').value = '';
+            document.getElementById('dashboard-d-entryType-dropdown').style.display = 'none';
+            dashboardDEntryTypes = [];
+            
+            // Reset category dropdown
+            document.getElementById('dashboard-d-category-input').value = '';
+            document.getElementById('dashboard-d-category-input').disabled = true;
+            document.getElementById('dashboard-d-category').value = '';
+            document.getElementById('dashboard-d-category-dropdown').style.display = 'none';
+            dashboardDCategories = [];
+            
+            document.getElementById('dashboard-d-amount').value = '';
+            // Optionally reset the date to today
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            document.getElementById('dashboard-d-entryDate').value = `${year}-${month}-${day}`;
+        }
+
+        // Function to update the floating "Today" banner visibility
+        function updateTodayBanner() {
+            const banner = document.getElementById('today-floating-banner');
+            if (!banner) return;
+            
+            const todayContainer = document.querySelector('.dashboard-d-container.today-outline');
+            
+            // Only show banner if today's container exists (meaning we're viewing the current week)
+            if (!todayContainer) {
+                banner.style.display = 'none';
+                return;
+            }
+            
+            const containerRect = todayContainer.getBoundingClientRect();
+            const dashboardWrapper = document.getElementById('dashboard-wrapper');
+            const wrapperRect = dashboardWrapper.getBoundingClientRect();
+            const viewportHeight = window.innerHeight;
+            const navBarHeight = 100; // Height of the nav bar + calendar nav
+            
+            // Check if today's container is mostly visible in the viewport
+            // Consider it visible if more than 30% is in view
+            const visibleTop = Math.max(containerRect.top, navBarHeight);
+            const visibleBottom = Math.min(containerRect.bottom, viewportHeight);
+            const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+            const containerHeight = containerRect.height;
+            const visibilityRatio = visibleHeight / containerHeight;
+            
+            // Hide banner if today's container is mostly visible (more than 30%)
+            if (visibilityRatio > 0.3) {
+                banner.style.display = 'none';
+                return;
+            }
+            
+            const arrow = document.getElementById('today-banner-arrow');
+            if (!arrow) return;
+            
+            // If today's container is below the viewport, show banner at bottom pointing down
+            if (containerRect.top > viewportHeight - 50) {
+                // Switch to fixed positioning for bottom placement
+                banner.style.position = 'fixed';
+                banner.style.top = 'auto';
+                banner.style.bottom = '20px';
+                banner.style.left = wrapperRect.left + 'px';
+                arrow.className = 'fa-solid fa-arrow-down';
+                banner.style.display = 'flex';
+            } 
+            // If today's container is above the viewport, show banner at top pointing up
+            else if (containerRect.bottom < navBarHeight) {
+                // Use sticky positioning for top placement
+                banner.style.position = 'sticky';
+                banner.style.top = '120px';
+                banner.style.bottom = 'auto';
+                banner.style.left = '0';
+                arrow.className = 'fa-solid fa-arrow-up';
+                banner.style.display = 'flex';
+            }
+            // If partially visible, hide the banner
+            else {
+                banner.style.display = 'none';
+            }
+        }
+
+        // Update banner on scroll and load
+        window.addEventListener('scroll', updateTodayBanner, true); // Use capture phase
+        document.addEventListener('scroll', updateTodayBanner, true); // Also listen on document
+
+        // Make the banner clickable to scroll to today (only attach after DOM is loaded)
+        document.addEventListener('DOMContentLoaded', function() {
+            const banner = document.getElementById('today-floating-banner');
+            if (banner) {
+                banner.addEventListener('click', function() {
+                    const todayContainer = document.querySelector('.dashboard-d-container.today-outline');
+                    if (todayContainer) {
+                        todayContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                });
+            }
+
+            // Page tutorial (delay to ensure dynamic containers are built)
+            setTimeout(function() {
+                var todayCard = document.querySelector('.dashboard-d-container.today-outline');
+                if (!todayCard) return;
+
+                var contentWrapper = todayCard.querySelector('.dashboard-d-content-wrapper');
+                if (!contentWrapper) return;
+
+                // Only create temp examples and run tutorial if not already completed
+                fetch('/api/tutorial/status', { credentials: 'same-origin' })
+                    .then(function(res) { return res.json(); })
+                    .then(function(data) {
+                        var completed = (data.status === 'success' && data.completed) ? data.completed : {};
+                        if (completed['tutorial_dashboard_d']) return; // already done
+
+                        var tempIncome = null;
+                        var tempExpense = null;
+                        var tempCreditAccounts = [];
+                        var sym = currencySymbol || '$';
+
+                        function makeTempRow(cls, label) {
+                            var div = document.createElement('div');
+                            div.classList.add(cls, 'tutorial-temp');
+                            div.innerHTML = '<div class="dashboard-d-row">' +
+                                '<div class="dashboard-d-label-cell"><i class="fa-regular fa-folder category-icon"></i> ' + label + '</div>' +
+                                '<div class="dashboard-d-amount-cell">' + sym + '0.00</div></div>';
+                            return div;
+                        }
+
+                        // Ensure income entries div exists
+                        if (!todayCard.querySelector('.dashboard-d-income-entries')) {
+                            tempIncome = makeTempRow('dashboard-d-income-entries', 'Example Income');
+                            var incomeTotal = contentWrapper.querySelector('.dashboard-d-income-total');
+                            if (incomeTotal) contentWrapper.insertBefore(tempIncome, incomeTotal);
+                            else {
+                                var lastRem = contentWrapper.querySelector('.dashboard-d-lastremainder');
+                                if (lastRem) lastRem.after(tempIncome);
+                            }
+                        }
+
+                        // Ensure expense entries div exists
+                        if (!todayCard.querySelector('.dashboard-d-expense-entries')) {
+                            tempExpense = makeTempRow('dashboard-d-expense-entries', 'Example Expense');
+                            var expenseTotal = contentWrapper.querySelector('.dashboard-d-expense-total');
+                            if (expenseTotal) contentWrapper.insertBefore(tempExpense, expenseTotal);
+                            else {
+                                var incTotal = contentWrapper.querySelector('.dashboard-d-income-total');
+                                if (incTotal) incTotal.after(tempExpense);
+                            }
+                        }
+
+                        // Ensure credit account sections exist (create 2 example accounts)
+                        if (!todayCard.querySelector('.dashboard-d-credit-account')) {
+                            var creditDivider = contentWrapper.querySelector('.dashboard-d-credit-divider');
+                            var savingsDivider = null;
+                            var allDividers = contentWrapper.querySelectorAll('.dashboard-d-credit-divider');
+                            if (allDividers.length >= 2) savingsDivider = allDividers[1];
+
+                            var exampleAccounts = [
+                                { name: 'Example Visa', mask: '1234', entry: 'Groceries' },
+                                { name: 'Example Mastercard', mask: '5678', entry: 'Gas' }
+                            ];
+                            exampleAccounts.forEach(function(acct) {
+                                var caDiv = document.createElement('div');
+                                caDiv.classList.add('dashboard-d-credit-account', 'tutorial-temp');
+                                caDiv.innerHTML =
+                                    '<div class="dashboard-d-credit-row dashboard-d-credit-name-row">' +
+                                        '<div class="dashboard-d-label-cell">' + acct.name + '</div>' +
+                                        '<div class="dashboard-d-amount-cell">...' + acct.mask + '</div>' +
+                                    '</div>' +
+                                    '<div class="dashboard-d-credit-row dashboard-d-row">' +
+                                        '<div class="dashboard-d-label-cell"><i class="fa-regular fa-folder category-icon"></i> ' + acct.entry + '</div>' +
+                                        '<div class="dashboard-d-amount-cell">' + sym + '0.00</div>' +
+                                    '</div>' +
+                                    '<div class="dashboard-d-credit-row dashboard-d-credit-balance">' +
+                                        '<div class="dashboard-d-label-cell">Balance:</div>' +
+                                        '<div class="dashboard-d-amount-cell">' + sym + '0.00</div>' +
+                                    '</div>';
+                                if (savingsDivider) contentWrapper.insertBefore(caDiv, savingsDivider);
+                                else if (creditDivider) creditDivider.after(caDiv);
+                                else contentWrapper.appendChild(caDiv);
+                                tempCreditAccounts.push(caDiv);
+                            });
+                        }
+
+                        function cleanup() {
+                            if (tempIncome && tempIncome.parentNode) tempIncome.parentNode.removeChild(tempIncome);
+                            if (tempExpense && tempExpense.parentNode) tempExpense.parentNode.removeChild(tempExpense);
+                            tempCreditAccounts.forEach(function(el) { if (el && el.parentNode) el.parentNode.removeChild(el); });
+                            tempIncome = null;
+                            tempExpense = null;
+                            tempCreditAccounts = [];
+                        }
+
+                        startTutorial('tutorial_dashboard_d', [
+                            { selector: '.dashboard-d-container.today-outline', text: 'Each card represents one day of the week. Today\'s card has a highlighted border so you can spot it quickly.' },
+                            { selector: '.today-outline .dashboard-d-income-entries, .today-outline .dashboard-d-expense-entries', text: 'Income and expense entries are listed by category. Tap any amount to edit it directly.' },
+                            { selector: '.today-outline .dashboard-d-add-entry-btn', text: 'Tap this icon to add a new income or expense entry for that day.' },
+                            { selector: '.today-outline .dashboard-d-remainder', text: 'The remainder shows your income minus expenses for the day.' },
+                            { selector: '.today-outline .dashboard-d-credit-account', text: 'Credit account expenses and balances are tracked separately for each account.' },
+                            { selector: '.today-outline .dashboard-d-savings', text: 'Your cumulative savings balance is shown at the bottom of each day.' },
+                            { selector: '#today-floating-banner', text: 'When today\'s card scrolls off-screen, tap this banner to jump back to it.' }
+                        ], { delay: 500, onComplete: cleanup });
+                    })
+                    .catch(function() { /* silently ignore */ });
+            }, 1500);
+
+            // Limit decimal places for dashboard-d-amount input (2 decimals)
+            const dashboardDAmountInput = document.getElementById('dashboard-d-amount');
+            if (dashboardDAmountInput) {
+                dashboardDAmountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+        });
+
+    </script>
+</body>
+</html>

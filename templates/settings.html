@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"> <!-- Character encoding for the document -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Settings</title>
+    <!-- Link to the external stylesheet for styling the page -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Link to Font Awesome for icons -->
+    {% include '_fontawesome.html' %}
+    <!-- Link to jQuery library for JavaScript functionality -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="profile-body">
+    <!-- Include the navigation bar -->
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <!-- Calendar navigation section (currently empty) -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <!-- Main container for the profile section -->
+        <div class="profile-box">
+            <div class="profile-content">
+                <!-- Section for changing email and password -->
+                <div class="profile-actions">                
+                    <div class="data-section">
+                        <div class="section-liner">
+                            <form id="currency-type-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="currency_type">Currency:</label>
+                                    <select name="currency_type" id="currency_type" class="login-input" required>
+                                        <option value="USD" {% if currency_type == 'USD' %}selected{% endif %}>USD</option>
+                                        <option value="EUR" {% if currency_type == 'EUR' %}selected{% endif %}>EUR</option>
+                                    </select>
+                                    <button type="submit" class="submit-button">
+                                        <i id="currency-type-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <!-- Balance Threshold Form -->
+                            <form id="balance-threshold-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="balance_threshold">Threshold:</label>
+                                    <div class="currency-input-container">
+                                        <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                                        <input type="number" name="balance_threshold" id="balance_threshold" class="login-input" value="{{ balance_threshold }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
+                                    </div>
+                                    <button type="submit" class="submit-button">
+                                        <i id="balance-threshold-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <form id="landing-page-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="landing_page">Landing Page:</label>
+                                    <select class="login-input" name="landing_page" id="landing_page">
+                                        <option value="dashboard" {% if landing_page == 'dashboard' %}selected{% endif %}>Week View</option>
+                                        <option value="dashboard_d" {% if landing_page == 'dashboard_d' %}selected{% endif %}>Day View</option>
+                                        <option value="dashboard_3m" {% if landing_page == 'dashboard_3m' %}selected{% endif %}>Month View</option>
+                                    </select>
+                                    <button type="submit" class="submit-button">
+                                        <i id="landing-page-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <form id="goofy-week-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="goofy_week_mode">Friday Start Week:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="goofy_week_mode">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if goofy_week_mode != 1 %}toggle-off{% endif %}"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <p class="setting-description">Shifts your budget week to Friday–Thursday instead of the default Saturday–Friday.</p>
+                        </div>
+                    </div>
+                    <div class="notification-section">
+                        <div class="section-liner">
+                            <form id="email-notifications-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="email_notifications">Email Notifications:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="email_notifications" {% if email_notifications == 1 %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="email_notifications">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if email_notifications != 1 %}toggle-off{% endif %}"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <p class="setting-description email-delivery-warning{% if email_delivery_verified() %} email-delivery-hidden{% endif %}"
+                               id="email-notifications-hint">
+                                Email delivery must be set up and switched on in the admin
+                                console before this can be turned on. Until then there is
+                                nowhere for notifications to go.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <!-- Include the external JavaScript file for additional functionality -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script type="text/javascript">
+        document.getElementById('loading-screen').style.display = 'none';
+        const currencyType = "{{ currency_type }}";
+        const currencySymbols = { USD: "$", EUR: "€" };
+        const currencySymbol = currencySymbols[currencyType] || currencyType;
+
+        // Helper function to show success messages
+        function showSuccessMessage(message) {
+            showToast(message, 'success');
+        }
+
+        $(document).ready(function() {
+            // === Submit button change tracking ===
+            // Store initial values for each form field
+            const initialCurrency = $('#currency_type').val();
+            const initialLandingPage = $('#landing_page').val();
+
+            // Helper: toggle submit button grey/active state
+            function updateSubmitState(btn, hasChanged) {
+                if (hasChanged) {
+                    btn.removeClass('submit-unchanged');
+                } else {
+                    btn.addClass('submit-unchanged');
+                }
+            }
+
+            // Set initial grey state for all submit buttons
+            $('#currency-type-form .submit-button').addClass('submit-unchanged');
+            $('#balance-threshold-form .submit-button').addClass('submit-unchanged');
+            $('#landing-page-form .submit-button').addClass('submit-unchanged');
+
+            // Currency type change tracking
+            $('#currency_type').on('change', function() {
+                updateSubmitState($('#currency-type-form .submit-button'), $(this).val() !== initialCurrency);
+            });
+
+            // Landing page change tracking
+            $('#landing_page').on('change', function() {
+                updateSubmitState($('#landing-page-form .submit-button'), $(this).val() !== initialLandingPage);
+            });
+
+            // JS for form submissions and validation
+
+            // Format existing values to show .00 on page load
+            const balanceThreshold = $('#balance_threshold');
+            
+            if (balanceThreshold.val() && !isNaN(balanceThreshold.val())) {
+                balanceThreshold.val(parseFloat(balanceThreshold.val()).toFixed(2));
+            }
+
+            // Store initial threshold AFTER formatting
+            const initialThreshold = $('#balance_threshold').val();
+
+            $('#balance_threshold').on('input', function() {
+                $('#balance-threshold-submit-icon').removeClass('fa-times').addClass('fa-check');
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                // Limit to 2 decimal places
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+                // Update submit button state
+                updateSubmitState($('#balance-threshold-form .submit-button'), this.value !== initialThreshold);
+            });
+
+            // Format to show .00 on blur
+            $('#balance_threshold').on('blur', function() {
+                if (this.value && !isNaN(this.value)) {
+                    this.value = parseFloat(this.value).toFixed(2);
+                }
+                // Re-check after formatting
+                updateSubmitState($('#balance-threshold-form .submit-button'), this.value !== initialThreshold);
+            });
+
+            // Handle toggle switch clicks
+            $('.toggle-switch').on('click', function() {
+                const checkboxId = $(this).data('checkbox');
+                const checkbox = $('#' + checkboxId);
+                const icon = $(this).find('.toggle-icon');
+                
+                // Toggle checkbox state
+                checkbox.prop('checked', !checkbox.prop('checked'));
+                
+                // Toggle icon state
+                if (checkbox.prop('checked')) {
+                    icon.removeClass('toggle-off');
+                } else {
+                    icon.addClass('toggle-off');
+                }
+                
+                // Trigger change event for existing handlers
+                checkbox.trigger('change');
+            });
+        });
+
+        $(document).ready(function() {
+
+            // Handle form submission for balance threshold
+            $('#balance-threshold-form').on('submit', function(event) {
+                event.preventDefault();  // Prevent form from submitting normally
+
+                const balanceThreshold = $('#balance_threshold').val();  // Get the balance threshold value
+
+                $.ajax({
+                    url: "{{ url_for('update_balance_threshold') }}",  // URL for updating balance threshold
+                    method: "POST",
+                    data: { balance_threshold: balanceThreshold },  // Send the balance threshold value
+                    success: function(response) {
+                        showSuccessMessage('Balance threshold updated successfully');
+                        saveDailyTotalsAndRemainders();
+                    },
+                    error: function() {
+                        showToast('An error occurred while updating the balance threshold.', 'error');
+                    }
+                });
+            });
+        });
+
+        $(document).ready(function() {
+            $('#currency-type-form').on('submit', function(event) {
+                event.preventDefault();
+                const currencyType = $('#currency_type').val();
+
+                $.ajax({
+                    url: "{{ url_for('update_currency_type') }}",
+                    method: "POST",
+                    data: { currency_type: currencyType },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            showSuccessMessage('Currency updated successfully');
+                            setTimeout(function() {
+                                location.reload();
+                            }, 1000);
+                        } else {
+                            showToast('Error updating currency: ' + response.message, 'error');
+                        }
+                    },
+                    error: function() {
+                        showToast('An error occurred while updating the currency.', 'error');
+                    }
+                });
+            });
+
+            $('#landing-page-form').on('submit', function(event) {
+                event.preventDefault();
+                const landingPage = $('#landing_page').val();
+
+                $.ajax({
+                    url: "{{ url_for('update_landing_page') }}",
+                    method: "POST",
+                    data: { landing_page: landingPage },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            showSuccessMessage('Landing page updated successfully');
+                        } else {
+                            showToast('Error updating landing page: ' + response.message, 'error');
+                        }
+                    },
+                    error: function() {
+                        showToast('An error occurred while updating the landing page.', 'error');
+                    }
+                });
+            });
+        });
+
+        $(document).ready(function() {
+            const goofyWeekCheckbox = $('#goofy_week_mode');
+            
+            if (goofyWeekCheckbox.length) {
+                // Handle Goofy Week Mode checkbox toggle
+                goofyWeekCheckbox.on('change', function() {
+                    const goofyWeekMode = $(this).is(':checked') ? 1 : 0;
+
+                    // Send an AJAX request to update goofy_week_mode in the database
+                    $.ajax({
+                        url: "{{ url_for('update_goofy_week_mode') }}",
+                        method: "POST",
+                        data: { goofy_week_mode: goofyWeekMode },
+                        success: function(response) {
+                            if (response.status === 'success') {
+                                showSuccessMessage('Friday Start Week ' + (goofyWeekMode ? 'enabled' : 'disabled'));
+                                saveDailyTotalsAndRemainders();
+                                saveCaDailyBalance();
+                            } else {
+                                showToast('Error updating Friday Start Week: ' + response.message, 'error');
+                            }
+                        },
+                        error: function() {
+                            showToast('An error occurred while updating Friday Start Week.', 'error');
+                        }
+                    });
+                });
+            } else {
+            }
+
+            // Handle Email Notifications checkbox toggle
+            const emailNotificationsCheckbox = $('#email_notifications');
+            
+            if (emailNotificationsCheckbox.length) {
+                // Reverting has to put the ICON back too, not just the hidden
+                // checkbox. The visible switch is the icon, so restoring only
+                // the checkbox leaves the switch showing "on" while the stored
+                // value is off. That was survivable while refusals were rare;
+                // the verification gate below makes them routine.
+                function revertEmailNotifications(previous) {
+                    emailNotificationsCheckbox.prop('checked', previous);
+                    const icon = $('.toggle-switch[data-checkbox="email_notifications"] .toggle-icon');
+                    icon.toggleClass('toggle-off', !previous);
+                }
+
+                emailNotificationsCheckbox.on('change', function() {
+                    const emailNotifications = $(this).is(':checked') ? 1 : 0;
+
+                    // Refuse locally when there is nowhere verified to send to.
+                    // The server enforces this as well - this branch exists so
+                    // the switch does not flick on and then snap back.
+                    if (emailNotifications === 1 && !emailDeliveryVerified) {
+                        revertEmailNotifications(false);
+                        showToast('Verify an email address under Email Delivery first.', 'error');
+                        return;
+                    }
+
+                    // Send an AJAX request to update email_notifications in the database
+                    $.ajax({
+                        url: "{{ url_for('update_email_notifications') }}",
+                        method: "POST",
+                        data: { email_notifications: emailNotifications },
+                        success: function(response) {
+                            if (response.status === 'success') {
+                                showSuccessMessage('Email notifications ' + (emailNotifications ? 'enabled' : 'disabled'));
+                            } else {
+                                showToast('Error updating email notifications: ' + response.message, 'error');
+                                revertEmailNotifications(!emailNotifications);
+                            }
+                        },
+                        error: function(xhr) {
+                            const res = (xhr && xhr.responseJSON) || {};
+                            showToast(res.message || 'An error occurred while updating email notifications.', 'error');
+                            revertEmailNotifications(!emailNotifications);
+                        }
+                    });
+                });
+            }
+
+        });
+
+        function saveDailyTotalsAndRemainders() {
+
+            $.ajax({
+                url: "/save_totals_remainders_d", // Back-end route
+                type: "POST", // Or "GET" depending on your method
+                contentType: "application/json",
+                async: false,  // Make the request synchronous
+                success: function(response) {
+                    if (response.status === "success") {
+                        // Refresh notification badge in case new notifications were created
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
+                        }
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                },
+                complete: function() {
+                    // Hide the loading screen after the AJAX request completes
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            });
+        }
+
+        function saveCaDailyBalance(startDate = null) {
+            let data = {};
+            if (startDate) {
+                data.start_date = startDate;
+            }
+
+            $.ajax({
+                url: "/save_ca_daily_balance", // New back-end route for CA balances only
+                type: "POST",
+                contentType: "application/json",
+                //async: false,  // Synchronous for consistency
+                data: JSON.stringify(data),
+                success: function(response) {
+                    if (response.status === "success") {
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                },
+                complete: function() {
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            });
+        }
+
+
+    </script>    
+</body>
+</html>

@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Admin Console</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="profile-body">
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <div class="profile-box">
+            <div class="profile-content">
+                <div class="profile-actions">
+                    <div class="admin-users-section">
+                        <div class="section-liner">
+                            <div class="admin-users-header">
+                                <button id="admin-add-user-btn" class="admin-add-user-btn"
+                                        type="button" title="Create User">
+                                    <i class="fas fa-user-plus"></i>
+                                </button>
+                            </div>
+                            <table class="admin-users-table">
+                                <thead>
+                                    <tr>
+                                        <th>Email Address</th>
+                                        <th>First Name</th>
+                                        <th>Last Name</th>
+                                        {# Actions. Left blank on purpose - the
+                                           column is named in the markup, not on
+                                           screen. #}
+                                        <th class="admin-user-action-col"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-user-list">
+                                    {% include 'admin_user_rows.html' %}
+                                </tbody>
+                            </table>
+                            <p class="setting-description" id="admin-user-status"></p>
+                        </div>
+                    </div>
+                    <div class="email-delivery-section">
+                        <div class="section-liner">
+                            <p class="setting-description">
+                                Notifications are emailed from and to this mailbox. Save the
+                                settings, then switch delivery on - that sends a six-digit code to
+                                the address, and entering it back here is what turns delivery on.
+                                Editing a field, or switching delivery off, means verifying again.
+                                For Gmail, use an App Password rather than your account password.
+                            </p>
+                            {% if smtp and not smtp.encryption_available %}
+                            <p class="setting-description email-delivery-warning">
+                                SETTINGS_ENCRYPTION_KEY is not set on the server, so a password
+                                cannot be saved here yet. The other fields can still be saved.
+                            </p>
+                            {% endif %}
+                            <form id="smtp-settings-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="smtp_from_email">Email Address:</label>
+                                    <input type="email" id="smtp_from_email" class="login-input" autocomplete="off"
+                                           placeholder="you@gmail.com"
+                                           value="{{ smtp.from_email if smtp else '' }}">
+                                </div>
+                                <div class="input-group">
+                                    <label for="smtp_username">Username:</label>
+                                    <input type="text" id="smtp_username" class="login-input" autocomplete="off"
+                                           placeholder="Usually the same address"
+                                           value="{{ smtp.smtp_username if smtp else '' }}">
+                                </div>
+                                <div class="input-group">
+                                    <label for="smtp_password">Password:</label>
+                                    <input type="password" id="smtp_password" class="login-input" autocomplete="new-password"
+                                           placeholder="{% if smtp and smtp.password_stored_in_db %}Saved - type to replace{% else %}App password{% endif %}">
+                                </div>
+                                <div class="input-group">
+                                    <label for="smtp_server">SMTP Server:</label>
+                                    <input type="text" id="smtp_server" class="login-input" autocomplete="off"
+                                           placeholder="smtp.gmail.com"
+                                           value="{{ smtp.smtp_server if smtp else '' }}">
+                                </div>
+                                <div class="input-group">
+                                    <label for="smtp_port">Port:</label>
+                                    <input type="number" id="smtp_port" class="login-input" autocomplete="off"
+                                           placeholder="587"
+                                           value="{{ smtp.smtp_port if smtp else '' }}">
+                                </div>
+                                <div class="input-group">
+                                    <label for="smtp_use_tls">Use TLS:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="smtp_use_tls" {% if not smtp or smtp.use_tls %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="smtp_use_tls">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if smtp and not smtp.use_tls %}toggle-off{% endif %}"></i>
+                                    </button>
+                                </div>
+                                <div class="input-group">
+                                    <label for="smtp-save-btn">Save Settings:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <button type="submit" class="submit-button" id="smtp-save-btn">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                                {# Switching this on sends the code; delivery is
+                                   on once the code comes back, so the checkbox
+                                   shows checked only when actually verified. #}
+                                <div class="input-group">
+                                    <label for="smtp-clear-btn">Clear Email Settings:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <button type="button" class="submit-button email-delivery-danger" id="smtp-clear-btn">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                                <div class="input-group">
+                                    <label for="email_delivery_enabled">Enable Email Delivery:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="email_delivery_enabled" class="hidden-checkbox"
+                                           {% if smtp and smtp.verification.verified %}checked{% endif %}>
+                                    <button type="button" class="toggle-switch" data-checkbox="email_delivery_enabled">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if not (smtp and smtp.verification.verified) %}toggle-off{% endif %}"></i>
+                                    </button>
+                                </div>
+                                <div id="smtp-verify-block"{% if not (smtp and smtp.verification.pending) %} class="email-delivery-hidden"{% endif %}>
+                                    <div class="input-group">
+                                        <label for="smtp_code">Verification Code:</label>
+                                        <input type="text" id="smtp_code" class="login-input"
+                                               autocomplete="one-time-code" inputmode="numeric"
+                                               maxlength="6" placeholder="6 digits from the email">
+                                        <button type="button" class="submit-button" id="smtp-verify-btn">
+                                            <i class="fas fa-key"></i>
+                                        </button>
+                                    </div>
+                                    <div class="input-group">
+                                        <label for="smtp-resend-btn">Resend Code:</label>
+                                        <input type="text" disabled class="hidden-spacer">
+                                        <button type="button" class="submit-button" id="smtp-resend-btn">
+                                            <i class="fas fa-rotate-right"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <p class="setting-description email-delivery-verified{% if not (smtp and smtp.verification.verified) %} email-delivery-hidden{% endif %}"
+                                   id="smtp-verified-line">
+                                    Delivery is on and this address is verified, so email
+                                    notifications can be turned on.
+                                </p>
+                                <p class="setting-description" id="smtp-status"></p>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create-user form. Reuses the .footer-modal system from
+         credit_accounts.html so it looks and behaves like every other modal
+         here, instead of introducing a second one. -->
+    <div id="add-user-modal" class="footer-modal">
+        <div class="add-credit-account-modal-content">
+            <span class="add-credit-account-close-modal" id="add-user-close">&times;</span>
+            <h3>Create User</h3>
+            <form id="admin-create-user-form">
+                {# Each bubble sits INSIDE its field's .footer-form-group. That
+                   group is position:relative, so it is both the input's offset
+                   parent and the bubble's containing block - which is what makes
+                   register.html's positioning maths apply unchanged. #}
+                <div class="footer-form-group">
+                    <label for="new_user_email">Email Address:</label>
+                    <input type="email" id="new_user_email" name="email" required
+                           autocomplete="off" placeholder="person@example.com">
+                    <div id="new-user-email-requirements" class="email-requirements">
+                        <p id="nu-email-format"><span class="requirement-icon">&#10007;</span> Valid email format</p>
+                        <p id="nu-email-available"><span class="requirement-icon">&#10007;</span> Email is available</p>
+                    </div>
+                </div>
+                <div class="footer-form-group">
+                    <label for="new_user_password">Password:</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="new_user_password" name="password" required
+                               autocomplete="new-password">
+                        <i class="fa-regular fa-eye password-toggle-icon" id="nu-toggle-password"></i>
+                    </div>
+                    <div id="new-user-password-requirements" class="password-requirements">
+                        <p id="nu-length"><span class="requirement-icon">&#10007;</span> At least 8 characters</p>
+                        <p id="nu-symbol"><span class="requirement-icon">&#10007;</span> At least 1 symbol</p>
+                        <p id="nu-capital"><span class="requirement-icon">&#10007;</span> At least 1 capital letter</p>
+                        <p id="nu-number"><span class="requirement-icon">&#10007;</span> At least 1 number</p>
+                    </div>
+                </div>
+                <div class="footer-form-group">
+                    <label for="new_user_confirm">Confirm:</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="new_user_confirm" name="confirm" required
+                               autocomplete="new-password">
+                        <i class="fa-regular fa-eye password-toggle-icon" id="nu-toggle-confirm"></i>
+                    </div>
+                    <div id="new-user-match-requirements" class="password-requirements">
+                        <p id="nu-match"><span class="requirement-icon">&#10007;</span> Passwords match</p>
+                    </div>
+                </div>
+                <div class="footer-form-group">
+                    <button type="submit" id="admin-create-user-submit" disabled>Create User</button>
+                </div>
+            </form>
+            <p class="add-user-modal-status" id="add-user-modal-status"></p>
+        </div>
+    </div>
+
+    {% include 'loading_modals.html' %}
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script type="text/javascript">
+        document.getElementById('loading-screen').style.display = 'none';
+
+        // The toggle-switch binding this page needs. settings.html has its own
+        // global one, and the SMTP script below deliberately does not bind
+        // .toggle-switch (two handlers would toggle twice per click), so the
+        // console has to supply it or the delivery switch would do nothing.
+        $(document).ready(function() {
+            $('.toggle-switch').on('click', function() {
+                const checkbox = $('#' + $(this).data('checkbox'));
+                const icon = $(this).find('.toggle-icon');
+                checkbox.prop('checked', !checkbox.prop('checked'));
+                icon.toggleClass('toggle-off', !checkbox.prop('checked'));
+                checkbox.trigger('change');
+            });
+        });
+
+        // ===== Email delivery (SMTP) settings =====
+        // No .toggle-switch binding here on purpose: this page already binds a
+        // global one further up, which flips the hidden checkbox and fires its
+        // change event. Adding a second handler would toggle twice per click and
+        // appear to do nothing.
+        // Whether a human actually typed in the password box during this page
+        // view. Browsers autofill a type=password field on a page like this
+        // with the ACCOUNT password, and submitting that would overwrite the
+        // stored app password with a value the user never chose - which then
+        // drops verification and breaks a working instance on a save that was
+        // meant to change something else entirely. So the field is submitted
+        // only when this is true; blank continues to mean "keep what is
+        // stored".
+        let smtpPasswordTyped = false;
+
+        $('#smtp_password').on('input', function() {
+            smtpPasswordTyped = true;
+        });
+
+        // Autofill often lands after DOMContentLoaded, so clear the box on load
+        // and again on first focus. Without this it LOOKS populated, which is
+        // its own kind of lie even though the value is no longer submitted.
+        function clearUntypedSmtpPassword() {
+            if (!smtpPasswordTyped) {
+                $('#smtp_password').val('');
+            }
+        }
+        $(window).on('load', function() { setTimeout(clearUntypedSmtpPassword, 0); });
+        $('#smtp_password').on('focus', clearUntypedSmtpPassword);
+
+        function smtpPayload() {
+            return {
+                from_email: $('#smtp_from_email').val().trim(),
+                smtp_username: $('#smtp_username').val().trim(),
+                // Never the autofilled value - see smtpPasswordTyped above.
+                smtp_password: smtpPasswordTyped ? $('#smtp_password').val() : '',
+                smtp_server: $('#smtp_server').val().trim(),
+                smtp_port: $('#smtp_port').val().trim(),
+                use_tls: $('#smtp_use_tls').is(':checked')
+            };
+        }
+
+        function smtpStatus(text, isError) {
+            $('#smtp-status').text(text).toggleClass('email-delivery-error', !!isError);
+        }
+
+        // Whether the CURRENT settings have confirmed a code. Kept in a variable
+        // rather than read from the DOM so that verifying unlocks the
+        // notifications toggle immediately, with no reload.
+        let emailDeliveryVerified = {% if smtp and smtp.verification.verified %}true{% else %}false{% endif %};
+
+        // The switch and its icon move together, always through here. The icon
+        // is the part the user sees, so setting the checkbox alone would leave a
+        // switch that contradicts the stored state.
+        function setDeliveryToggle(on) {
+            $('#email_delivery_enabled').prop('checked', on);
+            $('.toggle-switch[data-checkbox="email_delivery_enabled"] .toggle-icon')
+                .toggleClass('toggle-off', !on);
+        }
+
+        // One place that reflects verification state into the page, so the
+        // save, verify, enable and disable handlers cannot drift from each other.
+        function applyVerificationState(smtp) {
+            if (!smtp || !smtp.verification) { return; }
+            const v = smtp.verification;
+            emailDeliveryVerified = !!v.verified;
+
+            $('#smtp-verify-block').toggleClass('email-delivery-hidden', !v.pending);
+            $('#smtp-verified-line').toggleClass('email-delivery-hidden', !v.verified);
+            $('#email-notifications-hint').toggleClass('email-delivery-hidden', !!v.verified);
+
+            // The delivery switch tracks verified, NOT what was clicked. A code
+            // in flight is not delivery being on, so a click that starts
+            // verification leaves the switch off until the code comes back.
+            setDeliveryToggle(!!v.verified);
+
+            // A saved password is no longer typed in, so reflect that too.
+            $('#smtp_password').attr('placeholder',
+                smtp.password_stored_in_db ? 'Saved - type to replace' : 'App password');
+
+            if (!v.verified) {
+                // Losing verification means notifications are no longer allowed
+                // on. Show it rather than leaving a switch that now lies.
+                const cb = $('#email_notifications');
+                if (cb.length && cb.is(':checked')) {
+                    cb.prop('checked', false);
+                    $('.toggle-switch[data-checkbox="email_notifications"] .toggle-icon')
+                        .addClass('toggle-off');
+                }
+            }
+        }
+
+        $('#smtp-settings-form').on('submit', function(e) {
+            e.preventDefault();
+            smtpStatus('Saving...', false);
+            $.ajax({
+                url: "{{ url_for('update_smtp_settings') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(smtpPayload()),
+                success: function(res) {
+                    smtpStatus(res.message || 'Saved.', false);
+                    // Clear the password field: it is stored now, and the
+                    // placeholder already explains that blank means unchanged.
+                    // Resetting the flag matters as much as clearing the value,
+                    // or a later save would resubmit an empty typed password.
+                    $('#smtp_password').val('');
+                    smtpPasswordTyped = false;
+                    applyVerificationState(res.smtp);
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    smtpStatus(res.message || 'Could not save settings.', true);
+                }
+            });
+        });
+
+        $('#smtp-verify-btn').on('click', function() {
+            const btn = $(this);
+            const code = $('#smtp_code').val().trim();
+            if (!code) {
+                smtpStatus('Enter the code from the email.', true);
+                $('#smtp_code').focus();
+                return;
+            }
+            btn.prop('disabled', true);
+            smtpStatus('Checking the code...', false);
+            $.ajax({
+                url: "{{ url_for('verify_smtp_code') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ code: code }),
+                success: function(res) {
+                    smtpStatus(res.message || 'Verified.', false);
+                    $('#smtp_code').val('');
+                    applyVerificationState(res.smtp);
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    smtpStatus(res.message || 'Could not verify that code.', true);
+                    applyVerificationState(res.smtp);
+                },
+                complete: function() {
+                    btn.prop('disabled', false);
+                }
+            });
+        });
+
+        $('#smtp-resend-btn').on('click', function() {
+            const btn = $(this);
+            btn.prop('disabled', true);
+            smtpStatus('Sending a new code...', false);
+            $.ajax({
+                url: "{{ url_for('resend_smtp_code') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(res) {
+                    smtpStatus(res.message || 'A new code is on its way.', false);
+                    applyVerificationState(res.smtp);
+                    $('#smtp_code').val('').focus();
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    smtpStatus(res.message || 'Could not send a new code.', true);
+                },
+                complete: function() {
+                    btn.prop('disabled', false);
+                }
+            });
+        });
+
+        // The delivery switch. Turning it on sends the code; delivery only
+        // becomes on when that code is entered, so this handler puts the switch
+        // back to off and shows the code box instead of leaving it looking on.
+        $('#email_delivery_enabled').on('change', function() {
+            const wantOn = $(this).is(':checked');
+            const url = wantOn ? "{{ url_for('enable_email_delivery') }}"
+                               : "{{ url_for('disable_email_delivery') }}";
+            smtpStatus(wantOn ? 'Sending a verification code...' : 'Turning delivery off...', false);
+            $.ajax({
+                url: url,
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(res) {
+                    // 'pending' is the normal answer to switching on: the code
+                    // is out, delivery is not on yet. applyVerificationState
+                    // sets the switch from the server's view, never from the
+                    // click, so this cannot end up showing on prematurely.
+                    smtpStatus(res.message || '', false);
+                    applyVerificationState(res.smtp);
+                    if (res.status === 'pending') {
+                        $('#smtp_code').val('').focus();
+                    }
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    smtpStatus(res.message || 'Could not change email delivery.', true);
+                    if (res.smtp) {
+                        applyVerificationState(res.smtp);
+                    } else {
+                        setDeliveryToggle(!wantOn);
+                    }
+                }
+            });
+        });
+
+        // ===== New user creation =====
+        // The password is type=text on purpose: the admin is setting a
+        // credential to hand over, not entering one of their own, so hiding it
+        // from the person who has to read it out serves nobody. It also keeps
+        // password managers from treating this as a login field - autofill into
+        // a credential box has already cost this app one working config.
+        function adminUserStatus(text, isError) {
+            $('#admin-user-status').text(text).toggleClass('email-delivery-error', !!isError);
+        }
+
+        // Failures report inside the modal, where the form the user is looking
+        // at lives. Success reports on the page behind it, because the modal
+        // closes - a message in a hidden element is no message at all.
+        function addUserModalStatus(text, isError) {
+            $('#add-user-modal-status').text(text)
+                .toggleClass('add-user-modal-error', !!isError);
+        }
+
+        // ---- the registration page's checks, same rules ----
+        const nuEmail = $('#new_user_email');
+        const nuPassword = $('#new_user_password');
+        const nuConfirm = $('#new_user_confirm');
+        const nuSubmit = $('#admin-create-user-submit');
+
+        let nuEmailValid = false;
+        let nuPasswordValid = false;
+        let nuMatchValid = false;
+
+        const nuEmailBubble = $('#new-user-email-requirements');
+        const nuPasswordBubble = $('#new-user-password-requirements');
+        const nuMatchBubble = $('#new-user-match-requirements');
+
+        function mark(selector, ok) {
+            $(selector + ' .requirement-icon')
+                .html(ok ? '&#10003;' : '&#10007;')
+                .toggleClass('valid', ok);
+        }
+
+        // Lifted from register.html unchanged, including the reason it takes the
+        // wrapper when there is one: a password input's offset parent is the
+        // .password-input-wrapper, not the field group the bubble is positioned
+        // against, so measuring the input directly would place it wrong.
+        function nuPositionBubble(inputField, bubble) {
+            const wrapper = inputField.closest('.password-input-wrapper');
+            const target = wrapper.length > 0 ? wrapper : inputField;
+            const offset = target.position();
+            bubble.css({
+                top: offset.top - bubble.outerHeight() - 5 + 'px',
+                left: offset.left + 'px',
+                width: target.outerWidth() + 'px',
+                position: 'absolute',
+                borderRadius: inputField.css('border-radius')
+            });
+        }
+
+        function nuShowBubble(inputField, bubble) {
+            bubble.css('display', 'block').css('opacity', '1');
+            nuPositionBubble(inputField, bubble);
+        }
+
+        // Same two-stage fade as registration: opacity first, then display none
+        // once the 300ms transition has run.
+        function nuHideBubble(bubble, delay) {
+            setTimeout(function() {
+                bubble.css('opacity', '0');
+                setTimeout(function() {
+                    bubble.css('display', 'none');
+                }, 300);
+            }, delay);
+        }
+
+        function nuCheckForm() {
+            nuSubmit.prop('disabled', !(nuEmailValid && nuPasswordValid && nuMatchValid));
+        }
+
+        // Same pattern as register.html, deliberately identical.
+        const NU_EMAIL_PATTERN = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+        nuEmail.on('input', function() {
+            const value = nuEmail.val().trim();
+            const formatOk = NU_EMAIL_PATTERN.test(value);
+            mark('#nu-email-format', formatOk);
+            nuEmailValid = false;
+
+            if (!formatOk) {
+                mark('#nu-email-available', false);
+                nuCheckForm();
+                return;
+            }
+
+            // Availability comes from the same endpoint the registration page
+            // uses, so "taken" means the same thing in both places.
+            $.ajax({
+                url: "{{ url_for('check_username') }}",
+                method: 'POST',
+                data: { username: value },
+                success: function(res) {
+                    const free = res.status !== 'taken';
+                    mark('#nu-email-available', free);
+                    nuEmailValid = free;
+                    nuCheckForm();
+                    // Reposition: the bubble may be open, and its height does not
+                    // change but the availability line's tick does.
+                    if (nuEmailBubble.is(':visible')) {
+                        nuPositionBubble(nuEmail, nuEmailBubble);
+                    }
+                },
+                error: function() {
+                    mark('#nu-email-available', false);
+                    nuEmailValid = false;
+                    nuCheckForm();
+                }
+            });
+            nuCheckForm();
+        });
+
+        nuEmail.on('focusout', function() {
+            nuShowBubble(nuEmail, nuEmailBubble);
+            nuHideBubble(nuEmailBubble, 3000);
+        });
+
+        function nuCheckPassword() {
+            const pw = nuPassword.val();
+            const confirm = nuConfirm.val();
+
+            const rules = [
+                ['#nu-length', pw.length >= 8],
+                ['#nu-symbol', /[!@#$%^&*(),.?":{}|<>\-_]/.test(pw)],
+                ['#nu-capital', /[A-Z]/.test(pw)],
+                ['#nu-number', /\d/.test(pw)],
+            ];
+            nuPasswordValid = true;
+            rules.forEach(function(r) {
+                mark(r[0], r[1]);
+                if (!r[1]) { nuPasswordValid = false; }
+            });
+
+            nuMatchValid = pw !== '' && pw === confirm;
+            mark('#nu-match', nuMatchValid);
+            nuCheckForm();
+        }
+
+        nuPassword.on('input', function() {
+            nuCheckPassword();
+            nuShowBubble(nuPassword, nuPasswordBubble);
+        });
+        nuPassword.on('focusout', function() {
+            nuHideBubble(nuPasswordBubble, 500);
+        });
+
+        nuConfirm.on('input', nuCheckPassword);
+        nuConfirm.on('focusout', function() {
+            nuShowBubble(nuConfirm, nuMatchBubble);
+            nuHideBubble(nuMatchBubble, 3000);
+        });
+
+        function nuToggle(icon, input) {
+            $(icon).on('click', function() {
+                const type = input.attr('type') === 'password' ? 'text' : 'password';
+                input.attr('type', type);
+                $(this).toggleClass('fa-eye fa-eye-slash');
+            });
+        }
+        nuToggle('#nu-toggle-password', nuPassword);
+        nuToggle('#nu-toggle-confirm', nuConfirm);
+
+        function openAddUserModal() {
+            addUserModalStatus('', false);
+            nuEmail.val('');
+            nuPassword.val('').attr('type', 'password');
+            nuConfirm.val('').attr('type', 'password');
+            $('#nu-toggle-password, #nu-toggle-confirm')
+                .removeClass('fa-eye-slash').addClass('fa-eye');
+            // Reset every tick, or a reopened modal shows the last attempt's
+            // marks against empty fields.
+            ['#nu-email-format', '#nu-email-available', '#nu-length', '#nu-symbol',
+             '#nu-capital', '#nu-number', '#nu-match'].forEach(function(sel) {
+                mark(sel, false);
+            });
+            nuEmailValid = nuPasswordValid = nuMatchValid = false;
+            nuCheckForm();
+            // A bubble left over from the last attempt would fade in over empty
+            // fields, so hide all three outright rather than on a timer.
+            nuEmailBubble.add(nuPasswordBubble).add(nuMatchBubble)
+                .css({ display: 'none', opacity: '0' });
+            $('#add-user-modal').show();
+            nuEmail.focus();
+        }
+
+        function closeAddUserModal() {
+            $('#add-user-modal').hide();
+        }
+
+        $('#admin-add-user-btn').on('click', openAddUserModal);
+        $('#add-user-close').on('click', closeAddUserModal);
+        $('#add-user-modal').on('mousedown', function(e) {
+            // Backdrop only: mousedown on the content itself must not dismiss,
+            // or selecting text in a field would close the form.
+            if (e.target === this) {
+                closeAddUserModal();
+            }
+        });
+        $(document).on('keydown', function(e) {
+            if (e.key === 'Escape' && $('#add-user-modal').is(':visible')) {
+                closeAddUserModal();
+            }
+        });
+
+        $('#admin-create-user-form').on('submit', function(e) {
+            e.preventDefault();
+            const email = nuEmail.val().trim();
+            const password = nuPassword.val();
+            if (!nuEmailValid || !nuPasswordValid || !nuMatchValid) {
+                addUserModalStatus('Fix the items marked below first.', true);
+                return;
+            }
+            const btn = $(this).find('button[type="submit"]');
+            btn.prop('disabled', true);
+            addUserModalStatus('Creating the account...', false);
+            $.ajax({
+                url: "{{ url_for('admin_create_user') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ email: email, password: password }),
+                success: function(res) {
+                    if (res.users_html) {
+                        $('#admin-user-list').html(res.users_html);
+                    }
+                    closeAddUserModal();
+                    // No confirmation line: the new row appearing in the table
+                    // above is the confirmation, and a message repeating it just
+                    // shifts the layout for something already visible.
+                    adminUserStatus('', false);
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    addUserModalStatus(res.message || 'Could not create the account.', true);
+                },
+                complete: function() {
+                    btn.prop('disabled', false);
+                }
+            });
+        });
+
+        // ===== Delete a user =====
+        // Delegated from the tbody: the row markup is replaced wholesale after
+        // a create or delete, so a handler bound to the buttons themselves
+        // would stop working after the first change.
+        $('#admin-user-list').on('click', '.admin-user-delete-btn', function() {
+            const row = $(this).closest('tr');
+            const userId = row.data('user-id');
+            const username = row.data('username');
+            if (!confirm('Delete ' + username + '? This removes their account and all '
+                         + 'of their data, and cannot be undone.')) {
+                return;
+            }
+            adminUserStatus('Deleting ' + username + '...', false);
+            $.ajax({
+                url: '/admin/delete-user/' + userId,
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(res) {
+                    if (res.users_html) {
+                        $('#admin-user-list').html(res.users_html);
+                    }
+                    adminUserStatus(res.message || 'Account deleted.', false);
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    adminUserStatus(res.message || 'Could not delete the account.', true);
+                }
+            });
+        });
+
+        // ===== Clear email settings =====
+        $('#smtp-clear-btn').on('click', function() {
+            if (!confirm('Clear the email settings? This removes the server, address, '
+                         + 'username and password, and turns delivery off.')) {
+                return;
+            }
+            const btn = $(this);
+            btn.prop('disabled', true);
+            smtpStatus('Clearing email settings...', false);
+            $.ajax({
+                url: "{{ url_for('clear_smtp_settings') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(res) {
+                    smtpStatus(res.message || 'Email settings cleared.', false);
+                    // Empty every field: the row is gone, so anything left on
+                    // screen would describe settings that no longer exist.
+                    $('#smtp_from_email, #smtp_username, #smtp_password, #smtp_server, #smtp_port').val('');
+                    smtpPasswordTyped = false;
+                    applyVerificationState(res.smtp);
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    smtpStatus(res.message || 'Could not clear the settings.', true);
+                },
+                complete: function() {
+                    btn.prop('disabled', false);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

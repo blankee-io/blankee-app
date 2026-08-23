@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Login</title>
+    <!-- Link to the external stylesheet for custom styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="login-body">
+    <!-- Top navigation bar -->
+    <div class="nav-bar nav-bar-login">
+        <div class="nav-bar-container nav-bar-container-login">
+            <div class="nav-left-content nav-left-content-login">
+                <a href="https://blankee.io">
+                    <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo nav-logo-login">
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar navigation section (currently empty) -->
+    <div class="calendarnav">
+        <!-- Placeholder for calendar navigation content -->
+    </div>
+
+    <!-- Main container for the login form -->
+    <div class="logincontainer" id="logincontainer">
+        <h1>Log In</h1>
+
+        <!-- Login Error Modal -->
+        <div id="loginModal" class="modal">
+            <div class="modal-content">
+                <p id="loginMessage"></p>
+            </div>
+        </div>
+
+        {% if mfa_step %}
+            <form method="POST" action="{{ url_for('login_mfa') }}" id="login-mfa-form">
+                <div class="mfa-row">
+                    <label for="mfa_code">Enter 6-digit code from your authenticator app:</label>
+                    <div class="mfa-code-inputs">
+                        <div id="login-mfa-error" class="login-mfa-error" style="display: none;"></div>
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    </div>
+                    <input type="hidden" name="mfa_code" id="mfa_code">
+                </div>
+                <button type="submit" class="login-button">Verify</button>
+            </form>
+            {% if mfa_error %}
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    var errorDiv = document.getElementById('login-mfa-error');
+                    errorDiv.textContent = '{{ mfa_error }}';
+                    errorDiv.style.display = 'block';
+                    setTimeout(function() {
+                        errorDiv.style.opacity = '0';
+                        setTimeout(function() {
+                            errorDiv.style.display = 'none';
+                            errorDiv.style.opacity = '1';
+                        }, 300);
+                    }, 2000);
+                });
+            </script>
+            {% endif %}
+            <p><a href="{{ url_for('login') }}">Back to Login</a></p>
+        {% else %}
+            <form method="POST" action="{{ url_for('login') }}">
+                <div class="login-row">
+                    <label for="username">Email Address:</label>
+                    <input type="text" name="username" class="login-input" required>
+                </div>
+                <div class="login-row">
+                    <label for="password">Password:</label>
+                    <input type="password" name="password" class="login-input" required>
+                </div>
+                {# Offered only when the instance can actually send the mail.
+                   The route enforces the same rule; this just avoids showing a
+                   link that would bounce straight back here. #}
+                {% if email_delivery_verified() %}
+                <div class="forgot-password-container">
+                    <div class="forgot-password-label"></div>
+                    <div>
+                        <a href="{{ url_for('forgot_password') }}" class="forgot-password-link">Forgot Password?</a>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="login-row remember-me">
+                    <input type="checkbox" name="remember" id="remember">
+                    <label for="remember">Remember Me</label>
+                </div>
+                <button type="submit" class="login-button">Login</button>
+            </form>
+
+        {% endif %}
+
+        {% with messages = get_flashed_messages() %}
+        {% endwith %}
+    </div>
+
+    <!-- Link to the external JavaScript file -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var modal = document.getElementById('loginModal');
+            var message = document.getElementById('loginMessage');
+            
+            // MFA 6-digit input handling
+            const mfaDigits = document.querySelectorAll('.mfa-digit');
+            const mfaCodeHidden = document.getElementById('mfa_code');
+            
+            if (mfaDigits.length > 0 && mfaCodeHidden) {
+                function updateMfaCode() {
+                    let code = '';
+                    mfaDigits.forEach(input => {
+                        code += input.value;
+                    });
+                    mfaCodeHidden.value = code;
+                }
+
+                mfaDigits.forEach((input, index) => {
+                    // Only allow digits 0-9
+                    input.addEventListener('input', function(e) {
+                        this.value = this.value.replace(/[^0-9]/g, '');
+                        
+                        if (this.value.length === 1) {
+                            if (index < mfaDigits.length - 1) {
+                                mfaDigits[index + 1].focus();
+                            }
+                        }
+                        updateMfaCode();
+                    });
+
+                    // Handle backspace and arrow keys
+                    input.addEventListener('keydown', function(e) {
+                        if (e.key === 'Backspace' && this.value === '' && index > 0) {
+                            mfaDigits[index - 1].focus();
+                        }
+                        if (e.key === 'ArrowLeft' && index > 0) {
+                            mfaDigits[index - 1].focus();
+                        }
+                        if (e.key === 'ArrowRight' && index < mfaDigits.length - 1) {
+                            mfaDigits[index + 1].focus();
+                        }
+                        // Submit on Enter if all 6 digits are filled
+                        if (e.key === 'Enter') {
+                            updateMfaCode();
+                            if (mfaCodeHidden.value.length === 6) {
+                                e.preventDefault();
+                                document.getElementById('login-mfa-form').submit();
+                            }
+                        }
+                    });
+
+                    // Handle paste
+                    input.addEventListener('paste', function(e) {
+                        e.preventDefault();
+                        const pastedData = (e.clipboardData || window.clipboardData).getData('text');
+                        const digits = pastedData.replace(/[^0-9]/g, '').slice(0, 6);
+                        
+                        digits.split('').forEach((digit, i) => {
+                            if (mfaDigits[i]) {
+                                mfaDigits[i].value = digit;
+                            }
+                        });
+                        
+                        const nextEmptyIndex = Math.min(digits.length, mfaDigits.length - 1);
+                        mfaDigits[nextEmptyIndex].focus();
+                        updateMfaCode();
+                    });
+
+                    // Select all text on focus
+                    input.addEventListener('focus', function() {
+                        this.select();
+                    });
+                });
+                
+                // Autofocus first digit
+                mfaDigits[0].focus();
+            }
+
+            {% if error_message %}
+            // Error message modal
+            message.innerHTML = '<div class="modal-content-center">' +
+                               '<i class="fa-solid fa-siren-on error-modal-icon"></i>' +
+                               '<div class="error-modal-message">{{ error_message }}</div>' +
+                               '</div>';
+            modal.style.display = 'flex';
+            
+            // Close only when clicking outside the modal content
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
+            {% elif success_message %}
+            // Success message modal
+            message.innerHTML = '<div class="modal-content-center">' +
+                               '<i class="fas fa-check-circle success-modal-icon"></i>' +
+                               '<div class="success-modal-title">Success!</div>' +
+                               '<div class="success-modal-message">{{ success_message }}</div>' +
+                               '</div>';
+            modal.style.display = 'flex';
+            
+            // Close only when clicking outside the modal content
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
+            {% endif %}
+        });
+    </script>
+</body>
+</html>

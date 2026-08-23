@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Bank Accounts</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+{#
+  Provider-less Bank Accounts page.
+
+  The previous version of this template was ~2100 lines of aggregator-specific
+  connection management: the vendor's connector SDK, session-token exchange,
+  connection cards, per-account sync toggles, alias editing, and a sendBeacon
+  unload cleanup. All of it described one vendor's objects, so none of it
+  survived that vendor's removal.
+
+  The ROUTE and this FILENAME deliberately stay. Notification rows already in
+  the database link to /bank_accounts?reconnect=<id>, and script.js navigates
+  here from the reconnect modal - a 404 there would be a visible regression for
+  no gain. When a new provider lands, its connect button goes in
+  .connect-bank-container and its connection cards replace the empty state
+  (the .connection-card / .account-selection-* rules in style.css were kept
+  for exactly that).
+#}
+<body>
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="profile-box profile-bank-connections">
+            <div id="bank-connections-section">
+                <div class="section-liner">
+                    <div class="no-connections">
+                        <i class="fa-solid fa-building-columns"></i>
+                        <h3>No bank connected</h3>
+                        <p>Bank connections are temporarily unavailable while we move to a
+                           new Open Banking provider. Manual entry is unaffected, and
+                           everything you have already recorded stays exactly as it is.</p>
+                    </div>
+                    <div class="connect-bank-container">
+                        {# Reserved: the replacement provider's connect button #}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

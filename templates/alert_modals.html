@@ -1,0 +1,21 @@
+<!-- Alert Modals - Include this template in all pages that need system alerts -->
+
+<!-- Bank Reconnection Alert Modal -->
+<div id="bank-reconnect-modal" class="modal" onclick="if(event.target === this) dismissReconnectModal()">
+    <div class="modal-content alert-modal-content">
+        <div class="alert-modal-icon">
+            <i class="fa-solid fa-plug-circle-exclamation"></i>
+        </div>
+        <h2>Bank Connection Issue</h2>
+        <p id="reconnect-modal-message">One of your bank connections needs to be reconnected to continue syncing transactions.</p>
+        <div class="alert-modal-details" id="reconnect-modal-details">
+            <!-- Filled by JS -->
+        </div>
+        <div class="alert-modal-buttons">
+            <button class="btn btn-secondary" onclick="dismissReconnectModal()">Remind Me Later</button>
+            <button class="btn btn-primary" onclick="goToReconnect()">
+                <i class="fa-solid fa-link"></i> Reconnect Now
+            </button>
+        </div>
+    </div>
+</div>

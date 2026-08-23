@@ -1,0 +1,29 @@
+{# 
+Redis Auto-Refresh Snippet
+Include this in pages that should auto-refresh after Redis hydration completes.
+
+Usage in templates:
+{% include 'redis_auto_refresh.html' %}
+#}
+
+{# Add meta tag to indicate current hydration status #}
+{% if current_user.is_authenticated %}
+<meta name="redis-hydrated" content="{{ 'true' if g.get('redis_hydrated', False) else 'false' }}">
+<meta name="user-id" content="{{ current_user.id }}">
+{% endif %}
+
+{# Include the auto-refresh JavaScript #}
+<script src="{{ url_for('static', filename='js/redis_auto_refresh.js') }}" defer></script>
+
+{# Optional: Add debug info (remove in production) #}
+{% if config.DEBUG and current_user.is_authenticated %}
+<div id="redis-debug-info" style="position: fixed; bottom: 60px; right: 20px; background: rgba(0,0,0,0.7); color: #0f0; padding: 10px; font-family: monospace; font-size: 11px; border-radius: 4px; z-index: 9998; max-width: 300px;">
+    <strong>Redis Debug</strong><br>
+    Hydrated: {{ 'Yes' if g.get('redis_hydrated', False) else 'No' }}<br>
+    Fallback: {{ 'Yes' if g.get('using_mysql_fallback', False) else 'No' }}<br>
+    User: {{ current_user.id }}<br>
+    <button onclick="fetch('/api/redis/invalidate', {method: 'POST', credentials: 'same-origin'}).then(() => location.reload())" style="margin-top: 5px; font-size: 10px;">
+        Clear Cache
+    </button>
+</div>
+{% endif %}

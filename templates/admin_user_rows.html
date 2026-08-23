@@ -1,0 +1,19 @@
+{% for u in users %}
+<tr data-user-id="{{ u.id }}" data-username="{{ u.username }}">
+    <td class="admin-user-email-cell">
+        {{ u.username }}
+        {% if u.is_admin %}<span class="admin-user-tag">administrator</span>{% endif %}
+    </td>
+    <td>{% if u.first_name %}{{ u.first_name }}{% else %}&mdash;{% endif %}</td>
+    <td>{% if u.last_name %}{{ u.last_name }}{% else %}&mdash;{% endif %}</td>
+    <td class="admin-user-action-cell">
+        {# No delete for the administrator: registration is closed, so an
+           instance that loses its admin cannot get another one. #}
+        {% if not u.is_admin %}
+        <button type="button" class="admin-user-delete-btn" title="Delete {{ u.username }}">
+            <i class="fa-regular fa-trash-can"></i>
+        </button>
+        {% endif %}
+    </td>
+</tr>
+{% endfor %}

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"> <!-- Character encoding for the document -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Register</title>
+    <!-- Link to the external stylesheet for styling the page -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Link to Font Awesome for icons -->
+    {% include '_fontawesome.html' %}
+    <!-- Link to jQuery library for JavaScript functionality -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <!-- Google reCAPTCHA -->
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="register-body">
+    <!-- Top navigation bar -->
+    <div class="nav-bar nav-bar-login">
+        <div class="nav-bar-container nav-bar-container-login">
+            <div class="nav-left-content nav-left-content-login">
+                <a href="https://blankee.io">
+                    <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo nav-logo-login">
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar navigation bar -->
+    <div class="calendarnav">
+        <!-- Calendar nav content here -->
+    </div>
+
+    <!-- Main container for the registration form -->
+    <div class="logincontainer" id="logincontainer">
+        <h1>Register</h1>
+
+        <!-- Registration form -->
+        <form method="POST" action="{{ url_for('register') }}">
+            <!-- Input group for the email address -->
+            <div class="login-row" id="Username">
+                <label for="username">Email Address:</label>
+                <input type="text" name="username" id="username" class="login-input" required>
+            </div>
+            <div id="email-requirements" class="email-requirements">
+                <p id="email-format-requirement"><span class="requirement-icon">✗</span> Valid email format</p> <!-- Email format requirement -->
+                <p id="email-availability-requirement"><span class="requirement-icon">✗</span> Email is available</p> <!-- Email availability check -->
+            </div>
+            <!-- Input group for the password -->
+            <div class="login-row">
+                <label for="password">Password:</label>
+                <div class="password-input-wrapper">
+                    <input type="password" name="password" id="password" class="login-input" required>
+                    <i class="fa-regular fa-eye password-toggle-icon" id="toggle-password"></i>
+                </div>
+            </div>
+            <div id="password-requirements" class="password-requirements">
+                <p id="length-requirement"><span class="requirement-icon">✗</span> At least 8 characters</p> <!-- Password length requirement -->
+                <p id="symbol-requirement"><span class="requirement-icon">✗</span> At least 1 symbol</p> <!-- Password symbol requirement -->
+                <p id="capital-requirement"><span class="requirement-icon">✗</span> At least 1 capital letter</p> <!-- Password capital letter requirement -->
+                <p id="number-requirement"><span class="requirement-icon">✗</span> At least 1 number</p> <!-- Password number requirement -->
+            </div>
+            <!-- Input group for the confirm password -->
+            <div class="login-row">
+                <label for="confirm-password">Confirm:</label>
+                <div class="password-input-wrapper">
+                    <input type="password" name="confirm-password" id="confirm-password" class="login-input" required>
+                    <i class="fa-regular fa-eye password-toggle-icon" id="toggle-confirm-password"></i>
+                </div>
+            </div>
+            <div id="password-match-requirements" class="password-requirements">
+                <p id="password-match-requirement"><span class="requirement-icon">✗</span> Passwords match</p> <!-- Password match check -->
+            </div>
+            
+            <!-- Google reCAPTCHA -->
+            <div class="login-row recaptcha-row">
+                <div class="g-recaptcha" data-sitekey="6LdmCgAsAAAAALGB6JYlus0Rr9hepw1fbK70Bx9v" data-callback="recaptchaCallback"></div>
+            </div>
+            
+            <!-- member_since is now set during profile setup (threshold submission), not registration -->
+            <!-- Register button, initially disabled -->
+            <button type="submit" id="register-button" class="login-button" disabled>Register</button>
+        </form>
+
+        <!-- Link to the login page for users who already have an account -->
+
+    </div>
+
+    <!-- JavaScript functionality to validate form inputs and enable/disable the register button -->
+    <script>
+        $(document).ready(function() {
+            const usernameInput = $('#username');  // Select the username input field
+            const passwordInput = $('#password');  // Select the password input field
+            const confirmPasswordInput = $('#confirm-password');  // Select the confirm password input field
+            const registerButton = $('#register-button');  // Select the register button
+            
+            // Password visibility toggle
+            $('#toggle-password').on('click', function() {
+                const type = passwordInput.attr('type') === 'password' ? 'text' : 'password';
+                passwordInput.attr('type', type);
+                $(this).toggleClass('fa-eye fa-eye-slash');
+            });
+
+            $('#toggle-confirm-password').on('click', function() {
+                const type = confirmPasswordInput.attr('type') === 'password' ? 'text' : 'password';
+                confirmPasswordInput.attr('type', type);
+                $(this).toggleClass('fa-eye fa-eye-slash');
+            });
+            
+            const emailRequirements = $('#email-requirements');  // Select the email requirements container
+            const emailFormatRequirement = $('#email-format-requirement .requirement-icon');  // Select the email format requirement icon
+            const emailAvailabilityRequirement = $('#email-availability-requirement .requirement-icon');  // Select the email availability requirement icon
+            
+            const passwordRequirements = $('#password-requirements');  // Select the password requirements container
+            const lengthRequirement = $('#length-requirement .requirement-icon');  // Select the length requirement icon
+            const symbolRequirement = $('#symbol-requirement .requirement-icon');  // Select the symbol requirement icon
+            const capitalRequirement = $('#capital-requirement .requirement-icon');  // Select the capital letter requirement icon
+            const numberRequirement = $('#number-requirement .requirement-icon');  // Select the number requirement icon
+
+            const passwordMatchRequirements = $('#password-match-requirements');  // Password match window
+            const passwordMatchRequirement = $('#password-match-requirement .requirement-icon');  // Password match requirement
+
+            let isEmailValid = false;  // Track email validity
+            let isCaptchaValid = false;  // Track CAPTCHA validity
+            
+            // Set initial button state to disabled styling
+            registerButton.addClass('register-button-disabled');
+            
+            // reCAPTCHA callback function
+            window.recaptchaCallback = function() {
+                isCaptchaValid = true;
+                checkFormValidity();
+            };
+            let isPasswordValid = false;  // Track password validity
+            let isPasswordMatchValid = false;  // Track if passwords match
+
+            // member_since is now set during profile setup (threshold submission), not registration
+
+            // Function to check overall form validity and enable/disable the register button accordingly
+            function checkFormValidity() {
+                if (isEmailValid && isPasswordValid && isPasswordMatchValid && isCaptchaValid) {
+                    registerButton.prop('disabled', false);  // Enable the register button
+                    registerButton.removeClass('register-button-disabled');  // Enable styling
+                } else {
+                    registerButton.prop('disabled', true);  // Disable the register button
+                    registerButton.addClass('register-button-disabled');  // Disable styling
+                }
+            }
+
+
+
+            // Position the validation window to match the input field's width and position
+            function adjustValidationWindowPosition(inputField, validationWindow) {
+                // Use the wrapper position if the input is inside a password wrapper
+                const wrapper = inputField.closest('.password-input-wrapper');
+                const targetElement = wrapper.length > 0 ? wrapper : inputField;
+                
+                const offset = targetElement.position();
+                validationWindow.css({
+                    top: offset.top - validationWindow.outerHeight() - 5 + 'px',
+                    left: offset.left + 'px',
+                    width: targetElement.outerWidth() + 'px',
+                    position: 'absolute',
+                    borderRadius: inputField.css('border-radius')
+                });
+            }
+
+            // Event listener for changes in the username input field
+            usernameInput.on('input', function() {
+                const username = usernameInput.val();  // Get the input value
+                let emailPatternValid = false;  // Track if the email format is valid
+                isEmailValid = true;  // Assume the email is valid initially
+
+                const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;  // Regular expression for email format validation
+                if (emailPattern.test(username)) {
+                    emailFormatRequirement.text('✓').addClass('valid');  // Indicate valid email format
+                    emailPatternValid = true;
+                } else {
+                    emailFormatRequirement.text('✗').removeClass('valid');  // Indicate invalid email format
+                    isEmailValid = false;
+                }
+
+                // AJAX call to check if the email is already taken
+                $.ajax({
+                    url: "{{ url_for('check_username') }}",
+                    method: "POST",
+                    data: { username: username },
+                    success: function(response) {
+                        if (response.status === 'taken' || !emailPatternValid) {
+                            emailAvailabilityRequirement.text('✗').removeClass('valid');  // Indicate email is not available
+                            isEmailValid = false;
+                        } else {
+                            emailAvailabilityRequirement.text('✓').addClass('valid');  // Indicate email is available
+                            isEmailValid = isEmailValid && true;
+                        }
+
+                        checkFormValidity();  // Re-check form validity after AJAX call
+                    },
+                    error: function() {
+                        emailAvailabilityRequirement.text('✗').removeClass('valid');  // Indicate an error occurred
+                        isEmailValid = false;
+                        checkFormValidity();
+                    }
+                });
+
+                checkFormValidity();  // Check form validity on email input
+            });
+
+            // Show email requirements only on blur (focusout)
+            usernameInput.on('focusout', function() {
+                emailRequirements.css('display', 'block').css('opacity', '1');
+                adjustValidationWindowPosition(usernameInput, emailRequirements);
+                setTimeout(() => {
+                    emailRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        emailRequirements.css('display', 'none');
+                    }, 300);
+                }, 3000); // Show for 3s after blur
+            });
+
+            // Check password match
+            confirmPasswordInput.on('input', function() {
+                const password = passwordInput.val();  // Get password
+                const confirmPassword = confirmPasswordInput.val();  // Get confirmation password
+                
+                // Only update icons, do not show the box here
+                if (password === confirmPassword && confirmPassword !== "") {
+                    passwordMatchRequirement.text('✓').addClass('valid');  // Show valid if passwords match
+                    isPasswordMatchValid = true;
+                } else {
+                    passwordMatchRequirement.text('✗').removeClass('valid');  // Show invalid if passwords don't match
+                    isPasswordMatchValid = false;
+                }
+
+                checkFormValidity();  // Check form validity
+            });
+
+            // Show password match requirements only on blur (focusout)
+            confirmPasswordInput.on('focusout', function() {
+                passwordMatchRequirements.css('display', 'block').css('opacity', '1');
+                adjustValidationWindowPosition(confirmPasswordInput, passwordMatchRequirements);
+                setTimeout(() => {
+                    passwordMatchRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        passwordMatchRequirements.css('display', 'none');
+                    }, 300);
+                }, 3000); // Show for 3s after blur
+            });
+
+            // Event listener for changes in the password input field
+            passwordInput.on('input', function() {
+                const password = passwordInput.val();  // Get the input value
+                const confirmPassword = confirmPasswordInput.val();  // Get confirmation password
+
+                isPasswordValid = true;  // Assume the password is valid initially
+
+                passwordRequirements.css('display', 'block').css('opacity', '1');  // Show the password requirements
+
+                // Validate the password length
+                if (password.length >= 8) {
+                    lengthRequirement.text('✓').addClass('valid');  // Indicate valid length
+                } else {
+                    lengthRequirement.text('✗').removeClass('valid');  // Indicate invalid length
+                    isPasswordValid = false;
+                }
+
+                // Validate the presence of a symbol
+                if (/[!@#$%^&*(),.?":{}|<>\-_]/g.test(password)) {
+                    symbolRequirement.text('✓').addClass('valid');  // Indicate valid symbol
+                } else {
+                    symbolRequirement.text('✗').removeClass('valid');  // Indicate missing symbol
+                    isPasswordValid = false;
+                }
+
+                // Validate the presence of a capital letter
+                if (/[A-Z]/.test(password)) {
+                    capitalRequirement.text('✓').addClass('valid');  // Indicate valid capital letter
+                } else {
+                    capitalRequirement.text('✗').removeClass('valid');  // Indicate missing capital letter
+                    isPasswordValid = false;
+                }
+
+                // Validate the presence of a number
+                if (/\d/.test(password)) {  
+                    numberRequirement.text('✓').addClass('valid');  // Indicate valid number
+                } else {
+                    numberRequirement.text('✗').removeClass('valid');  // Indicate missing number
+                    isPasswordValid = false;
+                }
+
+                // Re-check password match when password changes
+                if (password === confirmPassword && confirmPassword !== "") {
+                    passwordMatchRequirement.text('✓').addClass('valid');  // Show valid if passwords match
+                    isPasswordMatchValid = true;
+                } else if (confirmPassword !== "") {
+                    passwordMatchRequirement.text('✗').removeClass('valid');  // Show invalid if passwords don't match
+                    isPasswordMatchValid = false;
+                } else {
+                    passwordMatchRequirement.text('✗').removeClass('valid');  // Show invalid if confirm is empty
+                    isPasswordMatchValid = false;
+                }
+
+                adjustValidationWindowPosition(passwordInput, passwordRequirements);
+                checkFormValidity();  // Check form validity on password input
+            });
+
+            // Hide email requirements when the user focuses out of the email input
+            usernameInput.on('focusout', function() {
+                setTimeout(() => {
+                    emailRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        emailRequirements.css('display', 'none');
+                    }, 300);
+                }, 3000);
+            });
+
+            // Hide password requirements when the user focuses out of the password input
+            passwordInput.on('focusout', function() {
+                setTimeout(() => {
+                    passwordRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        passwordRequirements.css('display', 'none');
+                    }, 300);
+                }, 500);
+            });
+
+
+
+            // Hide password match requirements when user focuses out of the confirm password input
+            confirmPasswordInput.on('focusout', function() {
+                setTimeout(() => {
+                    passwordMatchRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        passwordMatchRequirements.css('display', 'none');
+                    }, 300);
+                }, 500);
+            });
+        });
+    </script>    
+</body>
+</html>

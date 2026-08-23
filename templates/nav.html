@@ -1,0 +1,135 @@
+<!-- Top navigation bar -->
+<div class="nav-bar">
+    <div class="nav-bar-container">
+        <div class="nav-left-content">
+            <a href="https://blankee.io/">
+                <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo">
+            </a>
+        </div>
+
+        <div class="nav-right-content">
+            <!-- Support icon -->
+            <a href="{{ url_for('support_page') }}" class="nav-faq" title="Support">
+                <i class="fa-solid fa-headset"></i>
+            </a>
+
+            <!-- Notifications bell icon -->
+            <a href="{{ url_for('notifications') }}" class="nav-notifications">
+                <i class="fa-solid fa-bell"></i>
+                {% if unread_notifications_count > 0 %}
+                <span class="notification-badge"></span>
+                {% endif %}
+            </a>
+
+            <!-- Profile dropdown container -->
+            <div class="sidenav-profile"> <!-- Use JavaScript to toggle the dropdown -->
+            <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}" 
+                alt="Profile Picture" class="sidenav-profile-pic">
+            <!-- Dropdown Menu moved inside sidenav-profile for pure CSS width matching -->
+            <div id="profileDropdown" class="dropdown-content" style="display: none;">
+                <div class="dropdown-profile-label"><span>Profile</span></div>
+                <div class="dropdown-profile-section" id="dropdownProfileSection">
+                    <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}" 
+                        alt="Profile Picture" class="dropdown-profile-pic">
+                    <div style="display: flex; flex-direction: column; width: 100%;">
+                        {% if nav_first_name or nav_last_name %}
+                        <div class="dropdown-name">{{ nav_first_name }} {{ nav_last_name }}</div>
+                        {% endif %}
+                        <div class="dropdown-username">{{ current_user.username }}</div>
+                    </div>
+                </div>
+                <div class="dropdown-menu-section">
+                    <div class="dropdown-link"><a href="{{ url_for('profile') }}">Profile</a><i class="fa-regular fa-user"></i></div>
+                </div>
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-menu-section">
+                    <div class="dropdown-profile-label"><span>Blankee</span></div>
+                    <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Manage Categories</a><i class="fa-solid fa-folder-tree"></i></div>
+                    <div class="dropdown-link">
+                        <a href="javascript:void(0);" id="toggle-recurring-btn">Manage Recurring</a>
+                        <i class="fa-solid fa-arrows-repeat"></i>
+                    </div>
+                    <div id="recurring-sections" class="collapsed">
+                        <div class="dropdown-link dropdown-sublink">
+                            <a href="{{ url_for('recurring_income') }}">Income</a>
+                            <i class="fa-solid fa-plus-large"></i>
+                        </div>
+                        <div class="dropdown-link dropdown-sublink">
+                            <a href="{{ url_for('recurring_expense') }}">Expenses</a>
+                            <i class="fa-solid fa-minus"></i>
+                        </div>
+                        <div class="dropdown-link dropdown-sublink">
+                            <a href="{{ url_for('recurring_ca_expense') }}">Credit Expenses</a>
+                            <i class="fa-kit fa-light-credit-card-circle-minus"></i>
+                        </div>
+                    </div>
+                    <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Manage Credit Accounts</a><i class="fa-solid fa-credit-card"></i></div>
+                    <!--<div class="dropdown-link"><a href="{{ url_for('buds') }}">Manage Buds&trade;</a><i class="fa-regular fa-seedling"></i></div>-->
+                    <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-regular fa-sliders"></i></div>
+                </div>
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-menu-section">
+                    <div class="dropdown-profile-label"><span>Bank Accounts</span></div>
+                    <div class="dropdown-link"><a href="{{ url_for('bank_accounts') }}">{% if has_bank_connections %}Manage Connections{% else %}Connect Accounts{% endif %}</a><i class="fa-solid fa-building-columns"></i></div>
+                    {% if has_bank_accounts %}
+                    <div class="dropdown-link"><a href="{{ url_for('pending_transactions') }}">Pending Transactions{% if pending_transactions_count > 0 %}<span class="pending-txn-badge">{{ pending_transactions_count }}</span>{% endif %}</a><i class="fa-kit fa-light-money-bill-circle-question"></i></div>
+                    {% endif %}
+                </div>
+                {% if current_user.is_authenticated and current_user.is_admin %}
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-menu-section">
+                    <div class="dropdown-profile-label"><span>Administration</span></div>
+                    <div class="dropdown-link"><a href="{{ url_for('admin_console') }}">Admin Console</a><i class="fa-regular fa-user-gear"></i></div>
+                </div>
+                {% endif %}
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-menu-section">
+                    <div class="dropdown-link"><a href="{{ url_for('logout') }}">Log out</a><i class="fa-regular fa-arrow-left-from-bracket"></i></div>
+                </div>
+            </div>
+        </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const profile = document.querySelector('.sidenav-profile');
+        const dropdown = document.getElementById('profileDropdown');
+
+        if (profile && dropdown) {
+            // Toggle the dropdown menu on profile click
+            profile.addEventListener('click', function(event) {
+                event.stopPropagation();
+                if (dropdown.style.display === "block") {
+                    dropdown.style.display = "none";
+                } else {
+                    dropdown.style.display = "block";
+                }
+            });
+
+            // Prevent dropdown from closing when clicking inside it
+            dropdown.addEventListener('click', function(event) {
+                event.stopPropagation();
+            });
+
+            // Close dropdown only if clicking outside the dropdown-content
+            window.addEventListener('click', function(event) {
+                if (!event.target.closest('.dropdown-content') && dropdown.style.display === "block") {
+                    dropdown.style.display = "none";
+                }
+            });
+        } else {
+        }
+
+        // Toggle Recurring Income/Expense sections with animation
+        const toggleRecurringBtn = document.getElementById('toggle-recurring-btn');
+        const recurringSections = document.getElementById('recurring-sections');
+        if (toggleRecurringBtn && recurringSections) {
+            toggleRecurringBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                recurringSections.classList.toggle('expanded');
+            });
+        }
+    });
+</script>

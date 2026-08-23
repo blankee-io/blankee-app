@@ -1,0 +1,1616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Manage Categories</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/jquery-ui.css') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="manage-categories-body">
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <!-- Calendar navigation (back button) -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+
+        <!-- ======================== INCOME SECTION ======================== -->
+        <div class="manage-categories-container">
+            <div class="recurring-header income">
+                <span>Income Categories</span>
+                <div class="manage-cat-btn-group">
+                    <button class="manage-cat-btn add-group-btn" id="add-income-group-btn" title="Add Group">
+                        <i class="fa-kit fa-solid-layer-plus-circle-plus"></i>
+                    </button>
+                    <button class="manage-cat-btn add-cat-btn" id="add-income-btn" title="Add Category">
+                        <i class="fa-kit fa-solid-folder-plus-circle-plus"></i>
+                    </button>
+                </div>
+            </div>
+
+            <table class="manage-cat-table income-manage-table" id="income-manage-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th class="manage-cat-type-col">Type</th>
+                        <th class="manage-cat-status-col"><i class="fa-solid fa-eye"></i></th>
+                        <th class="manage-cat-actions-col"></th>
+                    </tr>
+                </thead>
+                <tbody id="income-groups-body">
+                    {# ── User-created groups (x≥2) ── #}
+                    {% for group in income_category_groups|sort(attribute='display_order', reverse=true) %}
+                    <tr class="group-header-row income-group-header"
+                        data-group-id="{{ group.id }}"
+                        data-group-type="income"
+                        data-display-order="{{ group.display_order }}">
+                        <td class="category-cell group-header-cell">
+                            <div class="group-header-content">
+                                <span class="group-sort-handle"><i class="fa-solid fa-bars"></i></span>
+                                <i class="fa-solid fa-layer-plus group-icon"></i>
+                                <span class="group-name">{{ group.name }}</span>
+                            </div>
+                        </td>
+                        <td class="manage-cat-type-col"></td>
+                        <td class="manage-cat-status-col"></td>
+                        <td class="manage-cat-actions-col">
+                            <button class="edit-group-btn" title="Edit Group"
+                                data-group-id="{{ group.id }}"
+                                data-group-type="income"
+                                data-group-name="{{ group.name }}">
+                                <i class="fa-solid fa-pen-to-square"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {# Categories in this group #}
+                    {% for category in income_categories|sort(attribute='display_order', reverse=true) %}
+                        {% if category.group_id is not none and category.group_id|int == group.id|int %}
+                        <tr class="grouped-category-row"
+                            data-category-id="{{ category.id }}"
+                            data-group-id="{{ group.id }}"
+                            data-is-auto-adjustment="{{ category.is_auto_adjustment }}"
+                            data-is-system="{{ category.is_system|default(0) }}"
+                            data-is-recurring="{{ category.is_recurring }}"
+                            data-hidden="{{ category.hidden }}">
+                            <td class="category-cell grouped-cell">
+                                <span class="sort-handle"><i class="fa-solid fa-bars"></i></span>
+                                <span class="category-name">{{ category.name }}</span>
+                            </td>
+                            <td class="manage-cat-type-col">
+                                {% if category.is_recurring %}
+                                    <i class="fa-regular fa-arrows-repeat category-icon"></i> Recurring
+                                {% else %}
+                                    <i class="fa-regular fa-folder category-icon"></i> Standard
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-status-col">
+                                {% if category.hidden == 1 %}
+                                    <i class="fa-solid fa-eye-slash manage-cat-eye-icon hidden-icon"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-eye manage-cat-eye-icon visible-icon"></i>
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-actions-col">
+                                <button class="rename-category-btn income" title="Edit Category"
+                                    data-category-id="{{ category.id }}"
+                                    data-category-type="income"
+                                    data-category-name="{{ category.name }}">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endif %}
+                    {% endfor %}
+                    {% endfor %}
+
+                    {# ── Ungrouped group (x=1, non-sortable header, categories are sortable) ── #}
+                    <tr class="group-header-row ungrouped-header income-group-header"
+                        data-group-id="ungrouped"
+                        data-group-type="income">
+                        <td class="category-cell group-header-cell">
+                            <div class="group-header-content">
+                                <span class="group-sort-handle-lock"><i class="fa-kit fa-solid-bars-lock"></i></span>
+                                <i class="fa-solid fa-layer-plus group-icon"></i>
+                                <span class="group-name">Ungrouped</span>
+                            </div>
+                        </td>
+                        <td class="manage-cat-type-col"></td>
+                        <td class="manage-cat-status-col"></td>
+                        <td class="manage-cat-actions-col"></td>
+                    </tr>
+                    {% for category in income_categories|sort(attribute='display_order', reverse=true) %}
+                        {% if (category.group_id is none or category.group_id == None) and category.is_system|default(0) != 1 and category.is_auto_adjustment != 1 and category.name != "Starting Balance" %}
+                        <tr class="grouped-category-row ungrouped-category-row"
+                            data-category-id="{{ category.id }}"
+                            data-group-id="ungrouped"
+                            data-is-auto-adjustment="{{ category.is_auto_adjustment }}"
+                            data-is-system="{{ category.is_system|default(0) }}"
+                            data-is-recurring="{{ category.is_recurring }}"
+                            data-hidden="{{ category.hidden }}">
+                            <td class="category-cell grouped-cell">
+                                <span class="sort-handle"><i class="fa-solid fa-bars"></i></span>
+                                <span class="category-name">{{ category.name }}</span>
+                            </td>
+                            <td class="manage-cat-type-col">
+                                {% if category.is_recurring %}
+                                    <i class="fa-regular fa-arrows-repeat category-icon"></i> Recurring
+                                {% else %}
+                                    <i class="fa-regular fa-folder category-icon"></i> Standard
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-status-col">
+                                {% if category.hidden == 1 %}
+                                    <i class="fa-solid fa-eye-slash manage-cat-eye-icon hidden-icon"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-eye manage-cat-eye-icon visible-icon"></i>
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-actions-col">
+                                <button class="rename-category-btn income" title="Edit Category"
+                                    data-category-id="{{ category.id }}"
+                                    data-category-type="income"
+                                    data-category-name="{{ category.name }}">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endif %}
+                    {% endfor %}
+
+                    {# ── System categories (x=0, bottom, non-draggable) ── #}
+                    {% set ns = namespace(has_system=false) %}
+                    {% for category in income_categories %}
+                        {% if category.is_system|default(0) == 1 or category.is_auto_adjustment == 1 or category.name == "Starting Balance" %}
+                            {% set ns.has_system = true %}
+                        {% endif %}
+                    {% endfor %}
+                    {% if ns.has_system %}
+                    <tr class="group-header-row income-group-header"
+                        data-group-id="_system"
+                        data-group-type="income">
+                        <td class="category-cell group-header-cell">
+                            <div class="group-header-content">
+                                <span class="group-sort-handle-lock"><i class="fa-kit fa-solid-bars-lock"></i></span>
+                                <i class="fa-solid fa-layer-plus group-icon"></i>
+                                <span class="group-name">System</span>
+                            </div>
+                        </td>
+                        <td class="manage-cat-type-col"></td>
+                        <td class="manage-cat-status-col"></td>
+                        <td class="manage-cat-actions-col"></td>
+                    </tr>
+                    {% for category in income_categories|sort(attribute='display_order', reverse=true) %}
+                        {% if category.is_system|default(0) == 1 or category.is_auto_adjustment == 1 or category.name == "Starting Balance" %}
+                        <tr class="system-category-row"
+                            data-category-id="{{ category.id }}"
+                            data-is-auto-adjustment="{{ category.is_auto_adjustment }}"
+                            data-is-system="1"
+                            data-is-recurring="{{ category.is_recurring }}"
+                            data-hidden="{{ category.hidden }}">
+                            <td class="category-cell">
+                                <span class="sort-handle-lock"><i class="fa-kit fa-solid-bars-lock"></i></span>
+                                <span class="category-name">{{ category.name }}</span>
+                            </td>
+                            <td class="manage-cat-type-col">
+                                <i class="fa-regular fa-lock category-icon"></i> System
+                            </td>
+                            <td class="manage-cat-status-col">
+                                {% if category.hidden == 1 %}
+                                    <i class="fa-solid fa-eye-slash manage-cat-eye-icon hidden-icon"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-eye manage-cat-eye-icon visible-icon"></i>
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-actions-col"></td>
+                        </tr>
+                        {% endif %}
+                    {% endfor %}
+                    {% endif %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="4" class="recurring-footer"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <!-- ======================== EXPENSE SECTION ======================== -->
+        <div class="manage-categories-container">
+            <div class="recurring-header expenses">
+                <span>Expense Categories</span>
+                <div class="manage-cat-btn-group">
+                    <button class="manage-cat-btn add-group-btn" id="add-expense-group-btn" title="Add Group">
+                        <i class="fa-kit fa-solid-layer-minus-circle-plus"></i>
+                    </button>
+                    <button class="manage-cat-btn add-cat-btn" id="add-expense-btn" title="Add Category">
+                        <i class="fa-kit fa-solid-folder-minus-circle-plus"></i>
+                    </button>
+                </div>
+            </div>
+
+            <table class="manage-cat-table expense-manage-table" id="expense-manage-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th class="manage-cat-type-col">Type</th>
+                        <th class="manage-cat-status-col"><i class="fa-solid fa-eye"></i></th>
+                        <th class="manage-cat-actions-col"></th>
+                    </tr>
+                </thead>
+                <tbody id="expense-groups-body">
+                    {# ── User-created groups (x≥2) ── #}
+                    {% for group in expense_category_groups|sort(attribute='display_order', reverse=true) %}
+                    <tr class="group-header-row expense-group-header"
+                        data-group-id="{{ group.id }}"
+                        data-group-type="expense"
+                        data-display-order="{{ group.display_order }}">
+                        <td class="category-cell group-header-cell">
+                            <div class="group-header-content">
+                                <span class="group-sort-handle"><i class="fa-solid fa-bars"></i></span>
+                                <i class="fa-solid fa-layer-minus group-icon"></i>
+                                <span class="group-name">{{ group.name }}</span>
+                            </div>
+                        </td>
+                        <td class="manage-cat-type-col"></td>
+                        <td class="manage-cat-status-col"></td>
+                        <td class="manage-cat-actions-col">
+                            <button class="edit-group-btn" title="Edit Group"
+                                data-group-id="{{ group.id }}"
+                                data-group-type="expense"
+                                data-group-name="{{ group.name }}">
+                                <i class="fa-solid fa-pen-to-square"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {# Categories in this group #}
+                    {% for category in expense_categories|sort(attribute='display_order', reverse=true) %}
+                        {% if category.group_id is not none and category.group_id|int == group.id|int %}
+                        <tr class="grouped-category-row"
+                            data-category-id="{{ category.id }}"
+                            data-group-id="{{ group.id }}"
+                            data-is-auto-adjustment="{{ category.is_auto_adjustment }}"
+                            data-is-credit-account="{{ category.is_credit_account }}"
+                            data-is-system="{{ category.is_system|default(0) }}"
+                            data-is-recurring="{{ category.is_recurring }}"
+                            data-hidden="{{ category.hidden }}">
+                            <td class="category-cell grouped-cell">
+                                {% if category.is_auto_adjustment != 1 and category.is_credit_account != 1 %}
+                                <span class="sort-handle"><i class="fa-solid fa-bars"></i></span>
+                                {% endif %}
+                                <span class="category-name">{{ category.name }}</span>
+                            </td>
+                            <td class="manage-cat-type-col">
+                                {% if category.is_recurring %}
+                                    <i class="fa-regular fa-arrows-repeat category-icon"></i> Recurring
+                                {% elif category.is_bud %}
+                                    <i class="fa-regular fa-seedling category-icon"></i> Bud
+                                {% else %}
+                                    <i class="fa-regular fa-folder category-icon"></i> Standard
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-status-col">
+                                {% if category.hidden == 1 %}
+                                    <i class="fa-solid fa-eye-slash manage-cat-eye-icon hidden-icon"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-eye manage-cat-eye-icon visible-icon"></i>
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-actions-col">
+                                {% if category.is_auto_adjustment != 1 and category.is_credit_account != 1 %}
+                                <button class="rename-category-btn expense" title="Edit Category"
+                                    data-category-id="{{ category.id }}"
+                                    data-category-type="expense"
+                                    data-category-name="{{ category.name }}">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+                    {% endfor %}
+                    {% endfor %}
+
+                    {# ── Ungrouped group (x=1, non-sortable header, categories are sortable) ── #}
+                    <tr class="group-header-row ungrouped-header expense-group-header"
+                        data-group-id="ungrouped"
+                        data-group-type="expense">
+                        <td class="category-cell group-header-cell">
+                            <div class="group-header-content">
+                                <span class="group-sort-handle-lock"><i class="fa-kit fa-solid-bars-lock"></i></span>
+                                <i class="fa-solid fa-layer-minus group-icon"></i>
+                                <span class="group-name">Ungrouped</span>
+                            </div>
+                        </td>
+                        <td class="manage-cat-type-col"></td>
+                        <td class="manage-cat-status-col"></td>
+                        <td class="manage-cat-actions-col"></td>
+                    </tr>
+                    {% for category in expense_categories|sort(attribute='display_order', reverse=true) %}
+                        {% if (category.group_id is none or category.group_id == None) and category.is_system|default(0) != 1 and category.is_auto_adjustment != 1 and category.is_credit_account != 1 %}
+                        <tr class="grouped-category-row ungrouped-category-row"
+                            data-category-id="{{ category.id }}"
+                            data-group-id="ungrouped"
+                            data-is-auto-adjustment="{{ category.is_auto_adjustment }}"
+                            data-is-credit-account="{{ category.is_credit_account }}"
+                            data-is-system="{{ category.is_system|default(0) }}"
+                            data-is-recurring="{{ category.is_recurring }}"
+                            data-hidden="{{ category.hidden }}">
+                            <td class="category-cell grouped-cell">
+                                <span class="sort-handle"><i class="fa-solid fa-bars"></i></span>
+                                <span class="category-name">{{ category.name }}</span>
+                            </td>
+                            <td class="manage-cat-type-col">
+                                {% if category.is_recurring %}
+                                    <i class="fa-regular fa-arrows-repeat category-icon"></i> Recurring
+                                {% elif category.is_bud %}
+                                    <i class="fa-regular fa-seedling category-icon"></i> Bud
+                                {% else %}
+                                    <i class="fa-regular fa-folder category-icon"></i> Standard
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-status-col">
+                                {% if category.hidden == 1 %}
+                                    <i class="fa-solid fa-eye-slash manage-cat-eye-icon hidden-icon"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-eye manage-cat-eye-icon visible-icon"></i>
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-actions-col">
+                                <button class="rename-category-btn expense" title="Edit Category"
+                                    data-category-id="{{ category.id }}"
+                                    data-category-type="expense"
+                                    data-category-name="{{ category.name }}">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endif %}
+                    {% endfor %}
+
+                    {# ── System categories (x=0, bottom, non-draggable) ── #}
+                    {% set ns2 = namespace(has_system=false) %}
+                    {% for category in expense_categories %}
+                        {% if (category.is_system|default(0) == 1 or category.is_auto_adjustment == 1 or category.is_credit_account == 1) and category.name != 'Interest Charge' %}
+                            {% set ns2.has_system = true %}
+                        {% endif %}
+                    {% endfor %}
+                    {% if ns2.has_system %}
+                    <tr class="group-header-row expense-group-header"
+                        data-group-id="_system"
+                        data-group-type="expense">
+                        <td class="category-cell group-header-cell">
+                            <div class="group-header-content">
+                                <span class="group-sort-handle-lock"><i class="fa-kit fa-solid-bars-lock"></i></span>
+                                <i class="fa-solid fa-layer-minus group-icon"></i>
+                                <span class="group-name">System</span>
+                            </div>
+                        </td>
+                        <td class="manage-cat-type-col"></td>
+                        <td class="manage-cat-status-col"></td>
+                        <td class="manage-cat-actions-col"></td>
+                    </tr>
+                    {% for category in expense_categories|sort(attribute='display_order', reverse=true) %}
+                        {% if (category.is_system|default(0) == 1 or category.is_auto_adjustment == 1 or category.is_credit_account == 1) and category.name != 'Interest Charge' %}
+                        <tr class="system-category-row"
+                            data-category-id="{{ category.id }}"
+                            data-is-auto-adjustment="{{ category.is_auto_adjustment }}"
+                            data-is-credit-account="{{ category.is_credit_account }}"
+                            data-is-system="1"
+                            data-is-recurring="{{ category.is_recurring }}"
+                            data-hidden="{{ category.hidden }}">
+                            <td class="category-cell">
+                                <span class="sort-handle-lock"><i class="fa-kit fa-solid-bars-lock"></i></span>
+                                <span class="category-name">{{ category.name }}</span>
+                            </td>
+                            <td class="manage-cat-type-col">
+                                {% if category.is_credit_account == 1 %}
+                                    <i class="fa-regular fa-credit-card category-icon"></i> Credit Payment
+                                {% else %}
+                                    <i class="fa-regular fa-lock category-icon"></i> System
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-status-col">
+                                {% if category.hidden == 1 %}
+                                    <i class="fa-solid fa-eye-slash manage-cat-eye-icon hidden-icon"></i>
+                                {% else %}
+                                    <i class="fa-solid fa-eye manage-cat-eye-icon visible-icon"></i>
+                                {% endif %}
+                            </td>
+                            <td class="manage-cat-actions-col"></td>
+                        </tr>
+                        {% endif %}
+                    {% endfor %}
+                    {% endif %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="4" class="recurring-footer"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal for editing category name -->
+    <div id="editCategoryModal" class="modal">
+        <div class="category-edit-modal-content modal-content">
+            <h2 class="category-edit-modal-title">Edit Category</h2>
+            <div class="category-edit-primary-row">
+                <input id="editCategoryInput" type="text" maxlength="20" />
+                <button id="confirmEditCategoryBtn" class="confirm-edit-category-btn">Rename</button>
+            </div>
+            <div id="editCategoryGroupRow" class="category-edit-group-row" style="display:none;">
+                <label for="editCategoryGroupSelect" class="category-edit-group-label">Group</label>
+                <select id="editCategoryGroupSelect" class="category-edit-group-select"></select>
+            </div>
+            <div class="category-edit-actions-row">
+                <button id="hideCategoryBtn" class="hide-category-btn" title="Hide Category"><span>Hide</span></button>
+                <button id="deleteFromEditCategoryBtn" class="delete-from-edit-category-btn"><span>Delete</span></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for adding a new category -->
+    <div id="addCategoryModal" class="category-input-overlay modal">
+        <div id="add-category-input-container" class="floating-input-container modal-content">
+            <h2 id="addCategoryTitle" class="floating-input-title">Add Category</h2>
+            <input id="addCategoryInput" type="text" maxlength="20" placeholder="Category Name" />
+            <div class="floating-input-actions modal-buttons">
+                <button type="button" class="floating-input-cancel-btn" onclick="closeAddCategoryModal()">Cancel</button>
+                <button id="confirmAddCategoryBtn" class="floating-input-confirm-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for adding a new group -->
+    <div id="addGroupModal" class="category-input-overlay modal">
+        <div id="add-group-input-container" class="floating-input-container modal-content">
+            <h2 id="addGroupTitle" class="floating-input-title">Add Category Group</h2>
+            <input id="addGroupInput" type="text" maxlength="20" placeholder="Group Name" />
+            <div class="floating-input-actions modal-buttons">
+                <button type="button" class="floating-input-cancel-btn" onclick="closeAddGroupModal()">Cancel</button>
+                <button id="confirmAddGroupBtn" class="floating-input-confirm-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for editing a group -->
+    <div id="editGroupModal" class="modal">
+        <div class="category-edit-modal-content modal-content">
+            <h2 class="category-edit-modal-title">Edit Group</h2>
+            <div class="category-edit-primary-row">
+                <input id="editGroupInput" type="text" maxlength="20" />
+                <button id="confirmEditGroupBtn" class="confirm-edit-category-btn">Rename</button>
+            </div>
+            <div class="category-edit-actions-row">
+                <button id="cancelEditGroupBtn" class="hide-category-btn" title="Cancel"><span>Cancel</span></button>
+                <button id="deleteGroupBtn" class="delete-from-edit-category-btn" title="Delete Group"><span>Delete</span></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Pass categories and groups to JS
+        let incomeCategories = {{ income_categories | tojson | safe }};
+        let expenseCategories = {{ expense_categories | tojson | safe }};
+        let incomeGroups = {{ income_category_groups | tojson | safe }};
+        let expenseGroups = {{ expense_category_groups | tojson | safe }};
+
+        let isModalOpen = false;
+
+        function zebraStripeManageRows() {
+            [
+                { selector: '#income-groups-body', odd: 'zebra-odd-income', even: 'zebra-even-income' },
+                { selector: '#expense-groups-body', odd: 'zebra-odd-expense', even: 'zebra-even-expense' }
+            ].forEach(({ selector, odd, even }) => {
+                const allRows = Array.from(document.querySelectorAll(`${selector} tr`));
+                let idx = 0;
+                allRows.forEach(row => {
+                    if (row.classList.contains('group-header-row')) {
+                        idx = 0;
+                        return;
+                    }
+                    if (!row.hasAttribute('data-category-id')) return;
+                    if (row.style.display === 'none') return;
+                    row.classList.remove(odd, even);
+                    row.classList.add(idx % 2 === 0 ? even : odd);
+                    idx++;
+                });
+            });
+        }
+
+        zebraStripeManageRows();
+
+        // ===================== ADD CATEGORY (Modal) =====================
+        let addCategoryType = null;
+        const addCategoryModal = document.getElementById('addCategoryModal');
+        const addCategoryContainer = document.getElementById('add-category-input-container');
+        const addCategoryTitle = document.getElementById('addCategoryTitle');
+        const addCategoryInput = document.getElementById('addCategoryInput');
+        const confirmAddCategoryBtn = document.getElementById('confirmAddCategoryBtn');
+
+        function openAddCategoryModal(type) {
+            addCategoryType = type;
+            addCategoryInput.value = '';
+            addCategoryContainer.classList.toggle('expense-theme', type === 'expense');
+            addCategoryTitle.textContent = type === 'income' ? 'Add Income Category' : 'Add Expense Category';
+            addCategoryInput.placeholder = type === 'income' ? 'New Income Category Name' : 'New Expense Category Name';
+            addCategoryModal.style.display = 'flex';
+            addCategoryContainer.style.display = 'flex';
+            addCategoryInput.focus();
+            isModalOpen = true;
+            if (addCategoryInput._dupWarning) addCategoryInput._dupWarning.classList.remove('visible');
+        }
+
+        function closeAddCategoryModal() {
+            addCategoryModal.style.display = 'none';
+            addCategoryContainer.style.display = 'none';
+            isModalOpen = false;
+        }
+
+        document.getElementById('add-income-btn').addEventListener('click', function() {
+            openAddCategoryModal('income');
+        });
+        document.getElementById('add-expense-btn').addEventListener('click', function() {
+            openAddCategoryModal('expense');
+        });
+
+        addCategoryModal.addEventListener('mousedown', function(e) {
+            if (e.target === addCategoryModal) closeAddCategoryModal();
+        });
+
+        function addCategory() {
+            const categoryName = addCategoryInput.value.trim();
+            if (!categoryName) return;
+
+            const catsToCheck = addCategoryType === 'income' ? incomeCategories : expenseCategories;
+            if (checkCategoryDuplicate(addCategoryInput, catsToCheck)) return;
+
+            const url = addCategoryType === 'income' ? "{{ url_for('add_income_category') }}" : "{{ url_for('add_expense_category') }}";
+
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: { name: categoryName },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        location.reload();
+                    } else {
+                        showToast(response.message || 'Failed to add category.', 'error');
+                    }
+                },
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Failed to add category.';
+                    showToast(msg, 'error');
+                }
+            });
+        }
+
+        confirmAddCategoryBtn.addEventListener('click', addCategory);
+        addCategoryInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') addCategory();
+        });
+
+        setupCategoryDuplicateCheck(addCategoryInput, function() {
+            return addCategoryType === 'income' ? incomeCategories : expenseCategories;
+        });
+
+        // ===================== ADD GROUP (Modal) =====================
+        let addGroupType = null;
+        const addGroupModal = document.getElementById('addGroupModal');
+        const addGroupContainer = document.getElementById('add-group-input-container');
+        const addGroupTitle = document.getElementById('addGroupTitle');
+        const addGroupInput = document.getElementById('addGroupInput');
+        const confirmAddGroupBtn = document.getElementById('confirmAddGroupBtn');
+
+        function openAddGroupModal(type) {
+            addGroupType = type;
+            addGroupInput.value = '';
+            addGroupContainer.classList.toggle('expense-theme', type === 'expense');
+            addGroupTitle.textContent = type === 'income' ? 'Add Income Group' : 'Add Expense Group';
+            addGroupInput.placeholder = type === 'income' ? 'New Income Group Name' : 'New Expense Group Name';
+            addGroupModal.style.display = 'flex';
+            addGroupContainer.style.display = 'flex';
+            addGroupInput.focus();
+            isModalOpen = true;
+        }
+
+        function closeAddGroupModal() {
+            addGroupModal.style.display = 'none';
+            addGroupContainer.style.display = 'none';
+            isModalOpen = false;
+        }
+
+        document.getElementById('add-income-group-btn').addEventListener('click', function() {
+            openAddGroupModal('income');
+        });
+        document.getElementById('add-expense-group-btn').addEventListener('click', function() {
+            openAddGroupModal('expense');
+        });
+
+        addGroupModal.addEventListener('mousedown', function(e) {
+            if (e.target === addGroupModal) closeAddGroupModal();
+        });
+
+        function addGroup() {
+            const name = addGroupInput.value.trim();
+            if (!name) return;
+
+            const url = addGroupType === 'income'
+                ? '/add_income_category_group'
+                : '/add_expense_category_group';
+
+            $.ajax({
+                url: url,
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ name: name }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        location.reload();
+                    } else {
+                        showToast(response.message || 'Failed to create group.', 'error');
+                    }
+                },
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Failed to create group.';
+                    showToast(msg, 'error');
+                }
+            });
+        }
+
+        confirmAddGroupBtn.addEventListener('click', addGroup);
+        addGroupInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') addGroup();
+        });
+
+        // ===================== EDIT GROUP (Modal) =====================
+        (function() {
+            const editGroupModal = document.getElementById('editGroupModal');
+            const editGroupInput = document.getElementById('editGroupInput');
+            const confirmEditGroupBtn = document.getElementById('confirmEditGroupBtn');
+            const cancelEditGroupBtn = document.getElementById('cancelEditGroupBtn');
+            const deleteGroupBtn = document.getElementById('deleteGroupBtn');
+            let editingGroupId = null;
+            let editingGroupType = null;
+
+            document.addEventListener('click', function(e) {
+                const btn = e.target.closest('.edit-group-btn');
+                if (!btn) return;
+
+                editingGroupId = btn.getAttribute('data-group-id');
+                editingGroupType = btn.getAttribute('data-group-type');
+                editGroupInput.value = btn.getAttribute('data-group-name');
+                editGroupModal.style.display = 'flex';
+                editGroupInput.focus();
+                editGroupInput.select();
+                isModalOpen = true;
+            });
+
+            editGroupModal.addEventListener('mousedown', function(e) {
+                if (e.target === editGroupModal) {
+                    editGroupModal.style.display = 'none';
+                    isModalOpen = false;
+                }
+            });
+
+            // Rename group
+            confirmEditGroupBtn.onclick = function() {
+                const newName = editGroupInput.value.trim();
+                if (!newName || !editingGroupId) return;
+
+                const url = editingGroupType === 'income'
+                    ? '/update_income_category_group'
+                    : '/update_expense_category_group';
+
+                $.ajax({
+                    url: url,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ group_id: editingGroupId, name: newName }),
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            // Update DOM
+                            const headerRow = document.querySelector(`.group-header-row[data-group-id="${editingGroupId}"][data-group-type="${editingGroupType}"]`);
+                            if (headerRow) headerRow.querySelector('.group-name').textContent = newName;
+                            // Update local array
+                            const groups = editingGroupType === 'income' ? incomeGroups : expenseGroups;
+                            const g = groups.find(g => String(g.id) === String(editingGroupId));
+                            if (g) g.name = newName;
+                            // Update edit button data
+                            const editBtn = headerRow ? headerRow.querySelector('.edit-group-btn') : null;
+                            if (editBtn) editBtn.setAttribute('data-group-name', newName);
+
+                            editGroupModal.style.display = 'none';
+                            isModalOpen = false;
+                        } else {
+                            showToast(response.message || 'Failed to rename group.', 'error');
+                        }
+                    },
+                    error: function(xhr) {
+                        const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Failed to rename group.';
+                        showToast(msg, 'error');
+                    }
+                });
+            };
+            editGroupInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') confirmEditGroupBtn.click();
+            });
+
+            cancelEditGroupBtn.onclick = function() {
+                editGroupModal.style.display = 'none';
+                isModalOpen = false;
+            };
+
+            // Delete group
+            deleteGroupBtn.onclick = async function() {
+                if (!editingGroupId) return;
+                editGroupModal.style.display = 'none';
+                isModalOpen = false;
+
+                const confirmed = await showConfirmModal({
+                    title: 'Delete Group',
+                    message: 'Deleting a group will ungroup its categories, not delete them. Continue?',
+                    confirmText: 'Delete',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
+
+                const url = editingGroupType === 'income'
+                    ? '/delete_income_category_group'
+                    : '/delete_expense_category_group';
+
+                $.ajax({
+                    url: url,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ group_id: editingGroupId }),
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            location.reload();
+                        } else {
+                            showToast(response.message || 'Failed to delete group.', 'error');
+                        }
+                    },
+                    error: function() {
+                        showToast('Failed to delete group.', 'error');
+                    }
+                });
+            };
+        })();
+
+        // ===================== SAVE NEW ORDER =====================
+        function saveNewOrder(type) {
+            let order = [];
+            const tableId = type === 'income' ? 'income-manage-table' : 'expense-manage-table';
+            const rows = $(`#${tableId} tbody tr`).get().reverse();
+
+            let orderNum = 1;
+            if (type === 'expense') {
+                let maxCreditOrder = 0;
+                expenseCategories.forEach(function(cat) {
+                    if (cat.is_credit_account == 1 && cat.display_order > maxCreditOrder) {
+                        maxCreditOrder = cat.display_order;
+                    }
+                });
+                orderNum = maxCreditOrder + 1;
+            }
+
+            // Build order based on visual position, assigning x.y display_orders
+            // Group headers get integer x values, categories get x.YYYY
+            // Since display_order sorts DESC, top visual row = highest value
+            const groups = type === 'income' ? incomeGroups : expenseGroups;
+            let groupOrder = [];
+            let categoryOrder = [];
+            let catSeq = {};
+
+            // Walk rows top→bottom (which is high→low display_order since sorted DESC)
+            const allRows = $(`#${tableId} tbody tr`).get();
+            let xValue = groups.length + 2;
+
+            // Pre-count categories per group so we can assign descending sub-orders
+            let catCounts = {};
+            for (const row of allRows) {
+                const $row = $(row);
+                if ($row.hasClass('system-category-row') || $row.hasClass('group-header-row')) continue;
+                const catId = $row.attr('data-category-id');
+                if (!catId) continue;
+                const rgid = $row.attr('data-group-id') || 'ungrouped';
+                catCounts[rgid] = (catCounts[rgid] || 0) + 1;
+            }
+
+            for (const row of allRows) {
+                const $row = $(row);
+                if ($row.hasClass('group-header-row')) {
+                    const gid = $row.attr('data-group-id');
+                    if (gid === 'ungrouped' || gid === '_system') {
+                        // Ungrouped/system header — not a real group, skip group order
+                        // Start sub-order high, decrement per category (DESC = top row highest)
+                        catSeq[gid] = (catCounts[gid] || 1) * 0.0001;
+                        continue;
+                    }
+                    groupOrder.push({ id: gid, order: xValue });
+                    catSeq[gid] = (catCounts[gid] || 1) * 0.0001;
+                    xValue--;
+                } else if ($row.hasClass('system-category-row')) {
+                    continue; // Skip system rows
+                } else {
+                    const catId = $row.attr('data-category-id');
+                    if (!catId) continue;
+
+                    const rowGroupId = $row.attr('data-group-id');
+                    if (rowGroupId === 'ungrouped') {
+                        // Ungrouped category — tier 1, descending sub-order
+                        categoryOrder.push({
+                            id: catId,
+                            name: $row.find('.category-name').text().trim(),
+                            order: Math.round((1 + catSeq['ungrouped']) * 10000) / 10000
+                        });
+                        catSeq['ungrouped'] = Math.round((catSeq['ungrouped'] - 0.0001) * 10000) / 10000;
+                    } else if (rowGroupId && catSeq[rowGroupId] !== undefined) {
+                        // Category in a group — descending sub-order within group
+                        const groupEntry = groupOrder.find(g => String(g.id) === String(rowGroupId));
+                        const gx = groupEntry ? groupEntry.order : 1;
+                        const displayOrder = Math.round((gx + catSeq[rowGroupId]) * 10000) / 10000;
+                        catSeq[rowGroupId] = Math.round((catSeq[rowGroupId] - 0.0001) * 10000) / 10000;
+                        categoryOrder.push({
+                            id: catId,
+                            name: $row.find('.category-name').text().trim(),
+                            order: displayOrder
+                        });
+                    } else {
+                        // Fallback ungrouped category — tier 1
+                        categoryOrder.push({
+                            id: catId,
+                            name: $row.find('.category-name').text().trim(),
+                            order: 1 + (categoryOrder.filter(c => Math.floor(c.order) === 1).length * 0.0001)
+                        });
+                    }
+                }
+            }
+
+            // Save group order
+            if (groupOrder.length > 0) {
+                const groupUrl = type === 'income' ? '/update_income_group_order' : '/update_expense_group_order';
+                $.ajax({
+                    url: groupUrl,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ order: groupOrder }),
+                    success: function(response) {
+                        if (response.status !== 'success') {
+                            showToast('Failed to save group order.', 'error');
+                        }
+                    },
+                    error: function() {
+                        showToast('Failed to save group order.', 'error');
+                    }
+                });
+            }
+
+            // Save category order
+            if (categoryOrder.length > 0) {
+                const catUrl = type === 'income' ? "{{ url_for('update_income_order') }}" : "{{ url_for('update_expense_order') }}";
+                $.ajax({
+                    url: catUrl,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ order: categoryOrder }),
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            categoryOrder.forEach(item => {
+                                const catArr = type === 'income' ? incomeCategories : expenseCategories;
+                                const catObj = catArr.find(c => String(c.id) === String(item.id));
+                                if (catObj) catObj.display_order = item.order;
+                            });
+                        }
+                    },
+                    error: function() {
+                        showToast('Failed to save order.', 'error');
+                    }
+                });
+            }
+        }
+
+        // ===================== ASSIGN CATEGORY TO GROUP =====================
+        function assignCategoryToGroup(categoryId, groupId, type) {
+            return $.ajax({
+                url: '/assign_category_to_group',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    type: type,
+                    category_id: categoryId,
+                    group_id: groupId || null
+                }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Update local data
+                        const catArr = type === 'income' ? incomeCategories : expenseCategories;
+                        const cat = catArr.find(c => String(c.id) === String(categoryId));
+                        if (cat) {
+                            cat.group_id = groupId || null;
+                            cat.display_order = response.new_display_order;
+                        }
+                    } else {
+                        showToast(response.message || 'Failed to assign category.', 'error');
+                        location.reload();
+                    }
+                },
+                error: function() {
+                    showToast('Failed to assign category to group.', 'error');
+                    location.reload();
+                }
+            });
+        }
+
+        // ===================== RENAME CATEGORY (Edit Modal) =====================
+        (function() {
+            const editCategoryModal = document.getElementById('editCategoryModal');
+            const editCategoryInput = document.getElementById('editCategoryInput');
+            const editCategoryGroupRow = document.getElementById('editCategoryGroupRow');
+            const editCategoryGroupSelect = document.getElementById('editCategoryGroupSelect');
+            const confirmEditCategoryBtn = document.getElementById('confirmEditCategoryBtn');
+            const deleteFromEditCategoryBtn = document.getElementById('deleteFromEditCategoryBtn');
+            const hideCategoryBtn = document.getElementById('hideCategoryBtn');
+            let editingCategoryId = null;
+            let editingCategoryType = null;
+            let suppressGroupChange = false;
+
+            function getGroupsForType(type) {
+                return type === 'income' ? incomeGroups : expenseGroups;
+            }
+
+            function populateCategoryGroupDropdown(type, categoryObj) {
+                if (type !== 'income' && type !== 'expense') {
+                    editCategoryGroupRow.style.display = 'none';
+                    return;
+                }
+
+                const groups = (getGroupsForType(type) || []).slice();
+                groups.sort((a, b) => Number(b.display_order || 0) - Number(a.display_order || 0));
+
+                const currentGroupId = categoryObj && categoryObj.group_id != null ? String(categoryObj.group_id) : '';
+                suppressGroupChange = true;
+                editCategoryGroupSelect.innerHTML = '';
+
+                const ungroupedOption = document.createElement('option');
+                ungroupedOption.value = '';
+                ungroupedOption.textContent = 'Ungrouped';
+                editCategoryGroupSelect.appendChild(ungroupedOption);
+
+                groups.forEach(group => {
+                    const opt = document.createElement('option');
+                    opt.value = String(group.id);
+                    opt.textContent = group.name;
+                    editCategoryGroupSelect.appendChild(opt);
+                });
+
+                editCategoryGroupSelect.value = currentGroupId;
+                editCategoryGroupRow.style.display = 'flex';
+                suppressGroupChange = false;
+            }
+
+            document.addEventListener('click', function(e) {
+                const btn = e.target.closest('.rename-category-btn');
+                if (!btn) return;
+
+                editingCategoryId = btn.getAttribute('data-category-id');
+                editingCategoryType = btn.getAttribute('data-category-type');
+                const currentName = btn.getAttribute('data-category-name');
+
+                if (editingCategoryType === 'expense') {
+                    const catObj = expenseCategories.find(cat => String(cat.id) === String(editingCategoryId));
+                    if (catObj) {
+                        if (catObj.is_credit_account == 1) {
+                            window.location.href = '/credit_accounts';
+                            return;
+                        }
+                    }
+                }
+
+                editCategoryInput.value = currentName;
+                editCategoryModal.style.display = 'flex';
+                editCategoryInput.focus();
+                editCategoryInput.select();
+                isModalOpen = true;
+
+                if (editCategoryInput._dupWarning) editCategoryInput._dupWarning.classList.remove('visible');
+
+                let catArr = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
+                let catObj = catArr.find(cat => String(cat.id) === String(editingCategoryId));
+                populateCategoryGroupDropdown(editingCategoryType, catObj);
+                if (catObj && catObj.hidden == 1) {
+                    hideCategoryBtn.title = "Unhide Category";
+                    hideCategoryBtn.querySelector('span').textContent = 'Unhide';
+                } else {
+                    hideCategoryBtn.title = "Hide Category";
+                    hideCategoryBtn.querySelector('span').textContent = 'Hide';
+                }
+            });
+
+            editCategoryModal.addEventListener('mousedown', function(e) {
+                if (e.target === editCategoryModal) {
+                    editCategoryModal.style.display = 'none';
+                    editCategoryGroupRow.style.display = 'none';
+                    isModalOpen = false;
+                }
+            });
+            document.addEventListener('keydown', function(e) {
+                if (isModalOpen && e.key === 'Escape') {
+                    editCategoryModal.style.display = 'none';
+                    editCategoryGroupRow.style.display = 'none';
+                    document.getElementById('editGroupModal').style.display = 'none';
+                    closeAddCategoryModal();
+                    closeAddGroupModal();
+                }
+            });
+
+            editCategoryGroupSelect.addEventListener('change', function() {
+                if (suppressGroupChange || !editingCategoryId || !editingCategoryType) return;
+                const newGroupId = this.value ? this.value : null;
+                assignCategoryToGroup(editingCategoryId, newGroupId, editingCategoryType)
+                    .done(function(response) {
+                        if (response.status === 'success') {
+                            location.reload();
+                        }
+                    });
+            });
+
+            editCategoryInput.addEventListener('input', function() {
+                if (!editingCategoryId || !editingCategoryType) return;
+                const catsToCheck = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
+                checkCategoryDuplicate(editCategoryInput, catsToCheck, { excludeId: editingCategoryId });
+            });
+
+            confirmEditCategoryBtn.onclick = function() {
+                if (editingCategoryId && editCategoryInput.value.trim()) {
+                    const catsToCheck = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
+                    if (checkCategoryDuplicate(editCategoryInput, catsToCheck, { excludeId: editingCategoryId })) return;
+
+                    const tableId = editingCategoryType === 'income' ? 'income-manage-table' : 'expense-manage-table';
+                    const row = document.querySelector(`#${tableId} tr[data-category-id='${editingCategoryId}']`);
+                    const categorySpan = row ? row.querySelector('.category-name') : null;
+                    if (categorySpan) categorySpan.textContent = editCategoryInput.value.trim();
+                    saveCategoryName(categorySpan, editingCategoryId, editingCategoryType);
+                    editCategoryModal.style.display = 'none';
+                    isModalOpen = false;
+                }
+            };
+            editCategoryInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') confirmEditCategoryBtn.click();
+            });
+
+            deleteFromEditCategoryBtn.onclick = function() {
+                if (editingCategoryId && editingCategoryType) {
+                    editCategoryModal.style.display = 'none';
+                    isModalOpen = false;
+                    openCategoryDeleteModal(editingCategoryId, editingCategoryType);
+                }
+            };
+
+            hideCategoryBtn.onclick = function() {
+                if (!editingCategoryId || !editingCategoryType) return;
+                let catArr = editingCategoryType === 'income' ? incomeCategories : expenseCategories;
+                const catObj = catArr.find(cat => String(cat.id) === String(editingCategoryId));
+                if (!catObj) return;
+
+                const newHidden = catObj.hidden == 1 ? 0 : 1;
+                const url = editingCategoryType === 'income' ? "/hide_income_category" : "/hide_expense_category";
+
+                $.ajax({
+                    url: url,
+                    method: "POST",
+                    data: { category_id: editingCategoryId, hidden: newHidden },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            catObj.hidden = newHidden;
+                            if (newHidden == 1) {
+                                hideCategoryBtn.title = "Unhide Category";
+                                hideCategoryBtn.querySelector('span').textContent = 'Unhide';
+                            } else {
+                                hideCategoryBtn.title = "Hide Category";
+                                hideCategoryBtn.querySelector('span').textContent = 'Hide';
+                            }
+                            const tableId = editingCategoryType === 'income' ? 'income-manage-table' : 'expense-manage-table';
+                            const row = document.querySelector(`#${tableId} tr[data-category-id='${editingCategoryId}']`);
+                            if (row) {
+                                row.setAttribute('data-hidden', newHidden);
+                                const eyeIcon = row.querySelector('.manage-cat-eye-icon');
+                                if (eyeIcon) {
+                                    if (newHidden == 1) {
+                                        eyeIcon.classList.remove('fa-eye', 'visible-icon');
+                                        eyeIcon.classList.add('fa-eye-slash', 'hidden-icon');
+                                    } else {
+                                        eyeIcon.classList.remove('fa-eye-slash', 'hidden-icon');
+                                        eyeIcon.classList.add('fa-eye', 'visible-icon');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            };
+        })();
+
+        // ===================== SAVE CATEGORY NAME =====================
+        function saveCategoryName(categorySpan, categoryId, type) {
+            const newCategoryName = categorySpan ? categorySpan.textContent.trim() : '';
+            if (!newCategoryName || !categoryId) return;
+
+            const url = type === 'income' ? "/update_income_category" : "/update_expense_category";
+
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: { category_id: categoryId, new_name: newCategoryName },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        let catArr = type === 'income' ? incomeCategories : expenseCategories;
+                        const catObj = catArr.find(cat => String(cat.id) === String(categoryId));
+                        if (catObj) catObj.name = newCategoryName;
+
+                        if (categorySpan) categorySpan.textContent = newCategoryName;
+
+                        const tableId = type === 'income' ? 'income-manage-table' : 'expense-manage-table';
+                        const row = document.querySelector(`#${tableId} tr[data-category-id='${categoryId}']`);
+                        if (row) {
+                            const renameBtn = row.querySelector('.rename-category-btn');
+                            if (renameBtn) renameBtn.setAttribute('data-category-name', newCategoryName);
+                        }
+                    }
+                },
+                error: function(xhr) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'Failed to rename category.';
+                    showToast(msg, 'error');
+                    if (categorySpan) {
+                        let catArr = type === 'income' ? incomeCategories : expenseCategories;
+                        const catObj = catArr.find(cat => String(cat.id) === String(categoryId));
+                        if (catObj) categorySpan.textContent = catObj.name;
+                    }
+                }
+            });
+        }
+
+        // ===================== DELETE CATEGORY =====================
+        async function openCategoryDeleteModal(categoryId, categoryType) {
+            const confirmed = await showConfirmModal({
+                title: 'Delete Category',
+                message: 'Are you sure you want to delete this category? Past entries for this category will be added to Uncategorized and future entries will be deleted.',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) return;
+            const url = categoryType === 'income' ? "{{ url_for('delete_income_category') }}" : "{{ url_for('delete_expense_category') }}";
+            $.ajax({
+                url: url,
+                method: "POST",
+                data: { id: categoryId },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        location.reload();
+                    } else {
+                        showToast('Failed to delete category.', 'error');
+                    }
+                },
+                error: function() {
+                    showToast('An error occurred while deleting the category.', 'error');
+                }
+            });
+        }
+
+        // ===================== SORTABLE TABLES (Drag and Drop) =====================
+        $(function() {
+            function initSortable(tableId, type) {
+                const $tbody = $(`#${tableId} tbody`);
+                const CATEGORY_ITEMS = '> tr[data-category-id]:not(.system-category-row)';
+                const GROUP_ITEMS = '> tr.group-header-row:not(.ungrouped-header):not([data-group-id="_system"])';
+                let draggingGroup = false;
+                let lastDragTargetGroupId = '';
+
+                // Track which group header is being hovered during drag
+                function updateDropHighlight(event, ui) {
+                    if (draggingGroup) return;
+
+                    const $allHeaders = $tbody.find('tr.group-header-row');
+                    $allHeaders.removeClass('drop-target-highlight');
+                    lastDragTargetGroupId = '';
+
+                    const mouseY = event.pageY;
+                    $allHeaders.each(function(index) {
+                        const $header = $(this);
+                        const headerTop = $header.offset().top;
+
+                        // Zone extends from header top to the top of the next group header
+                        // (covers empty groups and gaps between groups)
+                        const $nextHeader = $allHeaders.eq(index + 1);
+                        let zoneBottom;
+                        if ($nextHeader.length) {
+                            zoneBottom = $nextHeader.offset().top;
+                        } else {
+                            zoneBottom = $tbody.offset().top + $tbody.outerHeight();
+                        }
+
+                        if (mouseY >= headerTop && mouseY < zoneBottom) {
+                            $header.addClass('drop-target-highlight');
+                            lastDragTargetGroupId = $header.attr('data-group-id');
+                        }
+                    });
+                }
+
+                // Switch items BEFORE jQuery UI processes the mousedown
+                $tbody.on('mousedown touchstart', '.sort-handle', function() {
+                    draggingGroup = false;
+                    $tbody.sortable('option', 'items', CATEGORY_ITEMS);
+                    $tbody.sortable('refresh');
+                });
+                $tbody.on('mousedown touchstart', '.group-sort-handle', function() {
+                    draggingGroup = true;
+                    $tbody.sortable('option', 'items', GROUP_ITEMS);
+                    $tbody.sortable('refresh');
+                });
+
+                $tbody.sortable({
+                    axis: "y",
+                    scroll: true,
+                    scrollSensitivity: 30,
+                    scrollSpeed: 5,
+                    items: CATEGORY_ITEMS,
+                    handle: ".sort-handle, .group-sort-handle",
+                    placeholder: "sortable-placeholder",
+                    helper: function(e, tr) {
+                        var $originals = tr.children();
+                        var $helper = tr.clone();
+                        $helper.children().each(function(index) {
+                            $(this).width($originals.eq(index).width());
+                        });
+
+                        if (draggingGroup) {
+                            // Build stacked visual: group header on top, child rows behind
+                            const groupId = tr.attr('data-group-id');
+                            const $children = $tbody.find(`tr.grouped-category-row[data-group-id="${groupId}"]`);
+                            const totalWidth = tr.outerWidth();
+                            const rowHeight = tr.outerHeight();
+
+                            // Capture computed styles from the original row
+                            const cs = window.getComputedStyle(tr[0]);
+                            const bgColor = cs.backgroundColor;
+                            const borderBottom = cs.borderBottom;
+                            const fontSize = cs.fontSize;
+                            const fontWeight = cs.fontWeight;
+                            const color = cs.color;
+
+                            var $wrapper = $('<div>').css({
+                                position: 'relative',
+                                width: totalWidth,
+                                height: rowHeight,
+                                'z-index': 1000
+                            });
+
+                            // Add child "stack" layers behind (max 3 visible)
+                            const stackCount = Math.min($children.length, 3);
+                            for (let i = stackCount; i >= 1; i--) {
+                                $('<div>').css({
+                                    position: 'absolute',
+                                    top: (i * 4) + 'px',
+                                    left: (i * 4) + 'px',
+                                    width: (totalWidth - (i * 4)) + 'px',
+                                    height: rowHeight + 'px',
+                                    background: bgColor,
+                                    border: '1px solid var(--secondary-hover)',
+                                    borderRadius: '4px',
+                                    boxShadow: '0 1px 3px var(--shadow-sm)',
+                                    opacity: 1 - (i * 0.15)
+                                }).appendTo($wrapper);
+                            }
+
+                            // Group header on top — apply computed styles so it matches the original
+                            $helper.css({
+                                display: 'table',
+                                tableLayout: 'fixed',
+                                width: totalWidth + 'px',
+                                height: rowHeight + 'px',
+                                position: 'relative',
+                                'z-index': 10,
+                                margin: 0,
+                                backgroundColor: bgColor,
+                                borderBottom: borderBottom,
+                                fontSize: fontSize,
+                                fontWeight: fontWeight,
+                                color: color,
+                                boxShadow: '0 4px 12px var(--shadow-lg)',
+                                borderRadius: '4px'
+                            });
+                            // Also style all elements inside the helper to match original
+                            $helper.find('td').each(function(index) {
+                                const origTd = tr.children().eq(index)[0];
+                                if (origTd) {
+                                    const tdCs = window.getComputedStyle(origTd);
+                                    $(this).css({
+                                        padding: tdCs.padding,
+                                        fontWeight: tdCs.fontWeight,
+                                        fontSize: tdCs.fontSize,
+                                        color: tdCs.color
+                                    });
+                                }
+                            });
+                            // Style buttons/icons inside helper
+                            $helper.find('button, .edit-group-btn, .group-sort-handle, .group-icon, i').each(function() {
+                                const origEl = tr.find(this.tagName + '.' + Array.from(this.classList).join('.'))[0]
+                                    || tr.find(this.tagName)[Array.from($helper.find(this.tagName)).indexOf(this)];
+                                if (origEl) {
+                                    const elCs = window.getComputedStyle(origEl);
+                                    $(this).css({
+                                        color: elCs.color,
+                                        fontSize: elCs.fontSize,
+                                        background: elCs.backgroundColor,
+                                        border: elCs.border
+                                    });
+                                }
+                            });
+                            $wrapper.prepend($helper);
+
+                            return $wrapper;
+                        }
+
+                        // Wrap clone in a table matching the original so all CSS rules apply naturally
+                        const $origTable = tr.closest('table');
+                        // Lock cell widths on the clone to match originals
+                        tr.children().each(function(index) {
+                            const w = $(this).outerWidth();
+                            $helper.children().eq(index).css({ width: w + 'px', minWidth: w + 'px', maxWidth: w + 'px' });
+                        });
+                        const $wrapTable = $('<table></table>');
+                        $wrapTable.attr('class', $origTable.attr('class') || '');
+                        $wrapTable.append($helper);
+                        $wrapTable.css({
+                            width: $origTable.outerWidth() + 'px',
+                            tableLayout: 'fixed',
+                            borderCollapse: 'collapse',
+                            'z-index': 1000,
+                            margin: 0,
+                            boxShadow: '0 4px 12px var(--shadow-lg)',
+                            borderRadius: '3px'
+                        });
+                        return $wrapTable;
+                    },
+                    cursor: "move",
+                    appendTo: document.body,
+                    tolerance: 'pointer',
+                    start: function(event, ui) {
+                        var mouseY = event.pageY;
+                        var offsetY = ui.helper.height() / 2;
+                        var helperLeft = $tbody.closest('table').offset().left;
+                        ui.helper.css({ position: 'absolute', top: mouseY - offsetY, left: helperLeft });
+                        ui.item.data('helperLeft', helperLeft);
+
+                        if (draggingGroup) {
+                            // Dim ungrouped and system groups
+                            $tbody.find('tr[data-group-id="ungrouped"], tr[data-group-id="_system"]').addClass('group-drag-dimmed');
+                            $tbody.find('tr.grouped-category-row[data-group-id="ungrouped"], tr.system-category-row').addClass('group-drag-dimmed');
+
+                            // Hide the dragged group's children (they move with it)
+                            const draggedGroupId = ui.item.attr('data-group-id');
+                            const $draggedChildren = $tbody.find(`tr.grouped-category-row[data-group-id="${draggedGroupId}"]`);
+                            ui.item.data('childRows', $draggedChildren);
+                            $draggedChildren.hide();
+                        }
+                    },
+                    change: function(event, ui) {
+                        if (!draggingGroup) return;
+                        // After placeholder moves, reattach all non-dragged groups' children to their headers
+                        // so they always stay together as sections
+                        $tbody.find('tr.group-header-row:not(.ungrouped-header)').each(function() {
+                            const $header = $(this);
+                            // Skip the dragged item (it's detached/being moved by jQuery UI)
+                            if ($header.is(ui.item)) return;
+                            const gid = $header.attr('data-group-id');
+                            const $children = $tbody.find(`tr.grouped-category-row[data-group-id="${gid}"]`);
+                            if ($children.length) {
+                                $children.detach();
+                                $header.after($children);
+                            }
+                        });
+                    },
+                    sort: function(event, ui) {
+                        var mouseY = event.pageY;
+                        var offsetY = ui.helper.height() / 2;
+                        ui.helper.css({ top: mouseY - offsetY, left: ui.item.data('helperLeft') });
+                        updateDropHighlight(event, ui);
+                    },
+                    stop: function(event, ui) {
+                        // Clear highlights
+                        $tbody.find('tr.group-header-row').removeClass('drop-target-highlight');
+
+                        if (draggingGroup) {
+                            // Show and reattach dragged group's children after their header
+                            const childRows = ui.item.data('childRows');
+                            if (childRows && childRows.length) {
+                                childRows.detach();
+                                ui.item.after(childRows);
+                                childRows.show();
+                            }
+                            // Reattach all other groups' children too (final cleanup)
+                            $tbody.find('tr.group-header-row:not(.ungrouped-header)').each(function() {
+                                const $header = $(this);
+                                if ($header.is(ui.item)) return;
+                                const gid = $header.attr('data-group-id');
+                                const $children = $tbody.find(`tr.grouped-category-row[data-group-id="${gid}"]`);
+                                if ($children.length) {
+                                    $children.detach();
+                                    $header.after($children);
+                                }
+                            });
+                            // Remove dim from ungrouped/system groups
+                            $tbody.find('.group-drag-dimmed').removeClass('group-drag-dimmed');
+
+                            // Save group + category order after group drag
+                            draggingGroup = false;
+                            $tbody.sortable('option', 'items', CATEGORY_ITEMS);
+                            $tbody.sortable('refresh');
+                            saveNewOrder(type);
+                            zebraStripeManageRows();
+                            return;
+                        }
+
+                        // If a category was dropped, determine its new group via mouse position
+                        const $moved = ui.item;
+                        if (!draggingGroup && $moved.attr('data-category-id')) {
+                            // Use the target group tracked during sort (before DOM reflow)
+                            // rather than recalculating from post-reflow positions
+                            let targetGroupId = lastDragTargetGroupId;
+
+                            // Fallback: if no zone matched, check prev/next rows
+                            if (!targetGroupId) {
+                                const prevRow = $moved.prev('tr');
+                                if (prevRow.hasClass('group-header-row')) {
+                                    targetGroupId = prevRow.attr('data-group-id');
+                                } else if (prevRow.hasClass('grouped-category-row')) {
+                                    targetGroupId = prevRow.attr('data-group-id') || '';
+                                }
+                            }
+
+                            // If no group found, default to first group
+                            if (!targetGroupId) {
+                                const firstGroup = $tbody.find('tr.group-header-row').first();
+                                if (firstGroup.length) {
+                                    targetGroupId = firstGroup.attr('data-group-id');
+                                }
+                            }
+
+                            // Move the item visually into the target group (only if outside it)
+                            const $targetHeader = $tbody.find(`tr.group-header-row[data-group-id="${targetGroupId}"]`);
+                            if ($targetHeader.length) {
+                                // Check if item is already within this group zone
+                                let isWithinGroup = false;
+                                let $check = $targetHeader.next('tr');
+                                while ($check.length && !$check.hasClass('group-header-row')) {
+                                    if ($check.is($moved)) {
+                                        isWithinGroup = true;
+                                        break;
+                                    }
+                                    $check = $check.next('tr');
+                                }
+
+                                if (!isWithinGroup) {
+                                    // Item landed outside target group — move to top of group (right after header)
+                                    $moved.detach();
+                                    $targetHeader.after($moved);
+                                }
+                            }
+
+                            const effectiveNewGroupId = (targetGroupId === 'ungrouped') ? '' : targetGroupId;
+                            const oldGroupId = $moved.attr('data-group-id') || '';
+                            const effectiveOldGroupId = (oldGroupId === 'ungrouped') ? '' : oldGroupId;
+
+                            let groupChanged = false;
+                            if (effectiveNewGroupId !== effectiveOldGroupId) {
+                                groupChanged = true;
+                                $moved.attr('data-group-id', targetGroupId || 'ungrouped');
+                                if (effectiveNewGroupId) {
+                                    $moved.addClass('grouped-category-row');
+                                    $moved.removeClass('ungrouped-category-row');
+                                    $moved.find('.category-cell').addClass('grouped-cell');
+                                } else {
+                                    $moved.addClass('grouped-category-row ungrouped-category-row');
+                                    $moved.find('.category-cell').addClass('grouped-cell');
+                                }
+                            }
+
+                            // Chain: assign group first (so Redis has updated group_id), then save order
+                            draggingGroup = false;
+                            $tbody.sortable('option', 'items', CATEGORY_ITEMS);
+                            $tbody.sortable('refresh');
+                            if (groupChanged) {
+                                assignCategoryToGroup($moved.attr('data-category-id'), effectiveNewGroupId || null, type)
+                                    .always(function() { saveNewOrder(type); zebraStripeManageRows(); });
+                            } else {
+                                saveNewOrder(type);
+                                zebraStripeManageRows();
+                            }
+                        } else {
+                            // Not a category drag — just save
+                            draggingGroup = false;
+                            $tbody.sortable('option', 'items', CATEGORY_ITEMS);
+                            $tbody.sortable('refresh');
+                            saveNewOrder(type);
+                            zebraStripeManageRows();
+                        }
+                    }
+                }).disableSelection();
+            }
+
+            initSortable('income-manage-table', 'income');
+            initSortable('expense-manage-table', 'expense');
+        });
+
+
+    </script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            fetch('/api/tutorial/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.completed && data.completed['tutorial_manage_categories']) return;
+                    startTutorial('tutorial_manage_categories', [
+                        {
+                            selector: '#income-manage-table',
+                            text: 'View and manage your <b>income categories</b> here. Each row shows the category name, type, and visibility.'
+                        },
+                        {
+                            selector: '#expense-manage-table',
+                            text: 'Your <b>expense categories</b> are listed here — including standard, recurring, credit payment, and bud categories.'
+                        },
+                        {
+                            selector: '.sort-handle',
+                            text: 'Drag the <b>≡ handle</b> to reorder categories. This order is used across all dashboards.',
+                            padding: 6
+                        },
+                        {
+                            selector: '#add-income-btn, #add-expense-btn',
+                            text: 'Tap the <b>+</b> icon to create a new income or expense category.'
+                        },
+                        {
+                            selector: '.rename-category-btn',
+                            text: 'Tap the <b>pencil</b> to open the edit modal — rename, hide, or delete the category.',
+                            padding: 6
+                        },
+                        {
+                            selector: '.manage-cat-eye-icon',
+                            text: 'The <b>eye icon</b> shows whether a category is visible or hidden on your dashboards. Hidden categories keep their data but stay out of the way.',
+                            padding: 4
+                        }
+                    ], { delay: 500 });
+                })
+                .catch(function() {});
+        }, 600);
+    });
+    </script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+# MacOS junk
+.DS_Store
+._*
+
+# Logs
+*.log
+error_log
+
+# Temp/cache
+tmp/
+.cache/
+*.tmp
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build artifacts
+dist/
+build/
+
+# Ignore all WSGI files
+*.wsgi
+
+# Ignore all uploads except the default picture
+static/uploads
+
+# Font Awesome Pro. Commercial, per-seat software that cannot be redistributed -
+# static/fontawesome/LICENSE.txt says so itself. Keep your own build here and the
+# app picks it up automatically; without it the bundled Free build in
+# static/fontawesome-free/ takes over. See the Icons section of the README.
+static/fontawesome/
+
+# Ignore python cache
+__pycache__/
+*.pyc
+
+# Ignore sensitive environment file
+.env
+
+# Ignore Python virtual environment
+venv/
+
+# Copilot instructions (local only)
+.github/copilot-instructions.md
+
+# ---------------------------------------------------------------------------
+# Tooling, not application. None of this belongs to anyone who clones the repo.
+# ---------------------------------------------------------------------------
+
+# Claude Code. All of it is machine-specific: settings.json hooks reference an
+# absolute /v/ path, and CLAUDE.md documents this machine's drive-letter mounts.
+.claude/
+CLAUDE.md
+.mcp.json
+
+# GitHub Copilot instructions (local only)
+.github/copilot-instructions.md
+
+# Editors. .vscode/settings.json here defines a WSL profile with a V:\ path,
+# which is meaningless on any other machine.
+.vscode/
+*.code-workspace
+.idea/
+.history/
+*.swp
+*.swo
+*~
+
+# Windows shell junk (the macOS equivalents are at the top of this file)
+Thumbs.db
+desktop.ini
+
+# Python tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+
+# Internal working documents and machine-specific scripts. None of these are
+# part of the application: checklists are progress trackers, integrations
+# documents vendors that were removed, and server-scripts holds commands for one
+# particular host. migrations/ is ignored because the SQL a fresh install needs
+# now lives in install/sql/ - anything left in migrations/ is scratch.
+checklists/
+integrations/
+server-scripts/
+migrations/
+
+# NOTE: the '.env' rule above matches only that exact name, so
+# .env.docker.example is still committed. Do not change it to '.env*' - the
+# docker install reads that example file.

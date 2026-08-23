@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Registration Successful</title>
+    <!-- Link to the external stylesheet for custom styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="login-body">
+    <!-- Top navigation bar -->
+    <div class="nav-bar nav-bar-login">
+        <div class="nav-bar-container nav-bar-container-login">
+            <div class="nav-left-content nav-left-content-login">
+                <a href="https://blankee.io">
+                    <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo nav-logo-login">
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar navigation section (currently empty) -->
+    <div class="calendarnav">
+        <!-- Placeholder for calendar navigation content -->
+    </div>
+
+    <!-- Main container for the registration success content -->
+    <div class="logincontainer" id="logincontainer">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <i class="fas fa-check-circle" style="font-size: 64px; color: #2aaaa8; margin-bottom: 20px;"></i>
+        </div>
+        <h1 style="text-align: center;">Registration Successful!</h1>
+        
+        <div class="registration-success-content">
+                <p class="success-message">
+                    <i class="fas fa-check"></i>
+                    Your account <strong>{{ email }}</strong> is ready to use.
+                </p>
+
+                <div class="info-box">
+                    <h3><i class="fas fa-info-circle"></i> Next Steps:</h3>
+                    <ol>
+                        <li>Log in with the email and password you just chose</li>
+                        <li>Complete your profile setup</li>
+                        <li>Start budgeting!</li>
+                    </ol>
+                </div>
+
+                <div class="action-buttons">
+                    <a href="{{ url_for('login') }}" class="btn btn-primary">
+                        <i class="fas fa-sign-in-alt"></i> Go to Login
+                    </a>
+                </div>
+                
+            </div>
+        </div>
+    </div>
+
+    <!-- Link to the external JavaScript file -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

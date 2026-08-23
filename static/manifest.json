@@ -1,0 +1,30 @@
+{
+  "name": "Blankee",
+  "short_name": "Blankee",
+  "description": "Budget tracking and forecasting.",
+  "start_url": "/dashboard_summary",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFFFFF",
+  "theme_color": "#6665DD",
+  "icons": [
+    {
+      "src": "/static/mobileicon.png",
+      "sizes": "500x500",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/mobileicon.png",
+      "sizes": "500x500",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

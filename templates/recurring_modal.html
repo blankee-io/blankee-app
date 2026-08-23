@@ -1,0 +1,1453 @@
+<!-- Add Recurring Income Modal -->
+<div id="add-income-modal" class="modal">
+    <div class="income-form-container">
+        <h2>Add Recurring Income</h2>
+        <form id="add-recurring-income-form">
+            <label>Category</label>
+            <div class="category-input-wrapper">
+                <input type="text" class="category-input" id="category_name" name="category_name" placeholder="Search or create category..." autocomplete="off" required>
+                <input type="hidden" class="category-hidden" id="income-category-id-hidden" name="category_id" value="">
+                <div class="pending-transactions-category-dropdown"></div>
+            </div>
+
+<div class="form-row">
+                    <label for="wage-bill-select">Type:</label>
+                    <select id="wage-bill-select" name="wage_bill">
+                        <option value="1">Wages (fixed income)</option>
+                        <option value="0">Variable (irregular income)</option>
+                    </select>
+            </div>
+
+            <label for="amount">Recurring Amount</label>
+            <div class="currency-input-container">
+                <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                <input type="number" class="recurring-amount" id="amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
+            </div>
+
+            <label for="cadence-interval">Repeat Every</label>
+            <div class="cadence-row">
+                <input type="number" id="cadence-interval" name="cadence_interval" min="1" required>
+                <select id="cadence-unit" name="cadence_unit" required>
+                    <option value="days">Day(s)</option>
+                    <option value="weeks">Week(s)</option>
+                    <option value="months">Month(s)</option>
+                    <option value="years">Year(s)</option>
+                </select>
+            </div>
+
+            <div id="weekly-options" style="display:none;">
+                <label>Repeat on:</label>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Mo</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tu</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> We</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Th</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Fr</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Sa</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Su</div>
+            </div>
+
+            <div id="monthly-options" style="display:none;">
+                <label for="monthly-days">Days of the month:</label>
+                <div id="monthly-day-container"></div>
+                <button type="button" id="add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
+            </div>
+
+            <div id="yearly-options" style="display:none;">
+                <label for="yearly-day">Day of the year:</label>
+                <input type="number" id="yearly-day" name="yearly_day" min="1" max="31">
+                <label for="yearly-month">Month of the year:</label>
+                <select id="yearly-month" name="yearly_month">
+                    <option value="1">January</option>
+                    <option value="2">February</option>
+                    <option value="3">March</option>
+                    <option value="4">April</option>
+                    <option value="5">May</option>
+                    <option value="6">June</option>
+                    <option value="7">July</option>
+                    <option value="8">August</option>
+                    <option value="9">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                </select>
+            </div>
+
+            <div class="date-row">
+                <div class="date-label-row">
+                    <label for="start_date">Start Date</label>
+                    <div class="end-date-container" id="end-date-label-container">
+                        <label for="end_date">End Date</label>
+                    </div>
+                </div>
+                <div class="date-input-row">
+                    <input type="date" id="start_date" name="start_date" required>
+                    <div class="end-date-container" id="end-date-input-container">
+                        <input type="date" id="end_date" name="end_date">
+                    </div>
+                </div>
+                <div class="date-checkbox-row">
+                    <span class="date-checkbox-label">Or</span>
+                    <input type="checkbox" id="no-end-date-checkbox">
+                    <label for="no-end-date-checkbox">No End Date</label>
+                </div>
+                <div class="date-checkbox-row">
+                    <span class="date-checkbox-label">Or</span>
+                    <input type="checkbox" id="use-occurrences-checkbox">
+                    <label for="use-occurrences-checkbox">Repeat this many times:</label>
+                    <input type="number" id="occurrences-count" name="occurrences_count" min="1" style="width:60px;" disabled>
+                </div>
+            </div>
+
+            <br>
+            <button type="submit">Submit</button>
+        </form>
+    </div>
+</div>
+
+<!-- Add Recurring Expense Modal -->
+<div id="add-expense-modal" class="modal">
+    <div class="expense-form-container">
+        <h2>Add Recurring Expense</h2>
+        <form id="add-recurring-expense-form">
+            <label>Category</label>
+            <div class="category-input-wrapper">
+                <input type="text" class="category-input" id="expense-category_name" name="category_name" placeholder="Search or create category..." autocomplete="off" required>
+                <input type="hidden" class="category-hidden" id="expense-category-id-hidden" name="category_id" value="">
+                <div class="pending-transactions-category-dropdown"></div>
+            </div>
+
+<div class="form-row">
+                    <label for="expense-wage-bill-select">Type:</label>
+                    <select id="expense-wage-bill-select" name="wage_bill">
+                        <option value="1">Bill (fixed expense)</option>
+                        <option value="0">Allowance (flexible spending)</option>
+                    </select>
+            </div>
+
+            <label for="amount">Recurring Amount</label>
+            <div class="currency-input-container">
+                <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                <input type="number" class="recurring-amount" id="expense-amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
+            </div>
+
+            <label for="cadence-interval">Repeat Every</label>
+            <div class="cadence-row">
+                <input type="number" id="expense-cadence-interval" name="cadence-interval" placeholder="0" step="1" min="1" required>
+                <select id="expense-cadence-unit" name="cadence_unit" required>
+                    <option value="days">Day(s)</option>
+                    <option value="weeks">Week(s)</option>
+                    <option value="months">Month(s)</option>
+                    <option value="years">Year(s)</option>
+                </select>
+            </div>
+
+            <div id="expense-weekly-options" style="display:none;">
+                <label>Repeat on:</label>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Mo</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tu</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> We</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Th</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Fr</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Sa</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Su</div>
+            </div>
+
+            <div id="expense-monthly-options" style="display:none;">
+                <label for="monthly-days">Days of the month:</label>
+                <div id="expense-monthly-day-container"></div>
+                <button type="button" id="expense-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
+            </div>
+
+            <div id="expense-yearly-options" style="display:none;">
+                <label for="yearly-day">Day of the year:</label>
+                <input type="number" id="expense-yearly-day" name="yearly_day" min="1" max="31">
+                <label for="yearly-month">Month of the year:</label>
+                <select id="expense-yearly-month" name="yearly_month">
+                    <option value="1">January</option>
+                    <option value="2">February</option>
+                    <option value="3">March</option>
+                    <option value="4">April</option>
+                    <option value="5">May</option>
+                    <option value="6">June</option>
+                    <option value="7">July</option>
+                    <option value="8">August</option>
+                    <option value="9">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                </select>
+            </div>
+
+            <div class="date-row">
+                <div class="date-label-row">
+                    <label for="start_date">Start Date</label>
+                    <div class="end-date-container" id="expense-end-date-label-container">
+                        <label for="expense-end_date">End Date</label>
+                    </div>
+                </div>
+                <div class="date-input-row">
+                    <input type="date" id="expense-start_date" name="start_date" required>
+                    <div class="end-date-container" id="expense-end-date-input-container">
+                        <input type="date" id="expense-end_date" name="end_date">
+                    </div>
+                </div>
+                <div class="date-checkbox-row">
+                    <span class="date-checkbox-label">Or</span>
+                    <input type="checkbox" id="expense-no-end-date-checkbox">
+                    <label for="no-end-date">No End Date</label>
+                </div>
+                <div class="date-checkbox-row">
+                    <span class="date-checkbox-label">Or</span>
+                    <input type="checkbox" id="expense-use-occurrences-checkbox">
+                    <label for="use-occurrences-checkbox">Repeat this many times:</label>
+                    <input type="number" id="expense-occurrences-count" name="occurrences_count" min="1" style="width:60px;" disabled>
+                </div>
+            </div>
+
+            <br>
+            <button type="submit">Submit</button>
+        </form>
+    </div>
+</div>
+
+<!-- Add Recurring CA Expense Modal -->
+<div id="add-ca-modal" class="modal">
+    <div class="ca-form-container">
+        <h2>Add Recurring <span id="ca-modal-account-name"></span> Expense</h2>
+        <form id="add-recurring-ca-form">
+            <!-- Account selection (if needed, otherwise set via JS) -->
+            <select id="ca-account-id" name="account_id" required hidden>
+                {% for account in credit_accounts %}
+                    <option value="{{ account.id }}">{{ account.name }}</option>
+                {% endfor %}
+            </select>
+
+            <label>Category</label>
+            <div class="category-input-wrapper">
+                <input type="text" class="category-input" id="ca-category-input" name="ca_category_name" placeholder="Search categories..." autocomplete="off" required>
+                <input type="hidden" class="category-hidden" id="ca-category-id-hidden" name="category_id" value="">
+                <div class="pending-transactions-category-dropdown"></div>
+            </div>
+
+            <label for="ca-amount">Recurring Amount</label>
+            <div class="currency-input-container">
+                <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                <input type="number" class="recurring-amount" id="ca-amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
+            </div>
+
+            <label for="ca-cadence-interval">Repeat Every</label>
+            <div class="cadence-row">
+                <input type="number" id="ca-cadence-interval" name="cadence_interval" min="1" required>
+                <select id="ca-cadence-unit" name="cadence_unit" required>
+                    <option value="days">Day(s)</option>
+                    <option value="weeks">Week(s)</option>
+                    <option value="months">Month(s)</option>
+                    <option value="years">Year(s)</option>
+                </select>
+            </div>
+
+            <div id="ca-weekly-options" style="display:none;">
+                <label>Repeat on:</label>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Mo</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tu</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> We</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="thursday"> Th</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="friday"> Fr</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="saturday"> Sa</div>
+                <div class="weekday"><input type="checkbox" name="weekdays" value="sunday"> Su</div>
+            </div>
+
+            <div id="ca-monthly-options" style="display:none;">
+                <label for="ca-monthly-days">Days of the month:</label>
+                <div id="ca-monthly-day-container"></div>
+                <button type="button" id="ca-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
+            </div>
+
+            <div id="ca-yearly-options" style="display:none;">
+                <label for="ca-yearly-day">Day of the year:</label>
+                <input type="number" id="ca-yearly-day" name="yearly_day" min="1" max="31">
+                <label for="ca-yearly-month">Month of the year:</label>
+                <select id="ca-yearly-month" name="yearly_month">
+                    <option value="1">January</option>
+                    <option value="2">February</option>
+                    <option value="3">March</option>
+                    <option value="4">April</option>
+                    <option value="5">May</option>
+                    <option value="6">June</option>
+                    <option value="7">July</option>
+                    <option value="8">August</option>
+                    <option value="9">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                </select>
+            </div>
+
+            <div class="date-row">
+                <div class="date-label-row">
+                    <label for="ca-start-date">Start Date</label>
+                    <div class="end-date-container" id="ca-end-date-label-container">
+                        <label for="ca-end-date">End Date</label>
+                    </div>
+                </div>
+                <div class="date-input-row">
+                    <input type="date" id="ca-start-date" name="start_date" required>
+                    <div class="end-date-container" id="ca-end-date-input-container">
+                        <input type="date" id="ca-end-date" name="end_date">
+                    </div>
+                </div>
+                <div class="date-checkbox-row">
+                    <span class="date-checkbox-label">Or</span>
+                    <input type="checkbox" id="ca-no-end-date-checkbox">
+                    <label for="ca-no-end-date-checkbox">No End Date</label>
+                </div>
+                <div class="date-checkbox-row">
+                    <span class="date-checkbox-label">Or</span>
+                    <input type="checkbox" id="ca-use-occurrences-checkbox">
+                    <label for="ca-use-occurrences-checkbox">Repeat this many times:</label>
+                    <input type="number" id="ca-occurrences-count" name="occurrences_count" min="1" style="width:60px;" disabled>
+                </div>
+            </div>
+
+            <br>
+            <button type="submit">Submit</button>
+        </form>
+    </div>
+</div>
+
+<script>
+
+        // Searchable category dropdown for Add Recurring modals
+        function showRecurringModalDropdown(input, searchText, categories, hiddenInputId, allCategories) {
+            const wrapper = input.closest('.category-input-wrapper');
+            const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
+            const hiddenInput = document.getElementById(hiddenInputId);
+
+            dropdown.innerHTML = '';
+            const searchLower = searchText.toLowerCase().trim();
+
+            const matchingCategories = searchLower.length > 0
+                ? categories.filter(cat => cat.name.toLowerCase().includes(searchLower))
+                : [];
+            const matchingIds = new Set(matchingCategories.map(cat => cat.id));
+            const nonMatchingCategories = searchLower.length > 0
+                ? categories.filter(cat => !matchingIds.has(cat.id))
+                : categories;
+            const exactMatch = matchingCategories.find(cat => cat.name.toLowerCase() === searchLower);
+
+            // Search results
+            if (searchLower.length > 0 && matchingCategories.length > 0) {
+                dropdown.style.display = 'block';
+                matchingCategories.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `<i class="fa-solid fa-magnifying-glass search-icon"></i> ${getCategoryIcon(cat)} ${cat.name}`;
+                    div.className = 'pending-transactions-category-dropdown-item search-result';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+            }
+
+            // Create new option right after search results (income and expense only, not CA)
+            // Check against ALL categories (including recurring) to prevent duplicates
+            const allCats = allCategories || categories;
+            const allCatsExactMatch = allCats.find(cat => cat.name.toLowerCase() === searchLower);
+            if (hiddenInputId !== 'ca-category-id-hidden' && searchLower.length > 0 && !allCatsExactMatch) {
+                dropdown.style.display = 'block';
+                const createDiv = document.createElement('div');
+                createDiv.className = 'pending-transactions-category-dropdown-item create-new-category';
+                createDiv.innerHTML = `<i class="fa-solid fa-plus"></i> Create "${searchText}"`;
+                createDiv.addEventListener('click', function() {
+                    // Safety check against all categories
+                    const dupCheck = allCats.find(c => c.name.toLowerCase() === searchText.toLowerCase().trim());
+                    if (dupCheck) {
+                        showToast('A category with this name already exists.', 'warning');
+                        return;
+                    }
+                    input.value = searchText;
+                    hiddenInput.value = '';
+                    input.dataset.createNew = 'true';
+                    dropdown.style.display = 'none';
+                });
+                dropdown.appendChild(createDiv);
+            }
+
+            // Add separator before remaining categories if there's content above
+            if (searchLower.length > 0 && dropdown.children.length > 0 && nonMatchingCategories.length > 0) {
+                const sep = document.createElement('div');
+                sep.className = 'dropdown-separator';
+                dropdown.appendChild(sep);
+            }
+
+            const catsToShow = searchLower.length > 0 ? nonMatchingCategories : categories;
+            if (catsToShow.length > 0) {
+                dropdown.style.display = 'block';
+                catsToShow.forEach(cat => {
+                    const div = document.createElement('div');
+                    div.innerHTML = getCategoryIcon(cat) + ' ' + cat.name;
+                    div.className = 'pending-transactions-category-dropdown-item';
+                    div.addEventListener('click', function() {
+                        input.value = cat.name;
+                        hiddenInput.value = cat.id;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(div);
+                });
+            }
+
+            if (dropdown.children.length === 0) {
+                dropdown.style.display = 'none';
+            }
+        }
+
+        // Get filtered categories for each type
+        function getFilteredIncomeCategories() {
+            return (typeof incomeCategories !== 'undefined' ? incomeCategories : []).filter(cat =>
+                cat.is_recurring != 1 &&
+                cat.name !== 'Starting Balance' && cat.name !== 'Uncategorized'
+            ).sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
+        }
+
+        function getFilteredExpenseCategories() {
+            return (typeof expenseCategories !== 'undefined' ? expenseCategories : []).filter(cat =>
+                cat.is_recurring != 1 && cat.is_bud != 1 &&
+                cat.name !== 'Starting Balance' && cat.name !== 'Uncategorized' &&
+                cat.name !== 'Interest Charge'
+            ).sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
+        }
+
+        function getFilteredCACategories(accountId) {
+            return (typeof c_expense_categories !== 'undefined' ? c_expense_categories : []).filter(cat =>
+                String(cat.account_id) === String(accountId) &&
+                cat.is_recurring != 1 &&
+                cat.is_interest != 1 &&
+                cat.is_bud != 1 &&
+                cat.name !== 'Uncategorized'
+            ).sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
+        }
+
+        // Attach event listeners for all three category inputs
+        (function() {
+            // Income
+            const incomeInput = document.getElementById('category_name');
+            if (incomeInput) {
+                incomeInput.addEventListener('input', function() {
+                    document.getElementById('income-category-id-hidden').value = '';
+                    this.dataset.createNew = '';
+                    const allIncome = typeof incomeCategories !== 'undefined' ? incomeCategories : [];
+                    showRecurringModalDropdown(this, this.value, getFilteredIncomeCategories(), 'income-category-id-hidden', allIncome);
+                });
+                incomeInput.addEventListener('focus', function() {
+                    if (this._dropdownJustClosed && Date.now() - this._dropdownJustClosed < 200) return;
+                    const allIncome = typeof incomeCategories !== 'undefined' ? incomeCategories : [];
+                    showRecurringModalDropdown(this, '', getFilteredIncomeCategories(), 'income-category-id-hidden', allIncome);
+                });
+                // On blur: clear input if user typed something but didn't select or create
+                incomeInput.addEventListener('blur', function() {
+                    const input = this;
+                    setTimeout(function() {
+                        const hiddenInput = document.getElementById('income-category-id-hidden');
+                        if (!hiddenInput.value && input.value && input.dataset.createNew !== 'true') {
+                            input.value = '';
+                        }
+                    }, 200);
+                });
+            }
+
+            // Expense
+            const expenseInput = document.getElementById('expense-category_name');
+            if (expenseInput) {
+                expenseInput.addEventListener('input', function() {
+                    document.getElementById('expense-category-id-hidden').value = '';
+                    this.dataset.createNew = '';
+                    const allExpense = typeof expenseCategories !== 'undefined' ? expenseCategories : [];
+                    showRecurringModalDropdown(this, this.value, getFilteredExpenseCategories(), 'expense-category-id-hidden', allExpense);
+                });
+                expenseInput.addEventListener('focus', function() {
+                    if (this._dropdownJustClosed && Date.now() - this._dropdownJustClosed < 200) return;
+                    const allExpense = typeof expenseCategories !== 'undefined' ? expenseCategories : [];
+                    showRecurringModalDropdown(this, '', getFilteredExpenseCategories(), 'expense-category-id-hidden', allExpense);
+                });
+                // On blur: clear input if user typed something but didn't select or create
+                expenseInput.addEventListener('blur', function() {
+                    const input = this;
+                    setTimeout(function() {
+                        const hiddenInput = document.getElementById('expense-category-id-hidden');
+                        if (!hiddenInput.value && input.value && input.dataset.createNew !== 'true') {
+                            input.value = '';
+                        }
+                    }, 200);
+                });
+            }
+
+            // CA
+            const caInput = document.getElementById('ca-category-input');
+            if (caInput) {
+                caInput.addEventListener('input', function() {
+                    document.getElementById('ca-category-id-hidden').value = '';
+                    const accountId = document.getElementById('ca-account-id').value;
+                    showRecurringModalDropdown(this, this.value, getFilteredCACategories(accountId), 'ca-category-id-hidden');
+                });
+                caInput.addEventListener('focus', function() {
+                    if (this._dropdownJustClosed && Date.now() - this._dropdownJustClosed < 200) return;
+                    const accountId = document.getElementById('ca-account-id').value;
+                    showRecurringModalDropdown(this, '', getFilteredCACategories(accountId), 'ca-category-id-hidden');
+                });
+            }
+
+            // Close dropdowns on outside click
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.category-input-wrapper')) {
+                    document.querySelectorAll('.pending-transactions-category-dropdown').forEach(function(d) {
+                        if (d.style.display !== 'none') {
+                            d.style.display = 'none';
+                            const input = d.closest('.category-input-wrapper')?.querySelector('.category-input');
+                            if (input) input._dropdownJustClosed = Date.now();
+                        }
+                    });
+                }
+            });
+        })();
+
+        // Limit decimal places for recurring amount inputs (2 decimals)
+        document.addEventListener('DOMContentLoaded', function() {
+            const amountInput = document.getElementById('amount');
+            const expenseAmountInput = document.getElementById('expense-amount');
+            const caAmountInput = document.getElementById('ca-amount');
+
+            if (amountInput) {
+                amountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+
+            if (expenseAmountInput) {
+                expenseAmountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+
+            if (caAmountInput) {
+                caAmountInput.addEventListener('input', function() {
+                    let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+        });
+
+        // Add Recurring Income Modal
+
+        const addIncomeModal = document.getElementById("add-income-modal");
+
+        // Close modal when clicking outside
+        function closeModalOnOverlay(event, modal, resetAddModal = false) {
+            if (event.target === modal) {
+                modal.style.display = "none";
+                if (resetAddModal) {
+                    document.getElementById('weekly-options').style.display = 'none';
+                    document.getElementById('monthly-options').style.display = 'none';
+                    document.getElementById('yearly-options').style.display = 'none';
+                    document.getElementById('monthly-day-container').innerHTML = '';
+                }
+            }
+        }
+        ["mousedown", "touchstart"].forEach(function(evtType) {
+            addIncomeModal.addEventListener(evtType, function(event) {
+                closeModalOnOverlay(event, addIncomeModal, true);
+            });
+        });
+
+        // Add monthly day select
+        document.getElementById('add-monthly-day-btn').addEventListener('click', function() {
+            const newSelect = createMonthlyDaySelect('monthly_days[]');
+            document.getElementById('monthly-day-container').appendChild(newSelect);
+        });
+
+        // Show cadence options
+        document.getElementById('cadence-unit').addEventListener('change', function() {
+            const unit = this.value;
+            document.getElementById('weekly-options').style.display = 'none';
+            document.getElementById('monthly-options').style.display = 'none';
+            document.getElementById('yearly-options').style.display = 'none';
+
+            if (unit === 'weeks') {
+                document.getElementById('weekly-options').style.display = 'flex';
+            } else if (unit === 'months') {
+                document.getElementById('monthly-options').style.display = 'block';
+                const container = document.getElementById('monthly-day-container');
+                container.innerHTML = '';
+                const selectContainer = createMonthlyDaySelect('monthly_days[]');
+                container.appendChild(selectContainer);
+            } else if (unit === 'years') {
+                document.getElementById('yearly-options').style.display = 'block';
+            }
+        });
+
+        // Three-way toggle: End Date / No End Date / Use Occurrences
+        function setGreyedOut(selector, greyed) {
+            $(selector).css('opacity', greyed ? 0.5 : 1);
+        }
+
+        function updateIncomeEndDateState() {
+            var noEnd = $('#no-end-date-checkbox').is(':checked');
+            var useOcc = $('#use-occurrences-checkbox').is(':checked');
+            if (noEnd) {
+                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', false);
+                setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', true);
+                $('#end-date-label-container, #end-date-input-container').css('opacity', 0.5);
+                $('#end_date').prop('disabled', true);
+                $('#occurrences-count').prop('disabled', true).val('');
+            } else if (useOcc) {
+                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', true);
+                setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', false);
+                $('#end-date-label-container, #end-date-input-container').css('opacity', 0.5);
+                $('#end_date').prop('disabled', true);
+                $('#occurrences-count').prop('disabled', false);
+            } else {
+                var hasEndDate = $('#end_date').val() !== '';
+                setGreyedOut('.date-checkbox-row:has(#no-end-date-checkbox)', hasEndDate);
+                setGreyedOut('.date-checkbox-row:has(#use-occurrences-checkbox)', hasEndDate);
+                $('#end-date-label-container, #end-date-input-container').css('opacity', 1);
+                $('#end_date').prop('disabled', false);
+                $('#occurrences-count').prop('disabled', true).val('');
+            }
+        }
+
+        $('#no-end-date-checkbox').on('change', function() {
+            if (this.checked) $('#use-occurrences-checkbox').prop('checked', false);
+            updateIncomeEndDateState();
+        });
+        $('#use-occurrences-checkbox').on('change', function() {
+            if (this.checked) $('#no-end-date-checkbox').prop('checked', false);
+            updateIncomeEndDateState();
+        });
+        $('#end_date').on('change input', function() {
+            updateIncomeEndDateState();
+        });
+        // Click on end date to activate it (Income modal)
+        $('#end-date-label-container, #end-date-input-container').on('click', function() {
+            if ($('#end_date').prop('disabled')) {
+                $('#no-end-date-checkbox').prop('checked', false);
+                $('#use-occurrences-checkbox').prop('checked', false);
+                updateIncomeEndDateState();
+                $('#end_date').focus();
+            }
+        });
+
+        // Auto-calculate end date when occurrences or cadence changes
+        $('#occurrences-count, #start_date, #cadence-interval, #cadence-unit, input[name="weekdays"], .monthly-day-select, #yearly-day, #yearly-month').on('input change', function() {
+            if ($('#use-occurrences-checkbox').is(':checked')) {
+                const start = $('#start_date').val();
+                const interval = $('#cadence-interval').val();
+                const unit = $('#cadence-unit').val();
+                const occ = $('#occurrences-count').val();
+                let selectedWeekdays = [];
+                $('input[name="weekdays"]:checked').each(function() {
+                    selectedWeekdays.push($(this).val());
+                });
+                let selectedMonthlyDays = [];
+                $('div#monthly-day-container .monthly-day-select').each(function() {
+                    if ($(this).val()) selectedMonthlyDays.push($(this).val());
+                });
+                const yearlyDay = $('#yearly-day').val();
+                const yearlyMonth = $('#yearly-month').val();
+                $('#end_date').val(
+                    calculateEndDateFromOccurrences(start, interval, unit, occ, selectedWeekdays, selectedMonthlyDays, yearlyDay, yearlyMonth)
+                );
+            }
+        });
+
+        // Helper: createMonthlyDaySelect
+        function createMonthlyDaySelect(nameAttr, selectedValue = null) {
+            const containerDiv = document.createElement('div');
+            containerDiv.className = 'monthly-day-select-container';
+            const select = document.createElement('select');
+            select.name = nameAttr;
+            select.className = 'monthly-day-select';
+            for (let i = 1; i <= 31; i++) {
+                const option = document.createElement('option');
+                option.value = i.toString();
+                option.text = i.toString();
+                if (selectedValue && selectedValue == i.toString()) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            }
+            const lastDayOption = document.createElement('option');
+            lastDayOption.value = 'Last Day';
+            lastDayOption.text = 'Last Day';
+            if (selectedValue && selectedValue == 'Last Day') {
+                lastDayOption.selected = true;
+            }
+            select.appendChild(lastDayOption);
+            containerDiv.appendChild(select);
+            const minusButton = document.createElement('button');
+            minusButton.type = 'button';
+            minusButton.className = 'remove-day-btn';
+            minusButton.textContent = '-';
+            minusButton.addEventListener('click', function() {
+                const container = containerDiv.parentNode;
+                const totalSelects = container.querySelectorAll('.monthly-day-select-container').length;
+                if (totalSelects > 1) {
+                    container.removeChild(containerDiv);
+                } else {
+                    showToast('At least one day must be selected.', 'warning');
+                }
+            });
+            containerDiv.appendChild(minusButton);
+            return containerDiv;
+        }
+
+        // Form submission for Add Recurring Income
+        $('#add-recurring-income-form').on('submit', function(event) {
+            event.preventDefault();
+            const startDate = $('#start_date').val();
+            const endDate = $('#end_date').val();
+            const noEndDateChecked = $('#no-end-date-checkbox').is(':checked');
+            const useOccChecked = $('#use-occurrences-checkbox').is(':checked');
+            if (!noEndDateChecked && !useOccChecked && !endDate) {
+                showEndDateWarning('#end_date');
+                return false;
+            }
+            if (new Date(endDate) < new Date(startDate)) {
+                showToast("End date cannot be earlier than the start date.", 'warning');
+                return false;
+            }
+            if (!validateDateRange(startDate, endDate, noEndDateChecked)) {
+                return;
+            }
+            let selectedWeekdays = [];
+            $('input[name="weekdays"]:checked').each(function() {
+                selectedWeekdays.push($(this).val());
+            });
+            let selectedMonthlyDays = [];
+            $('div#monthly-day-container .monthly-day-select').each(function() {
+                if ($(this).val()) {
+                    selectedMonthlyDays.push($(this).val());
+                }
+            });
+            const incomeSelectedCategoryId = $('#income-category-id-hidden').val();
+            const formData = {
+                amount: $('#amount').val(),
+                cadence_interval: $('#cadence-interval').val(),
+                cadence_unit: $('#cadence-unit').val(),
+                start_date: startDate,
+                end_date: endDate,
+                weekdays: selectedWeekdays,
+                monthly_days: selectedMonthlyDays,
+                wage_bill: parseInt($('#wage-bill-select').val())
+            };
+            if (incomeSelectedCategoryId) {
+                formData.category_id = incomeSelectedCategoryId;
+            } else {
+                formData.category_name = $('#category_name').val();
+                // Duplicate check before creating new category
+                if (checkCategoryDuplicate(document.getElementById('category_name'), typeof incomeCategories !== 'undefined' ? incomeCategories : [])) return false;
+            }
+            formData.no_end_date = $('#no-end-date-checkbox').is(':checked') ? 1 : 0;
+            if ($('#cadence-unit').val() === 'years') {
+                const yearlyDay = $('#yearly-day').val();
+                const yearlyMonth = $('#yearly-month').val();
+                if (!yearlyDay || !yearlyMonth) {
+                    showToast("Please select both a day and a month for yearly recurrence.", 'warning');
+                    return false;
+                }
+                formData.yearly_day = yearlyDay;
+                formData.yearly_month = yearlyMonth;
+            }
+            if ($('#use-occurrences-checkbox').is(':checked')) {
+                const start = $('#start_date').val();
+                const interval = $('#cadence-interval').val();
+                const unit = $('#cadence-unit').val();
+                const occ = $('#occurrences-count').val();
+                let selectedWeekdays = [];
+                $('input[name="weekdays"]:checked').each(function() {
+                    selectedWeekdays.push($(this).val());
+                });
+                let selectedMonthlyDays = [];
+                $('div#monthly-day-container .monthly-day-select').each(function() {
+                    if ($(this).val()) selectedMonthlyDays.push($(this).val());
+                });
+                const yearlyDay = $('#yearly-day').val();
+                const yearlyMonth = $('#yearly-month').val();
+                formData.end_date = calculateEndDateFromOccurrences(start, interval, unit, occ, selectedWeekdays, selectedMonthlyDays, yearlyDay, yearlyMonth);
+                formData.occurrences_count = occ;
+            } else {
+                formData.occurrences_count = null;
+            }
+            if ($('#no-end-date-checkbox').is(':checked')) {
+                formData.end_date = getFiveYearsFromNowEndDateString();
+            }
+            document.getElementById('add-income-modal').style.display = 'none';
+            document.getElementById('loading-screen').style.display = 'flex';
+            $.ajax({
+                url: "{{ url_for('add_recurring_income') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(formData),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        saveDailyTotalsAndRemainders();
+                        location.reload();
+                        document.getElementById('loading-screen').style.display = 'none';
+                    } else {
+                        showToast(response.message || 'Failed to add recurring income.', 'error');
+                        document.getElementById('loading-screen').style.display = 'none';
+                    }
+                },
+                error: function(xhr, status, error) {
+                    const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'An error occurred while adding recurring income.';
+                    showToast(msg, 'error');
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            });
+        });
+
+    ////////////////////////////////////// Expenses ///////////////////////////////////
+    // Open Add Expense Modal
+    const addExpenseModal = document.getElementById("add-expense-modal");
+
+    // Close modal when clicking outside
+    function closeModalOnOverlay(event, modal, resetAddModal = false) {
+        if (event.target === modal) {
+            modal.style.display = "none";
+            if (resetAddModal) {
+                document.getElementById('weekly-options').style.display = 'none';
+                document.getElementById('monthly-options').style.display = 'none';
+                document.getElementById('yearly-options').style.display = 'none';
+                document.getElementById('monthly-day-container').innerHTML = '';
+            }
+        }
+    }
+    ["mousedown", "touchstart"].forEach(function(evtType) {
+        addExpenseModal.addEventListener(evtType, function(event) {
+            closeModalOnOverlay(event, addExpenseModal, true);
+        });
+    });
+
+    // Add monthly day select for expense modal
+    document.getElementById('expense-add-monthly-day-btn').addEventListener('click', function() {
+        const newSelect = createMonthlyDaySelect('monthly_days[]');
+        document.getElementById('expense-monthly-day-container').appendChild(newSelect);
+    });
+
+    // Show cadence options
+    document.getElementById('expense-cadence-unit').addEventListener('change', function() {
+        const unit = this.value;
+        document.getElementById('expense-weekly-options').style.display = 'none';
+        document.getElementById('expense-monthly-options').style.display = 'none';
+        document.getElementById('expense-yearly-options').style.display = 'none';
+
+        if (unit === 'weeks') {
+            document.getElementById('expense-weekly-options').style.display = 'flex';
+        } else if (unit === 'months') {
+            document.getElementById('expense-monthly-options').style.display = 'block';
+            const container = document.getElementById('expense-monthly-day-container');
+            container.innerHTML = '';
+            const selectContainer = createMonthlyDaySelect('monthly_days[]');
+            container.appendChild(selectContainer);
+        } else if (unit === 'years') {
+            document.getElementById('expense-yearly-options').style.display = 'block';
+        }
+    });
+
+    // Three-way toggle: End Date / No End Date / Use Occurrences (Expense)
+    function updateExpenseEndDateState() {
+        var noEnd = $('#expense-no-end-date-checkbox').is(':checked');
+        var useOcc = $('#expense-use-occurrences-checkbox').is(':checked');
+        if (noEnd) {
+            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', false);
+            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', true);
+            $('#expense-end-date-label-container, #expense-end-date-input-container').css('opacity', 0.5);
+            $('#expense-end_date').prop('disabled', true);
+            $('#expense-occurrences-count').prop('disabled', true).val('');
+        } else if (useOcc) {
+            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', true);
+            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', false);
+            $('#expense-end-date-label-container, #expense-end-date-input-container').css('opacity', 0.5);
+            $('#expense-end_date').prop('disabled', true);
+            $('#expense-occurrences-count').prop('disabled', false);
+        } else {
+            var hasEndDate = $('#expense-end_date').val() !== '';
+            setGreyedOut('.date-checkbox-row:has(#expense-no-end-date-checkbox)', hasEndDate);
+            setGreyedOut('.date-checkbox-row:has(#expense-use-occurrences-checkbox)', hasEndDate);
+            $('#expense-end-date-label-container, #expense-end-date-input-container').css('opacity', 1);
+            $('#expense-end_date').prop('disabled', false);
+            $('#expense-occurrences-count').prop('disabled', true).val('');
+        }
+    }
+    $('#expense-no-end-date-checkbox').on('change', function() {
+        if (this.checked) $('#expense-use-occurrences-checkbox').prop('checked', false);
+        updateExpenseEndDateState();
+    });
+    $('#expense-use-occurrences-checkbox').on('change', function() {
+        if (this.checked) $('#expense-no-end-date-checkbox').prop('checked', false);
+        updateExpenseEndDateState();
+    });
+    $('#expense-end_date').on('change input', function() {
+        updateExpenseEndDateState();
+    });
+    // Click on end date to activate it (Expense modal)
+    $('#expense-end-date-label-container, #expense-end-date-input-container').on('click', function() {
+        if ($('#expense-end_date').prop('disabled')) {
+            $('#expense-no-end-date-checkbox').prop('checked', false);
+            $('#expense-use-occurrences-checkbox').prop('checked', false);
+            updateExpenseEndDateState();
+            $('#expense-end_date').focus();
+        }
+    });
+
+    // Auto-calculate end date when occurrences or cadence changes
+    $('#occurrences-count, #start_date, #cadence-interval, #cadence-unit, input[name="weekdays"], .monthly-day-select, #yearly-day, #yearly-month').on('input change', function() {
+        if ($('#use-occurrences-checkbox').is(':checked')) {
+            const start = $('#start_date').val();
+            const interval = $('#cadence-interval').val();
+            const unit = $('#cadence-unit').val();
+            const occ = $('#occurrences-count').val();
+            let selectedWeekdays = [];
+            $('input[name="weekdays"]:checked').each(function() {
+                selectedWeekdays.push($(this).val());
+            });
+            let selectedMonthlyDays = [];
+            $('div#monthly-day-container .monthly-day-select').each(function() {
+                if ($(this).val()) selectedMonthlyDays.push($(this).val());
+            });
+            const yearlyDay = $('#yearly-day').val();
+            const yearlyMonth = $('#yearly-month').val();
+            $('#end_date').val(
+                calculateEndDateFromOccurrences(start, interval, unit, occ, selectedWeekdays, selectedMonthlyDays, yearlyDay, yearlyMonth)
+            );
+        }
+    });
+
+    // Helper: createMonthlyDaySelect
+    function createMonthlyDaySelect(nameAttr, selectedValue = null) {
+        const containerDiv = document.createElement('div');
+        containerDiv.className = 'monthly-day-select-container';
+        const select = document.createElement('select');
+        select.name = nameAttr;
+        select.className = 'monthly-day-select';
+        for (let i = 1; i <= 31; i++) {
+            const option = document.createElement('option');
+            option.value = i.toString();
+            option.text = i.toString();
+            if (selectedValue && selectedValue == i.toString()) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        }
+        const lastDayOption = document.createElement('option');
+        lastDayOption.value = 'Last Day';
+        lastDayOption.text = 'Last Day';
+        if (selectedValue && selectedValue == 'Last Day') {
+            lastDayOption.selected = true;
+        }
+        select.appendChild(lastDayOption);
+        containerDiv.appendChild(select);
+        const minusButton = document.createElement('button');
+        minusButton.type = 'button';
+        minusButton.className = 'remove-day-btn';
+        minusButton.textContent = '-';
+        minusButton.addEventListener('click', function() {
+            const container = containerDiv.parentNode;
+            const totalSelects = container.querySelectorAll('.monthly-day-select-container').length;
+            if (totalSelects > 1) {
+                container.removeChild(containerDiv);
+            } else {
+                showToast('At least one day must be selected.', 'warning');
+            }
+        });
+        containerDiv.appendChild(minusButton);
+        return containerDiv;
+    }
+
+    // Form submission for Add Recurring Expense
+    $('#add-recurring-expense-form').on('submit', function(event) {
+        event.preventDefault();
+        const $form = $('#add-recurring-expense-form');
+        const startDate = $form.find('#expense-start_date').val();
+        const endDate = $form.find('#expense-end_date').val();
+        const noEndDateChecked = $form.find('#expense-no-end-date-checkbox').is(':checked');
+        const useOccChecked = $form.find('#expense-use-occurrences-checkbox').is(':checked');
+        if (!noEndDateChecked && !useOccChecked && !endDate) {
+            showEndDateWarning('#expense-end_date');
+            return false;
+        }
+        if (new Date(endDate) < new Date(startDate)) {
+            showToast("End date cannot be earlier than the start date.", 'warning');
+            return false;
+        }
+        if (!validateDateRange(startDate, endDate, noEndDateChecked)) {
+            return;
+        }
+        let selectedWeekdays = [];
+        $form.find('input[name="weekdays"]:checked').each(function() {
+            selectedWeekdays.push($(this).val());
+        });
+        let selectedMonthlyDays = [];
+        $form.find('div#monthly-day-container .monthly-day-select').each(function() {
+            if ($(this).val()) {
+                selectedMonthlyDays.push($(this).val());
+            }
+        });
+        const expenseSelectedCategoryId = $form.find('#expense-category-id-hidden').val();
+        const formData = {
+            amount: $form.find('#expense-amount').val(),
+            cadence_interval: $form.find('#expense-cadence-interval').val(),
+            cadence_unit: $form.find('#expense-cadence-unit').val(),
+            start_date: startDate,
+            end_date: endDate,
+            weekdays: selectedWeekdays,
+            monthly_days: selectedMonthlyDays,
+            wage_bill: parseInt($form.find('#expense-wage-bill-select').val())
+        };
+        if (expenseSelectedCategoryId) {
+            formData.category_id = expenseSelectedCategoryId;
+        } else {
+            formData.category_name = $form.find('#expense-category_name').val();
+            // Duplicate check before creating new category
+            if (checkCategoryDuplicate(document.getElementById('expense-category_name'), typeof expenseCategories !== 'undefined' ? expenseCategories : [])) return false;
+        }
+        formData.no_end_date = $form.find('#expense-no-end-date-checkbox').is(':checked') ? 1 : 0;
+        if ($form.find('#expense-cadence-unit').val() === 'years') {
+            const yearlyDay = $form.find('#expense-yearly-day').val();
+            const yearlyMonth = $form.find('#expense-yearly-month').val();
+            if (!yearlyDay || !yearlyMonth) {
+                showToast("Please select both a day and a month for yearly recurrence.", 'warning');
+                return false;
+            }
+            formData.yearly_day = yearlyDay;
+            formData.yearly_month = yearlyMonth;
+        }
+        if ($form.find('#expense-use-occurrences-checkbox').is(':checked')) {
+            const start = $form.find('#expense-start_date').val();
+            const interval = $form.find('#expense-cadence-interval').val();
+            const unit = $form.find('#expense-cadence-unit').val();
+            const occ = $form.find('#expense-occurrences-count').val();
+            let selectedWeekdays = [];
+            $form.find('input[name="weekdays"]:checked').each(function() {
+                selectedWeekdays.push($(this).val());
+            });
+            let selectedMonthlyDays = [];
+            $form.find('div#monthly-day-container .monthly-day-select').each(function() {
+                if ($(this).val()) selectedMonthlyDays.push($(this).val());
+            });
+            const yearlyDay = $form.find('#expense-yearly-day').val();
+            const yearlyMonth = $form.find('#expense-yearly-month').val();
+            formData.end_date = calculateEndDateFromOccurrences(start, interval, unit, occ, selectedWeekdays, selectedMonthlyDays, yearlyDay, yearlyMonth);
+            formData.occurrences_count = occ;
+        } else {
+            formData.occurrences_count = null;
+        }
+        if ($form.find('#expense-no-end-date-checkbox').is(':checked')) {
+            formData.end_date = getFiveYearsFromNowEndDateString();
+        }
+        document.getElementById('add-expense-modal').style.display = 'none';
+        document.getElementById('loading-screen').style.display = 'flex';
+        $.ajax({
+            url: "{{ url_for('add_recurring_expense') }}",
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(formData),
+            success: function(response) {
+                if (response.status === 'success') {
+                    saveDailyTotalsAndRemainders();
+                    location.reload();
+                    document.getElementById('loading-screen').style.display = 'none';
+                } else {
+                    showToast(response.message || 'Failed to add recurring expense.', 'error');
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            },
+            error: function(xhr, status, error) {
+                const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'An error occurred while adding recurring expense.';
+                showToast(msg, 'error');
+                document.getElementById('loading-screen').style.display = 'none';
+            }
+        });
+    });
+    
+    function getTodayDateString() {
+        var today = new Date();
+        var year = today.getFullYear();
+        var month = (today.getMonth() + 1).toString().padStart(2, '0'); // Months are zero-based
+        var day = today.getDate().toString().padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    function validateDateRange(startDate, endDate, noEndDateChecked) {
+        const currentYear = new Date().getFullYear();
+
+        // Set the allowed range
+        const minStartDate = new Date(currentYear - 1, 0, 1); // January 1st of the previous year
+        const maxEndDate = new Date(currentYear + 3, 11, 31); // December 31st, 3 years from now
+
+        const start = new Date(startDate);
+
+        if (start < minStartDate) {
+            showToast(`Start date cannot be earlier than January 1, ${currentYear - 1}`, 'warning');
+            return false;
+        }
+
+        if (!noEndDateChecked) {
+            const end = new Date(endDate);
+
+            if (end > maxEndDate) {
+                showToast(`End date cannot be later than December 31, ${currentYear + 3}`, 'warning');
+                return false;
+            }
+
+            if (start > end) {
+                showToast("End date cannot be earlier than the start date.", 'warning');
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    function getFiveYearsFromNowEndDateString() {
+        var today = new Date();
+        var year = today.getFullYear() + 3;
+        return `${year}-12-31`;
+    }
+
+    // Calculate end date from occurrences, cadence, and start date
+    function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences, selectedWeekdays = [], selectedMonthlyDays = [], yearlyDay = null, yearlyMonth = null) {
+        if (!startDate || !interval || !unit || !occurrences) return '';
+        interval = parseInt(interval, 10);
+        occurrences = parseInt(occurrences, 10);
+        if (isNaN(interval) || isNaN(occurrences) || occurrences < 1) return '';
+        let date = new Date(startDate);
+
+        // --- Weekly with selected weekdays ---
+        if (unit === 'weeks' && selectedWeekdays.length > 0) {
+            const weekdayMap = {
+                sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+                thursday: 4, friday: 5, saturday: 6
+            };
+            const weekdayNums = selectedWeekdays.map(w => weekdayMap[w.toLowerCase()]).sort((a, b) => a - b);
+
+            let occurrencesLeft = occurrences;
+            let current = new Date(date);
+            let foundDates = [];
+
+            while (occurrencesLeft > 0) {
+                for (let i = 0; i < weekdayNums.length && occurrencesLeft > 0; i++) {
+                    let next = new Date(current);
+                    let dayDiff = (weekdayNums[i] - next.getDay() + 7) % 7;
+                    next.setDate(next.getDate() + (dayDiff === 0 && foundDates.length === 0 && next >= date ? 0 : dayDiff));
+                    if (next > date || (dayDiff === 0 && foundDates.length === 0 && next >= date)) {
+                        foundDates.push(new Date(next));
+                        occurrencesLeft--;
+                    }
+                }
+                current.setDate(current.getDate() + 7 * interval);
+            }
+            const last = foundDates[foundDates.length - 1];
+            return formatDateUTC(last);
+        }
+
+        // --- Monthly with selected days ---
+        if (unit === 'months' && selectedMonthlyDays.length > 0) {
+            let occurrencesLeft = occurrences;
+            let foundDates = [];
+            let current = new Date(date);
+            let monthlyDays = selectedMonthlyDays.map(d => d === 'Last Day' ? 32 : parseInt(d, 10)).sort((a, b) => a - b);
+
+            // Start from the month of the start date
+            while (occurrencesLeft > 0) {
+                let year = current.getFullYear();
+                let month = current.getMonth();
+                let daysInMonth = new Date(year, month + 1, 0).getDate();
+
+                // For each selected day in this month, in order
+                for (let i = 0; i < monthlyDays.length && occurrencesLeft > 0; i++) {
+                    let day = monthlyDays[i];
+                    let actualDay = (day === 32) ? daysInMonth : Math.min(day, daysInMonth);
+                    let next = new Date(Date.UTC(year, month, actualDay)); // Use UTC
+
+                    // Only count if it's after the start date, or it's the first occurrence and >= start date
+                    if (
+                        (foundDates.length === 0 && next >= date) ||
+                        (foundDates.length > 0 && next > foundDates[foundDates.length - 1])
+                    ) {
+                        foundDates.push(next);
+                        occurrencesLeft--;
+                        if (occurrencesLeft === 0) break;
+                    }
+                }
+                // Move to next month
+                current.setUTCMonth(current.getUTCMonth() + 1);
+                current.setUTCDate(1); // Avoid overflow
+            }
+            const last = foundDates[foundDates.length - 1];
+            return formatDateUTC(last);
+        }
+
+        // --- Yearly with specific month and day ---
+        if (unit === 'years' && yearlyDay && yearlyMonth) {
+            let occurrencesLeft = occurrences;
+            let current = new Date(date);
+            let foundDates = [];
+            yearlyDay = parseInt(yearlyDay, 10);
+            yearlyMonth = parseInt(yearlyMonth, 10) - 1; // JS months are 0-based
+
+            while (occurrencesLeft > 0) {
+                let year = current.getFullYear();
+                let daysInMonth = new Date(year, yearlyMonth + 1, 0).getDate();
+                let actualDay = Math.min(yearlyDay, daysInMonth);
+                let next = new Date(year, yearlyMonth, actualDay);
+                if (next > date || (foundDates.length === 0 && next >= date)) {
+                    foundDates.push(new Date(next));
+                    occurrencesLeft--;
+                }
+                // Move to next interval year
+                current.setFullYear(current.getFullYear() + interval);
+            }
+            const last = foundDates[foundDates.length - 1];
+            return formatDateUTC(last);
+        }
+
+        // --- Default for simple day/week/month/year cadence ---
+        if (unit === 'days') date.setDate(date.getDate() + interval * (occurrences - 1));
+        else if (unit === 'weeks') date.setDate(date.getDate() + interval * 7 * (occurrences - 1));
+        else if (unit === 'months') date.setMonth(date.getMonth() + interval * (occurrences - 1));
+        else if (unit === 'years') date.setFullYear(date.getFullYear() + interval * (occurrences - 1));
+        return formatDateUTC(date);
+    }
+
+    function formatDateUTC(date) {
+        const year = date.getUTCFullYear();
+        const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+        const day = date.getUTCDate().toString().padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+
+    ////////////////////////////////////////////////////// Credit Accounts ////////////////////////////////////////////////
+
+    // Clear CA category input when account changes
+    $('#ca-account-id').on('change', function() {
+        $('#ca-category-input').val('');
+        $('#ca-category-id-hidden').val('');
+    });
+
+    // Also clear when the modal becomes visible
+    const caCatObserver = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.attributeName === 'style') {
+                const modal = document.getElementById('add-ca-modal');
+                if (modal && modal.style.display === 'flex') {
+                    $('#ca-category-input').val('');
+                    $('#ca-category-id-hidden').val('');
+                }
+            }
+        });
+    });
+    const recurringCaModal = document.getElementById('add-ca-modal');
+    if (recurringCaModal) {
+        caCatObserver.observe(recurringCaModal, { attributes: true, attributeFilter: ['style'] });
+    }
+
+    // Show/hide cadence options for CA modal
+    $('#ca-cadence-unit').on('change', function() {
+        $('#ca-weekly-options, #ca-monthly-options, #ca-yearly-options').hide();
+        if (this.value === 'weeks') $('#ca-weekly-options').show();
+        else if (this.value === 'months') $('#ca-monthly-options').show();
+        else if (this.value === 'years') $('#ca-yearly-options').show();
+    });
+
+    // Add monthly day select for CA modal
+    $('#ca-add-monthly-day-btn').on('click', function() {
+        const newSelect = createMonthlyDaySelect('monthly_days[]');
+        $('#ca-monthly-day-container').append(newSelect);
+    });
+
+    // Three-way toggle: End Date / No End Date / Use Occurrences (CA)
+    function updateCaEndDateState() {
+        var noEnd = $('#ca-no-end-date-checkbox').is(':checked');
+        var useOcc = $('#ca-use-occurrences-checkbox').is(':checked');
+        if (noEnd) {
+            setGreyedOut('.date-checkbox-row:has(#ca-no-end-date-checkbox)', false);
+            setGreyedOut('.date-checkbox-row:has(#ca-use-occurrences-checkbox)', true);
+            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 0.5);
+            $('#ca-end-date').prop('disabled', true);
+            $('#ca-occurrences-count').prop('disabled', true).val('');
+        } else if (useOcc) {
+            setGreyedOut('.date-checkbox-row:has(#ca-no-end-date-checkbox)', true);
+            setGreyedOut('.date-checkbox-row:has(#ca-use-occurrences-checkbox)', false);
+            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 0.5);
+            $('#ca-end-date').prop('disabled', true);
+            $('#ca-occurrences-count').prop('disabled', false);
+        } else {
+            var hasEndDate = $('#ca-end-date').val() !== '';
+            setGreyedOut('.date-checkbox-row:has(#ca-no-end-date-checkbox)', hasEndDate);
+            setGreyedOut('.date-checkbox-row:has(#ca-use-occurrences-checkbox)', hasEndDate);
+            $('#ca-end-date-label-container, #ca-end-date-input-container').css('opacity', 1);
+            $('#ca-end-date').prop('disabled', false);
+            $('#ca-occurrences-count').prop('disabled', true).val('');
+        }
+    }
+    $('#ca-no-end-date-checkbox').on('change', function() {
+        if (this.checked) $('#ca-use-occurrences-checkbox').prop('checked', false);
+        updateCaEndDateState();
+    });
+    $('#ca-use-occurrences-checkbox').on('change', function() {
+        if (this.checked) $('#ca-no-end-date-checkbox').prop('checked', false);
+        updateCaEndDateState();
+    });
+    $('#ca-end-date').on('change input', function() {
+        updateCaEndDateState();
+    });
+    // Click on end date to activate it (CA modal)
+    $('#ca-end-date-label-container, #ca-end-date-input-container').on('click', function() {
+        if ($('#ca-end-date').prop('disabled')) {
+            $('#ca-no-end-date-checkbox').prop('checked', false);
+            $('#ca-use-occurrences-checkbox').prop('checked', false);
+            updateCaEndDateState();
+            $('#ca-end-date').focus();
+        }
+    });
+
+    // Form submission for Add Recurring CA Expense
+    $('#add-recurring-ca-form').on('submit', function(event) {
+        event.preventDefault();
+        const $form = $(this);
+        const startDate = $form.find('#ca-start-date').val();
+        const endDate = $form.find('#ca-end-date').val();
+        const noEndDateChecked = $form.find('#ca-no-end-date-checkbox').is(':checked');
+        const useOccChecked = $form.find('#ca-use-occurrences-checkbox').is(':checked');
+        if (!noEndDateChecked && !useOccChecked && !endDate) {
+            showEndDateWarning('#ca-end-date');
+            return false;
+        }
+        if (new Date(endDate) < new Date(startDate)) {
+            showToast("End date cannot be earlier than the start date.", 'warning');
+            return false;
+        }
+        if (!validateDateRange(startDate, endDate, noEndDateChecked)) {
+            return;
+        }
+        let selectedWeekdays = [];
+        $form.find('input[name="weekdays"]:checked').each(function() {
+            selectedWeekdays.push($(this).val());
+        });
+        let selectedMonthlyDays = [];
+        $form.find('div#ca-monthly-day-container .monthly-day-select').each(function() {
+            if ($(this).val()) selectedMonthlyDays.push($(this).val());
+        });
+        const caSelectedCategoryId = $form.find('#ca-category-id-hidden').val();
+        if (!caSelectedCategoryId) {
+            showToast('Please select a category from the dropdown.', 'warning');
+            return false;
+        }
+        const formData = {
+            account_id: $form.find('#ca-account-id').val(),
+            category_id: caSelectedCategoryId,
+            amount: $form.find('#ca-amount').val(),
+            cadence_interval: $form.find('#ca-cadence-interval').val(),
+            cadence_unit: $form.find('#ca-cadence-unit').val(),
+            start_date: startDate,
+            end_date: endDate,
+            weekdays: selectedWeekdays,
+            monthly_days: selectedMonthlyDays
+        };
+        formData.no_end_date = $form.find('#ca-no-end-date-checkbox').is(':checked') ? 1 : 0;
+        if ($form.find('#ca-cadence-unit').val() === 'years') {
+            const yearlyDay = $form.find('#ca-yearly-day').val();
+            const yearlyMonth = $form.find('#ca-yearly-month').val();
+            if (!yearlyDay || !yearlyMonth) {
+                showToast("Please select both a day and a month for yearly recurrence.", 'warning');
+                return false;
+            }
+            formData.yearly_day = yearlyDay;
+            formData.yearly_month = yearlyMonth;
+        }
+        if ($form.find('#ca-use-occurrences-checkbox').is(':checked')) {
+            const start = $form.find('#ca-start-date').val();
+            const interval = $form.find('#ca-cadence-interval').val();
+            const unit = $form.find('#ca-cadence-unit').val();
+            const occ = $form.find('#ca-occurrences-count').val();
+            let selectedWeekdays = [];
+            $form.find('input[name="weekdays"]:checked').each(function() {
+                selectedWeekdays.push($(this).val());
+            });
+            let selectedMonthlyDays = [];
+            $form.find('div#ca-monthly-day-container .monthly-day-select').each(function() {
+                if ($(this).val()) selectedMonthlyDays.push($(this).val());
+            });
+            const yearlyDay = $form.find('#ca-yearly-day').val();
+            const yearlyMonth = $form.find('#ca-yearly-month').val();
+            formData.end_date = calculateEndDateFromOccurrences(start, interval, unit, occ, selectedWeekdays, selectedMonthlyDays, yearlyDay, yearlyMonth);
+            formData.occurrences_count = occ;
+        } else {
+            formData.occurrences_count = null;
+        }
+        if ($form.find('#ca-no-end-date-checkbox').is(':checked')) {
+            formData.end_date = getFiveYearsFromNowEndDateString();
+        }
+        document.getElementById('add-ca-modal').style.display = 'none';
+        document.getElementById('loading-screen').style.display = 'flex';
+        $.ajax({
+            url: "/add-recurring-ca-expense",
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(formData),
+            success: function(response) {
+                if (response.status === 'success') {
+                    saveCaDailyBalance();
+                    location.reload();
+                    document.getElementById('loading-screen').style.display = 'none';
+                } else {
+                    showToast(response.message || 'Failed to add recurring CA expense.', 'error');
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            },
+            error: function(xhr, status, error) {
+                const msg = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : 'An error occurred while adding recurring CA expense.';
+                showToast(msg, 'error');
+                document.getElementById('loading-screen').style.display = 'none';
+            }
+        });
+    });
+
+</script>

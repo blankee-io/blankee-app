@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Month Overview</title>
+    <!-- Link to the custom stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Include Font Awesome for icons -->
+    {% include '_fontawesome.html' %}
+    <!-- Include jQuery for easier DOM manipulation and AJAX -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <!-- Include jQuery UI for sortable tables and other UI interactions -->
+    <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
+    <!-- Link to the jQuery UI CSS for styling the sortable elements -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/jquery-ui.css') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+    {% include 'redis_auto_refresh.html' %}
+</head>
+<body id="dashboard-m-body">
+    <!-- Include the navigation bar -->
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <!-- Calendar navigation for moving between months -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <!-- Single button with repeat icon -->
+            <div class="nav-dash-container">
+                <!-- Link to Recurring Summary -->
+                <a href="{{ url_for('dashboard_summary') }}" class="nav-button">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Recurring Summary</span>
+                </a>
+                <!-- Inline nav buttons (icons only) -->
+                <div id="nav-inline-buttons">
+                    <a href="{{ url_for('dashboard_d') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-day"></i>
+                        <span class="nav-tooltip">Day View</span>
+                    </a>
+                    <a href="{{ url_for('dashboard') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-week"></i>
+                        <span class="nav-tooltip">Week View</span>
+                    </a>
+                    <a href="{{ url_for('dashboard_3m') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <span class="nav-tooltip">Month View</span>
+                    </a>
+                    <div class="nav-button nav-button-focus">
+                        <i class="fa-solid fa-calendar-exclamation"></i>
+                        <span class="nav-tooltip">Month Overview</span>
+                    </div>
+                    <a href="{{ url_for('dashboard_y') }}" class="nav-button">
+                        <i class="fa-solid fa-calendars"></i>
+                        <span class="nav-tooltip">Year Overview</span>
+                    </a>
+                </div>
+            </div>
+            <div class="calendarnavbuttons"> 
+                <a id="previous-nav-btn" class="nav-button" href="javascript:previousMonth()"><i class="fa-solid fa-left"></i><span class="nav-tooltip">Previous Month</span></a>
+                <a id="current-nav-btn" class="nav-button" href="javascript:goToCurrentMonth()"><i class="fa-kit fa-solid-calendar-day-circle-arrow-down-tl"></i><span class="nav-tooltip">Go to Current Month</span></a>
+                <a id="next-nav-btn" class="nav-button" href="javascript:nextMonth()"><i class="fa-solid fa-right"></i><span class="nav-tooltip">Next Month</span></a>
+                <div id="next-indicator" style="display:none;text-align:center;">
+                    <span class="indicator-dot">!</span>
+                    <span class="nav-tooltip">An entry in the future is negative/below threshold!</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <!-- Calendar container -->
+        <div class="dashboard-m-calendar-container">
+            <div id="dashboard-m-month-year-header" class="dashboard-m-month-year-header">
+                <div class="month-wrapper">
+                    <select id="dashboard-m-month-dropdown" class="dashboard-m-month-dropdown">
+                        <!-- JavaScript will populate the month options dynamically -->
+                    </select>
+                </div>
+                <div class="year-wrapper">
+                    <select id="dashboard-m-year-dropdown" class="dashboard-m-year-dropdown">
+                        <!-- JavaScript will populate the year options dynamically -->
+                    </select>
+                </div>
+            </div>
+            <table id="dashboard-m-calendar">
+                <thead id="dashboard-m-calendar-header">
+                    <!-- This will be dynamically populated with week headers -->
+                </thead>
+                <tbody id="dashboard-m-calendar-body">
+                    <!-- This will be dynamically populated with the calendar days -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <!-- Include the navigation bar -->
+
+    <!-- Link to the external JavaScript file -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+
+    <script>
+
+        const currencyType = "{{ currency_type }}";
+        const currencySymbols = { USD: "$", EUR: "€" };
+        const currencySymbol = currencySymbols[currencyType] || currencyType;
+
+        // Get goofy_week_mode and selected_date from Flask template
+        const incomeCategories = {{ income_categories | tojson }};
+        const expenseCategories = {{ expense_categories | tojson }};
+        const incomeEntries = {{ income_entries | tojson }};
+        const expenseEntries = {{ expense_entries | tojson }};
+        const c_expense_categories = {{ c_expense_categories | tojson }};
+        const c_expense_entries = {{ c_expense_entries | tojson }};
+        const buds = {{ buds | default([]) | tojson }};
+        let goofyWeekMode = {{ goofy_week_mode|tojson }};
+        let selectedDate = new Date("{{ selected_date }}");
+        const currentMonthDate = new Date(selectedDate);  // Store the initially selected date
+        let totals_remainders_d = {{ totals_remainders_d|tojson }};
+        const balance_threshold = {{ balance_threshold|tojson }};
+        let member_since = {{ member_since | tojson | safe }};
+        let bank_sync_flags = {{ bank_sync_flags | tojson | safe }};
+        let bank_last_txn_date = {{ bank_last_txn_date | tojson | safe }};
+        let savingsEntries = {{ savings_entries | tojson }};
+        let ca_balances_d = {{ c_a_balances_d|tojson }};
+        const credit_accounts = {{ credit_accounts|tojson }};
+
+        let touchStartX = null;
+        let touchEndX = null;
+        let isAnimating = false;
+        let containerWidth = null;
+
+        const mainContainer = document.getElementById('main-container');
+    
+        // Function to handle the start of a touch event
+        function handleTouchStart(event) {
+            if (isAnimating) return;
+
+            touchStartX = event.touches[0].screenX;
+            touchStartY = event.touches[0].screenY; // Capture the vertical start point
+
+            containerWidth = mainContainer.offsetWidth;
+            isHorizontalSwipe = false; // Reset the swipe direction flag
+        }
+
+        // Function to handle touch movement
+        function handleTouchMove(event) {
+            if (!touchStartX || isAnimating) return;
+
+            touchCurrentX = event.touches[0].screenX;
+            const touchCurrentY = event.touches[0].screenY;
+            const swipeDistanceX = touchCurrentX - touchStartX;
+            const swipeDistanceY = touchCurrentY - touchStartY;
+
+            // Detect if the movement is primarily horizontal
+            if (Math.abs(swipeDistanceX) > Math.abs(swipeDistanceY)) {
+                isHorizontalSwipe = true; // Mark this as a horizontal swipe
+                event.preventDefault(); // Prevent scrolling on horizontal swipes
+
+                // Move the main container based on swipe distance
+                mainContainer.style.transform = `translateX(${swipeDistanceX}px)`;
+            }
+        }
+
+        // Function to handle the end of a touch event
+        function handleTouchEnd() {
+            if (!touchStartX || !isHorizontalSwipe) return; // Ignore if not a horizontal swipe
+
+            const swipeDistanceX = touchCurrentX - touchStartX;
+            const swipePercentage = Math.abs(swipeDistanceX) / containerWidth;
+
+            if (swipePercentage > 0.2) {
+                if (swipeDistanceX > 0) {
+                    // Swipe right - move to the previous week
+                    slideWithAnimation('right');
+                } else if (swipeDistanceX < 0) {
+                    // Swipe left - move to the next week
+                    slideWithAnimation('left');
+                }
+            } else {
+                // Reset the container position if swipe is less than 20%
+                mainContainer.style.transform = 'translateX(0)';
+            }
+
+            // Reset touch positions
+            touchStartX = null;
+            touchCurrentX = null;
+            isHorizontalSwipe = false; // Reset the swipe flag
+        }
+
+        // Function to animate the slide effect
+        function slideWithAnimation(direction) {
+            isAnimating = true;
+
+            if (direction === 'left') {
+                mainContainer.style.transition = 'transform 0.3s ease';
+                mainContainer.style.transform = `translateX(-${containerWidth}px)`;
+            } else if (direction === 'right') {
+                mainContainer.style.transition = 'transform 0.3s ease';
+                mainContainer.style.transform = `translateX(${containerWidth}px)`;
+            }
+
+            setTimeout(() => {
+                if (direction === 'left') {
+                    nextMonth();
+                } else if (direction === 'right') {
+                    previousMonth();
+                }
+
+                mainContainer.style.transition = 'none';
+                mainContainer.style.transform = 'translateX(0)';
+                isAnimating = false;
+            }, 300);  // Match the CSS transition duration
+        }
+
+        function updateMonthYearHeader(selectedDate) {
+            const monthDropdown = document.getElementById('dashboard-m-month-dropdown');
+            const yearDropdown = document.getElementById('dashboard-m-year-dropdown');
+
+            if (!monthDropdown || !yearDropdown) {
+                return;
+            }
+
+            const months = [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'
+            ];
+
+            const currentMonth = selectedDate.getMonth(); // 0-based month index
+            const currentYear = selectedDate.getFullYear();
+            const today = new Date();
+
+            // Limit year dropdown to between previous year and 3 years from now
+            const startYear = today.getFullYear() - 1; // Previous year
+            const endYear = today.getFullYear() + 3;   // 3 years from now
+
+            // Clear the dropdowns before repopulating them
+            monthDropdown.innerHTML = '';
+            yearDropdown.innerHTML = '';
+
+            // Populate the month dropdown
+            months.forEach((month, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = month;
+                if (index === currentMonth) {
+                    option.selected = true; // Select the current month
+                }
+                monthDropdown.appendChild(option);
+            });
+
+            // Populate the year dropdown with limited range
+            for (let year = startYear; year <= endYear; year++) {
+                const option = document.createElement('option');
+                option.value = year;
+                option.textContent = year;
+                if (year === currentYear) {
+                    option.selected = true; // Select the current year
+                }
+                yearDropdown.appendChild(option);
+            }
+
+            // Give the picker the same look as the add-entry fields on the daily
+            // dashboard. Called at the end of the one function that populates it,
+            // so it survives every repopulation. Idempotent.
+            enhanceSelectAsDropdown(monthDropdown);
+            enhanceSelectAsDropdown(yearDropdown);
+        }
+
+        function generateCalendar(goofyWeekMode, selectedDate) {
+            const year = selectedDate.getFullYear();
+            const month = selectedDate.getMonth();
+
+            // Calculate the first visible day (start of calendar grid)
+            const firstDayOfMonth = new Date(year, month, 1);
+            let gridStart = new Date(firstDayOfMonth);
+            while (gridStart.getDay() !== (goofyWeekMode ? 5 : 6)) {
+                gridStart.setDate(gridStart.getDate() - 1);
+            }
+
+            // Calculate the last visible day (end of calendar grid)
+            const lastDayOfMonth = new Date(year, month + 1, 0);
+            let gridEnd = new Date(lastDayOfMonth);
+            while (gridEnd.getDay() !== (goofyWeekMode ? 4 : 5)) {
+                gridEnd.setDate(gridEnd.getDate() + 1);
+            }
+
+            const startStr = gridStart.toISOString().split('T')[0];
+            const endStr = gridEnd.toISOString().split('T')[0];
+
+            $.ajax({
+                url: `/get_dashboard_m_data?start_date=${startStr}&end_date=${endStr}`,
+                type: "GET",
+                dataType: "json",
+                async: false,
+                success: function(response) {
+                    if (response.status === "success") {
+                        totals_remainders_d = response.totals_remainders_d || [];
+                        ca_balances_d = response.c_a_balances_d || [];
+                        savingsEntries = response.savings_entries || [];
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                }
+            });
+
+            const days = goofyWeekMode 
+                ? ['Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu']
+                : ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+
+            const today = new Date();
+            const todayDay = today.getDate();
+            const todayMonth = today.getMonth();
+            const todayYear = today.getFullYear();
+
+            const calendarBody = document.getElementById('dashboard-m-calendar-body');
+            calendarBody.innerHTML = '';
+
+            let currentDay = new Date(firstDayOfMonth);
+
+            // Adjust currentDay to the first visible day in the calendar grid
+            while (currentDay.getDay() !== (goofyWeekMode ? 5 : 6)) {
+                currentDay.setDate(currentDay.getDate() - 1);
+            }
+
+            let rows = 0;
+            while (rows < 6) {
+                const weekRow = document.createElement('tr');
+
+                for (let i = 0; i < 7; i++) {
+                    const dayCell = document.createElement('td');
+                    const dayDiv = document.createElement('div');
+                    dayDiv.classList.add('dashboard-m-date');
+                    
+                    // Store the date for navigation and make it clickable
+                    const dateStr = currentDay.toISOString().split('T')[0];
+                    dayDiv.setAttribute('data-date', dateStr);
+                    dayDiv.style.cursor = 'pointer';
+                    dayDiv.title = 'Click to view this day in daily view';
+
+                    const todayContainerDiv = document.createElement('div');
+                    todayContainerDiv.classList.add('dashboard-d-today-container');
+                    dayDiv.appendChild(todayContainerDiv);
+
+                    // Create a wrapper for sections that should be covered by other-month overlay
+                    const mainSectionsWrapper = document.createElement('div');
+                    mainSectionsWrapper.classList.add('dashboard-m-main-sections');
+
+                    const dayOfWeek = days[i % 7];
+                    const dayOfWeekDiv = document.createElement('div');
+                    dayOfWeekDiv.classList.add('dashboard-m-day-label');
+                    dayOfWeekDiv.textContent = dayOfWeek;
+                    
+                    // Add member_since badge and dimming
+                    let normalizedMemberSinceDate = null;
+                    if (member_since) {
+                        normalizedMemberSinceDate = member_since;
+                        if (member_since.length > 10 || member_since.includes('GMT')) {
+                            const msDate = new Date(member_since);
+                            if (!isNaN(msDate)) {
+                                normalizedMemberSinceDate = msDate.toISOString().split('T')[0];
+                            }
+                        }
+                        // Add badge if this is the member_since date
+                        if (dateStr === normalizedMemberSinceDate) {
+                            const badge = document.createElement('div');
+                            badge.className = 'member-since-badge';
+                            badge.title = 'Member Since';
+                            badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
+                            dayOfWeekDiv.appendChild(badge);
+                        }
+                        // Add dimming for dates before member_since
+                        if (dateStr < normalizedMemberSinceDate) {
+                            dayCell.classList.add('before-member-since');
+                        }
+                    }
+
+                    const dateNumberDiv = document.createElement('div');
+                    dateNumberDiv.classList.add('dashboard-m-date-number');
+                    dateNumberDiv.textContent = currentDay.getDate();
+                    
+                    // Add bank sync marker above the date (absolute positioned on dayDiv)
+                    if (bank_last_txn_date && bank_sync_flags && dateStr === bank_last_txn_date) {
+                        const txnDate = new Date(bank_last_txn_date + 'T00:00:00');
+                        const marker = document.createElement('span');
+                        marker.className = 'bank-sync-marker';
+                        marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+                        marker.innerHTML = '<span class="bank-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
+                        dayDiv.appendChild(marker);
+                    }
+
+                    const incomeTotalDiv = document.createElement('div');
+                    incomeTotalDiv.classList.add('dashboard-m-income-total');
+                    const incomeValue = getIncomeTotalForDate(currentDay);
+                    if (parseFloat(incomeValue) === 0) {
+                        incomeTotalDiv.classList.add('zero-value');
+                    }
+                    incomeTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-income">I</span> <span class="dashboard-m-value">${currencySymbol}${formatNumberWithCommas(parseFloat(incomeValue))}</span>`;
+
+                    const expenseTotalDiv = document.createElement('div');
+                    expenseTotalDiv.classList.add('dashboard-m-expense-total');
+                    const expenseValue = getExpenseTotalForDate(currentDay);
+                    if (parseFloat(expenseValue) === 0) {
+                        expenseTotalDiv.classList.add('zero-value');
+                    }
+                    expenseTotalDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-expense">E</span> <span class="dashboard-m-value">${currencySymbol}${formatNumberWithCommas(parseFloat(expenseValue))}</span>`;
+
+                    const remainderDiv = document.createElement('div');
+                    remainderDiv.classList.add('dashboard-m-remainder');
+                    const remainderValue = parseFloat(getRemainderForDate(currentDay));
+                    remainderDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-remainder">R</span> <span class="dashboard-m-value">${currencySymbol}${formatNumberWithCommas(remainderValue)}</span>`;
+                    
+                    const savingsDiv = document.createElement('div');
+                    savingsDiv.classList.add('dashboard-m-savings');
+                    const savingsValue = parseFloat(getSavingsForDate(currentDay));
+                    savingsDiv.innerHTML = `<span class="dashboard-m-label dashboard-m-label-savings">S</span> <span class="dashboard-m-value">${currencySymbol}${formatNumberWithCommas(savingsValue)}</span>`;
+
+                    let applyThresholdClass = true;
+                    if (member_since) {
+                        const cellDate = new Date(currentDay);
+                        const memberSinceDate = new Date(member_since);
+                        if (cellDate < memberSinceDate) {
+                            applyThresholdClass = false;
+                        }
+                    }
+                    if (applyThresholdClass) {
+                        if (remainderValue < 0) {
+                            remainderDiv.classList.add('negative');
+                        } else if (remainderValue < balance_threshold) {
+                            remainderDiv.classList.add('below-threshold');
+                        } else {
+                            remainderDiv.classList.add('above-threshold');
+                        }
+                    }
+
+                    const currentDayDate = currentDay.getDate();
+                    const currentDayMonth = currentDay.getMonth();
+                    const currentDayYear = currentDay.getFullYear();
+                    if (currentDayDate === todayDay && currentDayMonth === todayMonth && currentDayYear === todayYear) {
+                        dayCell.classList.add('dashboard-m-today');
+                        todayContainerDiv.textContent = "Today";
+                    }
+
+                    // Append main sections to the wrapper
+                    mainSectionsWrapper.appendChild(dayOfWeekDiv);
+                    mainSectionsWrapper.appendChild(dateNumberDiv);
+                    mainSectionsWrapper.appendChild(incomeTotalDiv);
+                    mainSectionsWrapper.appendChild(expenseTotalDiv);
+                    mainSectionsWrapper.appendChild(remainderDiv);
+
+                    // dateStr already declared above
+
+                    credit_accounts.forEach(account => {
+                        // Add divider for this credit account
+                        const caAccountDivider = document.createElement('div');
+                        caAccountDivider.className = 'dashboard-m-ca-account-divider';
+                        let initials = '';
+                        if (account.name) {
+                            const words = account.name.split(' ').filter(w => w.length > 0);
+                            if (words.length === 1) {
+                                // Single word: take first 2 characters
+                                initials = words[0].slice(0, 2).toUpperCase();
+                            } else {
+                                // Multiple words: take first letter of each, up to 2
+                                initials = words.map(word => word[0].toUpperCase()).join('').slice(0, 2);
+                            }
+                        } else {
+                            initials = 'CA';
+                        }
+                        const maskDisplay = account.mask ? account.mask.slice(-4) : '';
+                        caAccountDivider.innerHTML = `<span class="dashboard-m-ca-account-text">${initials}${maskDisplay}</span>`;
+                        mainSectionsWrapper.appendChild(caAccountDivider);
+
+                        const caBalance = ca_balances_d.find(item => {
+                            let itemDateStr;
+                            if (item.date.includes('GMT')) {
+                                itemDateStr = new Date(item.date).toISOString().split('T')[0];
+                            } else {
+                                itemDateStr = item.date;
+                            }
+                            return itemDateStr === dateStr && item.account_id == account.id;
+                        });
+
+                        const balanceValue = caBalance ? formatNumberWithCommas(parseFloat(caBalance.balance)) : '0.00';
+
+                        const caBalanceDiv = document.createElement('div');
+                        caBalanceDiv.classList.add('dashboard-m-ca-balance');
+                        caBalanceDiv.innerHTML = `<span class="dashboard-m-value">${currencySymbol}${balanceValue}</span>`;
+                        mainSectionsWrapper.appendChild(caBalanceDiv);
+                    });
+
+                    // Add teal divider for Savings section
+                    const savingsDivider = document.createElement('div');
+                    savingsDivider.className = 'dashboard-m-s-divider';
+                    savingsDivider.innerHTML = `<span class="dashboard-m-s-divider-text">S</span>`;
+                    mainSectionsWrapper.appendChild(savingsDivider);
+
+                    mainSectionsWrapper.appendChild(savingsDiv);
+
+                    // Append the wrapper to dayDiv
+                    dayDiv.appendChild(mainSectionsWrapper);
+
+                    if (currentDay.getMonth() !== selectedDate.getMonth()) {
+                        dayCell.classList.add('dashboard-m-other-month');
+                    }
+
+                    dayCell.appendChild(dayDiv);
+                    weekRow.appendChild(dayCell);
+                    currentDay.setDate(currentDay.getDate() + 1);
+                }
+
+                calendarBody.appendChild(weekRow);
+                rows++;
+
+                if (currentDay > lastDayOfMonth && rows >= 5) {
+                    break;
+                }
+            }
+
+            updateNextMonthIndicator();
+            
+            // Add click handlers to navigate to daily view
+            document.querySelectorAll('.dashboard-m-date').forEach(dateDiv => {
+                dateDiv.addEventListener('click', function() {
+                    const dateStr = this.getAttribute('data-date');
+                    if (dateStr) {
+                        const dateParts = dateStr.split('-');
+                        const year = parseInt(dateParts[0]);
+                        const month = parseInt(dateParts[1]) - 1; // 0-indexed
+                        const day = parseInt(dateParts[2]);
+                        window.location.href = `{{ url_for('dashboard_d') }}?year=${year}&month=${month}&day=${day}`;
+                    }
+                });
+            });
+
+            document.getElementById('loading-screen').style.display = 'none';
+        }
+
+
+        function getIncomeTotalForDate(date) {
+            const entry = totals_remainders_d.find(item => {
+                const itemDate = new Date(item.date); // Parse the date from totals_remainders_d in UTC
+                // Compare only the date part in UTC (ignore the time)
+                return itemDate.toISOString().split('T')[0] === date.toISOString().split('T')[0];
+            });
+            if (!entry) return '0.00';
+            const incomeTotal = parseFloat(entry.total_income) || 0;
+            const lastRemainder = parseFloat(entry.last_day_remainder) || 0;
+            const displayIncome = incomeTotal - lastRemainder;
+            return displayIncome.toFixed(2);
+        }
+
+        function getExpenseTotalForDate(date) {
+            const entry = totals_remainders_d.find(item => {
+                const itemDate = new Date(item.date); // Parse the date in UTC
+                return itemDate.toISOString().split('T')[0] === date.toISOString().split('T')[0];
+            });
+            return entry ? parseFloat(entry.total_expenses).toFixed(2) : '0.00';
+        }
+
+        function getRemainderForDate(date) {
+            const entry = totals_remainders_d.find(item => {
+                const itemDate = new Date(item.date); // Parse the date in UTC
+                return itemDate.toISOString().split('T')[0] === date.toISOString().split('T')[0];
+            });
+            return entry ? parseFloat(entry.remainder).toFixed(2) : '0.00';
+        }
+
+        function getCABalancesForDate(date) {
+            const dateStr = date.toISOString().split('T')[0];
+            // Normalize ca_balances_d date to YYYY-MM-DD for comparison
+            return ca_balances_d
+                .filter(item => {
+                    let itemDateStr;
+                    if (item.date.includes('GMT')) {
+                        // Parse RFC date string
+                        itemDateStr = new Date(item.date).toISOString().split('T')[0];
+                    } else {
+                        itemDateStr = item.date;
+                    }
+                    return itemDateStr === dateStr;
+                })
+                .map(item => ({
+                    account_id: item.account_id,
+                    balance: parseFloat(item.balance)
+                }));
+        }
+
+
+        function getSavingsForDate(date) {
+            const entry = savingsEntries.find(item => {
+                const itemDate = new Date(item.date);
+                return itemDate.toISOString().split('T')[0] === date.toISOString().split('T')[0];
+            });
+            return entry ? parseFloat(entry.amount) : 0;
+        }
+
+        function safeParseDate(date) {
+            if (!date || typeof date !== 'string') {
+                return null;
+            }
+            const parsedDate = new Date(date); // This should correctly parse the given date format
+            return isNaN(parsedDate.getTime()) ? null : parsedDate;
+        }
+
+        // Navigate to previous month
+        function previousMonth() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-right');
+            
+            document.getElementById('loading-screen').style.display = 'none';
+            selectedDate.setMonth(selectedDate.getMonth() - 1); // Move to previous month
+            
+            // Wait for animation to complete before regenerating calendar
+            setTimeout(() => {
+                mainContainer.classList.remove('slide-right');
+                updateMonthYearHeader(selectedDate);  // Update the dropdowns with the new selected month and year
+                generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
+            }, 50); // Small delay to ensure animation starts
+        }
+
+        // Navigate to next month
+        function nextMonth() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-left');
+            
+            document.getElementById('loading-screen').style.display = 'none';
+            selectedDate.setMonth(selectedDate.getMonth() + 1); // Move to next month
+            
+            // Wait for animation to complete before regenerating calendar
+            setTimeout(() => {
+                mainContainer.classList.remove('slide-left');
+                updateMonthYearHeader(selectedDate);  // Update the dropdowns with the new selected month and year
+                generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
+            }, 50); // Small delay to ensure animation starts
+        }
+
+        // Go to the current month
+        function goToCurrentMonth() {
+            document.getElementById('loading-screen').style.display = 'none';
+            selectedDate = new Date(currentMonthDate); // Reset to the initially selected date
+            updateMonthYearHeader(selectedDate);  // Update the dropdowns with the current month and year
+            generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
+        }
+               
+        // Listen for changes in the month and year dropdowns
+        document.getElementById('dashboard-m-month-dropdown').addEventListener('change', function() {
+            const selectedMonth = parseInt(this.value); // Get the selected month
+            selectedDate.setMonth(selectedMonth);       // Update the month in selectedDate
+            generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
+        });
+
+        document.getElementById('dashboard-m-year-dropdown').addEventListener('change', function() {
+            const selectedYear = parseInt(this.value);  // Get the selected year
+            selectedDate.setFullYear(selectedYear);     // Update the year in selectedDate
+            generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
+        });
+
+        function saveDailyTotalsAndRemainders() {
+
+            $.ajax({
+                url: "/save_totals_remainders_d", // Back-end route
+                type: "POST", // Or "GET" depending on your method
+                contentType: "application/json",
+                async: false,  // Make the request synchronous
+                success: function(response) {
+                    if (response.status === "success") {
+                        // Refresh notification badge in case new notifications were created
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
+                        }
+                        generateCalendar(goofyWeekMode, selectedDate);
+                        showDashboardSpinner(false);
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                },
+                complete: function() {
+                    // Hide the loading screen after the AJAX request completes
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            });
+        }
+
+        function updateNextMonthIndicator() {
+            const indicator = document.getElementById('next-indicator');
+            // Find the last day displayed in the current month
+            const year = selectedDate.getFullYear();
+            const month = selectedDate.getMonth();
+            const lastDayOfMonth = new Date(year, month + 1, 0);
+
+            let nextDate = new Date(lastDayOfMonth);
+            nextDate.setDate(nextDate.getDate() + 1);
+
+            // Filter future entries after the last displayed date
+            const futureEntries = totals_remainders_d
+                .map(item => ({
+                    entryDate: new Date(item.date),
+                    remainder: parseFloat(item.remainder)
+                }))
+                .filter(entry => {
+                    const entryDateStr = entry.entryDate.toISOString().split('T')[0];
+                    const nextDateStr = nextDate.toISOString().split('T')[0];
+                    // Only include entries after the last displayed date and after member_since (if set)
+                    if (member_since) {
+                        const memberSinceStr = new Date(member_since).toISOString().split('T')[0];
+                        if (entryDateStr < memberSinceStr) return false;
+                    }
+                    return entryDateStr >= nextDateStr;
+                })
+                .sort((a, b) => a.entryDate - b.entryDate);
+
+            const belowThresholdEntries = futureEntries.filter(entry => entry.remainder < balance_threshold);
+
+            if (belowThresholdEntries.length > 0) {
+                const negativeEntry = belowThresholdEntries.find(entry => entry.remainder < 0);
+                if (negativeEntry) {
+                    indicator.style.display = 'block';
+                    indicator.classList.remove('below-threshold-indicator');
+                    indicator.classList.add('negative-indicator');
+                } else {
+                    indicator.style.display = 'block';
+                    indicator.classList.remove('negative-indicator');
+                    indicator.classList.add('below-threshold-indicator');
+                }
+            } else {
+                indicator.style.display = 'none';
+                indicator.classList.remove('below-threshold-indicator', 'negative-indicator');
+            }
+        }
+
+        // Attach touch event listeners for sliding interaction
+        document.addEventListener('touchstart', handleTouchStart, { passive: false });
+        document.addEventListener('touchmove', handleTouchMove, { passive: false });
+        document.addEventListener('touchend', handleTouchEnd);
+
+        document.addEventListener('DOMContentLoaded', function() {
+            updateMonthYearHeader(selectedDate);  // This will update the month and year dropdown
+            generateCalendar(goofyWeekMode, selectedDate);  // This generates the calendar
+
+            function setDashboardMDateHeight() {
+                var dateElem = document.querySelector('.dashboard-m-date');
+                if (dateElem) {
+                    var height = dateElem.offsetHeight;
+                    document.documentElement.style.setProperty('--dashboard-m-date-height', height + 'px');
+                }
+            }
+
+            setDashboardMDateHeight();
+            window.addEventListener('resize', setDashboardMDateHeight);
+            // Also update after calendar is regenerated
+            const origGenerateCalendar = generateCalendar;
+            window.generateCalendar = function() {
+                origGenerateCalendar.apply(this, arguments);
+                setTimeout(setDashboardMDateHeight, 0);
+            };
+        });
+
+        $(function() {
+            var $toggle = $('#nav-dropdown-toggle');
+            var $arrow = $('#nav-dropdown-arrow');
+            var $inline = $('#nav-inline-buttons');
+            var $dropdown = $('#nav-dropdown-menu');
+            var open = false;
+            var justClosed = false;
+            var navButtons = [
+                { href: "{{ url_for('dashboard_d') }}", icon: 'fa-calendar-day', label: 'Day View', focus: false },
+                { href: "{{ url_for('dashboard') }}", icon: 'fa-calendar-week', label: 'Week View', focus: false },
+                { href: "{{ url_for('dashboard_3m') }}", icon: 'fa-calendar-days', label: 'Month View', focus: false },
+                { href: null, icon: 'fa-calendar-exclamation', label: 'Month Overview', focus: true },
+                { href: "{{ url_for('dashboard_y') }}", icon: 'fa-calendars', label: 'Year Overview', focus: false }
+            ];
+            $toggle.on('click', function(e) {
+                if (justClosed) {
+                    justClosed = false;
+                    return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                if (!open) {
+                    $inline.hide();
+                    $dropdown.empty();
+                    navButtons.forEach(function(btn) {
+                        var $btn = $('<a></a>').addClass('nav-button').css({width:'100%',display:'flex',alignItems:'center',gap:'10px',padding:'8px 18px'});
+                        if (btn.href) $btn.attr('href', btn.href);
+                        if (btn.focus) $btn.addClass('nav-button-focus');
+                        $btn.append($('<i></i>').addClass('fa-solid').addClass(btn.icon));
+                        $btn.append($('<span></span>').addClass('nav-label').text(btn.label));
+                        $dropdown.append($btn);
+                    });
+                    $dropdown.show();
+                    $arrow.removeClass('fa-caret-right').addClass('fa-caret-down');
+                    $toggle.addClass('active');
+                    open = true;
+                    setTimeout(function() {
+                        $(document).on('mousedown.navdropdown', function(ev) {
+                            if (!$dropdown.is(ev.target) && $dropdown.has(ev.target).length === 0 && !$toggle.is(ev.target)) {
+                                $dropdown.hide();
+                                $inline.show();
+                                $arrow.removeClass('fa-caret-down').addClass('fa-caret-right');
+                                $toggle.removeClass('active');
+                                open = false;
+                                $(document).off('mousedown.navdropdown');
+                                justClosed = true;
+                            }
+                        });
+                    }, 0);
+                } else {
+                    $(document).off('mousedown.navdropdown');
+                    $dropdown.hide();
+                    $inline.show();
+                    $arrow.removeClass('fa-caret-down').addClass('fa-caret-right');
+                    $toggle.removeClass('active');
+                    open = false;
+                }
+            });
+        });
+
+        // Show loading screen on nav button click (inline or dropdown)
+        $(function() {
+            $(document).on('click', '#nav-inline-buttons a.nav-button, #nav-dropdown-menu a.nav-button', function(e) {
+                var href = $(this).attr('href');
+                if (href && href !== '#' && !href.startsWith('javascript:')) {
+                    $('#loading-screen').show();
+                }
+            });
+        });
+
+        // --- Tutorial ---
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                fetch('/api/tutorial/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.completed && data.completed['tutorial_dashboard_m']) return;
+
+                        startTutorial('tutorial_dashboard_m', [
+                            { selector: '#dashboard-m-month-dropdown, #dashboard-m-year-dropdown', text: 'Use these dropdowns to jump directly to any month and year.' },
+                            { selector: '#dashboard-m-calendar', text: 'The calendar shows every day of the month. Each cell displays a quick summary of that day\'s totals.' },
+                            { selector: '.dashboard-m-today', text: '<b>Today</b> is highlighted so you can spot it at a glance.' },
+                            { selector: '.dashboard-m-today .dashboard-m-main-sections', text: 'Each day shows: <b>I</b> (income), <b>E</b> (expenses), <b>R</b> (remainder), credit account balances, and <b>S</b> (savings). Color coding on the remainder warns you of low or negative balances.' },
+                            { selector: '#dashboard-m-calendar', text: 'Tap any day to open it in the <b>Day view</b> for a detailed breakdown. You can also swipe left or right to change months.' }
+                        ], { delay: 500 });
+                    })
+                    .catch(function() { /* silently ignore */ });
+            }, 600);
+        });
+    </script>   
+</body>
+</html>

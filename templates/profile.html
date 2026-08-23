@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"> <!-- Character encoding for the document -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Profile</title>
+    <!-- Link to the external stylesheet for styling the page -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Link to Font Awesome for icons -->
+    {% include '_fontawesome.html' %}
+    <!-- Link to jQuery library for JavaScript functionality -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="profile-body">
+    <!-- Include the navigation bar -->
+    {% include 'nav.html' %}
+
+    <!-- Calendar navigation section (currently empty) -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <!-- Main container for the profile section -->
+        <div class="profile-box">
+            <div class="profile-content">
+                <!-- Section for changing email and password -->
+                <div class="profile-actions">
+                    <div class="profile-section">
+                        <div class="section-liner">
+                            <div class="profile-pic-container">
+                                <!-- Display the profile picture if it exists, otherwise show a default picture -->
+                                {% if profile_picture %}
+                                    <img src="{{ url_for('static', filename='uploads/' + profile_picture) }}" alt="Profile Picture" class="profile-pic">
+                                    <!-- Button to remove the profile picture -->
+                                    <button class="remove-pic-button" onclick="removeProfilePicture()">
+                                        <i class="fas fa-times"></i> <!-- Font Awesome icon for 'times' -->
+                                    </button>
+                                {% else %}
+                                    <img src="{{ url_for('static', filename='uploads/DefaultProfilePicture.svg') }}" alt="Default Profile Picture" class="profile-pic">
+                                {% endif %}
+                                <!-- Button to open the upload prompt for a new profile picture -->
+                                <button class="pic-edit-button" onclick="toggleUploadPrompt()">
+                                    <i class="fas fa-plus"></i> <!-- Font Awesome icon for 'plus' -->
+                                </button>
+                                
+                                <!-- Floating prompt for uploading a new profile picture -->
+                                <div id="uploadModalOverlay" class="center-modal-overlay">
+                                    <div id="uploadPrompt" class="center-modal-content">
+                                        <form id="profile-upload-form" method="POST" action="{{ url_for('update_profile_picture') }}" enctype="multipart/form-data">
+                                            <div id="image-crop-container">
+                                                <div class="zoom-buttons">
+                                                    <button type="button" id="zoom-out-btn"><i class="fas fa-magnifying-glass-minus"></i></button>
+                                                    <button type="button" id="zoom-in-btn"><i class="fas fa-magnifying-glass-plus"></i></button>
+                                                </div>
+                                                <canvas id="crop-canvas" width="200" height="200"></canvas>
+                                                <p class="crop-hint">Drag to reposition</p>
+                                            </div>
+                                            <input type="file" name="profile_picture" id="profile_picture" class="file-input" accept=".png,.jpg,.jpeg,.gif">
+                                            <label for="profile_picture" id="file-input-label" class="file-input-label profile-pic-placeholder">
+                                                <i class="fas fa-upload"></i>
+                                            </label>
+                                            <p class="format-hint">Accepted formats: PNG, JPG, JPEG, GIF</p>
+                                            <div class="upload-modal-buttons">
+                                                <button type="button" class="cancel-upload-button" onclick="toggleUploadPrompt()">Cancel</button>
+                                                <button type="submit" class="upload-button">Upload</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Form for changing the first name -->
+                            <form method="POST" action="{{ url_for('update_first_name') }}" class="profile-form">
+                                <div class="input-group">
+                                    <label for="first_name">Change First Name:</label>
+                                    <input type="text" name="first_name" id="profile-first-name" class="login-input" value="{{ first_name }}" required> <!-- Input field for first name -->
+                                    <button type="submit" class="submit-button">
+                                        <i id="profile-first-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Form for changing the last name -->
+                            <form method="POST" action="{{ url_for('update_last_name') }}" class="profile-form">
+                                <div class="input-group">
+                                    <label for="last_name">Change Last Name:</label>
+                                    <input type="text" name="last_name" id="profile-last-name" class="login-input" value="{{ last_name }}" required> <!-- Input field for last name -->
+                                    <button type="submit" class="submit-button">
+                                        <i id="profile-last-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <!-- Form for changing the email -->
+                            <form method="POST" action="{{ url_for('update_username') }}" class="profile-form">
+                                <div class="input-group">
+                                    <label for="username">Change Email:</label>
+                                    <input type="text" name="username" id="profile-username" class="login-input" value="{{ current_username }}" required> <!-- Input field for new email -->
+                                    <!-- Submit button, initially unchanged -->
+                                    <button type="submit" id="profile-submit-button" class="submit-button submit-unchanged">
+                                        <i id="profile-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                    <!-- Container for email validation messages -->
+                                    <div id="profile-email-requirements" class="profile-email-requirements">
+                                        <p id="profile-email-format-requirement"><span class="profile-requirement-icon">✗</span> Valid email format</p>
+                                        <p id="profile-email-availability-requirement"><span class="profile-requirement-icon">✗</span> Email is available</p>
+                                    </div>
+                                </div>
+                            </form>
+
+                            <!-- Button to change password -->
+                            <form id="password-change-form" class="profile-form">
+                                <div class="input-group">
+                                    <label>Change Password:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <button type="button" id="change-password-btn" class="submit-button">
+                                        <i class="fa-solid fa-pen"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <form id="mfa-enable-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="mfa-toggle">MFA:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="mfa-toggle" {% if mfa_enabled %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="mfa-toggle">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if not mfa_enabled %}toggle-off{% endif %}"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            {# The administrator gets a reset instead of a deletion:
+                               removing that account closes registration behind
+                               itself and leaves nobody who can administer the
+                               instance. data-mode drives the wording and where
+                               the browser goes afterwards. #}
+                            {% if current_user.is_admin %}
+                            <button class="delete-account-button" data-mode="clear"
+                                    data-url="{{ url_for('clear_account') }}">
+                                Clear Account
+                            </button>
+                            {% else %}
+                            <button class="delete-account-button" data-mode="delete"
+                                    data-url="{{ url_for('delete_user', user_id=current_user.id) }}">
+                                Delete Account
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="successModal" class="modal">
+        <div class="modal-content">
+            <p id="successMessage"></p>
+        </div>
+    </div>
+
+    <div id="deleteSuccessModal" class="modal">
+        <div id="delete-account-modal-content"class="modal-content">
+            <p>Your account has been successfully deleted.</p>
+        </div>
+    </div>
+
+    
+    <div id="mfa-qr-modal" class="modal">
+        <div class="modal-content">
+            <span id="close-mfa-modal" class="close-modal">&times;</span>
+            <h3>Enable Multi-Factor Authentication</h3>
+            <ol class="mfa-instructions">
+                <li>Install an authenticator app (like Google Authenticator or Authy) on your phone.</li>
+                <li>Open the app and choose "Add Account" or "Scan QR Code".</li>
+                <li>Scan the QR code below with your app.</li>
+                <li>Or manually enter the key below if you can't scan the QR code.</li>
+                <li>Enter the 6-digit code from your app to verify.</li>
+            </ol>
+            <div id="mfa-qr-image"></div>
+            <div class="mfa-secret-container">
+                <p class="mfa-secret-label">Can't scan? Enter this key manually:</p>
+                <div class="mfa-secret-box">
+                    <code id="mfa-secret-key"></code>
+                    <button type="button" id="copy-mfa-secret" class="mfa-copy-button" title="Copy to clipboard">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+            </div>
+            <form id="mfa-verify-form" class="mfa-verify-form">
+                <div class="mfa-code-inputs">
+                    <div id="mfa-verify-message" class="mfa-speech-bubble" style="display: none;"></div>
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    <input type="text" class="mfa-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                </div>
+                <input type="hidden" id="mfa-code" name="mfa-code">
+                <button type="submit" class="submit-button">Verify</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="mfa-password-modal" class="modal">
+        <div class="modal-content change-password-modal-content">
+            <span id="close-mfa-password-modal" class="close-modal">&times;</span>
+            <h2 id="mfa-password-modal-title">Enter Password</h2>
+            <p id="mfa-password-modal-desc">Please enter your password to continue.</p>
+            <form id="mfa-password-form">
+                <div class="password-form-group">
+                    <label for="mfa-password-input">Password:</label>
+                    <input type="password" id="mfa-password-input" class="login-input" required>
+                </div>
+                <div id="mfa-password-error" class="field-error"></div>
+                <div class="modal-buttons">
+                    <button type="submit" class="confirm-delete-category-btn">Continue</button>
+                    <button type="button" id="cancel-mfa-password" class="cancel-delete-category-btn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="password-mfa-modal" class="modal">
+        <div class="modal-content">
+            <span id="close-password-mfa-modal" class="close-modal">&times;</span>
+            <h2>MFA Verification Required</h2>
+            <p>Please enter your 6-digit MFA code to change your password.</p>
+            <form id="password-mfa-form">
+                <input type="text" id="password-mfa-code" maxlength="6" placeholder="Enter 6-digit code" required>
+                <div id="password-mfa-error"></div>
+                <div class="modal-buttons">
+                    <button type="submit" class="confirm-delete-category-btn">Verify & Change Password</button>
+                    <button type="button" id="cancel-password-mfa-btn" class="cancel-delete-category-btn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="change-password-modal" class="modal">
+        <div class="modal-content change-password-modal-content">
+            <span id="close-change-password-modal" class="close-modal">&times;</span>
+            <h2>Change Password</h2>
+            <form id="change-password-form">
+                <div class="password-form-group">
+                    <label for="current-password">Current Password:</label>
+                    <input type="password" id="current-password" class="login-input" required>
+                </div>
+                <div class="password-form-group">
+                    <label for="new-password">New Password:</label>
+                    <input type="password" id="new-password" class="login-input" required>
+                </div>
+                <div class="password-form-group">
+                    <label for="confirm-password">Confirm New Password:</label>
+                    <input type="password" id="confirm-password" class="login-input" required>
+                </div>
+                <div id="current-password-error"></div>
+                <div class="modal-buttons">
+                    <button type="submit" id="submit-password-change" class="confirm-delete-category-btn" disabled>Change Password</button>
+                    <button type="button" id="cancel-password-change" class="cancel-delete-category-btn">Cancel</button>
+                </div>
+                
+                <!-- Password requirements overlay - positioned absolutely -->
+                <div id="change-password-requirements" class="password-requirements">
+                    <p id="change-length-requirement"><span class="requirement-icon">✗</span> At least 8 characters</p>
+                    <p id="change-symbol-requirement"><span class="requirement-icon">✗</span> At least 1 symbol</p>
+                    <p id="change-capital-requirement"><span class="requirement-icon">✗</span> At least 1 capital letter</p>
+                    <p id="change-number-requirement"><span class="requirement-icon">✗</span> At least 1 number</p>
+                </div>
+                
+                <!-- Password match error overlay - positioned absolutely -->
+                <div id="password-match-requirements" class="password-requirements">
+                    <p id="password-match-requirement"><span class="requirement-icon">✗</span> Passwords match</p>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <!-- Include the external JavaScript file for additional functionality -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script type="text/javascript">
+    document.getElementById('loading-screen').style.display = 'none';
+
+        // === Submit button change tracking for first name / last name ===
+        (function() {
+            const initialFirstName = $('#profile-first-name').val();
+            const initialLastName = $('#profile-last-name').val();
+
+            function updateSubmitState(btn, hasChanged) {
+                if (hasChanged) {
+                    btn.removeClass('submit-unchanged');
+                } else {
+                    btn.addClass('submit-unchanged');
+                }
+            }
+
+            // Set initial grey state
+            $('#profile-first-name').closest('form').find('.submit-button').addClass('submit-unchanged');
+            $('#profile-last-name').closest('form').find('.submit-button').addClass('submit-unchanged');
+
+            $('#profile-first-name').on('input', function() {
+                updateSubmitState($(this).closest('form').find('.submit-button'), $(this).val() !== initialFirstName);
+            });
+
+            $('#profile-last-name').on('input', function() {
+                updateSubmitState($(this).closest('form').find('.submit-button'), $(this).val() !== initialLastName);
+            });
+        })();
+    
+        // Helper function to show success messages
+        function showSuccessMessage(message, color) {
+            const bgColor = color || '#2aaaa8';
+            const successMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: ' + bgColor + '; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">' + message + '</div>');
+            $('body').append(successMsg);
+            setTimeout(function() {
+                successMsg.fadeOut(300, function() { $(this).remove(); });
+            }, 2000);
+        }
+        
+        $(document).ready(function() {
+            let mfaVerified = false; // Track if MFA was successfully verified
+            let pendingMfaAction = null; // 'enable' or 'disable'
+
+            // Prompt for password before MFA action, returns password or null
+            function promptMfaPassword(action) {
+                return new Promise(function(resolve) {
+                    pendingMfaAction = action;
+                    if (action === 'enable') {
+                        $('#mfa-password-modal-title').text('Enable MFA');
+                        $('#mfa-password-modal-desc').text('Enter your password to enable multi-factor authentication.');
+                    } else {
+                        $('#mfa-password-modal-title').text('Disable MFA');
+                        $('#mfa-password-modal-desc').text('Enter your password to disable multi-factor authentication.');
+                    }
+                    $('#mfa-password-input').val('');
+                    $('#mfa-password-error').text('');
+                    $('#mfa-password-modal').css('display', 'flex');
+                    $('#mfa-password-input').focus();
+
+                    // Remove any previous handlers
+                    $('#mfa-password-form').off('submit').on('submit', function(e) {
+                        e.preventDefault();
+                        const pw = $('#mfa-password-input').val();
+                        if (!pw) {
+                            $('#mfa-password-error').text('Password is required.');
+                            return;
+                        }
+                        $('#mfa-password-modal').css('display', 'none');
+                        resolve(pw);
+                    });
+
+                    function cancel() {
+                        $('#mfa-password-modal').css('display', 'none');
+                        resolve(null);
+                    }
+                    $('#cancel-mfa-password').off('click').on('click', cancel);
+                    $('#close-mfa-password-modal').off('click').on('click', cancel);
+                    $('#mfa-password-modal').off('click.bg').on('click.bg', function(e) {
+                        if (e.target.id === 'mfa-password-modal') cancel();
+                    });
+                });
+            }
+
+            // Handle MFA toggle switch
+            $('#mfa-toggle').on('change', function() {
+                const isChecked = $(this).is(':checked');
+                const icon = $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon');
+                
+                if (isChecked) {
+                    // Enabling MFA - prompt password first
+                    mfaVerified = false;
+                    promptMfaPassword('enable').then(function(password) {
+                        if (!password) {
+                            // Cancelled - revert toggle
+                            $('#mfa-toggle').prop('checked', false);
+                            icon.addClass('toggle-off');
+                            return;
+                        }
+                        $.post('/enable_mfa', { password: password }, function(data) {
+                            if (data.status === 'success' && data.qr_url) {
+                                $('#mfa-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code">');
+                                $('#mfa-secret-key').text(data.secret);
+                                $('#mfa-verify-message').text('');
+                                $('#mfa-code').val('');
+                                $('.mfa-digit').each(function() { $(this).val(''); });
+                                $('#mfa-qr-modal').css('display', 'flex');
+                            } else {
+                                $('#mfa-toggle').prop('checked', false);
+                                icon.addClass('toggle-off');
+                                showToast(data.message || 'Failed to enable MFA.', 'error');
+                            }
+                        }).fail(function(xhr) {
+                            $('#mfa-toggle').prop('checked', false);
+                            icon.addClass('toggle-off');
+                            const resp = xhr.responseJSON;
+                            showToast(resp && resp.message ? resp.message : 'Failed to enable MFA.', 'error');
+                        });
+                    });
+                } else {
+                    // Disabling MFA - show confirmation
+                    confirmDisableMfa();
+                }
+            });
+
+            // Initialize toggle icon based on checkbox state
+            const mfaToggle = $('#mfa-toggle');
+            const mfaIcon = $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon');
+            if (mfaToggle.prop('checked')) {
+                mfaIcon.removeClass('toggle-off');
+            } else {
+                mfaIcon.addClass('toggle-off');
+            }
+
+            // Handle toggle switch click
+            $('.toggle-switch[data-checkbox="mfa-toggle"]').on('click', function() {
+                const checkbox = $('#mfa-toggle');
+                const icon = $(this).find('.toggle-icon');
+                
+                // Toggle checkbox state
+                checkbox.prop('checked', !checkbox.prop('checked'));
+                
+                // Toggle icon state
+                if (checkbox.prop('checked')) {
+                    icon.removeClass('toggle-off');
+                } else {
+                    icon.addClass('toggle-off');
+                }
+                
+                // Trigger change event
+                checkbox.trigger('change');
+            });
+
+            // Copy MFA secret to clipboard
+            $(document).on('click', '#copy-mfa-secret', function() {
+                const secret = $('#mfa-secret-key').text();
+                navigator.clipboard.writeText(secret).then(function() {
+                    const btn = $('#copy-mfa-secret');
+                    const originalHtml = btn.html();
+                    btn.html('<i class="fas fa-check"></i>');
+                    setTimeout(function() {
+                        btn.html(originalHtml);
+                    }, 2000);
+                }).catch(function(err) {
+                    showToast('Failed to copy: ' + err, 'error');
+                });
+            });
+
+            $('#disable-mfa-btn').on('click', function() {
+                confirmDisableMfa();
+            });
+
+            // Async function to confirm MFA disable
+            async function confirmDisableMfa() {
+                const confirmed = await showConfirmModal({
+                    title: 'Disable Multi-Factor Authentication',
+                    message: 'Are you sure you want to disable MFA? This will make your account less secure.',
+                    confirmText: 'Disable MFA',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) {
+                    // Revert toggle back to on
+                    $('#mfa-toggle').prop('checked', true);
+                    $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
+                    return;
+                }
+                // Prompt for password
+                const password = await promptMfaPassword('disable');
+                if (!password) {
+                    $('#mfa-toggle').prop('checked', true);
+                    $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
+                    return;
+                }
+                $.post('/disable_mfa', { password: password }, function(data) {
+                    if (data.status !== 'success') {
+                        // Revert toggle
+                        $('#mfa-toggle').prop('checked', true);
+                        $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
+                        showToast(data.message || 'Failed to disable MFA.', 'error');
+                    }
+                }).fail(function(xhr) {
+                    $('#mfa-toggle').prop('checked', true);
+                    $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').removeClass('toggle-off');
+                    const resp = xhr.responseJSON;
+                    showToast(resp && resp.message ? resp.message : 'Incorrect password.', 'error');
+                });
+            }
+
+            // Function to cancel MFA setup
+            function cancelMfaSetup() {
+                if (!mfaVerified) {
+                    $.post('/cancel_mfa', function(data) {
+                        if (data.status === 'success') {
+                            $('#mfa-code').val('');
+                            $('#mfa-verify-message').text('');
+                            // Revert toggle to off
+                            $('#mfa-toggle').prop('checked', false);
+                            $('.toggle-switch[data-checkbox="mfa-toggle"] .toggle-icon').addClass('toggle-off');
+                        }
+                    });
+                }
+            }
+
+            // Close modal and cancel MFA setup
+            $('#close-mfa-modal').on('click', function() {
+                $('#mfa-qr-modal').css('display', 'none');
+                cancelMfaSetup();
+            });
+
+            // Click outside modal to close
+            $('#mfa-qr-modal').on('click', function(e) {
+                if (e.target.id === 'mfa-qr-modal') {
+                    $('#mfa-qr-modal').css('display', 'none');
+                    cancelMfaSetup();
+                }
+            });
+
+            // MFA 6-digit input handling
+            const mfaDigits = document.querySelectorAll('.mfa-digit');
+            const mfaCodeHidden = document.getElementById('mfa-code');
+
+            function updateMfaCode() {
+                let code = '';
+                mfaDigits.forEach(input => {
+                    code += input.value;
+                });
+                mfaCodeHidden.value = code;
+            }
+
+            mfaDigits.forEach((input, index) => {
+                // Only allow digits 0-9
+                input.addEventListener('input', function(e) {
+                    // Remove any non-digit characters
+                    this.value = this.value.replace(/[^0-9]/g, '');
+                    
+                    if (this.value.length === 1) {
+                        // Auto-advance to next input
+                        if (index < mfaDigits.length - 1) {
+                            mfaDigits[index + 1].focus();
+                        }
+                    }
+                    updateMfaCode();
+                });
+
+                // Handle backspace to go to previous input
+                input.addEventListener('keydown', function(e) {
+                    if (e.key === 'Backspace' && this.value === '' && index > 0) {
+                        mfaDigits[index - 1].focus();
+                    }
+                    // Handle arrow keys
+                    if (e.key === 'ArrowLeft' && index > 0) {
+                        mfaDigits[index - 1].focus();
+                    }
+                    if (e.key === 'ArrowRight' && index < mfaDigits.length - 1) {
+                        mfaDigits[index + 1].focus();
+                    }
+                    // Submit on Enter if all 6 digits are filled
+                    if (e.key === 'Enter') {
+                        updateMfaCode();
+                        if (mfaCodeHidden.value.length === 6) {
+                            e.preventDefault();
+                            document.getElementById('mfa-verify-form').dispatchEvent(new Event('submit'));
+                        }
+                    }
+                });
+
+                // Handle paste - distribute across all inputs
+                input.addEventListener('paste', function(e) {
+                    e.preventDefault();
+                    const pastedData = (e.clipboardData || window.clipboardData).getData('text');
+                    const digits = pastedData.replace(/[^0-9]/g, '').slice(0, 6);
+                    
+                    digits.split('').forEach((digit, i) => {
+                        if (mfaDigits[i]) {
+                            mfaDigits[i].value = digit;
+                        }
+                    });
+                    
+                    // Focus the next empty input or the last one
+                    const nextEmptyIndex = Math.min(digits.length, mfaDigits.length - 1);
+                    mfaDigits[nextEmptyIndex].focus();
+                    updateMfaCode();
+                });
+
+                // Select all text on focus for easy replacement
+                input.addEventListener('focus', function() {
+                    this.select();
+                });
+            });
+
+            // Verify MFA code
+            $('#mfa-verify-form').on('submit', function(e) {
+                e.preventDefault();
+                const code = $('#mfa-code').val();
+                if (code.length !== 6) {
+                    showMfaMessage('Please enter all 6 digits', 'error');
+                    return;
+                }
+                $.post('/verify_mfa', {code: code}, function(data) {
+                    if (data.status === 'success') {
+                        mfaVerified = true; // Mark as verified
+                        showMfaMessage('MFA enabled successfully!', 'success');
+                        setTimeout(function() { $('#mfa-qr-modal').hide(); }, 1500);
+                    } else {
+                        showMfaMessage('Incorrect code', 'error');
+                        // Clear inputs on error
+                        mfaDigits.forEach(input => input.value = '');
+                        mfaDigits[0].focus();
+                        mfaCodeHidden.value = '';
+                    }
+                }).fail(function() {
+                    showMfaMessage('Error verifying code', 'error');
+                });
+            });
+
+            function showMfaMessage(message, type) {
+                const msgEl = $('#mfa-verify-message');
+                msgEl.stop(true, true)
+                    .removeClass('error success')
+                    .addClass(type)
+                    .text(message)
+                    .css({display: 'block', opacity: 1});
+                
+                if (type === 'error') {
+                    setTimeout(function() {
+                        msgEl.fadeOut(300, function() {
+                            $(this).text('').css('display', 'none');
+                        });
+                    }, 2000);
+                }
+            }
+        });
+
+        $(document).ready(function() {
+            const usernameInput = $('#profile-username');
+            const passwordInput = $('#profile-password');
+            const submitButton = $('#profile-submit-button');
+            const passwordSubmitButton = $('#profile-password-submit-button');
+            const submitIcon = $('#profile-submit-icon');
+            const passwordSubmitIcon = $('#profile-password-submit-icon');
+
+            const emailRequirements = $('#profile-email-requirements');
+            const emailFormatRequirement = $('#profile-email-format-requirement .profile-requirement-icon');
+            const emailAvailabilityRequirement = $('#profile-email-availability-requirement .profile-requirement-icon');
+
+            const passwordRequirements = $('#profile-password-requirements');
+            const lengthRequirement = $('#profile-length-requirement .profile-requirement-icon');
+            const symbolRequirement = $('#profile-symbol-requirement .profile-requirement-icon');
+            const capitalRequirement = $('#profile-capital-requirement .profile-requirement-icon');
+            const numberRequirement = $('#profile-number-requirement .profile-requirement-icon');
+
+            const initialEmail = usernameInput.val();
+            let isEmailValid = false;
+            let isPasswordValid = false;
+
+            // Enable button: orange check, clickable
+            function enableButton(button, icon) {
+                button.prop('disabled', false);
+                button.removeAttr('disabled');
+                button.css('background-color', '');
+                button.removeClass('submit-unchanged disabled');
+                button.css('pointer-events', '');
+            }
+
+            // Disable button: grey check, non-interactive
+            function disableButton(button, icon) {
+                button.prop('disabled', true);
+                button.attr('disabled', 'disabled');
+                button.css('background-color', '');
+                button.addClass('submit-unchanged');
+                button.removeClass('disabled');
+                button.css('pointer-events', '');
+            }
+
+            // Check form validity and toggle submit buttons
+            function checkFormValidity() {
+                // Email: must be valid AND different from original
+                if (isEmailValid && usernameInput.val() !== initialEmail) {
+                    enableButton(submitButton, submitIcon);
+                } else {
+                    disableButton(submitButton, submitIcon);
+                }
+
+                if (isPasswordValid) {
+                    enableButton(passwordSubmitButton, passwordSubmitIcon);
+                } else {
+                    disableButton(passwordSubmitButton, passwordSubmitIcon);
+                }
+            }
+
+            // Event listener for changes in the email input field
+            usernameInput.on('input', function() {
+                const username = usernameInput.val();
+
+                // If email matches original, hide requirements and grey the button
+                if (username === initialEmail) {
+                    emailRequirements.css('display', 'none');
+                    isEmailValid = false;
+                    checkFormValidity();
+                    return;
+                }
+
+                let emailPatternValid = false;
+                isEmailValid = true;
+
+                emailRequirements.css('display', 'block').css('opacity', '1');
+                
+                const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;  // Regular expression for email validation
+                if (emailPattern.test(username)) {
+                    emailFormatRequirement.text('✓').addClass('valid');  // Indicate valid email format
+                    emailPatternValid = true;  // Set the email pattern as valid
+                } else {
+                    emailFormatRequirement.text('✗').removeClass('valid');  // Indicate invalid email format
+                    isEmailValid = false;  // Set the email as invalid
+                }
+
+                // AJAX request to check if the email is already taken
+                $.ajax({
+                    url: "{{ url_for('check_username') }}",  // URL to send the request to
+                    method: "POST",  // Request method
+                    data: { username: username },  // Data to send with the request
+                    success: function(response) {
+                        if (response.status === 'taken' || !emailPatternValid) {
+                            emailAvailabilityRequirement.text('✗').removeClass('valid');  // Indicate email is taken
+                            isEmailValid = false;  // Set the email as invalid
+                        } else {
+                            emailAvailabilityRequirement.text('✓').addClass('valid');  // Indicate email is available
+                        }
+
+                        checkFormValidity();  // Check form validity after the AJAX response
+                    },
+                    error: function() {
+                        emailAvailabilityRequirement.text('✗').removeClass('valid');  // Indicate an error occurred
+                        isEmailValid = false;  // Set the email as invalid
+                        checkFormValidity();  // Check form validity after the AJAX error
+                    }
+                });
+
+                // Position the email requirements box near the email input field
+                const emailOffset = usernameInput.position();
+                emailRequirements.css({
+                    top: emailOffset.top - emailRequirements.outerHeight() - 5 + 'px',
+                    left: emailOffset.left + 'px',
+                    width: usernameInput.outerWidth() + 'px',
+                    position: 'absolute',
+                    borderRadius: usernameInput.css('border-radius')
+                });
+            });
+
+            // Event listener for changes in the password input field
+            passwordInput.on('input', function() {
+                const password = passwordInput.val();  // Get the password input value
+                isPasswordValid = true;  // Assume the password is valid initially
+
+                passwordRequirements.css('display', 'block').css('opacity', '1');  // Show the password requirements box
+
+                // Validate the password length
+                if (password.length >= 8) {
+                    lengthRequirement.text('✓').addClass('valid');  // Indicate valid password length
+                } else {
+                    lengthRequirement.text('✗').removeClass('valid');  // Indicate invalid password length
+                    isPasswordValid = false;  // Set the password as invalid
+                }
+
+                // Validate the presence of a symbol
+                if (/[!@#$%^&*(),.?":{}|<>]/g.test(password)) {
+                    symbolRequirement.text('✓').addClass('valid');  // Indicate valid symbol
+                } else {
+                    symbolRequirement.text('✗').removeClass('valid');  // Indicate missing symbol
+                    isPasswordValid = false;  // Set the password as invalid
+                }
+
+                // Validate the presence of a capital letter
+                if (/[A-Z]/.test(password)) {
+                    capitalRequirement.text('✓').addClass('valid');  // Indicate valid capital letter
+                } else {
+                    capitalRequirement.text('✗').removeClass('valid');  // Indicate missing capital letter
+                    isPasswordValid = false;  // Set the password as invalid
+                }
+
+                // Validate the presence of a number
+                if (/\d/.test(password)) {  
+                    numberRequirement.text('✓').addClass('valid');  // Indicate valid number
+                } else {
+                    numberRequirement.text('✗').removeClass('valid');  // Indicate missing number
+                    isPasswordValid = false;  // Set the password as invalid
+                }
+
+                // Position the password requirements box near the password input field
+                const passwordOffset = passwordInput.position();
+                passwordRequirements.css({
+                    top: passwordOffset.top - passwordRequirements.outerHeight() - 5 + 'px',
+                    left: passwordOffset.left + 'px',
+                    width: passwordInput.outerWidth() + 'px',
+                    position: 'absolute',
+                    borderRadius: passwordInput.css('border-radius')
+                });
+
+                checkFormValidity();  // Check form validity on password input
+            });
+
+            // Hide email requirements when the user focuses out of the email input
+            usernameInput.on('focusout', function() {
+                setTimeout(() => {
+                    emailRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        emailRequirements.css('display', 'none');
+                    }, 300);
+                }, 500);
+            });
+
+            // Hide password requirements when the user focuses out of the password input
+            passwordInput.on('focusout', function() {
+                setTimeout(() => {
+                    passwordRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        passwordRequirements.css('display', 'none');
+                    }, 300);
+                }, 500);
+            });
+        });
+
+        // Remove profile picture functionality
+        async function removeProfilePicture() {
+            var confirmed = await showConfirmModal({
+                title: 'Remove Picture',
+                message: 'Are you sure you want to remove your profile picture?',
+                confirmText: 'Remove',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (confirmed) {
+                $.ajax({
+                    url: "{{ url_for('remove_profile_picture') }}",  // URL to send the request to
+                    method: "POST",  // Request method
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            $('.profile-pic').attr('src', '{{ url_for('static', filename='uploads/DefaultProfilePicture.svg') }}');  // Set default profile picture
+                            $('.remove-pic-button').hide();  // Hide the remove button
+                        } else {
+                            showToast('Failed to remove profile picture.', 'error');  // Alert if removal failed
+                        }
+                    },
+                    error: function() {
+                        showToast('An error occurred while removing the profile picture.', 'error');  // Alert if an error occurred
+                    }
+                });
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function() {
+            if (document.body.id === "profile-body") {
+                const deleteSuccessModal = document.getElementById("deleteSuccessModal");
+
+                function showDeleteSuccessModal() {
+                    deleteSuccessModal.style.display = "block";
+
+                    setTimeout(function() {
+                        window.location.href = "{{ url_for('login') }}";
+                    }, 3000); // Show the modal for 3 seconds before redirecting
+                }
+            }
+        });
+
+        function saveTotalsAndRemainders() {
+            $.ajax({
+                url: '/save_totals_remainders_d',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Update the local totals and remainders here or refresh the view
+                        // Optionally: update the totals and remainders in the UI without reloading the page
+                    } else {
+                    }
+                },
+                error: function(error) {
+                }
+            });
+        }        
+
+        // Image cropping functionality
+        let cropperState = {
+            image: null,
+            scale: 1,
+            offsetX: 0,
+            offsetY: 0,
+            isDragging: false,
+            startX: 0,
+            startY: 0
+        };
+
+        document.addEventListener("DOMContentLoaded", function() {
+            const fileInput = document.getElementById('profile_picture');
+            const canvas = document.getElementById('crop-canvas');
+            const ctx = canvas.getContext('2d');
+            const cropContainer = document.getElementById('image-crop-container');
+            const placeholder = document.getElementById('file-input-label');
+            const zoomInBtn = document.getElementById('zoom-in-btn');
+            const zoomOutBtn = document.getElementById('zoom-out-btn');
+
+            if (fileInput && canvas) {
+                fileInput.addEventListener('change', function(event) {
+                    const file = event.target.files[0];
+                    if (file && file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const img = new Image();
+                            img.onload = function() {
+                                cropperState.image = img;
+                                // Calculate initial scale to fit image in circle
+                                const minDimension = Math.min(img.width, img.height);
+                                cropperState.scale = 200 / minDimension;
+                                cropperState.offsetX = 0;
+                                cropperState.offsetY = 0;
+                                
+                                cropContainer.style.display = 'block';
+                                placeholder.style.display = 'none';
+                                drawImage();
+                            };
+                            img.src = e.target.result;
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                });
+
+                // Zoom controls
+                zoomInBtn.addEventListener('click', function() {
+                    cropperState.scale *= 1.1;
+                    drawImage();
+                });
+
+                zoomOutBtn.addEventListener('click', function() {
+                    cropperState.scale *= 0.9;
+                    drawImage();
+                });
+
+                // Mouse drag events
+                canvas.addEventListener('mousedown', function(e) {
+                    cropperState.isDragging = true;
+                    cropperState.startX = e.offsetX;
+                    cropperState.startY = e.offsetY;
+                });
+
+                canvas.addEventListener('mousemove', function(e) {
+                    if (cropperState.isDragging) {
+                        const dx = e.offsetX - cropperState.startX;
+                        const dy = e.offsetY - cropperState.startY;
+                        cropperState.offsetX += dx;
+                        cropperState.offsetY += dy;
+                        cropperState.startX = e.offsetX;
+                        cropperState.startY = e.offsetY;
+                        drawImage();
+                    }
+                });
+
+                canvas.addEventListener('mouseup', function() {
+                    cropperState.isDragging = false;
+                });
+
+                canvas.addEventListener('mouseleave', function() {
+                    cropperState.isDragging = false;
+                });
+
+                // Touch events for mobile
+                canvas.addEventListener('touchstart', function(e) {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    const rect = canvas.getBoundingClientRect();
+                    cropperState.isDragging = true;
+                    cropperState.startX = touch.clientX - rect.left;
+                    cropperState.startY = touch.clientY - rect.top;
+                });
+
+                canvas.addEventListener('touchmove', function(e) {
+                    e.preventDefault();
+                    if (cropperState.isDragging) {
+                        const touch = e.touches[0];
+                        const rect = canvas.getBoundingClientRect();
+                        const x = touch.clientX - rect.left;
+                        const y = touch.clientY - rect.top;
+                        const dx = x - cropperState.startX;
+                        const dy = y - cropperState.startY;
+                        cropperState.offsetX += dx;
+                        cropperState.offsetY += dy;
+                        cropperState.startX = x;
+                        cropperState.startY = y;
+                        drawImage();
+                    }
+                });
+
+                canvas.addEventListener('touchend', function() {
+                    cropperState.isDragging = false;
+                });
+            }
+
+            function drawImage() {
+                if (!cropperState.image) return;
+                
+                const canvas = document.getElementById('crop-canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // Clear canvas
+                ctx.clearRect(0, 0, 200, 200);
+                
+                // Save context
+                ctx.save();
+                
+                // Create circular clipping path
+                ctx.beginPath();
+                ctx.arc(100, 100, 100, 0, Math.PI * 2);
+                ctx.clip();
+                
+                // Calculate scaled dimensions
+                const scaledWidth = cropperState.image.width * cropperState.scale;
+                const scaledHeight = cropperState.image.height * cropperState.scale;
+                
+                // Center image initially
+                const x = 100 - (scaledWidth / 2) + cropperState.offsetX;
+                const y = 100 - (scaledHeight / 2) + cropperState.offsetY;
+                
+                // Draw image
+                ctx.drawImage(cropperState.image, x, y, scaledWidth, scaledHeight);
+                
+                // Restore context
+                ctx.restore();
+                
+                // Draw circular border
+                ctx.beginPath();
+                ctx.arc(100, 100, 100, 0, Math.PI * 2);
+                ctx.strokeStyle = '#ddd';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        });
+
+        function toggleUploadPrompt() {
+            const overlay = document.getElementById('uploadModalOverlay');
+            const cropContainer = document.getElementById('image-crop-container');
+            const placeholder = document.getElementById('file-input-label');
+            
+            if (overlay) {
+                if (overlay.style.display === 'flex') {
+                    overlay.style.display = 'none';
+                    // Reset cropper state
+                    cropperState = {
+                        image: null,
+                        scale: 1,
+                        offsetX: 0,
+                        offsetY: 0,
+                        isDragging: false,
+                        startX: 0,
+                        startY: 0
+                    };
+                    cropContainer.style.display = 'none';
+                    placeholder.style.display = 'flex';
+                    document.getElementById('profile_picture').value = '';
+                } else {
+                    overlay.style.display = 'flex';
+                }
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function() {
+            const overlay = document.getElementById('uploadModalOverlay');
+            const modalContent = document.getElementById('uploadPrompt');
+
+            // Prevent closing modal on clicking outside
+            if (overlay && modalContent) {
+                overlay.addEventListener('click', function(e) {
+                    // Do nothing - modal can only be closed with Cancel or Done button
+                    e.stopPropagation();
+                });
+            }
+
+            // Handle form submission to send cropped image
+            const uploadForm = document.getElementById('profile-upload-form');
+            if (uploadForm) {
+                uploadForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    // Check if an image has been selected
+                    if (!cropperState.image) {
+                        // Show error message using settings bubble pattern
+                        const errorMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: #dc3545; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">Please add image</div>');
+                        $('body').append(errorMsg);
+                        setTimeout(function() {
+                            errorMsg.fadeOut(300, function() { $(this).remove(); });
+                        }, 3000);
+                        return;
+                    }
+                    
+                    // If an image has been cropped, use the canvas data
+                    if (cropperState.image) {
+                        const canvas = document.getElementById('crop-canvas');
+                        canvas.toBlob(function(blob) {
+                            const formData = new FormData();
+                            formData.append('profile_picture', blob, 'profile_picture.png');
+                            
+                            // Send via AJAX
+                            fetch('{{ url_for("update_profile_picture") }}', {
+                                method: 'POST',
+                                body: formData
+                            })
+                            .then(response => response.text())
+                            .then(html => {
+                                // Reload the page to show the updated profile picture
+                                window.location.reload();
+                            })
+                            .catch(error => {
+                                showToast('Error uploading profile picture', 'error');
+                            });
+                        }, 'image/png');
+                    }
+                });
+            }
+        });
+
+        $(document).ready(function() {
+            const $accountButton = $('.delete-account-button');
+            const accountUrl = $accountButton.data('url');
+            const isClear = $accountButton.data('mode') === 'clear';
+
+            $accountButton.on('click', async function(e) {
+                e.preventDefault();
+                const confirmed = await showConfirmModal(isClear ? {
+                    title: 'Clear Account',
+                    message: 'This deletes all of your entries, categories, credit accounts '
+                           + 'and settings, then starts profile setup again. Your login stays '
+                           + 'the same. This cannot be undone.',
+                    confirmText: 'Clear',
+                    cancelText: 'Cancel',
+                    danger: true
+                } : {
+                    title: 'Delete Account',
+                    message: 'Are you sure you want to delete your account? This action cannot be undone.',
+                    confirmText: 'Delete',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
+
+                $.ajax({
+                    url: accountUrl,
+                    method: 'POST',
+                    success: function(response) {
+                        if (response.status !== 'success') {
+                            showToast('Error: ' + (response.message || 'unknown'), 'error');
+                            return;
+                        }
+                        if (isClear) {
+                            // Straight to setup - the session survives because the
+                            // account keeps its id. No success modal: the setup
+                            // wizard appearing is the confirmation.
+                            window.location.href = response.redirect
+                                || "{{ url_for('setup_profile') }}";
+                            return;
+                        }
+                        $('#deleteSuccessModal').css('display', 'flex');
+                        setTimeout(function() {
+                            window.location.href = "{{ url_for('login') }}";
+                        }, 3000);
+                    },
+                    error: function(xhr) {
+                        const res = (xhr && xhr.responseJSON) || {};
+                        showToast(res.message
+                            || (isClear ? 'An error occurred while clearing your account.'
+                                        : 'An error occurred while deleting your account.'),
+                            'error');
+                    }
+                });
+            });
+        });
+
+        // Post-action success messages
+        $(document).ready(function() {
+            const successModal = $('#successModal');
+            const successMessage = $('#successMessage');
+
+            const urlParams = new URLSearchParams(window.location.search);
+
+            // Check if we're returning from an email change
+            if (urlParams.get('success') === 'email') {
+                showSuccessMessage('Email address updated successfully');
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            
+            // Check if we're returning from a password change
+            if (urlParams.get('success') === 'password') {
+                successMessage.text('Password changed successfully!');
+                successModal.css('display', 'flex');
+                // Remove the query parameter from URL without reload
+                window.history.replaceState({}, document.title, window.location.pathname);
+                // Auto-hide after 3 seconds
+                setTimeout(function() {
+                    successModal.css('display', 'none');
+                }, 3000);
+            }
+            
+            // Check if we're returning from a first name change
+            if (urlParams.get('success') === 'first_name') {
+                showSuccessMessage('First name updated successfully');
+                // Remove the query parameter from URL without reload
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            
+            // Check if we're returning from a last name change
+            if (urlParams.get('success') === 'last_name') {
+                showSuccessMessage('Last name updated successfully');
+                // Remove the query parameter from URL without reload
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+
+        });
+
+        // Handle password change with MFA verification
+        $(document).ready(function() {
+            const changePasswordBtn = $('#change-password-btn');
+            const changePasswordModal = $('#change-password-modal');
+            const changePasswordForm = $('#change-password-form');
+            const passwordMfaModal = $('#password-mfa-modal');
+            const passwordMfaForm = $('#password-mfa-form');
+            const passwordMfaError = $('#password-mfa-error');
+            const submitPasswordBtn = $('#submit-password-change');
+            
+            const newPasswordInput = $('#new-password');
+            const confirmPasswordInput = $('#confirm-password');
+            const currentPasswordInput = $('#current-password');
+            
+            const passwordRequirements = $('#change-password-requirements');
+            const lengthRequirement = $('#change-length-requirement .requirement-icon');
+            const symbolRequirement = $('#change-symbol-requirement .requirement-icon');
+            const capitalRequirement = $('#change-capital-requirement .requirement-icon');
+            const numberRequirement = $('#change-number-requirement .requirement-icon');
+            const passwordMatchRequirements = $('#password-match-requirements');
+            const passwordMatchRequirement = $('#password-match-requirement .requirement-icon');
+            const currentPasswordError = $('#current-password-error');
+            
+            let isPasswordValid = false;
+            let passwordsMatch = false;
+            let pendingPasswordData = null;
+
+            // Open change password modal
+            changePasswordBtn.on('click', function() {
+                changePasswordModal.css('display', 'flex');
+                currentPasswordInput.val('').focus();
+                newPasswordInput.val('');
+                confirmPasswordInput.val('');
+                passwordRequirements.hide();
+                passwordMatchRequirements.hide();
+                currentPasswordError.hide();
+                isPasswordValid = false;
+                passwordsMatch = false;
+                submitPasswordBtn.prop('disabled', true).css('opacity', '0.5');
+            });
+
+            // Close modals
+            $('#close-change-password-modal, #cancel-password-change').on('click', function() {
+                changePasswordModal.css('display', 'none');
+            });
+
+            $('#close-password-mfa-modal, #cancel-password-mfa-btn').on('click', function() {
+                passwordMfaModal.css('display', 'none');
+                pendingPasswordData = null;
+                $('#password-mfa-code').val('');
+                passwordMfaError.hide();
+            });
+
+            // Close modals on blur (clicking outside)
+            changePasswordModal.on('click', function(e) {
+                if (e.target === this) {
+                    changePasswordModal.css('display', 'none');
+                }
+            });
+
+            passwordMfaModal.on('click', function(e) {
+                if (e.target === this) {
+                    passwordMfaModal.css('display', 'none');
+                    pendingPasswordData = null;
+                    $('#password-mfa-code').val('');
+                    passwordMfaError.hide();
+                }
+            });
+
+            // Validate new password on input
+            newPasswordInput.on('input', function() {
+                const password = newPasswordInput.val();
+                isPasswordValid = true;
+
+                // Show requirements while typing
+                if (password.length > 0) {
+                    const offset = newPasswordInput.position();
+                    passwordRequirements.css({
+                        top: (offset.top - passwordRequirements.outerHeight() - 5) + 'px',
+                        left: offset.left + 'px',
+                        width: newPasswordInput.outerWidth() + 'px',
+                        borderRadius: newPasswordInput.css('border-radius')
+                    });
+                    passwordRequirements.css('display', 'block').css('opacity', '1');
+                }
+
+                // Validate password length
+                if (password.length >= 8) {
+                    lengthRequirement.text('✓').addClass('valid');
+                } else {
+                    lengthRequirement.text('✗').removeClass('valid');
+                    isPasswordValid = false;
+                }
+
+                // Validate symbol
+                if (/[!@#$%^&*(),.?":{}|<>]/g.test(password)) {
+                    symbolRequirement.text('✓').addClass('valid');
+                } else {
+                    symbolRequirement.text('✗').removeClass('valid');
+                    isPasswordValid = false;
+                }
+
+                // Validate capital letter
+                if (/[A-Z]/.test(password)) {
+                    capitalRequirement.text('✓').addClass('valid');
+                } else {
+                    capitalRequirement.text('✗').removeClass('valid');
+                    isPasswordValid = false;
+                }
+
+                // Validate number
+                if (/\d/.test(password)) {
+                    numberRequirement.text('✓').addClass('valid');
+                } else {
+                    numberRequirement.text('✗').removeClass('valid');
+                    isPasswordValid = false;
+                }
+
+                checkPasswordMatch();
+                updateSubmitButton();
+            });
+
+            // Show password requirements on blur like register.html
+            newPasswordInput.on('focusout', function() {
+                setTimeout(() => {
+                    passwordRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        passwordRequirements.css('display', 'none');
+                    }, 300);
+                }, 3000); // Hide 3s after blur
+            });
+
+            // Check password match
+            confirmPasswordInput.on('input', checkPasswordMatch);
+            
+            function checkPasswordMatch() {
+                const newPass = newPasswordInput.val();
+                const confirmPass = confirmPasswordInput.val();
+                
+                if (confirmPass.length > 0) {
+                    if (newPass === confirmPass) {
+                        passwordMatchRequirement.text('✓').addClass('valid');
+                        passwordsMatch = true;
+                    } else {
+                        passwordMatchRequirement.text('✗').removeClass('valid');
+                        passwordsMatch = false;
+                    }
+                } else {
+                    passwordsMatch = false;
+                }
+                
+                updateSubmitButton();
+            }
+
+            // Show password match requirements on blur like register.html
+            confirmPasswordInput.on('focusout', function() {
+                // Position the match requirements overlay
+                const offset = confirmPasswordInput.position();
+                passwordMatchRequirements.css({
+                    top: (offset.top - passwordMatchRequirements.outerHeight() - 5) + 'px',
+                    left: offset.left + 'px',
+                    width: confirmPasswordInput.outerWidth() + 'px',
+                    borderRadius: confirmPasswordInput.css('border-radius')
+                });
+                
+                passwordMatchRequirements.css('display', 'block').css('opacity', '1');
+                setTimeout(() => {
+                    passwordMatchRequirements.css('opacity', '0');
+                    setTimeout(() => {
+                        passwordMatchRequirements.css('display', 'none');
+                    }, 300);
+                }, 3000); // Show for 3s after blur
+            });
+
+            function updateSubmitButton() {
+                if (isPasswordValid && passwordsMatch && currentPasswordInput.val().length > 0) {
+                    submitPasswordBtn.prop('disabled', false).css('opacity', '1');
+                } else {
+                    submitPasswordBtn.prop('disabled', true).css('opacity', '0.5');
+                }
+            }
+
+            currentPasswordInput.on('input', updateSubmitButton);
+
+            // Submit password change form
+            changePasswordForm.on('submit', function(e) {
+                e.preventDefault();
+                currentPasswordError.hide();
+                
+                pendingPasswordData = {
+                    current_password: currentPasswordInput.val(),
+                    password: newPasswordInput.val()
+                };
+                
+                // First verify current password
+                $.ajax({
+                    url: '{{ url_for("verify_current_password") }}',
+                    method: 'POST',
+                    data: { current_password: pendingPasswordData.current_password },
+                    success: function(response) {
+                        if (response.status === 'invalid') {
+                            currentPasswordError.text('Current password is incorrect').show();
+                        } else if (response.status === 'valid') {
+                            // Current password is correct, now check if MFA is enabled
+                            checkMfaStatus();
+                        }
+                    },
+                    error: function() {
+                        currentPasswordError.text('Error verifying password. Please try again.').show();
+                    }
+                });
+            });
+
+            function checkMfaStatus() {
+                // Check if user has MFA enabled
+                $.ajax({
+                    url: '{{ url_for("check_mfa_status") }}',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.mfa_enabled) {
+                            // MFA is enabled, show MFA modal
+                            changePasswordModal.css('display', 'none');
+                            passwordMfaModal.css('display', 'flex');
+                            $('#password-mfa-code').val('').focus();
+                            passwordMfaError.hide();
+                        } else {
+                            // No MFA, proceed with password change
+                            updatePasswordDirectly();
+                        }
+                    },
+                    error: function() {
+                        currentPasswordError.text('Error checking MFA status. Please try again.').show();
+                    }
+                });
+            }
+
+            function updatePasswordDirectly() {
+                $.ajax({
+                    url: '{{ url_for("update_password") }}',
+                    method: 'POST',
+                    data: { password: pendingPasswordData.password },
+                    success: function(response) {
+                        changePasswordModal.css('display', 'none');
+                        window.location.href = '{{ url_for("profile", success="password") }}';
+                    },
+                    error: function() {
+                        currentPasswordError.text('Error updating password. Please try again.').show();
+                    }
+                });
+            }
+
+            // Submit MFA verification
+            passwordMfaForm.on('submit', function(e) {
+                e.preventDefault();
+                const mfaCode = $('#password-mfa-code').val();
+                
+                $.ajax({
+                    url: '{{ url_for("update_password") }}',
+                    method: 'POST',
+                    data: { 
+                        password: pendingPasswordData.password,
+                        mfa_code: mfaCode
+                    },
+                    success: function(response) {
+                        if (response.status === 'invalid_mfa') {
+                            passwordMfaError.text(response.message).show();
+                            $('#password-mfa-code').val('').focus();
+                        } else {
+                            // Success - password updated
+                            passwordMfaModal.css('display', 'none');
+                            window.location.href = '{{ url_for("profile", success="password") }}';
+                        }
+                    },
+                    error: function() {
+                        passwordMfaError.text('Error verifying MFA. Please try again.').show();
+                    }
+                });
+            });
+        });
+
+    </script>    
+</body>
+</html>

@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Year Overview</title>
+    <!-- Link to the custom stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Include Font Awesome for icons -->
+    {% include '_fontawesome.html' %}
+    <!-- Include jQuery for easier DOM manipulation and AJAX -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <!-- Include jQuery UI for sortable tables and other UI interactions -->
+    <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
+    <!-- Link to the jQuery UI CSS for styling the sortable elements -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/jquery-ui.css') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+    {% include 'redis_auto_refresh.html' %}
+</head>
+<body id="dashboard-y-body">
+    <!-- Include the navigation bar -->
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <!-- Calendar navigation for moving between months -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <!-- Single button with repeat icon -->
+            <div class="nav-dash-container">
+                <!-- Link to Recurring Summary -->
+                <a href="{{ url_for('dashboard_summary') }}" class="nav-button">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Recurring Summary</span>
+                </a>
+                <!-- Inline nav buttons (icons only) -->
+                <div id="nav-inline-buttons">
+                    <a href="{{ url_for('dashboard_d') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-day"></i>
+                        <span class="nav-tooltip">Day View</span>
+                    </a>
+                    <a href="{{ url_for('dashboard') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-week"></i>
+                        <span class="nav-tooltip">Week View</span>
+                    </a>
+                    <a href="{{ url_for('dashboard_3m') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <span class="nav-tooltip">Month View</span>
+                    </a>
+                    <a href="{{ url_for('dashboard_m') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-exclamation"></i>
+                        <span class="nav-tooltip">Month Overview</span>
+                    </a>
+                    <div class="nav-button nav-button-focus">
+                        <i class="fa-solid fa-calendars"></i>
+                        <span class="nav-tooltip">Year Overview</span>
+                    </div>
+                </div>
+            </div>
+            <div class="calendarnavbuttons"> 
+                <a id="previous-nav-btn" class="nav-button" href="javascript:previousYear()"><i class="fa-solid fa-left"></i><span class="nav-tooltip">Previous Year</span></a>
+                <a id="current-nav-btn" class="nav-button" href="javascript:goToCurrentYear()"><i class="fa-kit fa-solid-calendar-day-circle-arrow-down-tl"></i><span class="nav-tooltip">Go to Current Year</span></a>
+                <a id="next-nav-btn" class="nav-button" href="javascript:nextYear()"><i class="fa-solid fa-right"></i><span class="nav-tooltip">Next Year</span></a>
+                <div id="next-indicator" style="display:none;text-align:center;">
+                    <span class="indicator-dot">!</span>
+                    <span class="nav-tooltip">An entry in the future is negative/below threshold!</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <!-- Year Header with Year Dropdown -->
+        <div class="dashboard-y-year-header">
+            <select id="year-dropdown" class="year-dropdown">
+                <!-- Options will be populated dynamically by JavaScript -->
+            </select>
+        </div>
+        <!-- Yearly Calendar will be dynamically generated here -->
+        <div id="year-calendar">
+        </div>
+    </div>
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <!-- Include the navigation bar -->
+
+    <!-- Link to the external JavaScript file -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
+
+    <script>
+        const incomeCategories = {{ income_categories | tojson }};
+        const expenseCategories = {{ expense_categories | tojson }};
+        const incomeEntries = {{ income_entries | tojson }};
+        const expenseEntries = {{ expense_entries | tojson }};
+        let savingsEntries = {{ savings_entries | tojson }};
+        const c_expense_categories = {{ c_expense_categories | tojson }};
+        const c_expense_entries = {{ c_expense_entries | tojson }};
+        let ca_balances_d = {{ c_a_balances_d | tojson }};
+        const buds = {{ buds | default([]) | tojson }};
+        let credit_accounts = {{ credit_accounts | tojson }};
+        let totals_remainders_d = {{ totals_remainders_d|tojson }};
+        const balanceThreshold = {{ balance_threshold }};
+        let selectedYear = new Date().getFullYear(); // Initially, set to the current year
+        const currentYear = new Date().getFullYear(); // Store the original year to go back to current year
+        const FIVE_MINUTES = 5 * 60 * 1000; // 5 minutes in milliseconds
+        let touchStartX = null;
+        let touchCurrentX = null;
+        let touchStartY = null;
+        let isAnimating = false;
+        let containerWidth = null;
+        let isHorizontalSwipe = false;
+    
+        const mainContainer = document.getElementById('main-container');
+    
+        const minYear = currentYear - 1; // One year before the current year
+        const maxYear = currentYear + 3; // Three years into the future
+
+        let member_since = {{ member_since | tojson | safe }};
+        let bank_sync_flags = {{ bank_sync_flags | tojson | safe }};
+        let bank_last_txn_date = {{ bank_last_txn_date | tojson | safe }};
+    
+        // Function to store the latest viewed year in localStorage
+        function storeLatestViewedYear(year) {
+            const timestamp = new Date().getTime(); // Current timestamp
+            const yearData = {
+                year: year,
+                timestamp: timestamp
+            };
+            localStorage.setItem('latestViewedYear', JSON.stringify(yearData));
+        }
+    
+        // Function to retrieve the latest viewed year from localStorage (if it's within 5 minutes)
+        function getLatestViewedYear() {
+            const yearData = JSON.parse(localStorage.getItem('latestViewedYear'));
+    
+            if (yearData) {
+                const currentTime = new Date().getTime();
+                const timeDiff = currentTime - yearData.timestamp;
+    
+                // Check if the stored year is within the last 5 minutes
+                if (timeDiff <= FIVE_MINUTES) {
+                    return yearData.year;
+                }
+            }
+            return null;
+        }
+    
+        // Function to handle the start of a touch event
+        function handleTouchStart(event) {
+            if (isAnimating) return;
+    
+            touchStartX = event.touches[0].screenX;
+            touchStartY = event.touches[0].screenY; // Capture the vertical start point
+    
+            containerWidth = mainContainer.offsetWidth;
+            isHorizontalSwipe = false; // Reset the swipe direction flag
+        }
+    
+        // Function to handle touch movement
+        function handleTouchMove(event) {
+            if (!touchStartX || isAnimating) return;
+    
+            touchCurrentX = event.touches[0].screenX;
+            const touchCurrentY = event.touches[0].screenY;
+            const swipeDistanceX = touchCurrentX - touchStartX;
+            const swipeDistanceY = touchCurrentY - touchStartY;
+    
+            // Detect if the movement is primarily horizontal
+            if (Math.abs(swipeDistanceX) > Math.abs(swipeDistanceY)) {
+                isHorizontalSwipe = true; // Mark this as a horizontal swipe
+                event.preventDefault(); // Prevent scrolling on horizontal swipes
+    
+                // Move the main container based on swipe distance
+                mainContainer.style.transform = `translateX(${swipeDistanceX}px)`;
+            }
+        }
+    
+        // Function to handle the end of a touch event
+        function handleTouchEnd() {
+            if (!touchStartX || !isHorizontalSwipe) return; // Ignore if not a horizontal swipe
+    
+            const swipeDistanceX = touchCurrentX - touchStartX;
+            const swipePercentage = Math.abs(swipeDistanceX) / containerWidth;
+    
+            if (swipePercentage > 0.2) {
+                if (swipeDistanceX > 0) {
+                    // Swipe right - move to the previous year
+                    slideWithAnimation('right');
+                } else if (swipeDistanceX < 0) {
+                    // Swipe left - move to the next year
+                    slideWithAnimation('left');
+                }
+            } else {
+                // Reset the container position if swipe is less than 20%
+                mainContainer.style.transform = 'translateX(0)';
+            }
+    
+            // Reset touch positions
+            touchStartX = null;
+            touchCurrentX = null;
+            isHorizontalSwipe = false; // Reset the swipe flag
+        }
+    
+        // Function to animate the slide effect
+        function slideWithAnimation(direction) {
+            isAnimating = true;
+    
+            if (direction === 'left') {
+                mainContainer.style.transition = 'transform 0.3s ease';
+                mainContainer.style.transform = `translateX(-${containerWidth}px)`;
+            } else if (direction === 'right') {
+                mainContainer.style.transition = 'transform 0.3s ease';
+                mainContainer.style.transform = `translateX(${containerWidth}px)`;
+            }
+    
+            setTimeout(() => {
+                if (direction === 'left') {
+                    nextYear();
+                } else if (direction === 'right') {
+                    previousYear();
+                }
+    
+                mainContainer.style.transition = 'none';
+                mainContainer.style.transform = 'translateX(0)';
+                isAnimating = false;
+            }, 300);  // Match the CSS transition duration
+        }
+    
+        // Populate the year dropdown
+        function populateYearDropdown(selectedYear) {
+            const yearDropdown = document.getElementById('year-dropdown');
+            const startYear = minYear; // Start from the previous year
+            const endYear = maxYear; // End at five years in the future
+    
+            yearDropdown.innerHTML = ''; // Clear the dropdown
+    
+            for (let year = startYear; year <= endYear; year++) {
+                const option = document.createElement('option');
+                option.value = year;
+                option.textContent = year;
+                if (year === selectedYear) {
+                    option.selected = true;
+                }
+                yearDropdown.appendChild(option);
+            }
+
+            // Give the picker the same look as the add-entry fields on the daily
+            // dashboard. Called at the end of the one function that populates it,
+            // so it survives every repopulation. Idempotent.
+            enhanceSelectAsDropdown(yearDropdown);
+        }
+    
+        // Generate calendar for the selected year
+        function generateCalendar(year) {
+            // Fetch all dashboard data for the year before rendering
+            $.ajax({
+                url: `/get_dashboard_y_data?year=${year}`,
+                type: "GET",
+                dataType: "json",
+                async: false,
+                success: function(response) {
+                    if (response.status === "success") {
+                        totals_remainders_d = response.totals_remainders_d || [];
+                        ca_balances_d = response.c_a_balances_d || [];
+                        savingsEntries = response.savings_entries || [];
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                }
+            });
+            const calendarContainer = document.getElementById('year-calendar');
+            calendarContainer.innerHTML = ''; // Clear previous content
+
+            // Logic to generate the 12-month calendar for the year
+            const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+            const today = new Date(); // Get today's date
+            const todayYear = today.getFullYear();
+            const todayMonth = today.getMonth(); // 0-based month index
+            const todayDate = today.getDate();
+
+            for (let month = 0; month < 12; month++) {
+                const monthDiv = document.createElement('div');
+                monthDiv.classList.add('dashboard-y-month-container');
+                const monthTitle = document.createElement('h3');
+                monthTitle.classList.add('dashboard-y-month-title');
+                monthTitle.textContent = monthNames[month];
+                monthTitle.style.cursor = 'pointer';
+                monthTitle.title = 'Click to view this month in weekly view';
+                monthTitle.setAttribute('data-year', year);
+                monthTitle.setAttribute('data-month', month);
+                monthTitle.addEventListener('click', function() {
+                    const y = this.getAttribute('data-year');
+                    const m = this.getAttribute('data-month');
+                    window.location.href = `{{ url_for('dashboard') }}?year=${y}&month=${m}`;
+                });
+                
+                // Add member_since badge to month title if member_since falls in this month
+                if (member_since) {
+                    let normalizedMemberSinceDate = member_since;
+                    if (member_since.length > 10 || member_since.includes('GMT')) {
+                        const msDate = new Date(member_since);
+                        if (!isNaN(msDate)) {
+                            normalizedMemberSinceDate = msDate.toISOString().split('T')[0];
+                        }
+                    }
+                    const msParts = normalizedMemberSinceDate.split('-');
+                    const msYear = parseInt(msParts[0]);
+                    const msMonth = parseInt(msParts[1]) - 1; // 0-indexed
+                    if (msYear === year && msMonth === month) {
+                        const badge = document.createElement('div');
+                        badge.className = 'member-since-badge';
+                        badge.title = 'Member Since';
+                        badge.innerHTML = '<i class="fa-solid fa-flag-checkered"></i>';
+                        monthTitle.appendChild(badge);
+                    }
+                }
+                
+                monthDiv.appendChild(monthTitle);
+
+                // Create table structure for the month
+                const table = document.createElement('table');
+                table.classList.add('dashboard-y-calendar-table');
+
+                // Add the table header for the days of the week
+                const thead = document.createElement('thead');
+                thead.innerHTML = `
+                    <tr>
+                        <th>S</th>
+                        <th>M</th>
+                        <th>T</th>
+                        <th>W</th>
+                        <th>Th</th>
+                        <th>F</th>
+                        <th>Sa</th>
+                    </tr>
+                `;
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+
+                // Logic for calculating dates in the month
+                const firstDay = new Date(year, month, 1);
+                const lastDay = new Date(year, month + 1, 0);
+                const firstDayOfWeek = firstDay.getDay();
+
+                let dayCount = 1;
+                let week = document.createElement('tr');
+
+                // Fill in empty cells for days before the first day of the month
+                for (let i = 0; i < firstDayOfWeek; i++) {
+                    week.appendChild(document.createElement('td'));
+                }
+
+                // Fill in the days of the month
+                while (dayCount <= lastDay.getDate()) {
+                    const dayCell = document.createElement('td');
+                    const dayContent = document.createElement('div'); // Create a div to hold the content
+                    dayContent.classList.add('dashboard-y-day-content');
+
+                    dayContent.textContent = dayCount; // Set the day number
+
+                    // Logic to determine the remainder and apply classes
+                    const formattedDate = `${year}-${(month + 1).toString().padStart(2, '0')}-${dayCount.toString().padStart(2, '0')}`;
+                    
+                    // Check for dimming dates before member_since
+                    if (member_since) {
+                        let normalizedMemberSinceDate = member_since;
+                        if (member_since.length > 10 || member_since.includes('GMT')) {
+                            const msDate = new Date(member_since);
+                            if (!isNaN(msDate)) {
+                                normalizedMemberSinceDate = msDate.toISOString().split('T')[0];
+                            }
+                        }
+                        // Add dimming for dates before member_since
+                        if (formattedDate < normalizedMemberSinceDate) {
+                            dayCell.classList.add('before-member-since');
+                        }
+                    }
+                    
+                    const remainderData = totals_remainders_d.find(data => {
+                        const itemDate = new Date(data.date).toISOString().split('T')[0];
+                        return itemDate === formattedDate;
+                    });
+
+                    if (remainderData) {
+                        const remainder = parseFloat(remainderData.remainder);
+                        // Only apply threshold classes if the date is on or after member_since
+                        let applyThresholdClass = true;
+                        if (member_since) {
+                            const cellDate = new Date(formattedDate);
+                            const memberSinceDate = new Date(member_since);
+                            if (cellDate < memberSinceDate) {
+                                applyThresholdClass = false;
+                            }
+                        }
+                        if (applyThresholdClass) {
+                            if (remainder < 0) {
+                                dayContent.classList.add('negative');
+                            } else if (remainder < balanceThreshold) {
+                                dayContent.classList.add('below-threshold');
+                            } else {
+                                dayContent.classList.add('above-threshold');
+                            }
+                        }
+                    }
+
+                    // Check if this day is today and apply the 'dashboard-y-today' class
+                    if (year === todayYear && month === todayMonth && dayCount === todayDate) {
+                        dayContent.classList.add('dashboard-y-today'); // Add 'dashboard-y-today' class to the div
+                    }
+
+                    // Make the cell clickable to navigate to daily view
+                    dayCell.style.cursor = 'pointer';
+                    dayCell.title = 'Click to view this day in daily view';
+                    dayCell.setAttribute('data-date', formattedDate);
+                    dayCell.addEventListener('click', function() {
+                        const dateStr = this.getAttribute('data-date');
+                        if (dateStr) {
+                            const dateParts = dateStr.split('-');
+                            const y = parseInt(dateParts[0]);
+                            const m = parseInt(dateParts[1]) - 1; // 0-indexed
+                            const d = parseInt(dateParts[2]);
+                            window.location.href = `{{ url_for('dashboard_d') }}?year=${y}&month=${m}&day=${d}`;
+                        }
+                    });
+
+                    dayCell.appendChild(dayContent); // Append the div inside the td
+                    
+                    // Add bank sync marker if this date matches last synced transaction date
+                    if (bank_last_txn_date && bank_sync_flags && formattedDate === bank_last_txn_date) {
+                        const txnDate = new Date(bank_last_txn_date + 'T00:00:00');
+                        const marker = document.createElement('span');
+                        marker.className = 'bank-sync-marker';
+                        marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+                        marker.innerHTML = '<span class="bank-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span>';
+                        dayContent.appendChild(marker);
+                    }
+                    week.appendChild(dayCell);
+
+                    // Start a new row when the week is complete
+                    if ((firstDayOfWeek + dayCount) % 7 === 0) {
+                        tbody.appendChild(week);
+                        week = document.createElement('tr');
+                    }
+
+                    dayCount++;
+                }
+
+                // Fill in the remaining cells of the last week
+                while (week.children.length < 7) {
+                    week.appendChild(document.createElement('td'));
+                }
+                tbody.appendChild(week);
+
+                // Ensure the month always has 6 rows by adding extra rows if necessary
+                while (tbody.children.length < 6) {
+                    const extraWeek = document.createElement('tr');
+                    for (let i = 0; i < 7; i++) {
+                        extraWeek.appendChild(document.createElement('td')); // Add empty cells to fill the row
+                    }
+                    tbody.appendChild(extraWeek);
+                }
+
+                table.appendChild(tbody);
+                monthDiv.appendChild(table);
+                calendarContainer.appendChild(monthDiv);
+            }
+
+            updateNextYearIndicator();
+
+            document.getElementById('loading-screen').style.display = 'none';
+        }
+
+        function updateNextYearIndicator() {
+            const indicator = document.getElementById('next-indicator');
+            // Find the last day displayed in the current year
+            const lastDayOfYear = new Date(selectedYear, 11, 31);
+
+            let nextDate = new Date(lastDayOfYear);
+            nextDate.setDate(nextDate.getDate() + 1);
+
+            // Filter future entries after the last displayed date
+            const futureEntries = totals_remainders_d
+                .map(item => ({
+                    entryDate: new Date(item.date),
+                    remainder: parseFloat(item.remainder)
+                }))
+                .filter(entry => {
+                    const entryDateStr = entry.entryDate.toISOString().split('T')[0];
+                    const nextDateStr = nextDate.toISOString().split('T')[0];
+                    // Only include entries after the last displayed date and after member_since (if set)
+                    if (member_since) {
+                        const memberSinceStr = new Date(member_since).toISOString().split('T')[0];
+                        if (entryDateStr < memberSinceStr) return false;
+                    }
+                    return entryDateStr >= nextDateStr;
+                })
+                .sort((a, b) => a.entryDate - b.entryDate);
+
+            const belowThresholdEntries = futureEntries.filter(entry => entry.remainder < balanceThreshold);
+
+            if (belowThresholdEntries.length > 0) {
+                const negativeEntry = belowThresholdEntries.find(entry => entry.remainder < 0);
+                if (negativeEntry) {
+                    indicator.style.display = 'block';
+                    indicator.classList.remove('below-threshold-indicator');
+                    indicator.classList.add('negative-indicator');
+                } else {
+                    indicator.style.display = 'block';
+                    indicator.classList.remove('negative-indicator');
+                    indicator.classList.add('below-threshold-indicator');
+                }
+            } else {
+                indicator.style.display = 'none';
+                indicator.classList.remove('below-threshold-indicator', 'negative-indicator');
+            }
+        }
+
+        // Navigate to previous year
+        function previousYear() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-right');
+
+            document.getElementById('loading-screen').style.display = 'none';
+            if (selectedYear > minYear) {
+                selectedYear--;
+                
+                // Wait for animation to complete before regenerating calendar
+                setTimeout(() => {
+                    mainContainer.classList.remove('slide-right');
+                    populateYearDropdown(selectedYear);
+                    generateCalendar(selectedYear);
+                    storeLatestViewedYear(selectedYear); // Store the latest viewed year
+                }, 50); // Small delay to ensure animation starts
+            } else {
+            }
+        }
+    
+        // Navigate to next year
+        function nextYear() {
+            const mainContainer = document.getElementById('main-container');
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            mainContainer.classList.add('slide-left');
+
+            document.getElementById('loading-screen').style.display = 'none';
+            if (selectedYear < maxYear) {
+                selectedYear++;
+                
+                // Wait for animation to complete before regenerating calendar
+                setTimeout(() => {
+                    mainContainer.classList.remove('slide-left');
+                    populateYearDropdown(selectedYear);
+                    generateCalendar(selectedYear);
+                    storeLatestViewedYear(selectedYear); // Store the latest viewed year
+                }, 50); // Small delay to ensure animation starts
+            } else {
+            }
+        }
+    
+        // Go to current year
+        function goToCurrentYear() {
+            document.getElementById('loading-screen').style.display = 'none';
+            selectedYear = currentYear;
+            populateYearDropdown(selectedYear);
+            generateCalendar(selectedYear);
+            storeLatestViewedYear(selectedYear); // Store the latest viewed year
+        }
+
+        function saveDailyTotalsAndRemainders() {
+
+            $.ajax({
+                url: "/save_totals_remainders_d", // Back-end route
+                type: "POST", // Or "GET" depending on your method
+                contentType: "application/json",
+                async: false,  // Make the request synchronous
+                success: function(response) {
+                    if (response.status === "success") {
+                        // Refresh notification badge in case new notifications were created
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
+                        }
+                        generateCalendar(selectedYear);
+                        showDashboardSpinner(false);
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                },
+                complete: function() {
+                    // Hide the loading screen after the AJAX request completes
+                    document.getElementById('loading-screen').style.display = 'none';
+                }
+            });
+        }
+    
+        // Add touch event listeners
+        document.addEventListener('touchstart', handleTouchStart, { passive: false });
+        document.addEventListener('touchmove', handleTouchMove, { passive: false });
+        document.addEventListener('touchend', handleTouchEnd);
+
+        // Add event listener for year dropdown change
+        document.getElementById('year-dropdown').addEventListener('change', function () {
+            const selectedDropdownYear = parseInt(this.value);
+            if (selectedDropdownYear >= minYear && selectedDropdownYear <= maxYear) {
+                selectedYear = selectedDropdownYear;
+                generateCalendar(selectedYear); // Update the calendar when a year is selected from the dropdown
+                storeLatestViewedYear(selectedDropdownYear); // Store the latest viewed year
+            }
+        });
+    
+        // Initialize the page with the latest viewed year or the current year
+        document.addEventListener('DOMContentLoaded', function() {
+            const latestViewedYear = getLatestViewedYear();
+            if (latestViewedYear) {
+                selectedYear = latestViewedYear;
+            } else {
+                selectedYear = currentYear;
+            }
+            populateYearDropdown(selectedYear);
+            generateCalendar(selectedYear);
+        });
+        
+        $(function() {
+            var $toggle = $('#nav-dropdown-toggle');
+            var $arrow = $('#nav-dropdown-arrow');
+            var $inline = $('#nav-inline-buttons');
+            var $dropdown = $('#nav-dropdown-menu');
+            var open = false;
+            var justClosed = false;
+            var navButtons = [
+                { href: "{{ url_for('dashboard_d') }}", icon: 'fa-calendar-day', label: 'Day View', focus: false },
+                { href: "{{ url_for('dashboard') }}", icon: 'fa-calendar-week', label: 'Week View', focus: false },
+                { href: "{{ url_for('dashboard_3m') }}", icon: 'fa-calendar-days', label: 'Month View', focus: false },
+                { href: "{{ url_for('dashboard_m') }}", icon: 'fa-calendar-exclamation', label: 'Month Overview', focus: false },
+                { href: null, icon: 'fa-calendar', label: 'Year Overview', focus: true }
+            ];
+            $toggle.on('click', function(e) {
+                if (justClosed) {
+                    justClosed = false;
+                    return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                if (!open) {
+                    $inline.hide();
+                    $dropdown.empty();
+                    navButtons.forEach(function(btn) {
+                        var $btn = $('<a></a>').addClass('nav-button').css({width:'100%',display:'flex',alignItems:'center',gap:'10px',padding:'8px 18px'});
+                        if (btn.href) $btn.attr('href', btn.href);
+                        if (btn.focus) $btn.addClass('nav-button-focus');
+                        $btn.append($('<i></i>').addClass('fa-solid').addClass(btn.icon));
+                        $btn.append($('<span></span>').addClass('nav-label').text(btn.label));
+                        $dropdown.append($btn);
+                    });
+                    $dropdown.show();
+                    $arrow.removeClass('fa-caret-right').addClass('fa-caret-down');
+                    $toggle.addClass('active');
+                    open = true;
+                    setTimeout(function() {
+                        $(document).on('mousedown.navdropdown', function(ev) {
+                            if (!$dropdown.is(ev.target) && $dropdown.has(ev.target).length === 0 && !$toggle.is(ev.target)) {
+                                $dropdown.hide();
+                                $inline.show();
+                                $arrow.removeClass('fa-caret-down').addClass('fa-caret-right');
+                                $toggle.removeClass('active');
+                                open = false;
+                                $(document).off('mousedown.navdropdown');
+                                justClosed = true;
+                            }
+                        });
+                    }, 0);
+                } else {
+                    $(document).off('mousedown.navdropdown');
+                    $dropdown.hide();
+                    $inline.show();
+                    $arrow.removeClass('fa-caret-down').addClass('fa-caret-right');
+                    $toggle.removeClass('active');
+                    open = false;
+                }
+            });
+        });
+
+        // Show loading screen on nav button click (inline or dropdown)
+        $(function() {
+            $(document).on('click', '#nav-inline-buttons a.nav-button, #nav-dropdown-menu a.nav-button', function(e) {
+                var href = $(this).attr('href');
+                if (href && href !== '#' && !href.startsWith('javascript:')) {
+                    $('#loading-screen').show();
+                }
+            });
+        });
+
+        // --- Tutorial ---
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                fetch('/api/tutorial/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.completed && data.completed['tutorial_dashboard_y']) return;
+
+                        startTutorial('tutorial_dashboard_y', [
+                            { selector: '#year-dropdown', text: 'Use this dropdown to jump to any year.' },
+                            { selector: '#year-calendar', text: 'The year overview shows all 12 months at a glance. Each day is color-coded by your remainder balance.' },
+                            { selector: '.dashboard-y-month-container:first-child .dashboard-y-month-title', text: 'Tap a <b>month name</b> to jump to that month in the Week view.' },
+                            { selector: '.dashboard-y-today', text: '<b>Today</b> is outlined so you can spot it quickly.' },
+                            { selector: '#year-calendar', text: '<b>Green</b> days are above your balance threshold, <b>orange</b> days are below it, and <b>red</b> days have a negative remainder. Swipe left or right to change years.' }
+                        ], { delay: 500 });
+                    })
+                    .catch(function() { /* silently ignore */ });
+            }, 600);
+        });
+    </script>
+</body>
+</html>

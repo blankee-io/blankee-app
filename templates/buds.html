@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Buds</title>
+    <!-- Link to the external stylesheet for styling the page -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Link to Font Awesome for icons -->
+    {% include '_fontawesome.html' %}
+    <!-- Link to jQuery library for JavaScript functionality -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="buds-body">
+    <!-- Include the navigation bar -->
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <!-- Calendar navigation section (currently empty) -->
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">   
+            <div class="nav-buttons">
+                <a href="{{ url_for(landing_page) }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+            <div class="calendarnavbuttons" id="calendarnavbuttons"> 
+                <a id="previous-nav-btn" class="nav-button" href="javascript:previousMonth()">
+                    <i class="fa-solid fa-left"></i>
+                    <span class="nav-tooltip">Previous Bud</span>
+                </a>
+                <select id="current-nav-select" class="nav-select">
+                    {% for bud in buds %}
+                        <option value="{{ bud.id }}" {% if selected_bud and bud.id == selected_bud.id %}selected{% endif %}>{{ bud.name }}</option>
+                    {% endfor %}
+                </select>
+                <span class="nav-tooltip">Choose a Bud</span>
+                <a id="next-nav-btn" class="nav-button" href="javascript:nextMonth()">
+                    <i class="fa-solid fa-right"></i>
+                    <span class="nav-tooltip">Next Bud</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <div class="buds-title">
+            
+            <span><i class="fa-solid fa-seedling"></i> Buds&trade;</span>
+            <button id="add-bud-btn" class="add-bud-btn" type="button"><strong><i class="fa-solid fa-plus"></i> Add Bud</strong></button>
+        </div>
+        {% if buds and buds|length > 0 %}
+            <div class="buds-container"
+                {% if selected_bud %}
+                    data-bud-id="{{ selected_bud.id }}"
+                    data-bud-active="{{ 1 if selected_bud.active else 0 }}"
+                {% endif %}>
+                <div class="bud-header">
+                    <!-- Active toggle switch -->
+                    {% if selected_bud %}
+                        <div class="bud-toggle-container">
+                            <button class="bud-active-toggle" data-bud-id="{{ selected_bud.id }}" aria-pressed="{{ 1 if selected_bud.active else 0 }}">
+                                <i class="fa-solid fa-toggle-on bud-toggle-on {% if not selected_bud.active %}bud-toggle-hidden{% endif %}"></i>
+                                <i class="fa-solid fa-toggle-off bud-toggle-off {% if selected_bud.active %}bud-toggle-hidden{% endif %}"></i>
+                            </button>
+                            <span class="bud-status-text">
+                                <span class="bud-status-active {% if not selected_bud.active %}bud-toggle-hidden{% endif %}">Active</span>
+                                <span class="bud-status-inactive {% if selected_bud.active %}bud-toggle-hidden{% endif %}">Inactive</span>
+                            </span>
+                            <span class="bud-toggle-tooltip">
+                                When active, items are added to "{{ selected_bud.name }}" category. When deactivated, future items are removed and past items move to Uncategorized.
+                            </span>
+                        </div>
+                    {% endif %}
+                    <span class="bud-name">
+                    {% if selected_bud %}
+                        {{ selected_bud.name }}
+                    {% endif %}
+                    </span>
+                    <button id="delete-bud-btn" class="delete-bud-btn" type="button"><i class="fa-solid fa-trash"></i></button>
+                </div>
+                <table class="bud-table">
+                    <thead>
+                        <tr>
+                            <th class="bud-item-col">Item</th>
+                            <th class="bud-amount-col">Amount</th>
+                            <th class="bud-due-date-col">Payment Date</th>
+                            <th class="bud-account-col">Account</th>
+                            <th class="bud-action-col"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if selected_bud and bud_items_by_bud[selected_bud.id] %}
+                            {% for item in bud_items_by_bud[selected_bud.id] %}
+                                <tr>
+                                    <td>{{ item.name }}</td>
+                                    <td>
+                                        <span class="bud-currency-symbol">
+                                            {{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}
+                                        </span>{{ "%.2f"|format(item.value) }}
+                                    </td>
+                                    <td>{{ item.date }}</td>
+                                    <td>{{ item.account }}</td> <!-- Show account value here -->
+                                    <td class="bud-item-action-cell">
+                                        <button class="delete-bud-item-btn" data-item-id="{{ item.id }}">
+                                            <i class="fa-regular fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        {% endif %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="5" class="add-bud-items"><a href=""><i class="fa-solid fa-plus"></i> Add new item.</a></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                <div class="bud-total">
+                    {% set total = 0 %}
+                    {% if selected_bud and bud_items_by_bud[selected_bud.id] %}
+                        {% set total = bud_items_by_bud[selected_bud.id] | map(attribute='value') | sum %}
+                    {% endif %}
+                    <span class="bud-total-label">Total</span>
+                    <div class="bud-total-amount">
+                        <span>
+                            {{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}
+                        </span>
+                        <span>{{ "%.2f"|format(total) }}</span>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <div class="buds-empty-info">
+                <h3>You don't have any Buds!</h3>
+                <p>
+                    <strong>Buds&trade;</strong> are small, focused budgets that integrate seamlessly into your main Blankee budget. 
+                    They’re perfect for tracking individual <strong>Items</strong> for a project, trip, event, or any one-off activity.
+                </p>
+                <p>
+                    Each Bud lets you organize and monitor specific spending, so you can keep your regular finances separate from special occasions or unique goals, while your Blankee budget continues to be accurate.
+                </p>
+                <p>
+                    To get started, click the <strong><i class="fa-solid fa-plus"></i> Add Bud</strong> button above to create your first Bud.
+                </p>
+            </div>
+        {% endif %}
+    </div> 
+
+    <div id="bud-input-overlay" class="bud-input-overlay">
+        <!-- Floating input field for adding a new income category -->
+        <div id="bud-input-container" class="bud-input-container">
+            <input type="text" id="new-bud" placeholder="New Bud Name" maxlength="20">
+            <button id="confirm-add-bud-btn" type="button"><i class="fa-solid fa-plus"></i></button>
+        </div>
+    </div>
+
+
+    <!-- Modal for adding bud item -->
+    <div id="add-bud-item-modal" class="footer-modal">
+        <div class="footer-modal-content">
+            <span class="footer-close-modal" id="add-bud-item-close">&times;</span>
+            <h3>Add Bud Item</h3>
+            <form id="add-bud-item-form">
+                <div class="footer-form-group">
+                    <label for="bud-item-name">Item Name:</label>
+                    <input type="text" id="bud-item-name" name="name" required placeholder="Item name">
+                </div>
+                <div class="footer-form-group">
+                    <label for="bud-item-value">Amount:</label>
+                    <input type="number" id="bud-item-value" name="value" min="0" step="0.01" required placeholder="0.00">
+                </div>
+                <div class="footer-form-group">
+                    <label for="bud-item-date">Payment Date:</label>
+                    <input type="date" id="bud-item-date" name="date" required>
+                </div>
+                <div class="footer-form-group">
+                    <label for="bud-item-account">Account:</label>
+                    <select id="bud-item-account" name="account" required>
+                        <option value="Blankee">Blankee</option>
+                        {% for account in credit_accounts %}
+                            <option value="{{ account.name }}">{{ account.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="footer-form-group">
+                    <button type="submit">Add Item</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <!-- Link to the external JavaScript file -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('loading-screen').style.display = 'none';
+            const addBudBtn = document.getElementById('add-bud-btn');
+            const budInputOverlay = document.getElementById('bud-input-overlay');
+            const confirmAddBudBtn = document.getElementById('confirm-add-bud-btn');
+            const newBudInput = document.getElementById('new-bud');
+
+            // Limit decimal places for bud-item-value input (2 decimals)
+            const budItemValueInput = document.getElementById('bud-item-value');
+            if (budItemValueInput) {
+                budItemValueInput.addEventListener('input', function() {
+                    let value = this.value;
+                    // Allow only one decimal point
+                    const parts = value.split('.');
+                    if (parts.length > 2) {
+                        this.value = parts[0] + '.' + parts.slice(1).join('');
+                        value = this.value;
+                    }
+                    if (value.includes('.')) {
+                        const decimals = value.split('.');
+                        if (decimals[1] && decimals[1].length > 2) {
+                            this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                        }
+                    }
+                });
+            }
+
+            // Toggle overlay visibility
+            addBudBtn.addEventListener('click', function() {
+                budInputOverlay.style.display = 'flex';
+                newBudInput.value = '';
+                newBudInput.focus();
+            });
+
+            // Hide overlay when clicking outside the input container
+            budInputOverlay.addEventListener('click', function(e) {
+                if (e.target === budInputOverlay) {
+                    budInputOverlay.style.display = 'none';
+                }
+            });
+
+            // Add Bud on button click
+            confirmAddBudBtn.addEventListener('click', addBud);
+
+            // Add Bud on Enter key
+            newBudInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    addBud();
+                }
+            });
+
+            function addBud() {
+                const budName = newBudInput.value.trim();
+                if (!budName) return;
+
+                fetch('/add-bud', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: budName })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        budInputOverlay.style.display = 'none';
+                        location.reload(); // Reload to show new bud
+                    } else {
+                        showToast(data.message || 'Error adding bud.', 'error');
+                    }
+                });
+            }
+
+            // Bud select dropdown logic
+            const budSelect = document.getElementById('current-nav-select');
+            const budsTitle = document.querySelector('.buds-title');
+            const previousNavBtn = document.getElementById('previous-nav-btn');
+            const nextNavBtn = document.getElementById('next-nav-btn');
+
+            // Gather all bud IDs from the select options
+            function getBudIds() {
+                return Array.from(budSelect.options).map(opt => parseInt(opt.value));
+            }
+
+            function getCurrentBudIndex() {
+                const budIds = getBudIds();
+                const currentBudId = parseInt(budSelect.value);
+                return budIds.indexOf(currentBudId);
+            }
+
+            function goToBud(index) {
+                const budIds = getBudIds();
+                // Cycle through (wrap around)
+                const newIndex = (index + budIds.length) % budIds.length;
+                const newBudId = budIds[newIndex];
+                budsTitle.setAttribute('data-bud-id', newBudId);
+                window.location.href = window.location.pathname + '?bud_id=' + newBudId;
+            }
+
+            if (previousNavBtn && budSelect) {
+                previousNavBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const currentIndex = getCurrentBudIndex();
+                    goToBud(currentIndex - 1);
+                });
+            }
+
+            if (nextNavBtn && budSelect) {
+                nextNavBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const currentIndex = getCurrentBudIndex();
+                    goToBud(currentIndex + 1);
+                });
+            }
+
+            if (budSelect && budsTitle) {
+                budSelect.addEventListener('change', function() {
+                    const selectedBudId = budSelect.value;
+                    budsTitle.setAttribute('data-bud-id', selectedBudId);
+                    window.location.href = window.location.pathname + '?bud_id=' + selectedBudId;
+                });
+            }
+
+            const budActiveToggle = document.querySelector('.bud-active-toggle');
+            if (budActiveToggle) {
+                budActiveToggle.addEventListener('click', function() {
+                    const budId = budActiveToggle.getAttribute('data-bud-id');
+                    const isActive = budActiveToggle.getAttribute('aria-pressed') === '1';
+
+                    budActiveToggle.setAttribute('aria-pressed', isActive ? '0' : '1');
+                    budActiveToggle.querySelector('.bud-toggle-on').classList.toggle('bud-toggle-hidden', isActive);
+                    budActiveToggle.querySelector('.bud-toggle-off').classList.toggle('bud-toggle-hidden', !isActive);
+                    
+                    // Toggle status text
+                    const statusText = document.querySelector('.bud-status-text');
+                    if (statusText) {
+                        statusText.querySelector('.bud-status-active').classList.toggle('bud-toggle-hidden', isActive);
+                        statusText.querySelector('.bud-status-inactive').classList.toggle('bud-toggle-hidden', !isActive);
+                    }
+                    
+                    document.getElementById('loading-screen').style.display = 'flex';
+                    fetch('/toggle-bud-active', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bud_id: budId, active: isActive ? 0 : 1 })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            // Refresh notification badge before reloading
+                            if (typeof refreshNotificationBadge === 'function') {
+                                refreshNotificationBadge();
+                            }
+                            saveDailyTotalsAndRemainders();
+                            location.reload();
+                        } else {
+                            showToast(data.message || 'Error updating bud status.', 'error');
+                        }
+                    });
+                });
+            }
+        });
+
+        $(function() {
+            const $addBudItemsLink = $('.add-bud-items a');
+            const $budsContainer = $('.buds-container');
+
+            // Show modal when Add new item link is clicked
+            $addBudItemsLink.on('click', function(e) {
+                e.preventDefault();
+                $('#add-bud-item-modal').show();
+                // Clear the form
+                $('#add-bud-item-form')[0].reset();
+                // Focus on first input
+                $('#bud-item-name').focus();
+            });
+
+            // Close modal on X click
+            $('#add-bud-item-close').on('click', function() {
+                $('#add-bud-item-modal').hide();
+            });
+
+            // Close modal on clicking outside modal content
+            $('#add-bud-item-modal').on('mousedown', function(e) {
+                if (e.target === this) {
+                    $('#add-bud-item-modal').hide();
+                }
+            });
+
+            // Handle form submission
+            $('#add-bud-item-form').on('submit', function(e) {
+                e.preventDefault();
+                
+                const itemName = $('#bud-item-name').val().trim();
+                const itemValue = $('#bud-item-value').val().trim();
+                const itemDate = $('#bud-item-date').val().trim();
+                const itemAccount = $('#bud-item-account').val();
+                
+                if (!itemName || !itemValue || !itemDate || !itemAccount) {
+                    showToast('Please fill in all fields.', 'warning');
+                    return;
+                }
+                
+                const budId = $budsContainer.data('bud-id');
+                const budActive = $budsContainer.data('bud-active') === 1 ? 1 : 0;
+                
+                document.getElementById('loading-screen').style.display = 'flex';
+                $.ajax({
+                    url: '/add-bud-item',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        name: itemName,
+                        value: itemValue,
+                        date: itemDate,
+                        account: itemAccount,
+                        bud_id: budId,
+                        active: budActive
+                    }),
+                    dataType: 'json',
+                    success: function(data) {
+                        if (data.status === 'success') {
+                            $('#add-bud-item-modal').hide();
+                            saveDailyTotalsAndRemainders();
+                            location.reload();
+                        } else {
+                            showToast(data.message || 'Error adding item.', 'error');
+                            document.getElementById('loading-screen').style.display = 'none';
+                        }
+                    },
+                    error: function() {
+                        showToast('Error adding item.', 'error');
+                        document.getElementById('loading-screen').style.display = 'none';
+                    }
+                });
+        });
+    });        $(function() {
+            const $budTableBody = $('.bud-table tbody');
+            const $budsContainer = $('.buds-container');
+
+            $budTableBody.on('click', 'td', function() {
+                const $td = $(this);
+                const $tr = $td.closest('tr');
+                const itemId = $tr.find('.delete-bud-item-btn').data('item-id');
+                if (!itemId) return;
+
+                const colIndex = $td.index();
+                let field, inputType, inputValue, $input;
+
+                if (colIndex === 0) {
+                    field = 'name';
+                    inputType = 'text';
+                    inputValue = $td.text().trim();
+                    $input = $('<input>').attr('type', inputType).addClass('bud-item-edit-input').val(inputValue);
+                } else if (colIndex === 1) {
+                    field = 'value';
+                    inputType = 'number';
+                    inputValue = $td.text().trim();
+                    $input = $('<input>').attr('type', inputType).addClass('bud-item-edit-input').val(inputValue)
+                        .attr('step', '1').attr('min', '0')
+                        .on('input', function() {
+                            let val = $(this).val();
+                            if (val && val.includes('.')) {
+                                $(this).val(val.split('.')[0]);
+                            }
+                        });
+                } else if (colIndex === 2) {
+                    field = 'date';
+                    inputType = 'date';
+                    inputValue = $td.text().trim();
+                    $input = $('<input>').attr('type', inputType).addClass('bud-item-edit-input').val(inputValue);
+                    if (inputValue) {
+                        const d = new Date(inputValue);
+                        if (!isNaN(d)) {
+                            $input.val(d.toISOString().slice(0, 10));
+                        }
+                    }
+                } else if (colIndex === 3) {
+                    field = 'account';
+                    inputValue = $td.text().trim();
+                    $input = $('<select>').addClass('bud-item-edit-input bud-item-account-select');
+                    $input.append($('<option>').val('Blankee').text('Blankee'));
+                    {% for account in credit_accounts %}
+                        $input.append($('<option>').val('{{ account.name|e }}').text('{{ account.name|e }}'));
+                    {% endfor %}
+                    if (inputValue === "deleted account") {
+                        $input.val('Blankee');
+                    } else {
+                        $input.val(inputValue);
+                    }
+                } else {
+                    return;
+                }
+
+                // Prevent multiple inputs
+                if ($td.find('input, select').length) return;
+
+                $td.empty().append($input);
+                $input.focus();
+
+                function submitEdit() {
+                    const newValue = $input.val().trim();
+                    if (newValue === inputValue || newValue === '') {
+                        $td.text(inputValue);
+                        return;
+                    }
+                    const budId = $budsContainer.data('bud-id');
+                    const budActive = $budsContainer.data('bud-active') === 1 ? 1 : 0;
+                    document.getElementById('loading-screen').style.display = 'flex';
+                    $.ajax({
+                        url: '/update-bud-item',
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({
+                            id: itemId,
+                            field: field,
+                            value: newValue,
+                            active: budActive
+                        }),
+                        dataType: 'json',
+                        success: function(data) {
+                            if (data.status === 'success') {
+                                saveDailyTotalsAndRemainders();
+                                location.reload();
+                            } else {
+                                showToast(data.message || 'Error updating item.', 'error');
+                                $td.text(inputValue);
+                            }
+                        },
+                        error: function() {
+                            showToast('Error updating item.', 'error');
+                            $td.text(inputValue);
+                        }
+                    });
+                }
+
+                $input.on('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        submitEdit();
+                    }
+                });
+                $input.on('blur change', function() {
+                    submitEdit();
+                });
+            });
+        });
+
+        $(function() {
+            const $budTableBody = $('.bud-table tbody');
+
+            // Delete bud item with confirmation
+            $budTableBody.on('click', '.delete-bud-item-btn', async function(e) {
+                e.preventDefault();
+                const itemId = $(this).data('item-id');
+                if (!itemId) return;
+
+                const confirmed = await showConfirmModal({
+                    title: 'Delete Bud Item',
+                    message: 'Are you sure you want to delete this item? If the date for this item is in the past, the amount will be moved to Uncategorized for that date.',
+                    confirmText: 'Delete',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
+
+                document.getElementById('loading-screen').style.display = 'flex';
+                $.ajax({
+                    url: '/delete-bud-item',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ id: itemId }),
+                    dataType: 'json',
+                    success: function(data) {
+                        if (data.status === 'success') {
+                            saveDailyTotalsAndRemainders();
+                            location.reload();
+                        } else {
+                            showToast(data.message || 'Error deleting item.', 'error');
+                        }
+                    },
+                    error: function() {
+                        showToast('Error deleting item.', 'error');
+                    }
+                });
+            });
+        });
+
+        function saveDailyTotalsAndRemainders(startDate = null) {
+            let data = {};
+            if (startDate) {
+                data.start_date = startDate;
+            }
+
+            $.ajax({
+                url: "/save_totals_remainders_d", // Back-end route
+                type: "POST", // Or "GET" depending on your method
+                contentType: "application/json",
+                data: JSON.stringify(data),
+                async: false,  // Make the request synchronous
+                success: function(response) {
+                    if (response.status === "success") {
+                        // Refresh notification badge in case new notifications were created
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
+                        }
+                        location.reload();
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                },
+                complete: function() {
+                }
+            });
+        }
+
+        $(function() {
+            const $budsContainer = $('.buds-container');
+            const $deleteBudBtn = $('#delete-bud-btn');
+
+            // Delete bud with confirmation
+            $deleteBudBtn.on('click', async function(e) {
+                e.preventDefault();
+                const confirmed = await showConfirmModal({
+                    title: 'Delete Bud',
+                    message: 'Are you sure you want to delete this Bud? Past entries for this Bud will be added to Uncategorized and future entries will be deleted.',
+                    confirmText: 'Delete',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
+
+                const budId = $budsContainer.data('bud-id');
+                document.getElementById('loading-screen').style.display = 'flex';
+                $.ajax({
+                    url: '/delete-bud',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ bud_id: budId }),
+                    dataType: 'json',
+                    success: function(data) {
+                        if (data.status === 'success') {
+                            saveDailyTotalsAndRemainders();
+                            location.reload();
+                        } else {
+                            showToast(data.message || 'Error deleting bud.', 'error');
+                            document.getElementById('loading-screen').style.display = 'none';
+                        }
+                    },
+                    error: function() {
+                        showToast('Error deleting bud.', 'error');
+                        document.getElementById('loading-screen').style.display = 'none';
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

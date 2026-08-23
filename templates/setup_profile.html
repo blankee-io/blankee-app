@@ -1,0 +1,1999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"> <!-- Character encoding for the document -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Setup Profile</title>
+    <!-- Link to the external stylesheet for styling the page -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Link to Font Awesome for icons -->
+    {% include '_fontawesome.html' %}
+    <!-- Link to jQuery library for JavaScript functionality -->
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="setup-profile-body">
+    <!-- Top navigation bar -->
+    <div class="nav-bar nav-bar-login">
+        <div class="nav-bar-container nav-bar-container-login">
+            <div class="nav-left-content nav-left-content-login">
+                <a href="https://blankee.io">
+                    <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo nav-logo-login">
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Welcome Modal -->
+    <div id="welcome-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Welcome to Blankee!</h2>
+            <p>We're excited to help you take control of your finances. To get started, we just need some basic information. Don't worry—it's only a few quick steps!</p>
+            <div class="setup-profile-button-container">
+                <button type="button" class="setup-profile-next-button" id="welcome-next-button">Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MFA Setup Modal -->
+    <div id="mfa-setup-modal-setup" class="modal-setup-profile" style="display: none;">
+        <div class="modal-content-setup-profile">
+            <h2>Secure Your Account</h2>
+            <p>Add an extra layer of security with Multi-Factor Authentication (MFA). You'll use an authenticator app to generate a code each time you log in.</p>
+
+            <div id="mfa-setup-loading" style="text-align: center; padding: 20px;">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; color: var(--primary);"></i>
+            </div>
+
+            <div id="mfa-setup-content" style="display: none;">
+                <ol class="mfa-instructions">
+                    <li>Install an authenticator app (like Google Authenticator or Authy) on your phone.</li>
+                    <li>Open the app and choose "Add Account" or "Scan QR Code".</li>
+                    <li>Scan the QR code below with your app.</li>
+                    <li>Enter the 6-digit code from your app to verify.</li>
+                </ol>
+                <div id="mfa-setup-qr-image"></div>
+                <div class="mfa-secret-container">
+                    <p class="mfa-secret-label">Can't scan? Enter this key manually:</p>
+                    <div class="mfa-secret-box">
+                        <code id="mfa-setup-secret-key"></code>
+                        <button type="button" id="copy-mfa-setup-secret" class="mfa-copy-button" title="Copy to clipboard">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                <form id="mfa-setup-verify-form" class="mfa-verify-form">
+                    <div class="mfa-code-inputs">
+                        <div id="mfa-setup-verify-message" class="mfa-speech-bubble" style="display: none;"></div>
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                        <input type="text" class="mfa-digit mfa-setup-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" required autocomplete="off">
+                    </div>
+                    <input type="hidden" id="mfa-setup-code" name="mfa-code">
+                    <div class="setup-profile-button-container" style="margin-top: 0.5em;">
+                        <button type="button" class="setup-profile-previous-button" id="mfa-setup-prev-btn">Previous</button>
+                        <button type="submit" class="setup-profile-next-button">Continue</button>
+                    </div>
+                    <div class="setup-skip-link-container">
+                        <a href="#" class="setup-skip-link" id="mfa-setup-skip-btn">Skip for Now</a>
+                    </div>
+                </form>
+            </div>
+
+            <div id="mfa-already-configured" style="display: none;">
+                <div style="text-align: center; padding: 20px;">
+                    <i class="fa-solid fa-shield-check" style="font-size: 48px; color: var(--success); margin-bottom: 16px;"></i>
+                    <p style="color: var(--text-dark); font-weight: 500; margin-bottom: 8px; text-align: center;">MFA is already enabled on your account.</p>
+                    <p style="color: var(--secondary-dark); text-align: center;">Your account is secured with Multi-Factor Authentication. You can manage MFA settings in your profile after setup.</p>
+                </div>
+                <div class="setup-profile-button-container">
+                    <button type="button" class="setup-profile-previous-button" id="mfa-configured-prev-btn">Previous</button>
+                    <button type="button" class="setup-profile-next-button" id="mfa-configured-continue-btn">Continue</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Category Recommendations Modal -->
+    <div id="category-recommendations-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile modal-content-category-recommendations">
+            <h2>Recommended Budget Categories</h2>
+            <p id="category-recommendations-description">We've prepared common budget categories with typical amounts to help you get started. Feel free to adjust, add, or remove any categories to match your needs.</p>
+            
+            <div class="category-recommendations-scroll-container">
+                <!-- Income Categories Section -->
+                <div class="category-section">
+                    <div class="recurring-header income" style="margin-bottom: 15px;">
+                        <span>Income Categories</span>
+                        <button id="add-recommended-income-btn" class="add-income-btn" type="button" title="Add Category"><i class="fa-kit fa-solid-folder-plus-circle-plus"></i></button>
+                    </div>
+                    <div class="cadence-legend">
+                        <span class="cadence-legend-item"><i class="fa-solid fa-calendar-day"></i> Day</span>
+                        <span class="cadence-legend-item"><i class="fa-solid fa-calendar-week"></i> Week</span>
+                        <span class="cadence-legend-item"><i class="fa-solid fa-calendar-days"></i> Month</span>
+                        <span class="cadence-legend-item"><i class="fa-solid fa-calendars"></i> Year</span>
+                    </div>
+                    <table class="income-recurring-table recommended-categories-table">
+                        <thead>
+                            <tr>
+                                <th class="income-category-col">Category</th>
+                                <th class="income-type-col">Type</th>
+                                <th class="income-amount-col">Amount</th>
+                                <th class="income-cadence-col">Cadence</th>
+                                <th class="income-action-col"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="recommended-income-categories">
+                            <!-- Income categories will be dynamically populated here -->
+                        </tbody>
+                        <tfoot>
+                            <tr class="recurring-footer"><td colspan="5"></td></tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <!-- Expense Categories Section -->
+                <div class="category-section">
+                    <div class="recurring-header expenses" style="margin-bottom: 15px;">
+                        <span>Expense Categories</span>
+                        <button id="add-recommended-expense-btn" class="add-expense-btn" type="button" title="Add Category"><i class="fa-kit fa-solid-folder-minus-circle-plus"></i></button>
+                    </div>
+                    <table class="expense-recurring-table recommended-categories-table">
+                        <thead>
+                            <tr>
+                                <th class="expense-category-col">Category</th>
+                                <th class="expense-type-col">Type</th>
+                                <th class="expense-amount-col">Amount</th>
+                                <th class="expense-cadence-col">Cadence</th>
+                                <th class="expense-action-col"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="recommended-expense-categories">
+                            <!-- Expense categories will be dynamically populated here -->
+                        </tbody>
+                        <tfoot>
+                            <tr class="recurring-footer"><td colspan="5"></td></tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <div class="setup-profile-button-container">
+                <button type="button" class="setup-profile-previous-button" id="category-recommendations-prev-btn">Previous</button>
+                <button type="button" class="setup-profile-next-button" id="confirm-category-recommendations">Continue</button>
+            </div>
+            <div class="setup-skip-link-container">
+                <a href="#" class="setup-skip-link" id="skip-category-recommendations">Create Categories Later</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Category Recommendation Modal -->
+    <div id="edit-category-recommendation-modal" class="modal">
+        <div class="income-form-container">
+            <h2 id="edit-category-modal-title">Edit Category</h2>
+            <form id="edit-category-recommendation-form">
+                <input type="hidden" id="edit-category-type" name="category_type">
+                <input type="hidden" id="edit-category-index" name="category_index">
+            
+                <div class="category-name-recurring-row">
+                    <div class="category-name-field">
+                        <label for="edit-category-name-input">Category Name</label>
+                        <div class="category-input-wrapper">
+                            <input type="text" id="edit-category-name-input" name="category_name" placeholder="Category" required maxlength="20">
+                        </div>
+                    </div>
+                    <div class="recurring-toggle-field">
+                        <label for="edit-is-recurring-checkbox">Recurring?</label>
+                        <input type="checkbox" id="edit-is-recurring-checkbox" name="is_recurring">
+                    </div>
+                </div>
+
+                <div class="form-row" id="edit-wage-bill-row">
+                    <label for="edit-wage-bill-select">Type:</label>
+                    <select id="edit-wage-bill-select" name="wage_bill">
+                        <option value="1" id="edit-wage-bill-option-1">Wages (fixed income)</option>
+                        <option value="0" id="edit-wage-bill-option-0">Variable (irregular income)</option>
+                    </select>
+                </div>
+
+                <div id="edit-recurring-options" style="display:none;">
+                    <label for="edit-category-amount">Recurring Amount</label>
+                    <div class="currency-input-container">
+                        <span class="r-currency-symbol">$</span>
+                        <input type="number" class="recurring-amount" id="edit-category-amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
+                    </div>
+                
+                    <label for="edit-category-cadence-interval">Repeat Every</label>
+                    <div class="cadence-row">
+                        <input type="number" id="edit-category-cadence-interval" name="cadence_interval" min="1" value="1" required>
+                        <select id="edit-category-cadence-unit" name="cadence_unit" required>
+                            <option value="days">Day(s)</option>
+                            <option value="weeks">Week(s)</option>
+                            <option value="months" selected>Month(s)</option>
+                            <option value="years">Year(s)</option>
+                        </select>
+                    </div>
+
+                    <div id="edit-category-weekly-options" style="display:none;">
+                        <label>Repeat on:</label>
+                        <div class="weekday"><input type="checkbox" name="edit_category_weekdays" value="monday"> Mo</div>
+                        <div class="weekday"><input type="checkbox" name="edit_category_weekdays" value="tuesday"> Tu</div>
+                        <div class="weekday"><input type="checkbox" name="edit_category_weekdays" value="wednesday"> We</div>
+                        <div class="weekday"><input type="checkbox" name="edit_category_weekdays" value="thursday"> Th</div>
+                        <div class="weekday"><input type="checkbox" name="edit_category_weekdays" value="friday"> Fr</div>
+                        <div class="weekday"><input type="checkbox" name="edit_category_weekdays" value="saturday"> Sa</div>
+                        <div class="weekday"><input type="checkbox" name="edit_category_weekdays" value="sunday"> Su</div>
+                    </div>
+
+                    <div id="edit-category-monthly-options" style="display:none;">
+                        <label for="edit-category-monthly-days">Days of the month:</label>
+                        <div id="edit-category-monthly-day-container">
+                        </div>
+                        <button type="button" id="edit-category-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
+                    </div>
+
+                    <div id="edit-category-yearly-options" style="display:none;">
+                        <label for="edit-category-yearly-day">Day of the year:</label>
+                        <input type="number" id="edit-category-yearly-day" name="yearly_day" min="1" max="31">
+
+                        <label for="edit-category-yearly-month">Month of the year:</label>
+                        <select id="edit-category-yearly-month" name="yearly_month">
+                            <option value="1">January</option>
+                            <option value="2">February</option>
+                            <option value="3">March</option>
+                            <option value="4">April</option>
+                            <option value="5">May</option>
+                            <option value="6">June</option>
+                            <option value="7">July</option>
+                            <option value="8">August</option>
+                            <option value="9">September</option>
+                            <option value="10">October</option>
+                            <option value="11">November</option>
+                            <option value="12">December</option>
+                        </select>
+                    </div>
+
+                    <div class="date-row">
+                        <div class="date-label-row">
+                            <label for="edit-category-start-date">Start Date</label>
+                            <div class="end-date-container" id="edit-category-end-date-label-container">
+                                <label for="edit-category-end-date">End Date</label>
+                            </div>
+                        </div>
+
+                        <div class="date-input-row">
+                            <input type="date" id="edit-category-start-date" name="start_date" required>
+                            <div class="end-date-container" id="edit-category-end-date-input-container">
+                                <input type="date" id="edit-category-end-date" name="end_date">
+                            </div>
+                        </div>
+
+                        <div class="date-checkbox-row">
+                            <span class="date-checkbox-label">Or</span>
+                            <input type="checkbox" id="edit-category-no-end-date-checkbox">
+                            <label for="edit-category-no-end-date-checkbox">No End Date</label>
+                        </div>
+                        <div class="date-checkbox-row">
+                            <span class="date-checkbox-label">Or</span>
+                            <input type="checkbox" id="edit-category-use-occurrences-checkbox">
+                            <label for="edit-category-use-occurrences-checkbox">Repeat this many times:</label>
+                            <input type="number" id="edit-category-occurrences-count" name="occurrences_count" min="1" style="width:60px;" disabled>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit">Save Changes</button>
+            </form>            
+        </div>        
+    </div>
+
+    <!-- Category Confirmation Summary Modal -->
+    <div id="category-confirmation-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Categories Created Successfully!</h2>
+            <p>Here's a summary of your budget categories:</p>
+            
+            <div class="category-summary-section">
+                <h3><i class="fa-solid fa-circle-plus"></i> Income Categories (<span id="income-count">0</span>)</h3>
+                <div id="income-summary-list" class="category-summary-list">
+                    <!-- Income summary will be populated here -->
+                </div>
+            </div>
+
+            <div class="category-summary-section">
+                <h3><i class="fa-solid fa-circle-minus"></i> Expense Categories (<span id="expense-count">0</span>)</h3>
+                <div id="expense-summary-list" class="category-summary-list">
+                    <!-- Expense summary will be populated here -->
+                </div>
+            </div>
+
+            <div class="setup-profile-button-container">
+                <button type="button" class="setup-profile-next-button" id="continue-after-categories">Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Name Input Modal -->
+    <div id="name-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>What's Your Name?</h2>
+            <form id="setup-profile-name-form" class="setup-profile-form" autocomplete="off" data-1p-ignore>
+                <input type="text" style="display:none;">
+                <input type="password" style="display:none;">
+                <label for="setup-profile-first-name">Enter your first and last name so we can personalize your experience.</label>
+                <div class="currency-input-container">
+                    <input type="text" id="setup-profile-first-name" name="first_name" placeholder="First Name" autocomplete="chrome-off" data-1p-ignore readonly required>
+                    <input type="text" id="setup-profile-last-name" name="last_name" placeholder="Last Name" autocomplete="chrome-off" data-1p-ignore readonly required>
+                </div>
+                <div class="setup-profile-button-container">
+                    <button type="button" class="setup-profile-previous-button" id="name-modal-prev-btn">Previous</button>
+                    <button type="submit" class="setup-profile-next-button" id="name-modal-continue-btn" disabled>Continue</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Currency Selection Modal -->
+    <div id="currency-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Choose Your Currency</h2>
+            <form id="setup-profile-currency-form" class="setup-profile-form">
+                <label for="setup-profile-currency-type">Select your preferred currency. You can change this later in your profile.</label>
+                <div class="currency-input-container">
+                    <select id="setup-profile-currency-type" name="currency_type" required>
+                        <option value="USD" selected>USD (&#36;)</option>
+                        <option value="EUR">EUR (&euro;)</option>
+                    </select>
+                </div>
+                <div class="setup-profile-button-container">
+                    <button type="button" class="setup-profile-previous-button" id="currency-modal-prev-btn">Previous</button>
+                    <button type="submit" class="setup-profile-next-button">Continue</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Starting Balance Modal -->
+    <div id="starting-balance-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Enter Starting Balance</h2>
+            <form id="setup-profile-balance-form" class="setup-profile-form">
+                <label for="setup-profile-starting-balance">The starting balance is the amount currently in your bank account. It serves as the initial balance in the Blankee app and helps set the foundation for tracking your finances. By entering your starting balance, Blankee can accurately calculate your remaining funds as you log income and expenses moving forward.</label>
+                <div class="currency-input-container">
+                    <div style="position: relative;">
+                        <label for="setup-profile-starting-balance">Checking:</label>
+                        <span class="s-p-sb-currency-symbol">$</span>
+                        <input type="number" step="0.01" id="setup-profile-starting-balance" inputmode="decimal" name="starting_balance" placeholder="0.00" required min="0">
+                        <span id="checking-auto-filled-indicator" class="balance-auto-filled-indicator">
+                            <i class="fa-solid fa-circle-check"></i> Auto-filled from bank
+                        </span>
+                    </div>
+                    <div style="position: relative;">
+                        <label for="setup-profile-starting-savings">Savings:</label>
+                        <span class="s-p-ss-currency-symbol">$</span>
+                        <input type="number" step="0.01" id="setup-profile-starting-savings" inputmode="decimal" name="starting_savings" placeholder="0.00" required min="0">
+                        <span id="savings-auto-filled-indicator" class="balance-auto-filled-indicator">
+                            <i class="fa-solid fa-circle-check"></i> Auto-filled from bank
+                        </span>
+                    </div>
+                </div>
+                <!-- Button container -->
+                <div class="setup-profile-button-container">
+                    <button type="button" class="setup-profile-previous-button" id="starting-balance-prev-btn">Previous</button>
+                    <button type="submit" class="setup-profile-next-button">Continue</button>
+                </div>
+            </form>            
+        </div>
+    </div>
+
+    <!-- Balance Threshold Modal -->
+    <div id="balance-threshold-modal-setup" class="modal-setup-profile">
+        <div class="modal-content-setup-profile">
+            <h2>Set Your Minimum Threshold</h2>
+            <form id="setup-profile-threshold-form" class="setup-profile-form">
+                <label for="setup-profile-balance-threshold">The balance threshold is the minimum amount you'd like to keep in your account. If your projected balance falls below this number, Blankee will notify you with an alert. This helps you monitor your financial cushion and track your spending patterns.</label>
+                <div class="currency-input-container">
+                    <span class="s-p-bt-currency-symbol">$</span>
+                    <input type="number" step="0.01" id="setup-profile-balance-threshold" inputmode="decimal" name="balance_threshold" placeholder="0.00" required min="0">
+                </div>
+                <!-- Button container -->
+                <div class="setup-profile-button-container">
+                    <button type="button" class="setup-profile-previous-button" id="balance-threshold-prev-btn">Previous</button>
+                    <button type="submit" class="setup-profile-submit-button">Submit</button>
+                </div>
+            </form>            
+        </div>
+    </div>
+
+    <!-- Include the recurring modal template -->
+    {% include 'loading_modals.html' %}
+
+    <!-- Link to external JavaScript -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <script>
+        // Disable data-version auto-reload on setup page — the POST calls during
+        // setup (sync-profile, analyze-transactions) bump data_version, and the
+        // 500 ms race window in script.js causes location.reload() mid-flow.
+        window._disableDataVersionReload = true;
+
+        // Track if bank was connected
+        let mfaAlreadyEnabled = {{ 'true' if mfa_enabled else 'false' }};
+        let mfaVerifiedThisSession = false;
+        let savedSetupStep = {{ setup_step|default(0) }};
+        let bankBalances = {
+            checking: 0,
+            savings: 0
+        };
+        
+        // Saved form data for prefilling on resume
+        let savedFirstName = {{ saved_first_name|tojson }};
+        let savedLastName = {{ saved_last_name|tojson }};
+        let savedCurrencyType = {{ saved_currency_type|tojson }};
+        let savedStartingBalance = {{ saved_starting_balance|tojson }};
+        let savedStartingSavings = {{ saved_starting_savings|tojson }};
+        let savedBalanceThreshold = {{ saved_balance_threshold|tojson }};
+        let savedSelectedAccountIds = {{ saved_selected_account_ids|tojson }};
+        let savedCategories = {{ saved_categories|tojson if saved_categories else 'null' }};
+        
+        // Category recommendations state (needs to be at top level)
+        let recommendedCategories = {
+            income: [],
+            expense: []
+        };
+        let selectedAccountIdsForCategories = [];
+        
+        // Helper function to get today's date in 'YYYY-MM-DD' format
+        function getTodayDateString() {
+            var today = new Date();
+            var year = today.getFullYear();
+            var month = (today.getMonth() + 1).toString().padStart(2, '0');
+            var day = today.getDate().toString().padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+        
+        // Helper function to get date 5 years from now
+        function getFiveYearsFromNowDateString() {
+            var future = new Date();
+            future.setFullYear(future.getFullYear() + 5);
+            var year = future.getFullYear();
+            var month = (future.getMonth() + 1).toString().padStart(2, '0');
+            var day = future.getDate().toString().padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+        
+        // Helper function to get December 31st three years from now
+        function getThreeYearsEndDateString() {
+            var today = new Date();
+            var threeYearsFromNow = today.getFullYear() + 3;
+            return `${threeYearsFromNow}-12-31`;
+        }
+
+        // ============================================================================
+        // STEP COUNTER
+        // ============================================================================
+        // One flow, 7 steps. There used to be two - a 7-step "no bank" flow and
+        // an 8-step "bank connected" flow - and switchToBankFlow() swapped
+        // between them. That was already broken: skipping the bank step called
+        // showFallbackCategories(), which showed the categories modal, whose
+        // .show() override called setSetupStep(), which auto-detected a
+        // "bank-only" modal and silently switched the user into the 8-step
+        // counter. So the step counter disagreed with the actual flow for every
+        // user who skipped. Collapsing to one flow fixes that as well.
+        let setupStepFlow = [
+            'welcome-modal-setup',
+            'mfa-setup-modal-setup',
+            'category-recommendations-modal-setup',
+            'name-modal-setup',
+            'currency-modal-setup',
+            'starting-balance-modal-setup',
+            'balance-threshold-modal-setup'
+        ];
+        let setupCurrentStep = 0;
+
+        function switchToBankFlow() {
+            // No-op: there is only one flow now. Kept as a seam so a future
+            // provider can reintroduce its own steps in one place.
+        }
+
+        function setSetupStep(modalId) {
+            const stepIndex = setupStepFlow.indexOf(modalId);
+            if (stepIndex === -1) return; // Not a tracked step (e.g. confirmation sub-modal)
+            setupCurrentStep = stepIndex;
+            renderStepCounter();
+        }
+
+        function renderStepCounter() {
+            // Remove any existing counter
+            const existing = document.getElementById('setup-step-counter');
+            if (existing) existing.remove();
+
+            // Find the currently visible setup modal
+            let targetContent = null;
+            document.querySelectorAll('.modal-setup-profile').forEach(function(modal) {
+                if (modal.style.display === 'flex') {
+                    targetContent = modal.querySelector('.modal-content-setup-profile');
+                }
+            });
+            if (!targetContent) return;
+
+            // Build counter HTML
+            const counter = document.createElement('div');
+            counter.id = 'setup-step-counter';
+            counter.className = 'setup-step-counter';
+
+            let html = '';
+            for (let i = 0; i < setupStepFlow.length; i++) {
+                let cls = 'upcoming';
+                if (i < setupCurrentStep) cls = 'completed';
+                else if (i === setupCurrentStep) cls = 'active';
+
+                html += '<div class="step-circle ' + cls + '">' + (i + 1) + '</div>';
+                if (i < setupStepFlow.length - 1) {
+                    html += '<div class="step-separator' + (i < setupCurrentStep ? ' completed' : '') + '"></div>';
+                }
+            }
+
+            counter.innerHTML = html;
+            targetContent.insertBefore(counter, targetContent.firstChild);
+        }
+
+        // Save the completed step and optional form data to the server
+        function saveSetupStep(stepIndex, data) {
+            var payload = { step: stepIndex };
+            if (data) payload.data = data;
+            $.ajax({
+                url: '/save_setup_step',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(payload),
+                success: function(resp) {
+                },
+                error: function(xhr, status, err) {
+                }
+            });
+        }
+
+        // Navigate to a specific step modal
+        function goToStep(stepModalId) {
+            // Hide all setup modals
+            $('.modal-setup-profile').hide();
+            // Show target modal (triggers setSetupStep via .show() override)
+            $('#' + stepModalId).show();
+        }
+
+        // Reset any setup-time bank state when going back
+        function removeBankConnection() {
+            // Nothing to remove: no provider means no setup-time connections.
+            // Returns a resolved jQuery promise because callers chain .always().
+            bankBalances = { checking: 0, savings: 0 };
+            window.setupSelectedAccountIds = [];
+            selectedAccountIdsForCategories = [];
+            return $.when();
+        }
+        
+        $(document).ready(function () {
+            // Override .show() for setup modals to use flexbox centering
+            (function() {
+                const origShow = $.fn.show;
+                $.fn.show = function() {
+                    if (this.hasClass('modal-setup-profile')) {
+                        this.css('display', 'flex');
+                        setSetupStep(this.attr('id'));
+                        return this;
+                    }
+                    return origShow.apply(this, arguments);
+                };
+            })();
+
+            document.getElementById('loading-screen').style.display = 'none';
+
+            // Remove readonly from name fields after a short delay to prevent 1Password detection
+            setTimeout(function() {
+                $('#setup-profile-first-name, #setup-profile-last-name').removeAttr('readonly');
+            }, 100);
+
+            // Prefill form fields from saved data
+            if (savedFirstName) $('#setup-profile-first-name').val(savedFirstName);
+            if (savedLastName) $('#setup-profile-last-name').val(savedLastName);
+            if (savedCurrencyType && savedCurrencyType !== 'USD') {
+                $('#setup-profile-currency-type').val(savedCurrencyType);
+                updateCurrencySymbols(savedCurrencyType);
+            }
+            if (savedStartingBalance) $('#setup-profile-starting-balance').val(savedStartingBalance);
+            if (savedStartingSavings) $('#setup-profile-starting-savings').val(savedStartingSavings);
+            if (savedBalanceThreshold) $('#setup-profile-balance-threshold').val(savedBalanceThreshold);
+            // Restore selected account IDs
+            if (savedSelectedAccountIds && savedSelectedAccountIds.length > 0) {
+                window.setupSelectedAccountIds = savedSelectedAccountIds;
+                selectedAccountIdsForCategories = savedSelectedAccountIds;
+            }
+            // Restore name JS vars if set
+            if (savedFirstName) window.setupFirstName = savedFirstName;
+            if (savedLastName) window.setupLastName = savedLastName;
+            // Restore saved categories if available
+            if (savedCategories) {
+                recommendedCategories = JSON.parse(JSON.stringify(savedCategories));
+                window.pendingCategoriesToCreate = JSON.parse(JSON.stringify(savedCategories));
+            }
+
+            // Resume at a saved step using unified step numbers (0-6)
+            // 0=welcome, 1=MFA, 2=categories, 3=name, 4=currency,
+            // 5=starting-balance, 6=threshold
+            //
+            // The wizard used to have 8 steps. A legacy saved value of 5 or 6
+            // means "name" or "currency" under the old numbering but
+            // "starting-balance"/"threshold" under the new one, and no
+            // frontend check can tell those apart - so the migration clears
+            // setup_step for anyone mid-wizard. The guard below still catches
+            // legacy 7/8 and any step whose modal no longer exists.
+            function resumeAtStep(stepNumber) {
+                var STEP_TO_MODAL = {
+                    1: 'mfa-setup-modal-setup',
+                    2: 'category-recommendations-modal-setup',
+                    3: 'name-modal-setup',
+                    4: 'currency-modal-setup',
+                    5: 'starting-balance-modal-setup',
+                    6: 'balance-threshold-modal-setup'
+                };
+                // Never leave the user on a blank overlay: if the saved step
+                // points at a modal that is not in this build, restart cleanly.
+                var _targetModal = STEP_TO_MODAL[stepNumber];
+                if (stepNumber > 0 && (!_targetModal || !document.getElementById(_targetModal))) {
+                    goToStep('welcome-modal-setup');
+                    saveSetupStep(0);
+                    return;
+                }
+                switch (stepNumber) {
+                    case 1:
+                        showMfaModal();
+                        break;
+                    case 2:
+                        // Third copy of this restore-or-fallback logic, now the
+                        // same one call as every other route in.
+                        enterCategoryStep();
+                        break;
+                    default:
+                        var modalId = STEP_TO_MODAL[stepNumber];
+                        if (modalId) {
+                            goToStep(modalId);
+                        } else {
+                            goToStep('welcome-modal-setup');
+                        }
+                        break;
+                }
+            }
+
+            // Resume at the saved step (step number = the page to show)
+            if (savedSetupStep > 0) {
+                resumeAtStep(savedSetupStep);
+            } else {
+                $('#welcome-modal-setup').show();
+            }
+
+            // Show MFA modal — either the QR setup or the "already configured" state
+            function showMfaModal() {
+                if (mfaAlreadyEnabled || mfaVerifiedThisSession) {
+                    // MFA already set up — show read-only confirmation
+                    $('#mfa-setup-loading').hide();
+                    $('#mfa-setup-content').hide();
+                    $('#mfa-already-configured').show();
+                    $('#mfa-setup-modal-setup').show();
+                } else {
+                    // Fresh MFA setup — load QR code
+                    $('#mfa-already-configured').hide();
+                    $('#mfa-setup-loading').show();
+                    $('#mfa-setup-content').hide();
+                    $('#mfa-setup-modal-setup').show();
+
+                    $.post('/enable_mfa', function(data) {
+                        $('#mfa-setup-loading').hide();
+                        if (data.status === 'success' && data.qr_url) {
+                            $('#mfa-setup-qr-image').html('<img src="' + data.qr_url + '" alt="MFA QR Code">');
+                            $('#mfa-setup-secret-key').text(data.secret);
+                            $('#mfa-setup-content').show();
+                            $('.mfa-setup-digit').first().focus();
+                        } else {
+                            showToast('Failed to set up MFA. You can enable it later in your profile.', 'error');
+                            $('#mfa-setup-modal-setup').hide();
+                            enterCategoryStep();
+                            saveSetupStep(2);
+                        }
+                    }).fail(function() {
+                        $('#mfa-setup-loading').hide();
+                        showToast('Failed to set up MFA. You can enable it later in your profile.', 'error');
+                        $('#mfa-setup-modal-setup').hide();
+                        enterCategoryStep();
+                        saveSetupStep(2);
+                    });
+                }
+            }
+
+            // Handle welcome next button - show MFA setup step
+            $('#welcome-next-button').on('click', function () {
+                $('#welcome-modal-setup').hide();
+                saveSetupStep(1);
+                showMfaModal();
+            });
+
+            // ==================== MFA SETUP STEP ====================
+
+            // "Skip for Now" link - cancel pending MFA and proceed to bank connection
+            $('#mfa-setup-skip-btn').on('click', function(e) {
+                e.preventDefault();
+                $.post('/cancel_mfa');
+                $('#mfa-setup-modal-setup').hide();
+                enterCategoryStep();
+                saveSetupStep(2);
+            });
+
+            // Previous button on MFA modal - go back to welcome
+            $('#mfa-setup-prev-btn').on('click', function() {
+                if (!mfaAlreadyEnabled && !mfaVerifiedThisSession) {
+                    $.post('/cancel_mfa');
+                }
+                saveSetupStep(0);
+                goToStep('welcome-modal-setup');
+            });
+
+            // MFA already-configured Previous/Continue buttons
+            $('#mfa-configured-prev-btn').on('click', function() {
+                saveSetupStep(0);
+                goToStep('welcome-modal-setup');
+            });
+            $('#mfa-configured-continue-btn').on('click', function() {
+                $('#mfa-setup-modal-setup').hide();
+                enterCategoryStep();
+                saveSetupStep(2);
+            });
+
+            // Copy MFA secret to clipboard (setup version)
+            $(document).on('click', '#copy-mfa-setup-secret', function() {
+                const secret = $('#mfa-setup-secret-key').text();
+                navigator.clipboard.writeText(secret).then(function() {
+                    const btn = $('#copy-mfa-setup-secret');
+                    const originalHtml = btn.html();
+                    btn.html('<i class="fas fa-check"></i>');
+                    setTimeout(function() { btn.html(originalHtml); }, 2000);
+                }).catch(function(err) {
+                    showToast('Failed to copy: ' + err, 'error');
+                });
+            });
+
+            // MFA 6-digit input handling (setup version)
+            const mfaSetupDigits = document.querySelectorAll('.mfa-setup-digit');
+            const mfaSetupCodeHidden = document.getElementById('mfa-setup-code');
+
+            function updateMfaSetupCode() {
+                let code = '';
+                mfaSetupDigits.forEach(input => { code += input.value; });
+                mfaSetupCodeHidden.value = code;
+            }
+
+            mfaSetupDigits.forEach((input, index) => {
+                input.addEventListener('input', function(e) {
+                    this.value = this.value.replace(/[^0-9]/g, '');
+                    if (this.value.length === 1 && index < mfaSetupDigits.length - 1) {
+                        mfaSetupDigits[index + 1].focus();
+                    }
+                    updateMfaSetupCode();
+                });
+
+                input.addEventListener('keydown', function(e) {
+                    if (e.key === 'Backspace' && this.value === '' && index > 0) {
+                        mfaSetupDigits[index - 1].focus();
+                    }
+                    if (e.key === 'ArrowLeft' && index > 0) mfaSetupDigits[index - 1].focus();
+                    if (e.key === 'ArrowRight' && index < mfaSetupDigits.length - 1) mfaSetupDigits[index + 1].focus();
+                    if (e.key === 'Enter') {
+                        updateMfaSetupCode();
+                        if (mfaSetupCodeHidden.value.length === 6) {
+                            e.preventDefault();
+                            document.getElementById('mfa-setup-verify-form').dispatchEvent(new Event('submit'));
+                        }
+                    }
+                });
+
+                input.addEventListener('paste', function(e) {
+                    e.preventDefault();
+                    const pastedData = (e.clipboardData || window.clipboardData).getData('text');
+                    const digits = pastedData.replace(/[^0-9]/g, '').slice(0, 6);
+                    digits.split('').forEach((digit, i) => {
+                        if (mfaSetupDigits[i]) mfaSetupDigits[i].value = digit;
+                    });
+                    const nextEmptyIndex = Math.min(digits.length, mfaSetupDigits.length - 1);
+                    mfaSetupDigits[nextEmptyIndex].focus();
+                    updateMfaSetupCode();
+                });
+
+                input.addEventListener('focus', function() { this.select(); });
+            });
+
+            // Show speech bubble message for MFA setup
+            function showMfaSetupMessage(message, type) {
+                const msgEl = $('#mfa-setup-verify-message');
+                msgEl.stop(true, true)
+                    .removeClass('error success')
+                    .addClass(type)
+                    .text(message)
+                    .css({display: 'block', opacity: 1});
+                
+                if (type === 'error') {
+                    setTimeout(function() {
+                        msgEl.fadeOut(300, function() { $(this).css('display', 'none'); });
+                    }, 3000);
+                }
+            }
+
+            // Verify MFA code (setup version)
+            $('#mfa-setup-verify-form').on('submit', function(e) {
+                e.preventDefault();
+                const code = $('#mfa-setup-code').val();
+                if (code.length !== 6) {
+                    showMfaSetupMessage('Please enter all 6 digits', 'error');
+                    return;
+                }
+                $.post('/verify_mfa_setup', {code: code}, function(data) {
+                    if (data.status === 'success') {
+                        mfaVerifiedThisSession = true;
+                        showMfaSetupMessage('MFA enabled!', 'success');
+                        setTimeout(function() {
+                            $('#mfa-setup-modal-setup').hide();
+                            enterCategoryStep();
+                            saveSetupStep(2);
+                        }, 1200);
+                    } else {
+                        showMfaSetupMessage('Incorrect code', 'error');
+                        mfaSetupDigits.forEach(input => input.value = '');
+                        mfaSetupDigits[0].focus();
+                        mfaSetupCodeHidden.value = '';
+                    }
+                }).fail(function() {
+                    showMfaSetupMessage('Error verifying code', 'error');
+                });
+            });
+
+            // ==================== END MFA SETUP STEP ====================
+
+            function loadAccountSelection() {
+                // No provider means no accounts to pick from - go straight to
+                // the category step, which is where this used to hand off.
+                showFallbackCategories();
+            }
+
+            // Enforce one-per-type selection for checking and savings accounts
+            function updateAccountCheckboxStates() {
+                ['checking', 'savings'].forEach(function(type) {
+                    const allOfType = $(`.account-checkbox[data-account-type="${type}"]`);
+                    const checkedOfType = allOfType.filter(':checked');
+                    
+                    if (checkedOfType.length > 0) {
+                        // One is selected — disable and grey out the others
+                        allOfType.not(checkedOfType).prop('disabled', true)
+                            .closest('.account-selection-item').addClass('disabled');
+                        // Keep the selected one enabled
+                        checkedOfType.prop('disabled', false)
+                            .closest('.account-selection-item').removeClass('disabled');
+                    } else {
+                        // None selected — enable all so user can pick one
+                        allOfType.prop('disabled', false)
+                            .closest('.account-selection-item').removeClass('disabled');
+                    }
+                });
+            }
+
+            $(document).on('change', '.account-checkbox', function() {
+                updateAccountCheckboxStates();
+            });
+
+            // Show toast when clicking a greyed-out row's checkbox area
+            // Disabled checkboxes swallow click events, so we listen on the parent row
+            $(document).on('click', '.account-selection-item.disabled', function(e) {
+                const type = $(this).find('.account-checkbox').data('account-type');
+                const label = type === 'checking' ? 'Checking' : 'Savings';
+                showToast(`Only one ${label} account can be synced in Blankee. Uncheck the current one first to switch.`, 'info');
+            });
+
+            function updateAccountsAndSync(selectedAccountIds) {
+                // No provider accounts to enable for sync; go on to categories.
+                window.setupSelectedAccountIds = selectedAccountIds || [];
+                analyzeCategoriesForSetup(window.setupSelectedAccountIds);
+            }
+
+            function fetchBankBalancesForSelectedAccounts(selectedAccountIds) {
+                // No provider means no live balances. Starting balances are
+                // entered by hand on the starting-balance step instead.
+                bankBalances = { checking: 0, savings: 0 };
+            }
+            function fetchBankBalances() {
+                // No provider means no balances to fetch.
+                bankBalances = { checking: 0, savings: 0 };
+            }
+
+            // ============================================================================
+            // CATEGORY RECOMMENDATIONS FUNCTIONS
+            // ============================================================================
+
+            // Analyze transactions and show category recommendations
+            function analyzeCategoriesForSetup(selectedAccountIds) {
+                // Category recommendations were derived from synced transactions.
+                // With no provider there are none, so use the built-in defaults.
+                showFallbackCategories();
+            }
+
+            // Display category recommendations in the modal
+            function displayCategoryRecommendations(recommendations, isFallback) {
+                const incomeContainer = $('#recommended-income-categories');
+                const expenseContainer = $('#recommended-expense-categories');
+                
+                incomeContainer.empty();
+                expenseContainer.empty();
+                
+                // Render income categories
+                if (recommendations.income && recommendations.income.length > 0) {
+                    recommendations.income.forEach(function(category, index) {
+                        const categoryHtml = createCategoryRecommendationItem(category, 'income', index);
+                        incomeContainer.append(categoryHtml);
+                    });
+                } else {
+                    incomeContainer.append('<p style="color: #999; padding: 10px;">No income categories. Click "Add Category" to create one.</p>');
+                }
+                
+                // Render expense categories
+                if (recommendations.expense && recommendations.expense.length > 0) {
+                    recommendations.expense.forEach(function(category, index) {
+                        const categoryHtml = createCategoryRecommendationItem(category, 'expense', index);
+                        expenseContainer.append(categoryHtml);
+                    });
+                } else {
+                    expenseContainer.append('<p style="color: #999; padding: 10px;">No expense categories. Click "Add Category" to create one.</p>');
+                }
+                
+                // Show the recommendations modal
+                $('#category-recommendations-modal-setup').show();
+                
+                // Attach event handlers
+                attachCategoryRecommendationHandlers();
+            }
+
+            // Create HTML for a single category recommendation item
+            function createCategoryRecommendationItem(category, type, index) {
+                const isRecurring = category.is_recurring || false;
+                const amount = parseFloat(category.amount) || 0;
+                const cadenceUnit = category.cadence_unit || category.cadence || 'months';
+                const cadenceInterval = category.cadence_interval || 1;
+                const monthlyDays = category.monthly_days || null;
+                const weekdays = category.weekdays || null;
+                const yearlyDay = category.yearly_day || null;
+                const yearlyMonth = category.yearly_month || null;
+                const cadenceDisplay = category.cadence_description || formatCadenceDisplay(cadenceInterval, cadenceUnit, weekdays, monthlyDays, yearlyDay, yearlyMonth);
+                const name = category.name || '';
+                const rowClass = type === 'income' ? 'income' : 'expense';
+                
+                const wageBill = category.wage_bill !== undefined ? category.wage_bill : 1;
+                let typeDisplay = '—';
+                if (isRecurring) {
+                    if (type === 'income') {
+                        typeDisplay = wageBill === 1 ? 'Wages' : 'Variable';
+                    } else {
+                        typeDisplay = wageBill === 1 ? 'Bill' : 'Allowance';
+                    }
+                }
+                
+                return `
+                    <tr class="${rowClass}-category-row" data-type="${type}" data-index="${index}">
+                        <td class="editable ${rowClass}-category" data-column="category_name">${escapeHtml(name)}</td>
+                        <td class="editable ${rowClass}-type" data-column="type">
+                            ${typeDisplay}
+                        </td>
+                        <td class="editable ${rowClass}-amount" data-column="amount">
+                            ${isRecurring ? `$${amount.toFixed(2)}` : '—'}
+                        </td>
+                        <td class="editable ${rowClass}-cadence" data-column="cadence">
+                            ${isRecurring ? cadenceDisplay : '—'}
+                        </td>
+                        <td class="${rowClass}-actions">
+                            <button class="edit-category-recommendation-btn" onclick="editCategoryRecommendation('${type}', ${index})">
+                                <i class="fa-solid fa-pen-to-square"></i>
+                            </button>
+                            <button class="delete-category-recommendation-btn" onclick="deleteCategoryRecommendation('${type}', ${index})">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }
+            
+            // Format cadence for display — matches recurring_i / recurring_e icon format
+            function formatCadenceDisplay(interval, unit, weekdays, monthlyDays, yearlyDay, yearlyMonth) {
+                interval = interval || 1;
+                unit = unit || 'months';
+
+                // Icon based on unit
+                let icon = '';
+                if (unit === 'years') icon = '<i class="fa-solid fa-calendars"></i>';
+                else if (unit === 'months') icon = '<i class="fa-solid fa-calendar-days"></i>';
+                else if (unit === 'weeks') icon = '<i class="fa-solid fa-calendar-week"></i>';
+                else icon = '<i class="fa-solid fa-calendar-day"></i>';
+
+                let html = `<span class="cadence-top">${interval} ${icon}</span>`;
+
+                // Detail line
+                if (unit === 'years' && yearlyMonth && yearlyDay) {
+                    const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                    html += `<span class="cadence-detail">${months[parseInt(yearlyMonth)] || ''} ${ordinalSuffix(yearlyDay)}</span>`;
+                } else if (unit === 'months' && monthlyDays) {
+                    const days = monthlyDays.split(',').map(d => ordinalSuffix(d.trim())).join(', ');
+                    html += `<span class="cadence-detail">${days}</span>`;
+                } else if (unit === 'weeks' && weekdays) {
+                    const weekdayMap = {
+                        'monday': 'Mo', 'tuesday': 'Tu', 'wednesday': 'We',
+                        'thursday': 'Th', 'friday': 'Fr', 'saturday': 'Sa', 'sunday': 'Su'
+                    };
+                    const abbr = weekdays.split(',').map(d => weekdayMap[d.trim().toLowerCase()] || d.trim()).join(', ');
+                    html += `<span class="cadence-detail">${abbr}</span>`;
+                }
+
+                return html;
+            }
+
+            // Ordinal suffix helper (1st, 2nd, 3rd, etc.)
+            function ordinalSuffix(n) {
+                n = parseInt(n);
+                if (isNaN(n)) return '';
+                const s = ['th', 'st', 'nd', 'rd'];
+                const v = n % 100;
+                return n + (s[(v - 20) % 10] || s[v] || s[0]);
+            }
+            
+            // Edit category recommendation - opens the edit modal
+            // Make globally accessible for onclick handlers
+            window.editCategoryRecommendation = function(type, index) {
+                const modal = document.getElementById('edit-category-recommendation-modal');
+                
+                // Clear any stale duplicate warning
+                var nameInput = document.getElementById('edit-category-name-input');
+                if (nameInput._dupWarning) nameInput._dupWarning.classList.remove('visible');
+                
+                // Show the modal first (in case of errors below)
+                modal.style.display = 'flex';
+                
+                const categories = type === 'income' ? recommendedCategories.income : recommendedCategories.expense;
+                const category = categories[index];
+                
+                // Set modal title based on type
+                $('#edit-category-modal-title').text(type === 'income' ? 'Edit Income Category' : 'Edit Expense Category');
+                
+                // Set hidden fields
+                $('#edit-category-type').val(type);
+                $('#edit-category-index').val(index);
+                
+                // Populate form fields
+                $('#edit-category-name-input').val(category.name || '');
+                $('#edit-is-recurring-checkbox').prop('checked', category.is_recurring || false);
+                
+                // Update wage_bill select options based on type
+                if (type === 'income') {
+                    $('#edit-wage-bill-option-1').text('Wages (fixed income)');
+                    $('#edit-wage-bill-option-0').text('Variable (irregular income)');
+                } else {
+                    $('#edit-wage-bill-option-1').text('Bill (fixed expense)');
+                    $('#edit-wage-bill-option-0').text('Allowance (flexible spending)');
+                }
+                $('#edit-wage-bill-select').val(category.wage_bill !== undefined ? category.wage_bill : 1);
+                
+                $('#edit-category-amount').val(category.amount || 0);
+                $('#edit-category-cadence-interval').val(category.cadence_interval || 1);
+                $('#edit-category-cadence-unit').val(category.cadence_unit || 'months');
+                
+                // Show/hide recurring options based on checkbox
+                if (category.is_recurring) {
+                    $('#edit-recurring-options').show();
+                    $('#edit-wage-bill-row').show();
+                } else {
+                    $('#edit-recurring-options').hide();
+                    $('#edit-wage-bill-row').hide();
+                }
+                
+                // Handle cadence unit specific options
+                window.handleEditCategoryCadenceOptions(category.cadence_unit || 'months');
+                
+                // Populate weekdays if weekly
+                if (category.cadence_unit === 'weeks' && category.weekdays) {
+                    const weekdays = category.weekdays.split(',').map(d => d.trim().toLowerCase());
+                    $('input[name="edit_category_weekdays"]').each(function() {
+                        $(this).prop('checked', weekdays.includes($(this).val()));
+                    });
+                } else {
+                    $('input[name="edit_category_weekdays"]').prop('checked', false);
+                }
+                
+                // Populate monthly days if monthly
+                $('#edit-category-monthly-day-container').empty();
+                if (category.cadence_unit === 'months' && category.monthly_days) {
+                    const days = category.monthly_days.split(',').map(d => d.trim());
+                    days.forEach(function(day) {
+                        if (day !== '') {
+                            const selectContainer = window.createCategoryMonthlyDaySelect('edit_category_monthly_days[]', day);
+                            $('#edit-category-monthly-day-container').append(selectContainer);
+                        }
+                    });
+                } else if (category.cadence_unit === 'months') {
+                    const selectContainer = window.createCategoryMonthlyDaySelect('edit_category_monthly_days[]');
+                    $('#edit-category-monthly-day-container').append(selectContainer);
+                }
+                
+                // Set date fields
+                $('#edit-category-start-date').val(category.start_date || getTodayDateString());
+                $('#edit-category-end-date').val(category.end_date || '');
+                
+                // Set no-end-date checkbox (default to checked if no end_date specified)
+                const noEndDate = category.no_end_date !== undefined ? category.no_end_date : !category.end_date;
+                $('#edit-category-no-end-date-checkbox').prop('checked', noEndDate);
+                
+                // Reset occurrences (not used for editing existing categories)
+                $('#edit-category-use-occurrences-checkbox').prop('checked', false);
+                $('#edit-category-occurrences-count').val('');
+                
+                // Update three-way toggle state
+                window.updateEditCategoryEndDateState();
+            }
+            
+            // Handle cadence unit change in edit modal
+            // Make globally accessible
+            window.handleEditCategoryCadenceOptions = function(unit) {
+                $('#edit-category-weekly-options').hide();
+                $('#edit-category-monthly-options').hide();
+                $('#edit-category-yearly-options').hide();
+                
+                if (unit === 'weeks') {
+                    $('#edit-category-weekly-options').css('display', 'flex');
+                } else if (unit === 'months') {
+                    $('#edit-category-monthly-options').show();
+                } else if (unit === 'years') {
+                    $('#edit-category-yearly-options').show();
+                }
+            }
+            
+            // Create a monthly day select dropdown for category editing
+            // Make globally accessible
+            window.createCategoryMonthlyDaySelect = function(name, selectedValue = '') {
+                const container = document.createElement('div');
+                container.className = 'monthly-day-select-container';
+                
+                const select = document.createElement('select');
+                select.name = name;
+                select.className = 'monthly-day-select';
+                
+                // Add day options 1-31
+                for (let i = 1; i <= 31; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i;
+                    if (String(i) === String(selectedValue)) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                }
+                
+                // Add the "Last Day" option
+                const lastDayOption = document.createElement('option');
+                lastDayOption.value = 'Last Day';
+                lastDayOption.text = 'Last Day';
+                if (selectedValue === 'Last Day') {
+                    lastDayOption.selected = true;
+                }
+                select.appendChild(lastDayOption);
+                
+                // Add remove button (minus button matching recurring_i.html)
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'remove-day-btn';
+                removeBtn.textContent = '-';
+                removeBtn.onclick = function() {
+                    container.remove();
+                };
+                
+                container.appendChild(select);
+                container.appendChild(removeBtn);
+                
+                return container;
+            }
+            
+            // Initialize edit modal event handlers
+            function initEditCategoryModal() {
+                const editModal = document.getElementById('edit-category-recommendation-modal');
+                
+                // Close modal when clicking outside
+                ['mousedown', 'touchstart'].forEach(function(evtType) {
+                    editModal.addEventListener(evtType, function(event) {
+                        if (event.target === editModal) {
+                            editModal.style.display = 'none';
+                        }
+                    });
+                });
+
+                // Live duplicate check on category name input
+                var editNameInput = document.getElementById('edit-category-name-input');
+                setupCategoryDuplicateCheck(editNameInput, function() {
+                    var type = $('#edit-category-type').val();
+                    var cats = type === 'income' ? recommendedCategories.income : recommendedCategories.expense;
+                    var idx = parseInt($('#edit-category-index').val());
+                    var isNew = (idx === -1);
+                    return cats.map(function(c, i) { return { name: c.name, id: i }; });
+                }, { get excludeId() { var idx = parseInt($('#edit-category-index').val()); return idx === -1 ? null : idx; } });
+                
+                // Handle recurring checkbox toggle
+                $('#edit-is-recurring-checkbox').on('change', function() {
+                    if ($(this).is(':checked')) {
+                        $('#edit-recurring-options').show();
+                        $('#edit-wage-bill-row').show();
+                        // Set default start date to today
+                        if (!$('#edit-category-start-date').val()) {
+                            $('#edit-category-start-date').val(getTodayDateString());
+                        }
+                    } else {
+                        $('#edit-recurring-options').hide();
+                        $('#edit-wage-bill-row').hide();
+                    }
+                });
+                
+                // Handle cadence unit change
+                $('#edit-category-cadence-unit').on('change', function() {
+                    const unit = $(this).val();
+                    window.handleEditCategoryCadenceOptions(unit);
+                    
+                    // Initialize monthly day container if switching to months
+                    if (unit === 'months') {
+                        const container = document.getElementById('edit-category-monthly-day-container');
+                        if (container.children.length === 0) {
+                            const selectContainer = window.createCategoryMonthlyDaySelect('edit_category_monthly_days[]');
+                            container.appendChild(selectContainer);
+                        }
+                    }
+                });
+                
+                // Handle add monthly day button
+                $('#edit-category-add-monthly-day-btn').on('click', function() {
+                    const selectContainer = window.createCategoryMonthlyDaySelect('edit_category_monthly_days[]');
+                    $('#edit-category-monthly-day-container').append(selectContainer);
+                });
+                
+                // Helper function to grey out elements
+                function setGreyedOut(selector, greyed) {
+                    $(selector).css('opacity', greyed ? 0.5 : 1);
+                }
+                
+                // Three-way toggle: End Date / No End Date / Use Occurrences
+                window.updateEditCategoryEndDateState = function() {
+                    var noEnd = $('#edit-category-no-end-date-checkbox').is(':checked');
+                    var useOcc = $('#edit-category-use-occurrences-checkbox').is(':checked');
+                    if (noEnd) {
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', false);
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-use-occurrences-checkbox)', true);
+                        $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 0.5);
+                        $('#edit-category-end-date').prop('disabled', true);
+                        $('#edit-category-occurrences-count').prop('disabled', true).val('');
+                    } else if (useOcc) {
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', true);
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-use-occurrences-checkbox)', false);
+                        $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 0.5);
+                        $('#edit-category-end-date').prop('disabled', true);
+                        $('#edit-category-occurrences-count').prop('disabled', false);
+                    } else {
+                        var hasEndDate = $('#edit-category-end-date').val() !== '';
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-no-end-date-checkbox)', hasEndDate);
+                        setGreyedOut('.date-checkbox-row:has(#edit-category-use-occurrences-checkbox)', hasEndDate);
+                        $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 1);
+                        $('#edit-category-end-date').prop('disabled', false);
+                        $('#edit-category-occurrences-count').prop('disabled', true).val('');
+                    }
+                }
+                
+                $('#edit-category-no-end-date-checkbox').on('change', function() {
+                    if (this.checked) $('#edit-category-use-occurrences-checkbox').prop('checked', false);
+                    updateEditCategoryEndDateState();
+                });
+                
+                $('#edit-category-use-occurrences-checkbox').on('change', function() {
+                    if (this.checked) $('#edit-category-no-end-date-checkbox').prop('checked', false);
+                    updateEditCategoryEndDateState();
+                });
+                
+                $('#edit-category-end-date').on('change input', function() {
+                    updateEditCategoryEndDateState();
+                });
+
+                // Click on end date to activate it
+                $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').on('click', function() {
+                    if ($('#edit-category-end-date').prop('disabled')) {
+                        $('#edit-category-no-end-date-checkbox').prop('checked', false);
+                        $('#edit-category-use-occurrences-checkbox').prop('checked', false);
+                        updateEditCategoryEndDateState();
+                        $('#edit-category-end-date').focus();
+                    }
+                });
+                
+                // Handle form submission
+                $('#edit-category-recommendation-form').on('submit', function(event) {
+                    event.preventDefault();
+                    
+                    const type = $('#edit-category-type').val();
+                    const index = parseInt($('#edit-category-index').val());
+                    const isNewCategory = (index === -1);
+                    
+                    // Get the category to edit or create a new one
+                    let category;
+                    if (isNewCategory) {
+                        category = {};
+                    } else {
+                        const categories = type === 'income' ? recommendedCategories.income : recommendedCategories.expense;
+                        category = categories[index];
+                    }
+                    
+                    // Update/set category from form values
+                    const categoryName = $('#edit-category-name-input').val().trim();
+                    if (!categoryName) {
+                        showToast('Please enter a category name.', 'warning');
+                        return;
+                    }
+
+                    // Check for duplicate name in the current list
+                    const catsToCheck = type === 'income' ? recommendedCategories.income : recommendedCategories.expense;
+                    const excludeOpts = isNewCategory ? {} : { excludeId: index };
+                    // Build a compatible array with .id for excludeId matching
+                    const catsWithIds = catsToCheck.map(function(c, i) { return { name: c.name, id: i }; });
+                    if (checkCategoryDuplicate(document.getElementById('edit-category-name-input'), catsWithIds, excludeOpts)) {
+                        showToast('A category with this name already exists.', 'warning');
+                        return;
+                    }
+                    
+                    category.name = categoryName;
+                    category.is_recurring = $('#edit-is-recurring-checkbox').is(':checked');
+                    category.wage_bill = parseInt($('#edit-wage-bill-select').val());
+                    
+                    if (category.is_recurring) {
+                        category.amount = parseFloat($('#edit-category-amount').val()) || 0;
+                        category.cadence_interval = parseInt($('#edit-category-cadence-interval').val()) || 1;
+                        category.cadence_unit = $('#edit-category-cadence-unit').val();
+                        
+                        // Get weekdays if weekly
+                        if (category.cadence_unit === 'weeks') {
+                            const selectedWeekdays = [];
+                            $('input[name="edit_category_weekdays"]:checked').each(function() {
+                                selectedWeekdays.push($(this).val());
+                            });
+                            category.weekdays = selectedWeekdays.join(',');
+                            category.monthly_days = null;
+                        } else if (category.cadence_unit === 'months') {
+                            // Get monthly days
+                            const selectedDays = [];
+                            $('#edit-category-monthly-day-container .monthly-day-select').each(function() {
+                                if ($(this).val()) {
+                                    selectedDays.push($(this).val());
+                                }
+                            });
+                            category.monthly_days = selectedDays.join(',');
+                            category.weekdays = null;
+                        } else {
+                            category.weekdays = null;
+                            category.monthly_days = null;
+                        }
+                        
+                        // Get date fields
+                        category.start_date = $('#edit-category-start-date').val();
+                        
+                        // Determine end_date based on checkboxes
+                        if ($('#edit-category-no-end-date-checkbox').is(':checked')) {
+                            category.no_end_date = true;
+                            category.end_date = null;
+                            category.occurrences_count = null;
+                        } else if ($('#edit-category-use-occurrences-checkbox').is(':checked')) {
+                            category.no_end_date = false;
+                            category.end_date = null;
+                            category.occurrences_count = parseInt($('#edit-category-occurrences-count').val()) || 1;
+                        } else {
+                            var endDateVal = $('#edit-category-end-date').val();
+                            if (!endDateVal) {
+                                showEndDateWarning('#edit-category-end-date');
+                                return;
+                            }
+                            category.no_end_date = false;
+                            category.end_date = endDateVal;
+                            category.occurrences_count = null;
+                        }
+                    } else {
+                        category.amount = 0;
+                        category.weekdays = null;
+                        category.monthly_days = null;
+                        category.start_date = null;
+                        category.end_date = null;
+                        category.no_end_date = false;
+                        category.occurrences_count = null;
+                    }
+                    
+                    // If new category, add to the appropriate array
+                    if (isNewCategory) {
+                        if (type === 'income') {
+                            recommendedCategories.income.push(category);
+                        } else {
+                            recommendedCategories.expense.push(category);
+                        }
+                    }
+                    
+                    // Close modal and re-render
+                    editModal.style.display = 'none';
+                    displayCategoryRecommendations(recommendedCategories, false);
+                });
+            }
+            
+            // Initialize the edit modal when document is ready
+            $(document).ready(function() {
+                initEditCategoryModal();
+                
+                // Handle Add Income Category button
+                $('#add-recommended-income-btn').on('click', function() {
+                    addNewCategory('income');
+                });
+                
+                // Handle Add Expense Category button
+                $('#add-recommended-expense-btn').on('click', function() {
+                    addNewCategory('expense');
+                });
+            });
+            
+            // Add a new category to the recommendations
+            function addNewCategory(type) {
+                const modal = document.getElementById('edit-category-recommendation-modal');
+                
+                // Set modal title based on type
+                $('#edit-category-modal-title').text(type === 'income' ? 'Add Income Category' : 'Add Expense Category');
+                
+                // Hide wage_bill row initially (will show when recurring is checked)
+                $('#edit-wage-bill-row').hide();
+                
+                // Update wage_bill select options based on type
+                if (type === 'income') {
+                    $('#edit-wage-bill-option-1').text('Wages (fixed income)');
+                    $('#edit-wage-bill-option-0').text('Variable (irregular income)');
+                } else {
+                    $('#edit-wage-bill-option-1').text('Bill (fixed expense)');
+                    $('#edit-wage-bill-option-0').text('Allowance (flexible spending)');
+                }
+                $('#edit-wage-bill-select').val(1);  // Default to wages/bills
+                
+                // Set hidden fields - use -1 for index to indicate new category
+                $('#edit-category-type').val(type);
+                $('#edit-category-index').val(-1);
+                
+                // Reset form fields to defaults
+                $('#edit-category-name-input').val('');
+                $('#edit-is-recurring-checkbox').prop('checked', false);
+                $('#edit-recurring-options').hide();
+                $('#edit-category-amount').val(0);
+                $('#edit-category-cadence-interval').val(1);
+                $('#edit-category-cadence-unit').val('days');
+                
+                // Reset cadence options
+                $('#edit-category-weekly-options').hide();
+                $('#edit-category-monthly-options').hide();
+                $('#edit-category-yearly-options').hide();
+                $('input[name="edit_category_weekdays"]').prop('checked', false);
+                $('#edit-category-monthly-day-container').empty();
+                
+                // Set default date fields
+                $('#edit-category-start-date').val(getTodayDateString());
+                $('#edit-category-end-date').val('');
+                $('#edit-category-no-end-date-checkbox').prop('checked', true);
+                $('#edit-category-end-date-label-container, #edit-category-end-date-input-container').css('opacity', 0.5);
+                $('#edit-category-end-date').prop('disabled', true);
+                $('#edit-category-use-occurrences-checkbox').prop('checked', false);
+                $('#edit-category-occurrences-count').val('');
+                $('#edit-category-occurrences-count').prop('disabled', true);
+                
+                // Clear any stale duplicate warning
+                var nameInput = document.getElementById('edit-category-name-input');
+                if (nameInput._dupWarning) nameInput._dupWarning.classList.remove('visible');
+                
+                // Open the modal
+                modal.style.display = 'flex';
+            }
+            
+            // Delete category recommendation
+            // Make globally accessible for onclick handlers
+            window.deleteCategoryRecommendation = async function(type, index) {
+                var confirmed = await showConfirmModal({
+                    title: 'Remove Category',
+                    message: 'Remove this category?',
+                    confirmText: 'Remove',
+                    cancelText: 'Cancel',
+                    danger: true
+                });
+                if (!confirmed) return;
+                
+                if (type === 'income') {
+                    recommendedCategories.income.splice(index, 1);
+                } else {
+                    recommendedCategories.expense.splice(index, 1);
+                }
+                
+                // Re-render
+                displayCategoryRecommendations(recommendedCategories, false);
+            }
+
+            // Attach event handlers for category recommendation interactions
+            function attachCategoryRecommendationHandlers() {
+                // Handle recurring checkbox toggle
+                $(document).off('change', '.category-recurring-checkbox-input').on('change', '.category-recurring-checkbox-input', function() {
+                    const $item = $(this).closest('.recommended-category-item');
+                    const isChecked = $(this).is(':checked');
+                    
+                    // Update "Yes/No" text
+                    $item.find('.category-recurring-checkbox span').text(isChecked ? 'Yes' : 'No');
+                    
+                    // Enable/disable amount and cadence fields
+                    $item.find('.category-amount-input').prop('disabled', !isChecked);
+                    $item.find('.category-cadence-select').prop('disabled', !isChecked);
+                    
+                    // If unchecked, clear amount
+                    if (!isChecked) {
+                        $item.find('.category-amount-input').val('0.00');
+                    }
+                });
+            }
+
+            // Show generic starter categories for new users
+            // Every route into the category step goes through here.
+            //
+            // The bug this replaces: HEAD reached this step by calling
+            // showFallbackCategories(), which populated the list and showed the
+            // modal in one go. The vendor removal swapped those calls for
+            // goToStep('category-recommendations-modal-setup'), which only shows
+            // it - so the step appeared with nothing in it. Anything that needs
+            // to land on this step calls this instead of navigating directly.
+            function enterCategoryStep() {
+                var pending = window.pendingCategoriesToCreate;
+                if (pending && ((pending.income || []).length || (pending.expense || []).length)) {
+                    // Edits made earlier in this session win: coming back must
+                    // not discard them for the generic template.
+                    recommendedCategories = JSON.parse(JSON.stringify(pending));
+                    displayCategoryRecommendations(recommendedCategories, true);
+                } else if (savedCategories) {
+                    recommendedCategories = JSON.parse(JSON.stringify(savedCategories));
+                    displayCategoryRecommendations(recommendedCategories, true);
+                } else {
+                    showFallbackCategories();
+                }
+            }
+
+            function showFallbackCategories() {
+                const genericRecommendations = {
+                    income: [
+                        { name: 'Wages', is_recurring: true, amount: 1500, cadence_interval: 2, cadence_unit: 'weeks', weekdays: 'Friday', wage_bill: 1 },
+                        { name: 'Variable', is_recurring: false, amount: 0, cadence_interval: 1, cadence_unit: 'months', wage_bill: 0 }
+                    ],
+                    expense: [
+                        { name: 'Housing', is_recurring: true, amount: 1200, cadence_interval: 1, cadence_unit: 'months', monthly_days: '1', wage_bill: 1 },
+                        { name: 'Utilities', is_recurring: true, amount: 150, cadence_interval: 1, cadence_unit: 'months', monthly_days: '1', wage_bill: 1 },
+                        { name: 'Phone', is_recurring: true, amount: 50, cadence_interval: 1, cadence_unit: 'months', monthly_days: '8', wage_bill: 1 },
+                        { name: 'Internet', is_recurring: true, amount: 100, cadence_interval: 1, cadence_unit: 'months', monthly_days: '15', wage_bill: 1 },
+                        { name: 'Gas', is_recurring: true, amount: 60, cadence_interval: 1, cadence_unit: 'weeks', weekdays: 'Friday', wage_bill: 0 },
+                        { name: 'Groceries', is_recurring: true, amount: 100, cadence_interval: 1, cadence_unit: 'weeks', weekdays: 'Saturday', wage_bill: 0 },
+                        { name: 'Fun', is_recurring: true, amount: 50, cadence_interval: 1, cadence_unit: 'weeks', weekdays: 'Friday', wage_bill: 0 },
+                        { name: 'Subscriptions', is_recurring: true, amount: 50, cadence_interval: 1, cadence_unit: 'months', monthly_days: '5', wage_bill: 1 }
+                    ]
+                };
+                
+                recommendedCategories = genericRecommendations;
+                displayCategoryRecommendations(genericRecommendations, true);
+            }
+
+            // Handle skip link - go directly to name page
+            $('#skip-category-recommendations').on('click', function(e) {
+                e.preventDefault();
+                $('#category-recommendations-modal-setup').hide();
+                // Navigate explicitly. This used to happen inside
+                // fetchBankBalancesForSelectedAccounts()'s AJAX success, so
+                // stubbing that out left the modal hidden and nothing shown -
+                // a blank page. saveSetupStep only records where you are; it
+                // does not move you.
+                goToStep('name-modal-setup');
+                $('#setup-profile-first-name').focus();
+                saveSetupStep(3);
+            });
+
+            // Handle previous from category recommendations -> back to MFA.
+            //
+            // This used to go to the bank connection step, which the vendor
+            // removal deleted; the replacement pointed at the category modal
+            // itself, so Previous did nothing at all. MFA is step 1, the step
+            // actually before this one. The old "Removing..." button text went
+            // with it - there is no connection to remove.
+            $('#category-recommendations-prev-btn').on('click', function() {
+                $('#category-recommendations-modal-setup').hide();
+                saveSetupStep(1);
+                showMfaModal();
+            });
+
+            // Handle create categories button - Store data and proceed to name modal
+            // Categories will be created after threshold page submission
+            $('#confirm-category-recommendations').on('click', function() {
+                // Validate that we have at least one category
+                if (recommendedCategories.income.length === 0 && recommendedCategories.expense.length === 0) {
+                    showToast('Please add at least one category or click "Create Categories Later" to skip.', 'warning');
+                    return;
+                }
+                
+                // Store the categories to be created later (after threshold page)
+                window.pendingCategoriesToCreate = JSON.parse(JSON.stringify(recommendedCategories));
+                
+                // Hide category recommendations modal and proceed to name modal
+                $('#category-recommendations-modal-setup').hide();
+                
+                // Reset balance state, then navigate. The navigation is here
+                // rather than inside fetchBankBalancesForSelectedAccounts
+                // because that function is about balances - burying the step
+                // transition in it is what made this a blank page when it
+                // became a no-op.
+                fetchBankBalancesForSelectedAccounts(selectedAccountIdsForCategories);
+                goToStep('name-modal-setup');
+                $('#setup-profile-first-name').focus();
+                // Save categories to Redis so they persist across reloads/browsers
+                saveSetupStep(3, { setup_categories: window.pendingCategoriesToCreate });
+            });
+
+            // Display category confirmation summary
+            function displayCategoryConfirmationSummary(categories) {
+                const incomeList = $('#income-summary-list');
+                const expenseList = $('#expense-summary-list');
+                
+                incomeList.empty();
+                expenseList.empty();
+                
+                // Count recurring vs one-time
+                let incomeRecurringCount = 0;
+                let expenseRecurringCount = 0;
+                
+                // Render income summary
+                categories.income.forEach(function(cat) {
+                    if (cat.is_recurring) incomeRecurringCount++;
+                    
+                    const detailsHtml = cat.is_recurring 
+                        ? `<span><i class="fa-solid fa-rotate"></i> Recurring</span>
+                           <span><i class="fa-solid fa-dollar-sign"></i> $${cat.amount.toFixed(2)}</span>
+                           <span><i class="fa-solid fa-calendar"></i> ${formatCadence(cat.cadence_unit)}</span>`
+                        : `<span><i class="fa-solid fa-calendar-day"></i> One-time</span>`;
+                    
+                    incomeList.append(`
+                        <div class="category-summary-item">
+                            <div class="category-summary-name">${escapeHtml(cat.name)}</div>
+                            <div class="category-summary-details">${detailsHtml}</div>
+                        </div>
+                    `);
+                });
+                
+                // Render expense summary
+                categories.expense.forEach(function(cat) {
+                    if (cat.is_recurring) expenseRecurringCount++;
+                    
+                    const detailsHtml = cat.is_recurring 
+                        ? `<span><i class="fa-solid fa-rotate"></i> Recurring</span>
+                           <span><i class="fa-solid fa-dollar-sign"></i> $${cat.amount.toFixed(2)}</span>
+                           <span><i class="fa-solid fa-calendar"></i> ${formatCadence(cat.cadence_unit)}</span>`
+                        : `<span><i class="fa-solid fa-calendar-day"></i> One-time</span>`;
+                    
+                    expenseList.append(`
+                        <div class="category-summary-item">
+                            <div class="category-summary-name">${escapeHtml(cat.name)}</div>
+                            <div class="category-summary-details">${detailsHtml}</div>
+                        </div>
+                    `);
+                });
+                
+                // Update counts
+                $('#income-count').text(categories.income.length);
+                $('#expense-count').text(categories.expense.length);
+                
+                // Show summary modal
+                $('#category-confirmation-modal-setup').show();
+            }
+
+            // Handle continue after category creation
+            $('#continue-after-categories').on('click', function() {
+                $('#category-confirmation-modal-setup').hide();
+                // Fetch balances and proceed to name modal
+                fetchBankBalancesForSelectedAccounts(selectedAccountIdsForCategories);
+            });
+
+            // Helper function to format cadence for display
+            function formatCadence(cadenceUnit) {
+                const cadenceMap = {
+                    'days': 'Daily',
+                    'weeks': 'Weekly',
+                    'biweekly': 'Biweekly',
+                    'months': 'Monthly',
+                    'years': 'Yearly'
+                };
+                return cadenceMap[cadenceUnit] || cadenceUnit;
+            }
+
+            // Helper function to escape HTML
+            function escapeHtml(text) {
+                const map = {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                };
+                return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+            }
+
+            // ============================================================================
+            // END CATEGORY RECOMMENDATIONS FUNCTIONS
+            // ============================================================================
+            
+            // Handle name form submission
+            $('#setup-profile-name-form').on('submit', function (event) {
+                event.preventDefault();
+                window.setupFirstName = $('#setup-profile-first-name').val().trim();
+                window.setupLastName = $('#setup-profile-last-name').val().trim();
+
+                if (!window.setupFirstName || !window.setupLastName) {
+                    showToast('Please enter your first and last name.', 'warning');
+                    return;
+                }
+
+                $('#name-modal-setup').hide();
+
+                saveSetupStep(4, { first_name: window.setupFirstName, last_name: window.setupLastName });
+                $('#currency-modal-setup').show();
+                $('#setup-profile-currency-type').focus();
+            });
+
+// Continue-button gating for the name step
+            (function() {
+                var continueBtn = $('#name-modal-continue-btn');
+
+                function checkNameFormReady() {
+                    var firstName = $('#setup-profile-first-name').val().trim();
+                    var lastName = $('#setup-profile-last-name').val().trim();
+                    continueBtn.prop('disabled', !(firstName && lastName));
+                }
+
+                $('#setup-profile-first-name, #setup-profile-last-name').on('input', checkNameFormReady);
+            })();
+            function pollForSyncedBalances(attempt = 0, maxAttempts = 60) {
+                // Nothing to poll for without a provider syncing balances.
+            }
+            function fetchBankBalancesForBalancePage() {
+                // No provider means no balances to prefill; the user types them.
+            }
+
+            // Handle previous button on name modal
+            $('#name-modal-prev-btn').on('click', function () {
+                $('#name-modal-setup').hide();
+                saveSetupStep(2);
+                enterCategoryStep();
+            });
+
+            // Handle previous button click on the currency modal
+            $('#currency-modal-prev-btn').on('click', function () {
+                saveSetupStep(3);
+                goToStep('name-modal-setup');
+                $('#setup-profile-first-name').focus();
+            });
+
+            $('#setup-profile-currency-form').on('submit', function (event) {
+                event.preventDefault();
+                const currencyType = $('#setup-profile-currency-type').val();
+                updateCurrencySymbols(currencyType);
+                saveSetupStep(5, { currency_type: currencyType });
+                goToStep('starting-balance-modal-setup');
+                $('#setup-profile-starting-balance').focus();
+            });
+
+            // Handle previous button click on the starting balance modal
+            $('#starting-balance-prev-btn').on('click', function () {
+                saveSetupStep(4);
+                goToStep('currency-modal-setup');
+                $('#setup-profile-currency-type').focus();
+            });
+
+            $('#setup-profile-balance-form').on('submit', function(event) {
+                event.preventDefault();
+                var balData = {
+                    setup_starting_balance: $('#setup-profile-starting-balance').val(),
+                    starting_savings: parseFloat($('#setup-profile-starting-savings').val()) || 0
+                };
+                saveSetupStep(6, balData);
+                goToStep('balance-threshold-modal-setup');
+                $('#setup-profile-balance-threshold').focus();
+            });
+
+            // Handle previous button click on the balance threshold modal
+            $('#balance-threshold-prev-btn').on('click', function () {
+                saveSetupStep(5);
+                goToStep('starting-balance-modal-setup');
+                $('#setup-profile-starting-balance').focus();
+            });
+
+            // Handle form submission for balance threshold (final step)
+            $('#setup-profile-threshold-form').on('submit', function (event) {
+                // Hide threshold modal and show Building Your Budget loading modal
+                $('#balance-threshold-modal-setup').hide();
+                document.getElementById('building-budget-loading-modal').style.display = 'flex';
+                event.preventDefault();
+
+                setTimeout(function() {
+                    // Get all the form data
+                    const currencyType = $('#setup-profile-currency-type').val();
+                    const startingBalance = $('#setup-profile-starting-balance').val();
+                    const balanceThreshold = $('#setup-profile-balance-threshold').val();
+                    const startingSavings = $('#setup-profile-starting-savings').val();
+
+                    // Calculate the income_entry_date (yesterday's date in local browser time)
+                    const startingBalanceDate = new Date();
+                    startingBalanceDate.setDate(startingBalanceDate.getDate() - 1);
+                    // Format as YYYY-MM-DD using local time
+                    const year = startingBalanceDate.getFullYear();
+                    const month = String(startingBalanceDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(startingBalanceDate.getDate()).padStart(2, '0');
+                    const incomeEntryDate = `${year}-${month}-${day}`;
+
+                    // Submit the data via AJAX to the backend
+                    $.ajax({
+                        url: "{{ url_for('complete_profile_setup') }}",  // Backend route
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({
+                            currency_type: currencyType,
+                            starting_balance: startingBalance,
+                            starting_savings: startingSavings,
+                            balance_threshold: balanceThreshold,
+                            income_entry_date: incomeEntryDate,
+                            first_name: window.setupFirstName || '',
+                            last_name: window.setupLastName || '',
+                            selected_account_ids: window.setupSelectedAccountIds || []
+                        }),
+                        success: function (response) {
+                            if (response.status === 'success') {
+                                // After profile is complete, create the recommended categories if any were selected
+                                createPendingCategoriesAndFinish();
+                            } else {
+                                document.getElementById('building-budget-loading-modal').style.display = 'none';
+                                showToast('Profile setup failed: ' + response.message, 'error');
+                            }
+                        },
+                        error: function (error) {
+                            document.getElementById('building-budget-loading-modal').style.display = 'none';
+                            showToast('An error occurred during profile setup.', 'error');
+                        }
+                    });
+                }, 10); // 10ms delay to allow DOM repaint
+            });
+            
+            // Create pending categories after profile setup is complete
+            function createPendingCategoriesAndFinish() {
+                // Check if there are pending categories to create
+                if (window.pendingCategoriesToCreate && 
+                    (window.pendingCategoriesToCreate.income.length > 0 || 
+                     window.pendingCategoriesToCreate.expense.length > 0)) {
+                    
+                    // Prepare the data with today's date for start_date and Dec 31st three years from now for end_date
+                    const today = getTodayDateString();
+                    const endDate = getThreeYearsEndDateString();
+                    const categoriesToCreate = {
+                        income: window.pendingCategoriesToCreate.income.map(cat => ({
+                            ...cat,
+                            start_date: cat.start_date || today,
+                            end_date: cat.end_date || endDate
+                        })),
+                        expense: window.pendingCategoriesToCreate.expense.map(cat => ({
+                            ...cat,
+                            start_date: cat.start_date || today,
+                            end_date: cat.end_date || endDate
+                        }))
+                    };
+                    
+                    $.ajax({
+                        url: '/bank/create-recommended-categories',
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify(categoriesToCreate),
+                        success: function(response) {
+                            if (response.status !== 'success') {
+                            }
+                            // Continue with the rest of setup regardless of category creation result
+                            finishSetupAndRedirect();
+                        },
+                        error: function(xhr, status, error) {
+                            // Continue with setup even if category creation fails
+                            finishSetupAndRedirect();
+                        }
+                    });
+                } else {
+                    // No pending categories, just finish setup
+                    finishSetupAndRedirect();
+                }
+            }
+            
+            // Finish setup by saving totals and redirecting to dashboard
+            function finishSetupAndRedirect() {
+                saveDailyTotalsAndRemainders();
+                loadDashboard();
+            }
+
+            // Decimal validation for monetary inputs
+            $('#setup-profile-starting-balance, #setup-profile-starting-savings, #setup-profile-balance-threshold').on('input', function() {
+                let value = this.value;
+                // Allow only one decimal point
+                const parts = value.split('.');
+                if (parts.length > 2) {
+                    this.value = parts[0] + '.' + parts.slice(1).join('');
+                    value = this.value;
+                }
+                // Limit to 2 decimal places
+                if (value.includes('.')) {
+                    const decimals = value.split('.');
+                    if (decimals[1] && decimals[1].length > 2) {
+                        this.value = decimals[0] + '.' + decimals[1].substring(0, 2);
+                    }
+                }
+            });
+
+            // Format to show .00 on blur
+            $('#setup-profile-starting-balance, #setup-profile-starting-savings, #setup-profile-balance-threshold').on('blur', function() {
+                if (this.value && !isNaN(this.value)) {
+                    this.value = parseFloat(this.value).toFixed(2);
+                }
+            });
+        });
+
+        function updateCurrencySymbols(currencyType) {
+            const currencySymbols = { USD: "$", EUR: "€" };
+            const symbol = currencySymbols[currencyType] || currencyType;
+            document.querySelectorAll('.s-p-sb-currency-symbol, .s-p-ss-currency-symbol, .s-p-bt-currency-symbol').forEach(function(span) {
+                span.textContent = symbol;
+            });
+        }
+
+        function saveDailyTotalsAndRemainders(startDate = null) {
+
+            $.ajax({
+                url: "/save_totals_remainders_d", // Back-end route
+                type: "POST", // Or "GET" depending on your method
+                contentType: "application/json",
+                success: function(response) {
+                    if (response.status === "success") {
+                        // Refresh notification badge in case new notifications were created
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
+                        }
+                    } else {
+                    }
+                },
+                error: function(xhr, status, error) {
+                },
+                complete: function() {
+                    // Hide the building budget loading screen after the AJAX request completes
+                    document.getElementById('building-budget-loading-modal').style.display = 'none';
+                }
+            });
+        }
+        
+        function loadDashboard() {
+            window.location.href = "{{ url_for('dashboard_3m') }}";
+        }
+    </script>
+
+</body>
+</html>
