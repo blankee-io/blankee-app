@@ -1,0 +1,76 @@
+{
+  "_about": [
+    "Font Awesome Pro -> Free fallback map. Edit this file, then run:",
+    "    python3 install/build_fa_fallback.py",
+    "which regenerates static/css/fa-pro-fallback.css.",
+    "",
+    "Each icon entry names the Free icon to borrow a glyph from, and the weight to",
+    "render it at. Weight matters because Free's regular family is only ~163 icons:",
+    "a light Pro icon can only stay light if its replacement is one of them.",
+    "",
+    "Run with --check to list any Pro icon used in the app that has no entry here.",
+    "That check is what keeps the promise that adding a Pro icon later cannot",
+    "silently leave Free installs with a blank box."
+  ],
+
+  "free_family": "Font Awesome 7 Free",
+
+  "styles": {
+    "_about": "Pro style classes, undefined in Free CSS. Weight 900 = solid, 400 = regular.",
+    "fa-light": 900,
+    "fal": 900,
+    "fa-thin": 900,
+    "fat": 900,
+    "fa-duotone": 900,
+    "fad": 900,
+    "fa-sharp": 900,
+    "fa-kit": 900,
+    "fak": 900
+  },
+
+  "icons": {
+    "_about": "Pro-only icon names and Kit icon names. style is solid or regular.",
+
+    "fa-arrows-repeat":            { "icon": "fa-arrows-rotate",        "style": "solid" },
+    "fa-calendars":                { "icon": "fa-calendar",             "style": "solid" },
+    "fa-turn-left":                { "icon": "fa-arrow-left",           "style": "solid" },
+    "fa-calendar-exclamation":     { "icon": "fa-calendar-check",       "style": "solid" },
+    "fa-left":                     { "icon": "fa-circle-left",          "style": "solid" },
+    "fa-right":                    { "icon": "fa-circle-right",         "style": "solid" },
+    "fa-filter-slash":             { "icon": "fa-filter-circle-xmark",  "style": "solid" },
+    "fa-toggle-large-on":          { "icon": "fa-toggle-on",            "style": "solid" },
+    "fa-siren-on":                 { "icon": "fa-triangle-exclamation", "style": "solid" },
+    "fa-layer-plus":               { "icon": "fa-square-plus",          "style": "solid" },
+    "fa-layer-minus":              { "icon": "fa-square-minus",         "style": "solid" },
+    "fa-spinner-scale":            { "icon": "fa-spinner",              "style": "solid" },
+    "fa-plus-large":               { "icon": "fa-plus",                 "style": "solid" },
+    "fa-shield-check":             { "icon": "fa-shield-halved",        "style": "solid" },
+    "fa-table-cells-rows":         { "icon": "fa-table-cells",          "style": "solid" },
+    "fa-broom-wide":               { "icon": "fa-broom",                "style": "solid" },
+    "fa-arrow-left-from-bracket":  { "icon": "fa-right-from-bracket",   "style": "solid" },
+
+    "fa-solid-credit-card-circle-plus":            { "icon": "fa-circle-plus",           "style": "solid"   },
+    "fa-solid-credit-card-circle-minus":           { "icon": "fa-circle-minus",          "style": "solid"   },
+    "fa-light-credit-card-circle-minus":           { "icon": "fa-square-minus",          "style": "regular" },
+    "fa-regular-credit-card-sync":                 { "icon": "fa-credit-card",           "style": "regular" },
+    "fa-light-money-bill-circle-question":         { "icon": "fa-money-bill-1",          "style": "regular" },
+    "fa-regular-piggy-bank-sync-bl":               { "icon": "fa-piggy-bank",            "style": "solid"   },
+    "fa-solid-arrows-repeat-circle-plus":          { "icon": "fa-arrows-rotate",         "style": "solid"   },
+    "fa-solid-arrows-repeat-slash":                { "icon": "fa-ban",                   "style": "solid"   },
+    "fa-solid-bars-lock":                          { "icon": "fa-lock",                  "style": "solid"   },
+    "fa-solid-building-columns-circle-check":      { "icon": "fa-building-columns",      "style": "solid"   },
+    "fa-solid-calendar-day-circle-arrow-down-tl":  { "icon": "fa-calendar-day",          "style": "solid"   },
+    "fa-solid-folder-circle-plus":                 { "icon": "fa-folder-plus",           "style": "solid"   },
+    "fa-solid-folder-minus-circle-plus":           { "icon": "fa-folder-minus",          "style": "solid"   },
+    "fa-solid-folder-plus-circle-plus":            { "icon": "fa-folder-plus",           "style": "solid"   },
+    "fa-solid-hand-holding-dollar-slash":          { "icon": "fa-hand-holding-dollar",   "style": "solid"   },
+    "fa-solid-layer-minus-circle-plus":            { "icon": "fa-square-minus",          "style": "solid"   },
+    "fa-solid-layer-plus-circle-plus":             { "icon": "fa-square-plus",           "style": "solid"   },
+    "fa-solid-money-bill-transfer-circle-plus-bl": { "icon": "fa-money-bill-transfer",   "style": "solid"   }
+  },
+
+  "ignore": {
+    "_about": "Not real icon names. Class strings built at runtime by JavaScript.",
+    "entries": ["fa-chevron-'"]
+  }
+}

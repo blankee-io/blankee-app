@@ -3036,7 +3036,11 @@ tr[data-category-id] td.before-member-since {
     font-size: 8.5px;
     font-weight: 900;
     pointer-events: none;
-    font-family: "Font Awesome 7 Pro";
+    font-family: var(--blankee-fa-family, "Font Awesome 7 Pro");
+    /* Pro when a Pro build is installed, Free otherwise. These two rules name a
+       font family directly instead of going through an icon class, so the
+       fallback stylesheet cannot reach them any other way. The glyph below
+       exists in both families. */
     content: '\f00c';
     color: var(--white);
     background-color: var(--success);
@@ -3062,7 +3066,11 @@ tr[data-category-id] td.before-member-since {
     font-size: 8.5px;
     font-weight: 900;
     pointer-events: none;
-    font-family: "Font Awesome 7 Pro";
+    font-family: var(--blankee-fa-family, "Font Awesome 7 Pro");
+    /* Pro when a Pro build is installed, Free otherwise. These two rules name a
+       font family directly instead of going through an icon class, so the
+       fallback stylesheet cannot reach them any other way. The glyph below
+       exists in both families. */
     content: '\f128';
     color: var(--white);
     background-color: var(--secondary);
