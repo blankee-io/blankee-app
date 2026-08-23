@@ -19,7 +19,7 @@ running site whose first account becomes the administrator.
 Needs Docker with the Compose plugin. Nothing else.
 
 ```bash
-git clone <repo> blankee && cd blankee
+git clone https://github.com/blankee-io/blankee-app.git && cd blankee-app
 cp .env.docker.example .env
 ```
 
@@ -38,7 +38,7 @@ different one.
 Installs onto the machine directly with Apache and mod_wsgi.
 
 ```bash
-git clone <repo> blankee && cd blankee
+git clone https://github.com/blankee-io/blankee-app.git && cd blankee-app
 sudo ./install/install.sh --server-name budget.example.com
 ```
 
