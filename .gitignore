@@ -37,3 +37,48 @@ venv/
 
 # Copilot instructions (local only)
 .github/copilot-instructions.md
+
+# ---------------------------------------------------------------------------
+# Tooling, not application. None of this belongs to anyone who clones the repo.
+# ---------------------------------------------------------------------------
+
+# Claude Code. All of it is machine-specific: settings.json hooks reference an
+# absolute /v/ path, and CLAUDE.md documents this machine's drive-letter mounts.
+.claude/
+CLAUDE.md
+.mcp.json
+
+# GitHub Copilot instructions (local only)
+.github/copilot-instructions.md
+
+# Editors. .vscode/settings.json here defines a WSL profile with a V:\ path,
+# which is meaningless on any other machine.
+.vscode/
+*.code-workspace
+.idea/
+.history/
+*.swp
+*.swo
+*~
+
+# Windows shell junk (the macOS equivalents are at the top of this file)
+Thumbs.db
+desktop.ini
+
+# Python tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+
+# Scratch migration and test scripts. Everything in migrations/ that starts with
+# an underscore is a throwaway - a runner, a probe, a one-off check - and none of
+# it is part of the schema history.
+migrations/_*
+
+# NOTE: the '.env' rule above matches only that exact name, so
+# .env.docker.example is still committed. Do not change it to '.env*' - the
+# docker install reads that example file.
