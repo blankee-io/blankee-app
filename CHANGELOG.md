@@ -31,6 +31,19 @@ First published version.
 - Font Awesome Pro is used when present and falls back to a bundled Free build
   otherwise, so every icon renders either way.
 
+### Added (since 1.0.0 was cut)
+- The administrator console reports whether newer code exists, whether the
+  installed Python packages match `requirements.txt`, and whether any database
+  migration is outstanding. Checking contacts GitHub only when the button is
+  pressed; nothing runs on a schedule.
+- Updates can be applied from the console. The web process only sets a flag in a
+  file it owns; a root systemd timer does the work, so the web user gains no
+  privilege. Reloading touches the WSGI script rather than restarting Apache, so
+  no connection is dropped.
+- `install/check_requirements.py` fails if the code imports something
+  `requirements.txt` does not declare — the class of bug that made `httpx` and
+  `PyJWT` break clean installs.
+
 ### Security
 - The web user cannot write in the configuration directory. Write permission on
   a directory is the right to replace what is in it, which would have allowed
