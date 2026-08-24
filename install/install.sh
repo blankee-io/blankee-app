@@ -90,12 +90,12 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
     info "free:          port $HTTP_PORT"
   fi
   if id www-data >/dev/null 2>&1; then
-    if sudo -u www-data test -r "$APP_DIR/app.py" 2>/dev/null; then
-      info "readable:      $APP_DIR by www-data"
+    if sudo -u www-data test -x "$(dirname "$APP_DIR")" 2>/dev/null; then
+      info "reachable:     $APP_DIR by www-data"
     else
-      warn "NOT readable:  $APP_DIR by www-data - Apache will 500. A parent directory"
-      warn "               denies access; /root is mode 700, the usual cause. Move the"
-      warn "               repository to somewhere like /opt/blankee first."
+      warn "UNREACHABLE:   www-data cannot traverse into $(dirname "$APP_DIR"), so"
+      warn "               Apache will 500 on every request. /root is mode 700, the"
+      warn "               usual cause. Move the repository to /opt/blankee first."
     fi
   fi
   say "Check complete"
@@ -119,18 +119,21 @@ systemctl enable --now mysql >/dev/null 2>&1 || systemctl enable --now mariadb >
 systemctl enable --now redis-server >/dev/null 2>&1 || die "Could not start Redis."
 info "MySQL and Redis are running"
 
-# Apache runs as www-data, and no amount of chown inside the repo helps if a
-# parent directory blocks it. Cloning into /root is the easy mistake: /root is
+# Apache runs as www-data, and no chmod inside the repo helps if an ancestor
+# directory blocks the way in. Cloning into /root is the easy mistake: /root is
 # mode 700, so www-data cannot traverse into it and every request becomes a 500
-# with a permission error buried in the Apache log. Fail here instead, where the
-# cause is obvious.
-if ! sudo -u www-data test -r "$APP_DIR/app.py" 2>/dev/null; then
-  die "www-data cannot read $APP_DIR/app.py, so Apache will not be able to serve it.
-    A parent directory denies access - /root is mode 700, which is the usual cause.
+# with a permission error buried in the Apache log. Fail here, where the cause is
+# obvious. Testing the parent rather than app.py on purpose - test -x requires
+# traversal of every ancestor, and it does not depend on the repo's own modes,
+# which the permissions step below fixes anyway.
+PARENT_DIR="$(dirname "$APP_DIR")"
+if ! sudo -u www-data test -x "$PARENT_DIR" 2>/dev/null; then
+  die "www-data cannot traverse into $PARENT_DIR, so Apache will not be able to
+    serve $APP_DIR. /root is mode 700, which is the usual cause.
     Move the repository somewhere Apache can reach and re-run:
         mv $APP_DIR /opt/blankee && cd /opt/blankee && ./install/install.sh"
 fi
-info "readable by www-data"
+info "reachable by www-data"
 
 # ---------------------------------------------------------------- python deps
 say "Installing Python dependencies"
@@ -229,12 +232,17 @@ DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" DB_NAME="$DB_NA
 
 # ---------------------------------------------------------------- permissions
 say "Setting permissions"
-chown -R www-data:www-data "$APP_DIR"
-# Profile pictures are written here at runtime.
+# static/uploads (profile pictures) is the only path the application writes to,
+# so the code stays owned by root and merely readable. Two reasons not to hand
+# the whole tree to www-data: a web process able to rewrite its own source turns
+# any code-execution bug into persistence, and a repository owned by www-data
+# makes every later "git pull" as root fail with "detected dubious ownership".
+chown -R root:root "$APP_DIR"
+chmod -R a+rX "$APP_DIR"
 mkdir -p "$APP_DIR/static/uploads"
-chown www-data:www-data "$APP_DIR/static/uploads"
+chown -R www-data:www-data "$APP_DIR/static/uploads"
 chmod 775 "$APP_DIR/static/uploads"
-info "$APP_DIR owned by www-data, static/uploads writable"
+info "code owned by root and readable; static/uploads writable by www-data"
 
 # ---------------------------------------------------------------- apache
 say "Configuring Apache"
