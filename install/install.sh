@@ -262,6 +262,12 @@ cat > "$VHOST" <<EOF
     # python-home points mod_wsgi at the virtualenv created by the installer.
     WSGIDaemonProcess blankee python-home=$VENV_DIR python-path=$APP_DIR
     WSGIProcessGroup blankee
+    # Run in the main interpreter, not a sub-interpreter. mod_wsgi defaults to a
+    # sub-interpreter per application, and Rust/PyO3 extension modules refuse to
+    # load in one - bcrypt 4.x is built that way, so without this every request
+    # dies with "PyO3 modules do not yet support subinterpreters" and Flask-Bcrypt
+    # reports itself missing. cryptography is in the same family.
+    WSGIApplicationGroup %{GLOBAL}
     WSGIScriptAlias / $WSGI_FILE
 
     <Directory $APP_DIR>
