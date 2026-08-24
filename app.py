@@ -77,6 +77,22 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
 
+# There is no CSRF token anywhere in this application. Today the state-changing
+# routes are protected only by accident: they read JSON, so a cross-site form
+# POST arrives form-encoded and parses to {}, and browsers happen to default
+# cookies to Lax. Stating Lax explicitly turns that accident into a decision -
+# the browser will not send this cookie on a cross-site POST at all, which is
+# what stands between a malicious page an administrator visits and every admin
+# action in the console. Not a substitute for real CSRF tokens, which remain
+# worth adding; this is the one-line half that costs nothing.
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
+# Defence in depth rather than a fix: the cookie is already inaccessible to
+# script, and marking it so removes one way a stored-XSS bug could become
+# session theft.
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+
 # Custom Jinja2 filter: ordinal day suffix (1st, 2nd, 3rd, 4th, 11th, 21st, etc.)
 # Renders suffix as superscript (<sup>) for display. Handles comma-separated lists.
 def ordinal_filter(value):
