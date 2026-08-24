@@ -41,6 +41,15 @@ _TRUTHY = ('1', 'true', 'yes', 'on')
 
 RESET_KEY = 'RESET_ADMIN_PASSWORD'
 
+# Self-update. SELF_UPDATE doubles as feature detection, which is why the
+# installer only sets it to 1 after `systemctl enable` has actually succeeded:
+# it is absent under Docker, absent on an install predating the feature, and 0
+# when an operator opts out - and all three should produce the same behaviour,
+# which the fail-closed read below already gives.
+SELF_UPDATE_KEY = 'SELF_UPDATE'
+UPDATE_REQUESTED_KEY = 'UPDATE_REQUESTED'
+UPDATE_REQUEST_ID_KEY = 'UPDATE_REQUEST_ID'
+
 # Written verbatim when the file does not exist. The installer calls
 # ensure_config_file() so there is one template, at one path, with no copy in a
 # shell script to drift from it. The app itself can no longer create the file -
@@ -67,6 +76,33 @@ _TEMPLATE = """# Blankee server configuration
 # on when you are ready to use it, not in advance, and check that it went back
 # to 0 afterwards.
 RESET_ADMIN_PASSWORD=0
+
+# ---------------------------------------------------------------------------
+# SELF_UPDATE
+# ---------------------------------------------------------------------------
+# Whether the admin console may apply updates. Set to 1 by install/install.sh,
+# and only once the blankee-update systemd timer is actually enabled - so it
+# answers "can this instance update itself" rather than "was it asked to".
+#
+# Set it to 0 to take the button away and be told the commands instead. The
+# units stay installed either way; nothing is uninstalled by turning this off.
+SELF_UPDATE=0
+
+# ---------------------------------------------------------------------------
+# UPDATE_REQUESTED
+# ---------------------------------------------------------------------------
+# Set to 1 by the admin console to ask for an update. A root-owned systemd
+# service checks this every minute, and clears it before doing any work - so a
+# request is consumed exactly once even if the update then fails.
+#
+# Editing it here is a supported way to update from a shell:
+#     sudo sed -i 's/^UPDATE_REQUESTED=0/UPDATE_REQUESTED=1/' this-file
+# though `sudo systemctl start blankee-update` is more direct.
+#
+# UPDATE_REQUEST_ID is written alongside it, and exists so the console can tell
+# "the updater finished my request" from "I am reading last week's result".
+UPDATE_REQUESTED=0
+UPDATE_REQUEST_ID=
 """
 
 # One creation attempt per process. Retrying on every request would mean a
@@ -294,3 +330,63 @@ def consume_admin_password_reset():
     return (False, f'The password was changed, but {RESET_KEY} could not be turned '
                    f'off automatically. Set it to 0 in {path} now - until you do, '
                    f'anyone reaching this site can change the administrator password.')
+
+
+def self_update_enabled():
+    """
+    Whether this instance can apply its own updates.
+
+    Fails closed, like every other flag here. A missing file, a missing key and
+    an unreadable file all mean "no", which is the right answer: the console then
+    shows the commands to run instead of a button that would write a flag nothing
+    is watching.
+    """
+    return _read().get(SELF_UPDATE_KEY, '').lower() in _TRUTHY
+
+
+def update_requested():
+    """(requested, request_id). The privileged updater's entry point."""
+    values = _read()
+    return (values.get(UPDATE_REQUESTED_KEY, '').lower() in _TRUTHY,
+            values.get(UPDATE_REQUEST_ID_KEY, '').strip() or None)
+
+
+def request_update():
+    """
+    Ask for an update. Returns (ok, request_id, error).
+
+    Both keys are written in one pass. Two separate writes could leave the
+    updater looking at a fresh UPDATE_REQUESTED beside the previous request id,
+    and it would then report the wrong run as finished.
+
+    The id is a timestamp and eight random hex characters. It is opaque and
+    carries no instruction - deliberately, because this file is the one channel
+    from the web process to a root process, and the moment it carries something
+    root acts on (a ref, a branch, a path) the web user chooses what root
+    checks out.
+    """
+    import secrets
+    import time
+
+    request_id = f'{int(time.time())}-{secrets.token_hex(4)}'
+    ok, error = _set_keys({UPDATE_REQUESTED_KEY: '1',
+                           UPDATE_REQUEST_ID_KEY: request_id})
+    if not ok:
+        log_error(logger, 'UPDATE', f'Could not request an update in {config_path()}: {error}')
+        return (False, None, error)
+    log_info(logger, 'UPDATE', f'Update requested', request_id=request_id)
+    return (True, request_id, None)
+
+
+def clear_update_request():
+    """
+    Clear the request. Called by the privileged updater before it starts work,
+    so a crash cannot make the request repeat forever.
+
+    The request id is deliberately left in place as a record of what was last
+    asked for.
+    """
+    ok, error = _set_keys({UPDATE_REQUESTED_KEY: '0'})
+    if not ok:
+        log_error(logger, 'UPDATE', f'Could not clear the update request: {error}')
+    return (ok, error)
