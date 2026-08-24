@@ -41,9 +41,11 @@ _TRUTHY = ('1', 'true', 'yes', 'on')
 
 RESET_KEY = 'RESET_ADMIN_PASSWORD'
 
-# Written verbatim when the file does not exist. The app creating its own config
-# is why there is no install step: there is one file, at one path, and no
-# template lying around for someone to edit by mistake.
+# Written verbatim when the file does not exist. The installer calls
+# ensure_config_file() so there is one template, at one path, with no copy in a
+# shell script to drift from it. The app itself can no longer create the file -
+# CONFIG_DIR is 750, so the web user cannot add entries to that directory - but
+# it can still rewrite the file in place, which is all any flag needs.
 _TEMPLATE = """# Blankee server configuration
 #
 # Created automatically. Read on every request, so an edit here takes effect on
@@ -99,11 +101,14 @@ def ensure_config_file():
         os.chmod(path, 0o640)
         log_info(logger, 'CONFIG', f'Created {path}')
     except Exception as e:
-        # Not an error: this is the expected outcome on a deployment whose config
-        # directory is root-owned, and nothing is broken until a flag is wanted.
+        # Not an error, and the expected outcome when the web user runs this:
+        # CONFIG_DIR is deliberately not writable by www-data, so creating the file
+        # is the installer's job. Nothing is broken until a flag is wanted, and
+        # every flag reads as off until then.
         log_warning(logger, 'CONFIG',
                     f'No config file at {path} and it could not be created ({e}). '
-                    f'All flags read as off. To create it: '
+                    f'All flags read as off. Re-run install/install.sh to create it, '
+                    f'or by hand: '
                     f'sudo install -o www-data -g www-data -m 640 /dev/null {path}')
 
 
@@ -125,7 +130,7 @@ def _read():
         return {}
     try:
         out = {}
-        with open(path, 'r', encoding='utf-8') as f:
+        with _locked(path, 'r') as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith('#') or '=' not in line:
@@ -150,6 +155,112 @@ def admin_password_reset_enabled():
     return _read().get(RESET_KEY, '').lower() in _TRUTHY
 
 
+# fcntl is POSIX-only. The application only ever runs on Linux, but importing
+# this module on a developer's Windows box should not explode - without the lock
+# the behaviour is exactly what it was before locking existed.
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+
+class _locked:
+    """
+    Open the config file with an flock held for the duration.
+
+    The lock, not atomic replacement, is what makes this file safe to share.
+    An atomic write means a temp file plus os.replace(), and replace() needs
+    write permission on the *directory* - which www-data deliberately does not
+    have, because that permission is also the right to swap out the virtualenv
+    and the WSGI entry point sitting beside this file. So the app rewrites the
+    file in place, and every reader and writer takes a lock instead.
+
+    Readers take a shared lock so they cannot observe a half-written file;
+    writers take an exclusive one so two threads cannot interleave. Root-run
+    tooling that reads this file must take the same shared lock.
+
+    A platform without fcntl, or a file that cannot be locked, degrades to no
+    lock rather than failing: an unlocked read is what this code did for its
+    whole life until now, and refusing to read would break the password-reset
+    recovery path this file exists to serve.
+    """
+
+    def __init__(self, path, mode, exclusive=False):
+        self.path, self.mode, self.exclusive = path, mode, exclusive
+        self.f = None
+
+    def __enter__(self):
+        self.f = open(self.path, self.mode, encoding='utf-8')
+        if fcntl is not None:
+            try:
+                fcntl.flock(self.f.fileno(),
+                            fcntl.LOCK_EX if self.exclusive else fcntl.LOCK_SH)
+            except OSError as e:
+                log_warning(logger, 'CONFIG',
+                            f'Could not lock {self.path} ({e}); proceeding unlocked')
+        return self.f
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if self.exclusive and exc_type is None:
+                self.f.flush()
+                os.fsync(self.f.fileno())
+        finally:
+            if fcntl is not None:
+                try:
+                    fcntl.flock(self.f.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+            self.f.close()
+        return False
+
+
+def _set_keys(mapping):
+    """
+    Set one or more KEY=VALUE pairs in place. Returns (ok, error_message).
+
+    In place, on a single file handle, under an exclusive lock: seek to the
+    start, write, truncate. Comments and key order survive, which matters
+    because this file is documentation as much as configuration.
+
+    A key that is not present is appended rather than silently dropped - the
+    caller asked for a value to be set, and a file that predates the key must
+    still end up with it.
+    """
+    path = config_path()
+    if not os.path.exists(path):
+        return (False, f'{path} does not exist')
+
+    want = {k.upper(): v for k, v in mapping.items()}
+    try:
+        with _locked(path, 'r+', exclusive=True) as f:
+            lines = f.readlines()
+
+            out, seen = [], set()
+            for line in lines:
+                stripped = line.strip()
+                if not stripped.startswith('#') and '=' in stripped:
+                    key = stripped.partition('=')[0].strip().upper()
+                    if key in want:
+                        out.append(f'{key}={want[key]}\n')
+                        seen.add(key)
+                        continue
+                out.append(line)
+
+            for key, value in want.items():
+                if key not in seen:
+                    if out and not out[-1].endswith('\n'):
+                        out.append('\n')
+                    out.append(f'{key}={value}\n')
+
+            f.seek(0)
+            f.writelines(out)
+            f.truncate()
+        return (True, None)
+    except Exception as e:
+        return (False, str(e))
+
+
 def consume_admin_password_reset():
     """
     Close the window. Returns (ok, message).
@@ -159,8 +270,10 @@ def consume_admin_password_reset():
 
     Rewrites the file in place rather than deleting it, so the operator's own
     comments survive and the file remains as documentation of the mechanism.
-    In-place rewriting also needs no write permission on the directory, which
-    matters because /var/www/budget_env is usually root-owned.
+    In-place rewriting also needs no write permission on the directory, which is
+    what makes it possible at all: the installer keeps /var/www/budget_env at 750
+    precisely so the web user cannot create or unlink entries there. See _locked
+    for why a lock rather than an atomic replace.
 
     A failure here is reported to the caller rather than swallowed: the reset has
     already happened, and the one thing the operator must know is that the door
@@ -170,31 +283,14 @@ def consume_admin_password_reset():
     if not os.path.exists(path):
         return (True, None)
 
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-
-        out, found = [], False
-        for line in lines:
-            stripped = line.strip()
-            if (not stripped.startswith('#') and '=' in stripped
-                    and stripped.partition('=')[0].strip().upper() == RESET_KEY):
-                out.append(f'{RESET_KEY}=0\n')
-                found = True
-            else:
-                out.append(line)
-        if not found:
-            out.append(f'{RESET_KEY}=0\n')
-
-        with open(path, 'w', encoding='utf-8') as f:
-            f.writelines(out)
-
+    ok, error = _set_keys({RESET_KEY: '0'})
+    if ok:
         log_info(logger, 'CONFIG', f'{RESET_KEY} switched off in {path} after use')
         return (True, None)
-    except Exception as e:
-        log_error(logger, 'CONFIG',
-                  f'Password reset succeeded but {RESET_KEY} could NOT be switched off '
-                  f'in {path} ({e}). It is still open - clear it by hand.')
-        return (False, f'The password was changed, but {RESET_KEY} could not be turned '
-                       f'off automatically. Set it to 0 in {path} now - until you do, '
-                       f'anyone reaching this site can change the administrator password.')
+
+    log_error(logger, 'CONFIG',
+              f'Password reset succeeded but {RESET_KEY} could NOT be switched off '
+              f'in {path} ({error}). It is still open - clear it by hand.')
+    return (False, f'The password was changed, but {RESET_KEY} could not be turned '
+                   f'off automatically. Set it to 0 in {path} now - until you do, '
+                   f'anyone reaching this site can change the administrator password.')
