@@ -89,6 +89,15 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
   else
     info "free:          port $HTTP_PORT"
   fi
+  if id www-data >/dev/null 2>&1; then
+    if sudo -u www-data test -r "$APP_DIR/app.py" 2>/dev/null; then
+      info "readable:      $APP_DIR by www-data"
+    else
+      warn "NOT readable:  $APP_DIR by www-data - Apache will 500. A parent directory"
+      warn "               denies access; /root is mode 700, the usual cause. Move the"
+      warn "               repository to somewhere like /opt/blankee first."
+    fi
+  fi
   say "Check complete"
   exit 0
 fi
@@ -109,6 +118,19 @@ systemctl enable --now mysql >/dev/null 2>&1 || systemctl enable --now mariadb >
   die "Could not start MySQL."
 systemctl enable --now redis-server >/dev/null 2>&1 || die "Could not start Redis."
 info "MySQL and Redis are running"
+
+# Apache runs as www-data, and no amount of chown inside the repo helps if a
+# parent directory blocks it. Cloning into /root is the easy mistake: /root is
+# mode 700, so www-data cannot traverse into it and every request becomes a 500
+# with a permission error buried in the Apache log. Fail here instead, where the
+# cause is obvious.
+if ! sudo -u www-data test -r "$APP_DIR/app.py" 2>/dev/null; then
+  die "www-data cannot read $APP_DIR/app.py, so Apache will not be able to serve it.
+    A parent directory denies access - /root is mode 700, which is the usual cause.
+    Move the repository somewhere Apache can reach and re-run:
+        mv $APP_DIR /opt/blankee && cd /opt/blankee && ./install/install.sh"
+fi
+info "readable by www-data"
 
 # ---------------------------------------------------------------- python deps
 say "Installing Python dependencies"
