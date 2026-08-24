@@ -542,20 +542,29 @@ def fetch_remote_state(slug, local_sha):
                         f'cannot be read from here. Updating still works.')
         return out
 
+    # Constructing the client is inside the try, not just the import. httpx pulls
+    # in httpcore, which imports h2 for HTTP/2 - and an old h2/hyperframe raises
+    # AttributeError there rather than ImportError, so importing httpx succeeds
+    # and building a client explodes. That happened on a real deployment. If it
+    # escaped this function it would take the whole report down, and the
+    # dependency check - which is what diagnoses it - would be the first
+    # casualty.
     try:
         import httpx
+        # Same client shape as push_notifications.py: an explicit timeout, so a
+        # blocked or slow network cannot hang the request waiting on this.
+        client = httpx.Client(
+            timeout=httpx.Timeout(10.0, connect=10.0),
+            follow_redirects=True,
+            headers={'Accept': 'application/vnd.github+json',
+                     'X-GitHub-Api-Version': '2022-11-28',
+                     'User-Agent': f'blankee/{read_version() or "unknown"}'})
     except Exception as e:
-        out['error'] = f'httpx is not available, so the check could not run ({e}).'
+        out['error'] = (f'The HTTP client could not be started, so the check could not '
+                        f'run ({type(e).__name__}: {e}). The dependency report below '
+                        f'usually says why.')
+        log_warning(logger, 'UPDATE', 'Could not build an HTTP client', error=str(e))
         return out
-
-    # Same client shape as push_notifications.py: an explicit timeout, so a
-    # blocked or slow network cannot hang the request that is waiting on this.
-    client = httpx.Client(
-        timeout=httpx.Timeout(10.0, connect=10.0),
-        follow_redirects=True,
-        headers={'Accept': 'application/vnd.github+json',
-                 'X-GitHub-Api-Version': '2022-11-28',
-                 'User-Agent': f'blankee/{read_version() or "unknown"}'})
     errors = []
     try:
         # Signal 1: the published VERSION.
