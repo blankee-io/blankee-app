@@ -48,13 +48,48 @@ To see what it would touch without changing anything:
 sudo ./install/install.sh --check
 ```
 
+This serves on **port 18420**, matching the Docker default, and Apache is
+configured to bind nothing else — not 80, not 443. Open
+`http://budget.example.com:18420/`, or `http://<server-ip>:18420/` if DNS is not
+pointing at it yet; the installer disables Apache's default site, so the app
+answers for any hostname. Pick a different port with:
+
+```bash
+sudo ./install/install.sh --server-name budget.example.com --port 39000
+```
+
+Because the standard ports are deliberately left free, the installer replaces
+`/etc/apache2/ports.conf` — Debian ships it with `Listen 80` and a `Listen 443`
+inside an `ssl_module` guard, which would otherwise stay open regardless of how
+the vhost is written. The original is kept once as
+`ports.conf.blankee-orig`. If you are adding Blankee to a machine already
+serving other sites from Apache, that is the one file to look at first.
+
+If the browser cannot reach it, the app is usually fine and something in front
+of it is not. Check, in order:
+
+```bash
+systemctl is-active apache2
+ss -lntp | grep ':18420'                        # is anything listening?
+curl -I http://127.0.0.1:18420/register         # does it answer locally?
+sudo ufw status                                 # a firewall the installer does not touch
+tail -30 /var/log/apache2/blankee_error.log
+```
+
+A local `200` or `302` with nothing reachable from outside means the port is
+blocked or unmapped rather than misconfigured — on a Docker container it needs
+`-p 18420:18420`, and on LXC or a VM check the host firewall.
+
 It generates its own secrets and database password into
 `/var/www/budget_env/.env`. Re-running is safe — existing secrets are kept,
 because regenerating them would log everyone out and orphan the stored SMTP
 password.
 
-Serving is plain HTTP. For HTTPS, run certbot afterwards and set `APP_URL` in
-that file to the `https://` address.
+Serving is plain HTTP. For HTTPS, run certbot afterwards, then set `APP_URL` in
+that file to the `https://` address including the port. Note that certbot
+assumes 443 and will want to add its own `Listen`; if you are keeping the
+standard ports clear, point it at your chosen TLS port instead and re-check
+`ports.conf` after it runs.
 
 ### First run
 
@@ -125,6 +160,12 @@ python3 install/build_fa_fallback.py --check
 
 It exits non-zero and names any Pro icon used without a mapping, along with the
 files using it. Worth running before you commit.
+
+It also checks *style* availability, which is a separate trap: Free has 2,583
+icons but only 273 in regular, so `fa-regular fa-lock` renders an empty box even
+though `fa-lock` is plainly in Free. The regular family is listed in
+`install/fa_free_regular.txt`, and any icon requested in regular that Free only
+has in solid gets an automatic override to solid rather than being left blank.
 
 Two things it cannot see. Class names assembled at runtime — such as
 `'fa-chevron-' + direction` — are invisible to a static scan; there is an
