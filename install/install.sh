@@ -8,6 +8,8 @@
 #   sudo ./install/install.sh --server-name budget.example.com
 #   sudo ./install/install.sh --check                # check prerequisites, change nothing
 #   sudo ./install/install.sh --port 18420           # listen here instead of the default
+#   sudo ./install/install.sh --no-self-update       # do not install the updater
+#   sudo ./install/install.sh --permissions-only     # re-apply ownership and exit
 #
 # Re-running is safe. Anything already in place is left alone, and existing
 # secrets in the config file are never regenerated - doing so would invalidate
@@ -33,21 +35,71 @@ SECURE_DIR="/etc/blankee"
 DB_CONF="$SECURE_DIR/db.conf"
 CONF_FILE="$CONFIG_DIR/blankee.conf"
 CHECK_ONLY=0
+PERMISSIONS_ONLY=0
+SELF_UPDATE=1
+UPDATER_SERVICE="/etc/systemd/system/blankee-update.service"
+UPDATER_TIMER="/etc/systemd/system/blankee-update.timer"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --server-name) SERVER_NAME="$2"; shift 2 ;;
     --port)        HTTP_PORT="$2"; shift 2 ;;
     --check)       CHECK_ONLY=1; shift ;;
-    -h|--help)     sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --permissions-only) PERMISSIONS_ONLY=1; shift ;;
+    --no-self-update)   SELF_UPDATE=0; shift ;;
+    -h|--help)     sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 warn() { printf '    \033[33m! %s\033[0m\n' "$*"; }
 die()  { printf '\n\033[31mFAILED: %s\033[0m\n' "$*" >&2; exit 1; }
+
+# Set one KEY=VALUE in blankee.conf, in place, appending if absent. The app does
+# the same thing from Python; this is for the values the installer decides.
+set_conf_key() {
+  local key="$1" value="$2"
+  [[ -f "$CONF_FILE" ]] || return 0
+  if grep -qE "^[[:space:]]*$key=" "$CONF_FILE"; then
+    sed -i "s|^[[:space:]]*$key=.*|$key=$value|" "$CONF_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$CONF_FILE"
+  fi
+}
+
+apply_permissions() {
+  # static/uploads (profile pictures) is the only path the application writes to,
+  # so the code stays owned by root and merely readable. Two reasons not to hand
+  # the whole tree to www-data: a web process able to rewrite its own source turns
+  # any code-execution bug into persistence, and a repository owned by www-data
+  # makes every later "git pull" as root fail with "detected dubious ownership".
+  #
+  # A function because the self-updater calls it through --permissions-only after
+  # every checkout. git creates new files with root's umask, so on a host with a
+  # restrictive one every added file would be unreadable by www-data and the site
+  # would 500 the moment it reloaded. One copy of these rules, called from both
+  # places.
+  chown -R root:root "$APP_DIR"
+  chmod -R a+rX "$APP_DIR"
+  mkdir -p "$APP_DIR/static/uploads"
+  chown -R www-data:www-data "$APP_DIR/static/uploads"
+  chmod 775 "$APP_DIR/static/uploads"
+}
+
+# The self-updater calls this after every checkout. Kept as early as possible so
+# it needs nothing else to be true - no packages, no database, no vhost.
+if [[ $PERMISSIONS_ONLY -eq 1 ]]; then
+  [[ $EUID -eq 0 ]] || die "Run with sudo."
+  [[ -f "$APP_DIR/app.py" ]] || die "Cannot find app.py - run this from inside the repository."
+  say "Setting permissions"
+  apply_permissions
+  info "code owned by root and readable; static/uploads writable by www-data"
+  exit 0
+fi
+
 
 # ---------------------------------------------------------------- checks
 say "Checking the machine"
@@ -100,6 +152,20 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
       warn "               Apache will 500 on every request. /root is mode 700, the"
       warn "               usual cause. Move the repository to /opt/blankee first."
     fi
+  fi
+  if [[ -f "$UPDATER_TIMER" ]]; then
+    if systemctl is-enabled blankee-update.timer >/dev/null 2>&1; then
+      info "enabled:       blankee-update.timer"
+    else
+      warn "installed but not enabled: blankee-update.timer"
+    fi
+  else
+    warn "will create:   $UPDATER_TIMER"
+  fi
+  if [[ -f "$APP_DIR/VERSION" ]]; then
+    info "version:       $(cat "$APP_DIR/VERSION")"
+  else
+    warn "no VERSION file - the footer will show no version"
   fi
   say "Check complete"
   exit 0
@@ -313,17 +379,87 @@ DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" DB_NAME="$DB_NA
 
 # ---------------------------------------------------------------- permissions
 say "Setting permissions"
-# static/uploads (profile pictures) is the only path the application writes to,
-# so the code stays owned by root and merely readable. Two reasons not to hand
-# the whole tree to www-data: a web process able to rewrite its own source turns
-# any code-execution bug into persistence, and a repository owned by www-data
-# makes every later "git pull" as root fail with "detected dubious ownership".
-chown -R root:root "$APP_DIR"
-chmod -R a+rX "$APP_DIR"
-mkdir -p "$APP_DIR/static/uploads"
-chown -R www-data:www-data "$APP_DIR/static/uploads"
-chmod 775 "$APP_DIR/static/uploads"
+apply_permissions
 info "code owned by root and readable; static/uploads writable by www-data"
+
+# ---------------------------------------------------------------- self-updater
+say "Configuring the self-updater"
+if [[ $SELF_UPDATE -eq 0 ]]; then
+  set_conf_key SELF_UPDATE 0
+  info "skipped (--no-self-update); the console will show the commands instead"
+elif ! command -v systemctl >/dev/null; then
+  set_conf_key SELF_UPDATE 0
+  warn "no systemd here, so the updater was not installed; updates stay manual"
+else
+  cat > "$UPDATER_SERVICE" <<EOF
+[Unit]
+Description=Blankee self-update (applies a request from the admin console)
+Documentation=file://$APP_DIR/docs/RELEASING.md
+After=network-online.target mysql.service apache2.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Root deliberately: it replaces root-owned code, installs into a root-owned
+# virtualenv and reloads the web server. The web process gains nothing from
+# this - it can only set a flag in blankee.conf, which this reads and validates.
+#
+# /usr/bin/python3 rather than the virtualenv's python: the moment this most
+# needs to report clearly is when pip has just broken that virtualenv.
+#
+# ExecStart points at the copy in the repository on purpose. The script rewrites
+# that tree while running, which is safe because CPython compiles the whole file
+# before executing it - and it means there is no second copy to go stale.
+ExecStart=/usr/bin/python3 $APP_DIR/install/blankee_update.py
+ExecStopPost=/usr/bin/python3 $APP_DIR/install/blankee_update.py --mark-aborted
+Environment=BLANKEE_APP_DIR=$APP_DIR
+Environment=BLANKEE_CONFIG_DIR=$CONFIG_DIR
+Environment=BLANKEE_CONFIG=$CONF_FILE
+Environment=BLANKEE_VENV=$VENV_DIR
+Environment=BLANKEE_WSGI=$WSGI_FILE
+Environment=BLANKEE_DB_CONF=$DB_CONF
+UMask=0022
+TimeoutStartSec=1800
+Nice=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blankee-update
+EOF
+
+  cat > "$UPDATER_TIMER" <<EOF
+[Unit]
+Description=Check for a Blankee update request every minute
+
+[Timer]
+# A timer rather than a .path unit watching blankee.conf. A path unit is
+# instant, but: an in-place rewrite truncates the file first, so the watcher can
+# fire on the truncation, read an empty file and exit, and the event for the
+# real content is dropped while the service is still active - the button appears
+# to do nothing, silently. PathModified also never fires retroactively, so a
+# request written while the unit is stopped is lost. A timer re-reads the
+# current state every tick, which makes all of that impossible.
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=blankee-update.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  chmod 644 "$UPDATER_SERVICE" "$UPDATER_TIMER"
+  systemctl daemon-reload
+  if systemctl enable --now blankee-update.timer >/dev/null 2>&1; then
+    # Only now is the flag true. It answers "can this instance update itself",
+    # so writing it before the timer is actually enabled would make the console
+    # offer a button whose request nothing would ever read.
+    set_conf_key SELF_UPDATE 1
+    info "blankee-update.timer enabled; updates can be applied from the admin console"
+  else
+    set_conf_key SELF_UPDATE 0
+    warn "could not enable blankee-update.timer; updates stay manual"
+  fi
+fi
 
 # ---------------------------------------------------------------- apache
 say "Configuring Apache"
