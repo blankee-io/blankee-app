@@ -392,6 +392,32 @@ def _fontawesome_pro_available():
 app.jinja_env.globals['fontawesome_pro_available'] = _fontawesome_pro_available
 
 
+def _app_version():
+    """
+    The application version, e.g. "1.0.0", or '' if it cannot be determined.
+
+    Registered as a plain VALUE rather than a callable, unlike the two globals
+    above, and the difference is deliberate. What those two report can change
+    while the process is running: a Font Awesome build can be dropped into
+    static/, a mailbox can be verified. The version cannot - it changes only
+    when the code changes, and new code does not run until the process is
+    reloaded, which re-runs this line. Calling a function per render would buy
+    nothing and charge every page a file read to be told the same answer.
+
+    Fails to '' so the template can simply omit the version. A footer with no
+    version is tidy; one reading "vunknown" is a support question.
+    """
+    try:
+        from version_info import read_version
+        return read_version()
+    except Exception as e:
+        log_error(app.logger, 'CONFIG', f'Could not determine the application version: {e}')
+        return ''
+
+
+app.jinja_env.globals['app_version'] = _app_version()
+
+
 @app.context_processor
 def inject_unread_notifications():
     """Inject unread notification count and user info into all templates for the nav"""
