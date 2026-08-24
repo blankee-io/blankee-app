@@ -1614,13 +1614,17 @@ transform: scale(1.2);
     color: var(--text-dark);
     font-size: 15px;
     transform: translateY(-50%);
+    transition: color 0.15s ease, transform 0.15s ease;
     cursor: pointer;
     user-select: none;
 }
 
 .password-toggle-icon:hover {
     color: var(--accent);
-    transform: scale(1.2);
+    /* translateY has to be repeated here. transform is a single property, so a
+       hover rule that sets only scale() discards the centering above and the
+       icon drops by half its height as it grows. */
+    transform: translateY(-50%) scale(1.08);
 }
 
 /* Login Button */
@@ -1654,11 +1658,6 @@ button.login-button#register-button {
     cursor: not-allowed;
 }
 
-.recaptcha-row {
-    margin-top: 20px;
-    display: flex;
-    justify-content: center;
-}
 
 .logincontainer .login-button:hover,
 button.login-button:hover {

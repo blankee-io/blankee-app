@@ -10,8 +10,6 @@
     {% include '_fontawesome.html' %}
     <!-- Link to jQuery library for JavaScript functionality -->
     <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
-    <!-- Google reCAPTCHA -->
-    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Blankee">
@@ -76,11 +74,6 @@
                 <p id="password-match-requirement"><span class="requirement-icon">✗</span> Passwords match</p> <!-- Password match check -->
             </div>
             
-            <!-- Google reCAPTCHA -->
-            <div class="login-row recaptcha-row">
-                <div class="g-recaptcha" data-sitekey="6LdmCgAsAAAAALGB6JYlus0Rr9hepw1fbK70Bx9v" data-callback="recaptchaCallback"></div>
-            </div>
-            
             <!-- member_since is now set during profile setup (threshold submission), not registration -->
             <!-- Register button, initially disabled -->
             <button type="submit" id="register-button" class="login-button" disabled>Register</button>
@@ -125,16 +118,10 @@
             const passwordMatchRequirement = $('#password-match-requirement .requirement-icon');  // Password match requirement
 
             let isEmailValid = false;  // Track email validity
-            let isCaptchaValid = false;  // Track CAPTCHA validity
             
             // Set initial button state to disabled styling
             registerButton.addClass('register-button-disabled');
             
-            // reCAPTCHA callback function
-            window.recaptchaCallback = function() {
-                isCaptchaValid = true;
-                checkFormValidity();
-            };
             let isPasswordValid = false;  // Track password validity
             let isPasswordMatchValid = false;  // Track if passwords match
 
@@ -142,7 +129,7 @@
 
             // Function to check overall form validity and enable/disable the register button accordingly
             function checkFormValidity() {
-                if (isEmailValid && isPasswordValid && isPasswordMatchValid && isCaptchaValid) {
+                if (isEmailValid && isPasswordValid && isPasswordMatchValid) {
                     registerButton.prop('disabled', false);  // Enable the register button
                     registerButton.removeClass('register-button-disabled');  // Enable styling
                 } else {
@@ -341,5 +328,7 @@
             });
         });
     </script>    
+{% include 'footer.html' %}
+
 </body>
 </html>
