@@ -32,6 +32,17 @@
         <div class="profile-box">
             <div class="profile-content">
                 <div class="profile-actions">
+                    <div class="updates-section">
+                        <div class="section-liner">
+                            <div class="update-line">
+                                <span class="update-line-name">Blankee{% if update.version %} v{{ update.version }}{% endif %}</span>
+                                <button type="button" class="update-check-link" id="update-check-btn">
+                                    <span>Check for updates</span>
+                                    <i class="fa-solid fa-arrows-rotate" id="update-check-icon"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                     <div class="admin-users-section">
                         <div class="section-liner">
                             <div class="admin-users-header">
@@ -163,17 +174,6 @@
                                 </p>
                                 <p class="setting-description" id="smtp-status"></p>
                             </form>
-                        </div>
-                    </div>
-                    <div class="updates-section">
-                        <div class="section-liner">
-                            <div class="update-line">
-                                <span class="update-line-name">Blankee{% if update.version %} v{{ update.version }}{% endif %}</span>
-                                <button type="button" class="update-check-link" id="update-check-btn">
-                                    <span>Check for updates</span>
-                                    <i class="fa-solid fa-arrows-rotate" id="update-check-icon"></i>
-                                </button>
-                            </div>
                         </div>
                     </div>
                 </div>
