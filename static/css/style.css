@@ -7819,14 +7819,6 @@ transform: scale(1.2);
     overflow-wrap: break-word;
 }
 
-/* An empty status line should take no space and draw no box. */
-#update-status:empty,
-#update-code-line:empty,
-#update-deps-line:empty,
-#update-schema-line:empty,
-#update-phase-line:empty {
-    display: none;
-}
 
 /* Canonical names for the three result colours. The email-delivery-* ones are
    kept working because existing markup uses them, but "email-delivery-error" in
@@ -7846,91 +7838,63 @@ transform: scale(1.2);
     color: var(--success);
 }
 
-/* The facts block: what this deployment is, at .input-group metrics so it reads
-   as another row of the form rather than a separate widget. */
-.update-facts {
-    width: 100%;
-    padding: 12px 16px;
-    background-color: var(--white);
-    border-radius: 10px;
-    margin: 0 0 8px;
-    box-sizing: border-box;
-}
-
-.update-fact {
+/* One line: the version, and a button to check. Deliberately not a panel of
+   status rows - an administrator opening this page is almost never here about
+   updates, and anything worth saying is said in a toast or the confirm modal. */
+.update-line {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
-    font-size: 13px;
-}
-
-.update-fact + .update-fact {
-    margin-top: 4px;
-}
-
-.update-fact-label {
-    width: 30%;
-    min-width: 40px;
-    text-align: right;
-    color: var(--secondary-dark);
-    font-size: 12px;
-}
-
-.update-fact-value {
-    flex: 1;
-    min-width: 0;
-    color: var(--text-dark);
-    overflow-wrap: anywhere;
-}
-
-/* A SHA, a branch name or a repository path. Monospace so a transposed
-   character is visible when somebody is comparing two of them. */
-.update-fact-mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 12px;
-}
-
-.update-detail-list,
-.update-step-list,
-.update-command-list {
-    list-style: none;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
     width: 100%;
-    margin: 0 0 8px;
     padding: 12px 16px;
     background-color: var(--white);
     border-radius: 10px;
     box-sizing: border-box;
-    font-size: 12px;
+}
+
+.update-line-name {
+    color: var(--text-dark);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.update-check-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--primary);
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.update-check-link:hover:not(:disabled) {
+    color: var(--primary-hover);
+}
+
+.update-check-link:disabled {
     color: var(--secondary-dark);
+    cursor: default;
 }
 
-.update-detail-list li,
-.update-step-list li,
-.update-command-list li {
-    padding: 2px 0;
-    overflow-wrap: anywhere;
-}
 
-.update-command-list code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    color: var(--text-dark);
-}
 
-.update-step-done {
-    color: var(--success);
-}
 
-.update-step-failed {
-    color: var(--danger);
-}
 
-.update-step-running {
-    color: var(--text-dark);
-}
 
-.update-progress {
-    width: 100%;
-}
+
+
+
+
+
+
+
 
    own background rather than the panel's. */
 .add-user-modal-status {

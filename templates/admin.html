@@ -167,88 +167,13 @@
                     </div>
                     <div class="updates-section">
                         <div class="section-liner">
-                            <p class="setting-description">
-                                Updates come from the latest commit on <strong>main</strong>
-                                of the repository this instance was cloned from. Checking
-                                contacts GitHub only when you press the button - nothing
-                                here runs on a schedule.
-                            </p>
-
-                            <div class="update-facts">
-                                <div class="update-fact">
-                                    <span class="update-fact-label">Installed</span>
-                                    <span class="update-fact-value">{% if update.version %}v{{ update.version }}{% else %}unknown{% endif %}</span>
-                                </div>
-                                {% if update.commit and update.commit.short %}
-                                <div class="update-fact">
-                                    <span class="update-fact-label">Commit</span>
-                                    <span class="update-fact-value update-fact-mono">{{ update.commit.short }}{% if update.commit.branch %} on {{ update.commit.branch }}{% endif %}</span>
-                                </div>
-                                {% endif %}
-                                {% if update.code and update.code.remote %}
-                                <div class="update-fact">
-                                    <span class="update-fact-label">Source</span>
-                                    <span class="update-fact-value update-fact-mono">{{ update.code.remote }}</span>
-                                </div>
-                                {% endif %}
+                            <div class="update-line">
+                                <span class="update-line-name">Blankee{% if update.version %} v{{ update.version }}{% endif %}</span>
+                                <button type="button" class="update-check-link" id="update-check-btn">
+                                    <span>Check for updates</span>
+                                    <i class="fa-solid fa-arrows-rotate" id="update-check-icon"></i>
+                                </button>
                             </div>
-
-                            {% if update.install and update.install.kind == 'docker' %}
-                            <p class="setting-description status-warning">
-                                This instance runs in a container, so its code is part of
-                                the image and cannot be replaced from here. Update it from
-                                the host:
-                            </p>
-                            <ul class="update-command-list">
-                                <li><code>git pull</code></li>
-                                <li><code>docker compose up -d --build</code></li>
-                            </ul>
-                            {% elif not update.self_update %}
-                            <p class="setting-description status-warning">
-                                The privileged updater is not installed here, so updates
-                                are applied from a shell. One run of the installer adds
-                                it.
-                            </p>
-                            <ul class="update-command-list">
-                                <li><code>sudo git -C {{ update.install.app_dir or '/opt/blankee' }} pull</code></li>
-                                <li><code>sudo {{ update.install.app_dir or '/opt/blankee' }}/install/install.sh</code></li>
-                            </ul>
-                            {% endif %}
-
-                            <form id="update-form" class="profile-form">
-                                <div class="input-group">
-                                    <label for="update-check-btn">Check for Updates:</label>
-                                    <input type="text" disabled class="hidden-spacer">
-                                    <button type="button" class="submit-button" id="update-check-btn"
-                                            title="Check for updates">
-                                        <i class="fa-solid fa-arrows-rotate"></i>
-                                    </button>
-                                </div>
-
-                                <p class="setting-description email-delivery-hidden" id="update-code-line"></p>
-                                <p class="setting-description email-delivery-hidden" id="update-deps-line"></p>
-                                <p class="setting-description email-delivery-hidden" id="update-schema-line"></p>
-                                <ul class="update-detail-list email-delivery-hidden" id="update-detail-list"></ul>
-
-                                {% if update.self_update and update.install.kind != 'docker' %}
-                                <div class="input-group">
-                                    <label for="update-apply-btn">Install Update:</label>
-                                    <input type="text" disabled class="hidden-spacer">
-                                    <button type="button" class="submit-button disabled" id="update-apply-btn"
-                                            title="Install the update">
-                                        <i class="fa-solid fa-download"></i>
-                                    </button>
-                                </div>
-                                {% endif %}
-
-                                <div class="update-progress email-delivery-hidden" id="update-progress">
-                                    <p class="setting-description" id="update-phase-line"></p>
-                                    <ul class="update-step-list" id="update-step-list"></ul>
-                                    <ul class="update-command-list email-delivery-hidden" id="update-recovery-list"></ul>
-                                </div>
-
-                                <p class="setting-description" id="update-status"></p>
-                            </form>
                         </div>
                     </div>
                 </div>
@@ -853,297 +778,205 @@
                 complete: function() {
                     btn.prop('disabled', false);
                 }
-            // ===== Updates =====
+            });
+
+        // ===== Updates =====
         //
-        // One function reflects server state into the page, and every handler
-        // feeds it from a response - the same reason applyVerificationState
-        // exists above. The install button is enabled only from here, never
-        // from a click, so a stale check cannot leave it clickable.
-        let updateState = {{ update | tojson }};
-        let pendingRequestId = null;
-        let pollTimer = null;
-        let pollErrors = 0;
-        let pollDeadline = 0;
-        let pickupDeadline = 0;
+        // One line, one button. Nothing to report is a toast; something to
+        // report is the confirm modal, which is also where the update is
+        // agreed to. Deliberately quiet: an administrator opening this page is
+        // almost never here about updates.
+        const updateState = {{ update | tojson }};
 
-        function updateStatusLine(text, isError) {
-            $('#update-status').text(text || '').toggleClass('status-error', !!isError);
+        function spinCheck(on) {
+            $('#update-check-icon').toggleClass('fa-spin', !!on);
+            $('#update-check-btn').prop('disabled', !!on);
         }
 
-        function setLine(id, text, cls) {
-            const el = $(id);
-            el.text(text || '')
-              .removeClass('status-ok status-warning status-error email-delivery-hidden');
-            if (!text) { el.addClass('email-delivery-hidden'); return; }
-            if (cls) { el.addClass(cls); }
+        function describeProblems(u) {
+            // Only ever mentioned when there is something wrong. This is the
+            // check that would have caught httpx being undeclared, so it is
+            // worth surfacing - but not worth a permanent row on the page.
+            const out = [];
+            const d = u.dependencies || {}, s = u.schema || {};
+            if ((d.missing || []).length) {
+                out.push(d.missing.length + ' package(s) required but not installed');
+            }
+            if ((d.mismatched || []).length) {
+                out.push(d.mismatched.length + ' package(s) at the wrong version');
+            }
+            if ((d.undeclared || []).length) {
+                out.push(d.undeclared.length + ' package(s) imported but not in requirements.txt');
+            }
+            if ((s.pending || []).length) {
+                out.push(s.pending.length + ' database migration(s) pending');
+            }
+            if (s.error) { out.push(s.error); }
+            return out;
         }
 
-        function applyUpdateState(u) {
-            if (!u) { return; }
-            updateState = u;
-            const code = u.code || {}, deps = u.dependencies || {}, schema = u.schema || {};
-
-            // Code
-            if (code.error) {
-                setLine('#update-code-line', code.error, 'status-error');
-            } else if (!code.checked) {
-                setLine('#update-code-line', '', null);
-            } else if (code.up_to_date) {
-                setLine('#update-code-line',
-                        'Up to date at ' + ((u.commit || {}).short || 'this commit') + '.',
-                        'status-ok');
-            } else {
-                let text = 'An update is available';
-                if (code.behind_by) {
-                    text += ': ' + code.behind_by + ' new commit'
-                         + (code.behind_by === 1 ? '' : 's') + ' on main';
-                }
-                if (code.latest_version && code.latest_version !== u.version) {
-                    text += ' (v' + (u.version || '?') + ' to v' + code.latest_version + ')';
-                }
-                setLine('#update-code-line', text + '.', 'status-warning');
+        async function offerUpdate(u, message) {
+            const lines = [message];
+            const problems = describeProblems(u);
+            if (problems.length) {
+                lines.push('Also on this instance: ' + problems.join('; ') + '.');
             }
 
-            // Dependencies
-            const details = [];
-            if (deps.error) {
-                setLine('#update-deps-line', deps.error, 'status-error');
-            } else if (deps.ok === null) {
-                setLine('#update-deps-line', '', null);
-            } else if (deps.ok) {
-                setLine('#update-deps-line',
-                        deps.pinned_count + ' pinned packages, all installed at the pinned version.',
-                        'status-ok');
-            } else {
-                const bits = [];
-                if ((deps.missing || []).length) { bits.push(deps.missing.length + ' missing'); }
-                if ((deps.mismatched || []).length) { bits.push(deps.mismatched.length + ' at the wrong version'); }
-                if ((deps.undeclared || []).length) { bits.push(deps.undeclared.length + ' not in requirements.txt'); }
-                const hard = (deps.missing || []).length || (deps.mismatched || []).length;
-                setLine('#update-deps-line', 'Dependencies: ' + bits.join(', ') + '.',
-                        hard ? 'status-error' : 'status-warning');
-                (deps.missing || []).forEach(function(d) {
-                    details.push(d.name + ' ' + d.required + ' is required but not installed');
+            if (!u.self_update) {
+                const dir = (u.install || {}).app_dir || '/opt/blankee';
+                const how = (u.install || {}).kind === 'docker'
+                    ? 'git pull && docker compose up -d --build'
+                    : 'sudo git -C ' + dir + ' pull && sudo ' + dir + '/install/install.sh';
+                await showConfirmModal({
+                    title: 'Update Available',
+                    message: lines.join(' ') + ' This instance cannot update itself, so '
+                           + 'apply it from a shell: ' + how,
+                    confirmText: 'OK',
+                    hideCancel: true
                 });
-                (deps.mismatched || []).forEach(function(d) {
-                    details.push(d.name + ': ' + d.required + ' required, ' + d.installed + ' installed');
-                });
-                (deps.undeclared || []).forEach(function(d) {
-                    details.push(d.name + ' is imported but not listed in requirements.txt');
-                });
+                return;
             }
 
-            // Schema
-            if (schema.error) {
-                setLine('#update-schema-line', schema.error, 'status-error');
-            } else if (schema.ok === null) {
-                setLine('#update-schema-line', '', null);
-            } else if (schema.ok) {
-                setLine('#update-schema-line',
-                        schema.applied_count + ' migrations applied, none pending.', 'status-ok');
-            } else {
-                setLine('#update-schema-line',
-                        (schema.pending || []).length + ' migration(s) pending.', 'status-error');
-                (schema.pending || []).forEach(function(n) { details.push('pending: ' + n); });
-                (schema.missing_files || []).forEach(function(n) { details.push('missing file: ' + n); });
-            }
-            (schema.unlisted || []).forEach(function(n) {
-                details.push('in install/sql but not in the manifest: ' + n);
-            });
-
-            const list = $('#update-detail-list').empty();
-            if (details.length) {
-                details.forEach(function(t) { list.append($('<li>').text(t)); });
-                list.removeClass('email-delivery-hidden');
-            } else {
-                list.addClass('email-delivery-hidden');
-            }
-
-            renderRun(u.run);
-
-            const btn = $('#update-apply-btn');
-            if (btn.length) {
-                const running = u.run && !u.run.terminal && !u.run.stale;
-                const ready = code.checked && code.up_to_date === false && !running;
-                btn.toggleClass('disabled', !ready);
-            }
-        }
-
-        function renderRun(run) {
-            const box = $('#update-progress');
-            if (!run) { box.addClass('email-delivery-hidden'); return; }
-            box.removeClass('email-delivery-hidden');
-
-            let phase = run.message || run.phase || '';
-            if (run.stale) {
-                phase = 'The updater stopped without finishing (' + (run.phase || '?')
-                      + '). Check journalctl -u blankee-update on the server.';
-            }
-            $('#update-phase-line').text(phase)
-                .removeClass('status-ok status-warning status-error')
-                .addClass(run.terminal ? (run.ok ? 'status-ok' : 'status-error')
-                                       : (run.stale ? 'status-error' : 'status-warning'));
-
-            const steps = $('#update-step-list').empty();
-            (run.steps || []).forEach(function(s) {
-                const mark = s.ok === true ? 'done' : (s.ok === false ? 'failed' : 'running');
-                steps.append($('<li>')
-                    .addClass('update-step-' + mark)
-                    .text(s.name + (s.detail ? ' - ' + s.detail : '')));
-            });
-
-            const recovery = $('#update-recovery-list').empty();
-            if ((run.recovery || []).length) {
-                run.recovery.forEach(function(line) {
-                    recovery.append($('<li>').append($('<code>').text(line)));
-                });
-                recovery.removeClass('email-delivery-hidden');
-            } else {
-                recovery.addClass('email-delivery-hidden');
-            }
-        }
-
-        function pollUpdateStatus() {
-            $.ajax({
-                url: "{{ url_for('admin_update_status') }}",
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({}),
-                success: function(res) {
-                    pollErrors = 0;
-                    applyUpdateState(res.update);
-                    const run = (res.update || {}).run;
-
-                    // The request was recorded but nothing has picked it up. Almost
-                    // always means the timer is not running, which is worth saying
-                    // plainly rather than spinning.
-                    if (pendingRequestId && (!run || run.request_id !== pendingRequestId)) {
-                        if (Date.now() > pickupDeadline) {
-                            updateStatusLine('The updater has not picked this request up. '
-                                + 'On the server: sudo systemctl status blankee-update.timer', true);
-                            pendingRequestId = null;
-                            return;
-                        }
-                    }
-
-                    if (run && run.request_id === pendingRequestId && run.terminal) {
-                        pendingRequestId = null;
-                        const proved = run.to && (res.update.commit || {}).short === run.to.short;
-                        if (run.ok && !proved) {
-                            updateStatusLine(run.message
-                                + ' The page is still showing the previous version - reload it.', false);
-                        } else {
-                            updateStatusLine(run.message, !run.ok);
-                        }
-                        return;
-                    }
-                    if (run && run.stale) { pendingRequestId = null; return; }
-                    if (Date.now() < pollDeadline) {
-                        pollTimer = setTimeout(pollUpdateStatus, 2000);
-                    }
-                },
-                error: function() {
-                    // Expected while the daemon process is being replaced. Only a
-                    // long run of failures means anything, and reporting the first
-                    // one would call a normal reload a failure.
-                    pollErrors += 1;
-                    if (pollErrors > 40) {
-                        updateStatusLine('The site stopped answering. Check '
-                            + 'journalctl -u blankee-update on the server.', true);
-                        return;
-                    }
-                    pollTimer = setTimeout(pollUpdateStatus, 2000);
-                }
-            });
-        }
-
-        $('#update-check-btn').on('click', function() {
-            const btn = $(this);
-            btn.prop('disabled', true);
-            updateStatusLine('Asking GitHub...', false);
-            $.ajax({
-                url: "{{ url_for('admin_update_check') }}",
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({}),
-                success: function(res) {
-                    applyUpdateState(res.update);
-                    updateStatusLine(res.message, res.status === 'error');
-                },
-                error: function(xhr) {
-                    const res = xhr.responseJSON || {};
-                    applyUpdateState(res.update);
-                    updateStatusLine(res.message || 'Could not check for updates.', true);
-                },
-                complete: function() { btn.prop('disabled', false); }
-            });
-        });
-
-        $('#update-apply-btn').on('click', async function() {
-            const btn = $(this);
-            if (btn.hasClass('disabled')) { return; }
-            const confirmed = await showConfirmModal({
-                title: 'Install Update',
-                message: 'This replaces the application code with the latest commit on '
-                       + 'main, installs any new dependencies, applies pending database '
-                       + 'migrations and reloads the application. It cannot be undone '
-                       + 'automatically.',
-                confirmText: 'Install',
-                cancelText: 'Cancel',
+            const go = await showConfirmModal({
+                title: 'Update Available',
+                message: lines.join(' ') + ' Installing replaces the application code, '
+                       + 'installs any new dependencies, applies pending migrations and '
+                       + 'reloads the application. It cannot be undone automatically.',
+                confirmText: 'Update',
+                cancelText: 'Not now',
                 danger: true
             });
-            if (!confirmed) { return; }
+            if (go) { startUpdate(); }
+        }
 
-            btn.addClass('disabled');
-            updateStatusLine('Requesting the update...', false);
+        function startUpdate() {
+            spinCheck(true);
+            showToast('Update requested. This takes a minute or two.', 'info', 6000);
             $.ajax({
                 url: "{{ url_for('admin_update_apply') }}",
                 method: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify({}),
                 success: function(res) {
-                    applyUpdateState(res.update);
-                    pendingRequestId = res.request_id || null;
-                    // The updater checks once a minute, so allow two of those
-                    // before calling it not picked up.
-                    pickupDeadline = Date.now() + 150000;
-                    pollDeadline = Date.now() + 20 * 60 * 1000;
-                    pollErrors = 0;
-                    updateStatusLine(res.message, false);
-                    if (pollTimer) { clearTimeout(pollTimer); }
-                    pollTimer = setTimeout(pollUpdateStatus, 2000);
+                    watchUpdate(res.request_id, Date.now() + 150000);
                 },
                 error: function(xhr) {
                     const res = xhr.responseJSON || {};
-                    applyUpdateState(res.update);
                     if (xhr.status === 409) {
-                        // Another administrator got there first. Attach to that run
-                        // rather than queuing a second one.
+                        // Someone else already asked. Follow that run rather
+                        // than queuing a second one.
                         const run = ((res.update || {}).run) || {};
-                        pendingRequestId = run.request_id || null;
-                        pickupDeadline = Date.now() + 150000;
-                        pollDeadline = Date.now() + 20 * 60 * 1000;
-                        if (pollTimer) { clearTimeout(pollTimer); }
-                        pollTimer = setTimeout(pollUpdateStatus, 2000);
+                        showToast('An update is already running.', 'info');
+                        watchUpdate(run.request_id, Date.now() + 150000);
+                        return;
                     }
-                    updateStatusLine(res.message || 'Could not request an update.', true);
+                    spinCheck(false);
+                    showToast(res.message || 'Could not request an update.', 'error', 8000);
+                }
+            });
+        }
+
+        function watchUpdate(requestId, pickupBy, errors) {
+            errors = errors || 0;
+            $.ajax({
+                url: "{{ url_for('admin_update_status') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(res) {
+                    const u = res.update || {};
+                    const run = u.run;
+
+                    if (run && run.request_id === requestId && run.terminal) {
+                        spinCheck(false);
+                        if (!run.ok) {
+                            showToast(run.message, 'error', 12000);
+                            return;
+                        }
+                        // Confirmed by the commit the new process reports, not by
+                        // the run claiming success - the two differ if the reload
+                        // did not take.
+                        const proved = run.to && (u.commit || {}).short === run.to.short;
+                        showToast(proved ? run.message
+                                         : run.message + ' Reload this page to see it.',
+                                  'success', 8000);
+                        return;
+                    }
+                    if (run && run.stale) {
+                        spinCheck(false);
+                        showToast('The updater stopped without finishing. Check '
+                                + 'journalctl -u blankee-update on the server.', 'error', 12000);
+                        return;
+                    }
+                    // Nothing has picked the request up. Almost always means the
+                    // timer is not running, which is worth saying rather than
+                    // spinning forever.
+                    if ((!run || run.request_id !== requestId) && Date.now() > pickupBy) {
+                        spinCheck(false);
+                        showToast('The updater has not picked this up. On the server: '
+                                + 'sudo systemctl status blankee-update.timer', 'error', 12000);
+                        return;
+                    }
+                    setTimeout(function() { watchUpdate(requestId, pickupBy, 0); }, 2000);
+                },
+                error: function() {
+                    // Expected while the application is being reloaded: the
+                    // daemon process is replaced under the request. Only a long
+                    // run of failures means anything.
+                    if (errors > 40) {
+                        spinCheck(false);
+                        showToast('The site stopped answering. Check journalctl -u '
+                                + 'blankee-update on the server.', 'error', 12000);
+                        return;
+                    }
+                    setTimeout(function() {
+                        watchUpdate(requestId, pickupBy, errors + 1);
+                    }, 2000);
+                }
+            });
+        }
+
+        $('#update-check-btn').on('click', function() {
+            spinCheck(true);
+            $.ajax({
+                url: "{{ url_for('admin_update_check') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: async function(res) {
+                    spinCheck(false);
+                    const u = res.update || {};
+                    if (res.status === 'error') {
+                        showToast(res.message, 'error', 10000);
+                        return;
+                    }
+                    if ((u.code || {}).up_to_date) {
+                        const problems = describeProblems(u);
+                        if (problems.length) {
+                            showToast('No update available, but: ' + problems.join('; ') + '.',
+                                      'warning', 10000);
+                        } else {
+                            showToast(res.message, 'success');
+                        }
+                        return;
+                    }
+                    await offerUpdate(u, res.message);
+                },
+                error: function(xhr) {
+                    spinCheck(false);
+                    const res = xhr.responseJSON || {};
+                    showToast(res.message || 'Could not check for updates.', 'error', 8000);
                 }
             });
         });
 
-        // Reflect whatever the server already knows, and pick a run back up if one
-        // was still going when this page was opened - the console is not the only
-        // way an update starts, and an administrator may simply have reloaded.
-        applyUpdateState(updateState);
+        // An update may already be running - somebody else started it, or this
+        // page was reloaded mid-flight.
         if (updateState && updateState.run && !updateState.run.terminal
                 && !updateState.run.stale) {
-            pendingRequestId = updateState.run.request_id || null;
-            pickupDeadline = Date.now() + 150000;
-            pollDeadline = Date.now() + 20 * 60 * 1000;
-            pollTimer = setTimeout(pollUpdateStatus, 2000);
+            spinCheck(true);
+            watchUpdate(updateState.run.request_id, Date.now() + 150000);
         }
-
-        });
         });
     </script>
 {% include 'footer.html' %}
