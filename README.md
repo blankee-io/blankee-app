@@ -38,9 +38,16 @@ different one.
 Installs onto the machine directly with Apache and mod_wsgi.
 
 ```bash
-git clone https://github.com/blankee-io/blankee-app.git && cd blankee-app
+sudo git clone https://github.com/blankee-io/blankee-app.git /opt/blankee
+cd /opt/blankee
 sudo ./install/install.sh --server-name budget.example.com
 ```
+
+Clone it somewhere Apache can reach. **Not your home directory** — `/root` is
+mode `700`, so www-data cannot traverse into it, and the result is `Internal
+Server Error` on every request with the real cause buried in the Apache log. The
+installer now refuses to continue in that situation, but `/opt/blankee` or
+`/var/www/blankee` avoids it entirely.
 
 To see what it would touch without changing anything:
 
