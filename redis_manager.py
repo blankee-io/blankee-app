@@ -301,10 +301,6 @@ def _hydrate_user_data(user_id: int):
             total_rows += rows_count
             tables_hydrated += 1
         
-        # Load bud_items (special case - uses bud_id not user_id)
-        bud_items_count = _hydrate_bud_items(user_id)
-        total_rows += bud_items_count
-        
         # Mark user as hydrated and remove from hydrating set
         with _user_activity_lock:
             _hydrated_users.add(user_id)
@@ -416,6 +412,16 @@ def _hydrate_table(table: str, user_id: int):
                     INNER JOIN credit_accounts ca ON cec.account_id = ca.id
                     WHERE ca.user_id = %s
                 """
+            elif table == 'bud_items':
+                # bud_items -> buds -> users. It has no user_id of its own, so
+                # the default branch below emitted "WHERE user_id = %s" against
+                # a table without that column - a query that failed on every
+                # hydration pass.
+                query = """
+                    SELECT bi.* FROM bud_items bi
+                    INNER JOIN buds b ON bi.bud_id = b.id
+                    WHERE b.user_id = %s
+                """
             elif table == 'credit_accounts':
                 # Credit accounts ordered by display_order DESC (highest at top, like categories)
                 query = "SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order DESC"
@@ -444,42 +450,6 @@ def _hydrate_table(table: str, user_id: int):
                 
     except Exception as e:
         log_error(logger, 'REDIS', f"Error hydrating {table} for user {user_id}: {e}")
-        return 0
-
-
-def _hydrate_bud_items(user_id: int):
-    """
-    Hydrate bud_items for all of a user's buds.
-    Stores all bud_items for a user in a single Redis key.
-    
-    Args:
-        user_id: User ID
-    
-    Returns:
-        Total count of bud items hydrated
-    """
-    try:
-        with get_db_pool().get_cursor(dictionary=True) as cursor:
-            # Get all bud_items for all buds belonging to this user
-            cursor.execute("""
-                SELECT bi.* FROM bud_items bi
-                INNER JOIN buds b ON bi.bud_id = b.id
-                WHERE b.user_id = %s
-            """, (user_id,))
-            items = cursor.fetchall()
-            
-            # Store all bud_items for this user in one key
-            redis_key = f"bud_items:{REDIS_KEY_VERSION}:{user_id}"
-            _redis_client.setex(
-                redis_key,
-                INACTIVITY_TIMEOUT + 60,
-                json.dumps(items, cls=DecimalEncoder)
-            )
-            log_info(logger, 'REDIS', f"Hydrated {len(items)} bud_items for user {user_id}")
-            return len(items)
-                
-    except Exception as e:
-        log_error(logger, 'REDIS', f"Error hydrating bud_items for user {user_id}: {e}")
         return 0
 
 
@@ -524,12 +494,6 @@ def _refresh_user_ttls(user_id: int):
                 if rows_count > 0:
                     hydrated_count += 1
                     log_info(logger, 'TTL_REFRESH', f"Hydrated missing table {table} for user {user_id}: {rows_count} rows")
-        
-        # Refresh TTL for bud_items (stored by user_id)
-        bud_items_key = f"bud_items:{REDIS_KEY_VERSION}:{user_id}"
-        if _redis_client.exists(bud_items_key):
-            _redis_client.expire(bud_items_key, INACTIVITY_TIMEOUT + 60)
-            refreshed_count += 1
         
         if hydrated_count > 0:
             log_info(logger, 'TTL_REFRESH', f"✓ Refreshed {refreshed_count} keys, hydrated {hydrated_count} missing tables for user {user_id}")
@@ -900,9 +864,17 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 with get_db_pool().get_connection() as conn:
                     cursor = conn.cursor()
                     placeholders = ','.join(['%s'] * len(delete_ids))
-                    cursor.execute(f"""
-                        DELETE FROM {table} WHERE id IN ({placeholders}) AND user_id = %s
-                    """, delete_ids + [user_id])
+                    if table == 'bud_items':
+                        # No user_id column; scoped through its parent bud.
+                        cursor.execute(f"""
+                            DELETE bi FROM bud_items bi
+                            INNER JOIN buds b ON bi.bud_id = b.id
+                            WHERE bi.id IN ({placeholders}) AND b.user_id = %s
+                        """, delete_ids + [user_id])
+                    else:
+                        cursor.execute(f"""
+                            DELETE FROM {table} WHERE id IN ({placeholders}) AND user_id = %s
+                        """, delete_ids + [user_id])
                     conn.commit()
                     log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} {table} from MySQL via pending_deletes (no Redis data)")
                 
