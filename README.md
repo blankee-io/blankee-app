@@ -102,6 +102,14 @@ A local `200` or `302` with nothing reachable from outside means the port is
 blocked or unmapped rather than misconfigured — on a Docker container it needs
 `-p 18420:18420`, and on LXC or a VM check the host firewall.
 
+Re-running an existing install is worth doing once for a security fix: the
+config directory used to be group-writable by the web user, and write permission
+on a *directory* is the right to rename or unlink what is in it — so the web user
+could have swapped out the virtualenv that root runs `pip` from, or replaced
+`blankee.wsgi`, the file that loads the application. Both are root-owned, which
+was not enough. The directory is now `750`, which closes it. Nothing moves and
+nothing else changes.
+
 It generates its own secrets and database password into
 `/var/www/budget_env/.env`. Re-running is safe — existing secrets are kept,
 because regenerating them would log everyone out and orphan the stored SMTP
