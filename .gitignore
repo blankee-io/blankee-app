@@ -22,8 +22,13 @@ build/
 # Ignore all WSGI files
 *.wsgi
 
-# Ignore all uploads except the default picture
-static/uploads
+# Uploaded profile pictures are user data, but the default avatar is an app
+# asset the templates reference by name - without it a fresh install 404s on
+# every page that shows a profile picture. The trailing /* matters: a bare
+# directory pattern stops git looking inside, so the negation below cannot
+# take effect.
+static/uploads/*
+!static/uploads/DefaultProfilePicture.svg
 
 # Font Awesome Pro. Commercial, per-seat software that cannot be redistributed -
 # static/fontawesome/LICENSE.txt says so itself. Keep your own build here and the
