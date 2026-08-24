@@ -7,6 +7,7 @@
 #   sudo ./install/install.sh                        # interactive
 #   sudo ./install/install.sh --server-name budget.example.com
 #   sudo ./install/install.sh --check                # check prerequisites, change nothing
+#   sudo ./install/install.sh --port 18420           # listen here instead of the default
 #
 # Re-running is safe. Anything already in place is left alone, and existing
 # secrets in the config file are never regenerated - doing so would invalidate
@@ -23,14 +24,19 @@ DB_NAME="${DB_NAME:-blankee}"
 DB_USER="${DB_USER:-blankee}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
 SERVER_NAME=""
+# Deliberately not 80 or 443: this serves on one uncommon port and Apache is
+# configured to bind nothing else.
+HTTP_PORT="${HTTP_PORT:-18420}"
 VHOST="/etc/apache2/sites-available/blankee.conf"
+PORTS_CONF="/etc/apache2/ports.conf"
 CHECK_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --server-name) SERVER_NAME="$2"; shift 2 ;;
+    --port)        HTTP_PORT="$2"; shift 2 ;;
     --check)       CHECK_ONLY=1; shift ;;
-    -h|--help)     sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)     sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -62,6 +68,14 @@ if [[ -z "$SERVER_NAME" ]]; then
 fi
 info "server name: $SERVER_NAME"
 
+if ! [[ "$HTTP_PORT" =~ ^[0-9]+$ ]] || (( HTTP_PORT < 1 || HTTP_PORT > 65535 )); then
+  die "--port must be a number between 1 and 65535 (got: $HTTP_PORT)"
+fi
+if (( HTTP_PORT == 80 || HTTP_PORT == 443 )); then
+  warn "port $HTTP_PORT is the default web port this installer exists to avoid"
+fi
+info "http port:   $HTTP_PORT"
+
 if [[ $CHECK_ONLY -eq 1 ]]; then
   say "Check only - nothing will be changed"
   for pkg in apache2 mysql-server redis-server python3; do
@@ -69,6 +83,12 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
   done
   [[ -f "$ENV_FILE" ]] && info "exists:        $ENV_FILE (secrets kept)" || warn "will create:   $ENV_FILE"
   [[ -f "$VHOST" ]] && info "exists:        $VHOST" || warn "will create:   $VHOST"
+  warn "will set:      $PORTS_CONF to listen on $HTTP_PORT only"
+  if command -v ss >/dev/null && ss -lnt 2>/dev/null | grep -q ":$HTTP_PORT "; then
+    warn "in use:        something is already listening on $HTTP_PORT"
+  else
+    info "free:          port $HTTP_PORT"
+  fi
   say "Check complete"
   exit 0
 fi
@@ -130,7 +150,7 @@ DB_NAME=$DB_NAME
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 
-APP_URL=http://$SERVER_NAME
+APP_URL=http://$SERVER_NAME:$HTTP_PORT
 SECRET_KEY=$SECRET_KEY
 SETTINGS_ENCRYPTION_KEY=$ENCRYPTION_KEY
 
@@ -140,6 +160,11 @@ BANK_PROVIDER=null
 ENRICHMENT_PROVIDER=null
 EOF
   info "created $ENV_FILE with generated secrets"
+fi
+
+if [[ "$(grep -c "^APP_URL=http://$SERVER_NAME:$HTTP_PORT$" "$ENV_FILE" || true)" -eq 0 ]]; then
+  sed -i "s|^APP_URL=.*|APP_URL=http://$SERVER_NAME:$HTTP_PORT|" "$ENV_FILE"
+  info "APP_URL set to http://$SERVER_NAME:$HTTP_PORT"
 fi
 
 chown www-data:www-data "$ENV_FILE"
@@ -193,8 +218,23 @@ info "$APP_DIR owned by www-data, static/uploads writable"
 say "Configuring Apache"
 a2enmod wsgi >/dev/null 2>&1 || true
 
+# Apache must answer on the chosen port and nothing else. Debian ships
+# ports.conf with "Listen 80", plus "Listen 443" inside an ssl_module guard, so
+# leaving that file alone keeps both open no matter how the vhost is written.
+# It is replaced outright; the original is kept once, for reference.
+if [[ ! -f "$PORTS_CONF.blankee-orig" ]]; then
+  cp -a "$PORTS_CONF" "$PORTS_CONF.blankee-orig"
+  info "original ports.conf saved as $PORTS_CONF.blankee-orig"
+fi
+cat > "$PORTS_CONF" <<EOF
+# Managed by install/install.sh - Blankee listens on $HTTP_PORT and nothing else.
+# The Debian original is at ports.conf.blankee-orig.
+Listen $HTTP_PORT
+EOF
+info "listening on $HTTP_PORT only - not 80, not 443"
+
 cat > "$VHOST" <<EOF
-<VirtualHost *:80>
+<VirtualHost *:$HTTP_PORT>
     ServerName $SERVER_NAME
 
     # python-home points mod_wsgi at the virtualenv created by the installer.
@@ -219,6 +259,8 @@ EOF
 a2ensite blankee >/dev/null 2>&1 || true
 # The default site would otherwise answer for any hostname that is not this one.
 a2dissite 000-default >/dev/null 2>&1 || true
+# Ships enabled on some images and would try to bind 443, which no longer exists.
+a2dissite default-ssl >/dev/null 2>&1 || true
 apache2ctl configtest >/dev/null 2>&1 || die "Apache config test failed - run 'apache2ctl configtest'."
 systemctl restart apache2
 info "vhost $VHOST enabled"
@@ -226,7 +268,7 @@ info "vhost $VHOST enabled"
 # ---------------------------------------------------------------- verify
 say "Verifying"
 sleep 2
-CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $SERVER_NAME" http://127.0.0.1/register || echo 000)"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $SERVER_NAME" http://127.0.0.1:$HTTP_PORT/register || echo 000)"
 case "$CODE" in
   200) info "GET /register -> 200: ready for the first account" ;;
   302) info "GET /register -> 302: an administrator already exists, so registration is closed" ;;
@@ -238,9 +280,16 @@ DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" DB_NAME="$DB_NA
   && info "schema verified" || warn "schema verification failed"
 
 say "Done"
+# The server name may not resolve yet, so print the IPs too - otherwise the
+# only URL offered here is one the browser cannot reach.
+IPS="$(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}' | tr '\n' ' ')"
 cat <<EOF
-    Open http://$SERVER_NAME/ and create the first account - it becomes the
+    Open http://$SERVER_NAME:$HTTP_PORT/ and create the first account - it becomes the
     administrator, and registration closes behind it.
+
+    Serving on port $HTTP_PORT. If $SERVER_NAME does not resolve yet, reach
+    it by address instead:
+$(for ip in $IPS; do echo "        http://$ip:$HTTP_PORT/"; done)
 
     Configuration:  $ENV_FILE
     Logs:           /var/log/apache2/blankee_error.log

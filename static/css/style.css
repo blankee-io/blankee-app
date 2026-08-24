@@ -15594,3 +15594,76 @@ transform: scale(1.2);
         align-self: stretch;
     }
 }
+
+/* ===== Application footer =====
+   Carries the AGPL section 13 source link, so it is a licence requirement, not
+   trim. Deliberately quiet: present on every page it is included on, and never
+   competing with the page's own content. */
+
+.app-footer {
+    width: 100%;
+    padding: 18px 16px 24px;
+    box-sizing: border-box;
+}
+
+.app-footer-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 6px 14px;
+    max-width: 875px;
+    margin: 0 auto;
+    padding-top: 16px;
+    /* A hairline rather than a full border: it separates without drawing a box
+       around the bottom of every page. */
+    border-top: 1px solid var(--secondary-lighter);
+}
+
+.app-footer-brand {
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+/* Hidden when the row wraps, because a separator at the end of a line reads as
+   a mistake. */
+.app-footer-sep {
+    width: 1px;
+    height: 12px;
+    background-color: var(--secondary-hover);
+}
+
+.app-footer-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    text-decoration: none;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.app-footer-link i {
+    font-size: 11px;
+}
+
+.app-footer-link:hover,
+.app-footer-link:focus-visible {
+    background-color: var(--primary-lighter);
+    color: var(--primary);
+}
+
+.app-footer-link:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+
+@media (max-width: 480px) {
+    .app-footer-sep {
+        display: none;
+    }
+}

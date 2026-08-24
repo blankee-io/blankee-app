@@ -83,3 +83,30 @@
 .fa-light-credit-card-circle-minus { --fa: "\f146"; --fa-style: 400; }  /* fa-square-minus */
 .fa-light-money-bill-circle-question { --fa: "\f3d1"; --fa-style: 400; }  /* fa-money-bill-1 */
 .fa-regular-credit-card-sync { --fa: "\f09d"; --fa-style: 400; }  /* fa-credit-card */
+
+/* Icons the markup asks for in regular that Free only ships in solid.
+   Free has ~2,500 icons but only ~270 in regular, so `fa-regular
+   fa-lock` is an empty box: the name exists, the glyph does not. These
+   render solid instead - heavier than intended, and visible, which is
+   the better of the two.
+
+   Scoped to .fa-regular/.far so the same icon used with fa-solid
+   elsewhere is untouched. */
+.fa-regular.fa-arrow-left-from-bracket, .far.fa-arrow-left-from-bracket { --fa-style: 900; }  /* via fa-right-from-bracket, solid-only */
+.fa-regular.fa-arrows-repeat, .far.fa-arrows-repeat { --fa-style: 900; }  /* via fa-arrows-rotate, solid-only */
+.fa-regular.fa-gear, .far.fa-gear { --fa-style: 900; }  /* fa-gear is solid-only */
+.fa-regular.fa-lock, .far.fa-lock { --fa-style: 900; }  /* fa-lock is solid-only */
+.fa-regular.fa-percent, .far.fa-percent { --fa-style: 900; }  /* fa-percent is solid-only */
+.fa-regular.fa-piggy-bank, .far.fa-piggy-bank { --fa-style: 900; }  /* fa-piggy-bank is solid-only */
+.fa-regular.fa-seedling, .far.fa-seedling { --fa-style: 900; }  /* fa-seedling is solid-only */
+.fa-regular.fa-sliders, .far.fa-sliders { --fa-style: 900; }  /* fa-sliders is solid-only */
+.fa-regular.fa-trash, .far.fa-trash { --fa-style: 900; }  /* fa-trash is solid-only */
+.fa-regular.fa-user-gear, .far.fa-user-gear { --fa-style: 900; }  /* fa-user-gear is solid-only */
+
+/* The app's own CSS sets a literal font-weight on these, which
+   overrides --fa-style and, with only a 400 and a 900 face in Free,
+   collapses every solid-only glyph under them into an empty box.
+   Handing the weight back to the icon costs nothing here, because
+   this file loads only when Pro is absent, so a Pro install keeps
+   its own look. */
+.dropdown-link i { font-weight: var(--fa-style, 900); }  /* profile dropdown - light under Pro, blank under Free */
