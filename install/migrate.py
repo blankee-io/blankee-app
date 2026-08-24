@@ -32,31 +32,11 @@ import re
 import subprocess
 import sys
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MIGRATIONS_DIR = os.path.join(REPO_ROOT, 'install', 'sql')
-
-# Order matters. schema.sql is the baseline; everything after it is applied on
-# top, oldest first.
-BASELINE = 'schema.sql'
-
-MIGRATIONS = [
-    'add_is_savings_to_categories.sql',
-    'add_recurring_mismatches_table.sql',
-    'add_recurring_suggestions_table.sql',
-    'unify_category_types.sql',
-    'widen_decimal_columns.sql',
-    'add_instance_settings.sql',
-    'add_smtp_verification.sql',
-    'add_admin_user.sql',
-    'add_totals_remainders_m_fk.sql',
-]
-
-# This directory holds only what a fresh install applies. The rollback scripts
-# and the one-off purges that used to sit beside them are gone: they were written
-# against particular database states, a new database has never been in any of
-# them, and keeping them invited someone to run one.
-#
-# Anything genuinely needed later belongs here, in MIGRATIONS, in order.
+# The file list lives in migration_manifest.py so that version_info.py can read
+# it without importing this module, which would pull subprocess into the web
+# application. This import works because running `python3 install/migrate.py`
+# puts install/ at the front of sys.path.
+from migration_manifest import BASELINE, MIGRATIONS, MIGRATIONS_DIR, REPO_ROOT
 
 # What must be true when this finishes. Checked against the live schema, so a
 # migration that silently did nothing is caught here rather than by a 500 later.
