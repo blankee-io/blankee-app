@@ -15626,6 +15626,15 @@ transform: scale(1.2);
     letter-spacing: 0.3px;
 }
 
+/* Quieter than the brand and not a link: it states a fact about the deployment
+   rather than being somewhere to go. Same size as the links so the row reads as
+   one line of small print. */
+.app-footer-version {
+    color: var(--secondary-dark);
+    font-size: 12px;
+    letter-spacing: 0.2px;
+}
+
 /* Hidden when the row wraps, because a separator at the end of a line reads as
    a mistake. */
 .app-footer-sep {

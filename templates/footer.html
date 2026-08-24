@@ -7,6 +7,10 @@
 <footer class="app-footer">
     <div class="app-footer-inner">
         <span class="app-footer-brand">Blankee</span>
+        {# Version only, never the commit: a SHA tells an anonymous visitor exactly #}
+        {# which commit is running, and therefore which fixes are missing. The #}
+        {# exact commit belongs in the admin console, behind admin_required. #}
+        {% if app_version %}<span class="app-footer-version">v{{ app_version }}</span>{% endif %}
         <span class="app-footer-sep" aria-hidden="true"></span>
         <a class="app-footer-link" href="https://github.com/blankee-io/blankee-app"
            target="_blank" rel="noopener noreferrer">

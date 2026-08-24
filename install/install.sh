@@ -114,8 +114,8 @@ apt-get install -y -qq \
   mysql-server \
   redis-server \
   python3 python3-pip python3-venv \
-  openssl >/dev/null
-info "apache2, mod_wsgi, mysql-server, redis-server, python3"
+  openssl curl ca-certificates >/dev/null
+info "apache2, mod_wsgi, mysql-server, redis-server, python3, curl"
 
 systemctl enable --now mysql >/dev/null 2>&1 || systemctl enable --now mariadb >/dev/null 2>&1 || \
   die "Could not start MySQL."
@@ -385,12 +385,19 @@ info "vhost $VHOST enabled"
 # ---------------------------------------------------------------- verify
 say "Verifying"
 sleep 2
-CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $SERVER_NAME" http://127.0.0.1:$HTTP_PORT/register || echo 000)"
-case "$CODE" in
-  200) info "GET /register -> 200: ready for the first account" ;;
-  302) info "GET /register -> 302: an administrator already exists, so registration is closed" ;;
-  *)   warn "GET /register -> $CODE. Check /var/log/apache2/blankee_error.log" ;;
-esac
+if ! command -v curl >/dev/null; then
+  # Said explicitly rather than reported as a bare 000: a verification step that
+  # cannot run is worth knowing about, and it used to read as a dead site.
+  warn "curl is not installed, so the site could not be checked from here"
+else
+  CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $SERVER_NAME" http://127.0.0.1:$HTTP_PORT/register || echo 000)"
+  case "$CODE" in
+    200) info "GET /register -> 200: ready for the first account" ;;
+    302) info "GET /register -> 302: an administrator already exists, so registration is closed" ;;
+    000) warn "GET /register -> no response. Check /var/log/apache2/blankee_error.log" ;;
+    *)   warn "GET /register -> $CODE. Check /var/log/apache2/blankee_error.log" ;;
+  esac
+fi
 
 DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" DB_NAME="$DB_NAME" \
   "$VENV_DIR/bin/python" "$APP_DIR/install/migrate.py" --verify-only >/dev/null \
