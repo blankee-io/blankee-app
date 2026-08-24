@@ -40,6 +40,20 @@ First published version.
   credentials for root-run tooling live in a root-only file instead.
 - `SameSite` and `HttpOnly` are set explicitly on the session cookies.
 
+### Fixed
+- `httpx` could not be used at all on a clean install. `hyper` was pinned but
+  never imported, and it pulled in an old `hyperframe` that uses
+  `collections.MutableSet`, removed in Python 3.10 — so constructing an HTTP
+  client raised `AttributeError`, which also meant push notifications were
+  broken on every fresh install. `hyper` and `apns2` are both gone; neither was
+  imported anywhere.
+- `PyJWT` is now declared. It was imported by the push-notification code and
+  present only because something else happened to install it.
+
 ### Notes
 - This is the first release, so there is nothing to upgrade from. Later entries
   will describe what changed and anything an operator must do by hand.
+- An installation made before the dependency fix above keeps the broken packages,
+  because `pip install -r requirements.txt` does not remove what the file no
+  longer names. Clear them once with
+  `pip uninstall -y apns2 hyper hyperframe h2`.
