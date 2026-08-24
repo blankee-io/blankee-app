@@ -14,6 +14,14 @@ Two options. Both install everything — database, cache, web server, Python
 dependencies, schema and generated secrets — and both end at the same place: a
 running site whose first account becomes the administrator.
 
+Either way, start from an up-to-date machine with `git` available. A minimal
+container image typically has neither:
+
+```bash
+sudo apt update && sudo apt-get upgrade -y
+sudo apt-get install -y git
+```
+
 ### Docker
 
 Needs Docker with the Compose plugin. Nothing else.
@@ -35,13 +43,20 @@ different one.
 
 ### Debian / Ubuntu
 
-Installs onto the machine directly with Apache and mod_wsgi.
+Installs onto the machine directly with Apache and mod_wsgi. Run the update and
+`git` step above first.
 
 ```bash
+sudo apt update && sudo apt-get upgrade -y
+sudo apt-get install -y git
+
 sudo git clone https://github.com/blankee-io/blankee-app.git /opt/blankee
 cd /opt/blankee
 sudo ./install/install.sh --server-name budget.example.com
 ```
+
+The installer takes it from there — Apache, mod_wsgi, MySQL, Redis and Python
+are all installed by it, so `git` is the only thing needed up front.
 
 Clone it somewhere Apache can reach. **Not your home directory** — `/root` is
 mode `700`, so www-data cannot traverse into it, and the result is `Internal
