@@ -57,9 +57,25 @@ plus `static/css/fa-pro-fallback.css` renders every icon.
 **35** Pro and Kit icons onto Free glyphs. Run the generator with `--check` to
 fail on any Pro icon used without a fallback.
 
-Weight is preserved where Free allows it. Free's regular family is only ~163
-icons, so a light Pro icon can stay light only when its replacement is one of
-them. Three are; the rest render solid.
+Weight is preserved where Free allows it. Free ships 2,583 icons but only **273**
+of them in regular, so a light Pro icon can stay light only when its replacement
+is one of those. Three are; the rest render solid.
+
+That 273-icon list is `install/fa_free_regular.txt`, and it is load-bearing rather
+than documentation. An icon's *name* existing in Free says nothing about the
+*style* being available: `fa-lock` is present in Free, but only in solid, so
+`fa-regular fa-lock` renders an empty box. The generator reads the list and emits
+a scoped override for each such case:
+
+```css
+.fa-regular.fa-lock, .far.fa-lock { --fa-style: 900; }
+```
+
+Ten icons the application asks for in regular are solid-only in Free and are
+forced this way — `fa-arrow-left-from-bracket`, `fa-arrows-repeat`, `fa-gear`,
+`fa-lock`, `fa-percent`, `fa-piggy-bank`, `fa-seedling`, `fa-sliders`, `fa-trash`
+and `fa-user-gear`. They render slightly heavier on a Free install. The remaining
+eight are genuinely in Free's regular family and are untouched.
 
 **Pro-only icons used with a free style (17)**
 
@@ -177,4 +193,13 @@ present but not on the main path.
 Blankee is served over a network, which engages AGPL-3.0 section 13: users
 interacting with it remotely must be offered the corresponding source. In
 practice that means a visible link to the source repository in the running
-application. That obligation falls on whoever operates an instance.
+application.
+
+Two places carry that link, so it is reachable whether or not anyone is signed
+in: `templates/footer.html` (the login page, dashboard summary, FAQ and support)
+and a **Source code** entry in the profile dropdown in `templates/nav.html`,
+which puts it on every authenticated page.
+
+The obligation falls on whoever operates an instance. **If you fork this and
+deploy it, repoint both links at your own repository** — the link has to offer
+*your* corresponding source, including any modifications, not this one.
