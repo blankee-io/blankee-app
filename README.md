@@ -130,23 +130,50 @@ which is what enables notifications and the Forgot Password link.
 
 ### Upgrading
 
+The admin console has an **Updates** section: it shows the running version and a
+button that checks for a newer one. If there is an update it offers to install
+it — pulling the code, installing any new dependencies, applying migrations and
+reloading the application.
+
+The web server cannot do any of that itself, and deliberately so: it can only
+write a request flag, which a root-owned systemd timer picks up within a minute.
+Progress and the result end up in `journalctl -u blankee-update`, and a failure
+leaves the exact recovery commands in the console.
+
+To turn the button off, set `SELF_UPDATE=0` in
+`/var/www/budget_env/blankee.conf`. The console then shows the commands instead.
+It is off automatically under Docker, where the code is part of the image.
+
+#### From a shell
+
 ```bash
-git pull
+# Debian/Ubuntu — the same steps the console runs
+sudo systemctl start blankee-update            # applies an update if there is one
+sudo /opt/blankee/install/blankee_update.py --dry-run --force   # check without changing anything
+
+# Docker
+git pull && docker compose up -d --build
 ```
 
-Then apply any new migrations — this is idempotent, so it is safe whether or not
-anything changed:
+Or by hand, which is what to reach for if the updater itself is the problem:
 
 ```bash
-# Docker
-docker compose up -d --build
-
-# Debian/Ubuntu
-sudo /var/www/budget_env/venv/bin/python install/migrate.py
+cd /opt/blankee
+sudo git pull
+sudo /var/www/budget_env/venv/bin/pip install -r requirements.txt
+set -a; . /etc/blankee/db.conf; set +a
+sudo -E /var/www/budget_env/venv/bin/python install/migrate.py
+sudo /opt/blankee/install/install.sh --permissions-only
 sudo systemctl restart apache2
 ```
 
-To check the schema without touching it, add `--verify-only`.
+Two of those steps are easy to skip and both bite later. **`pip install` is not
+optional** — a release that adds a dependency fails at import without it. And
+`migrate.py` reads its database credentials from the environment, so it needs
+`db.conf` sourced; `sudo` alone scrubs the environment and it exits with
+"Missing environment variables".
+
+To check the schema without changing it, add `--verify-only`.
 
 ---
 
