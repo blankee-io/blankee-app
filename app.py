@@ -14481,10 +14481,12 @@ def _update_blob(check_remote=False):
     """The state, plus whether this instance can apply an update itself."""
     state = _update_state(check_remote=check_remote)
     try:
-        from server_config import self_update_enabled
+        from server_config import self_update_enabled, auto_update_enabled
         state['self_update'] = self_update_enabled()
+        state['auto_update'] = auto_update_enabled()
     except Exception:
         state['self_update'] = False
+        state['auto_update'] = False
     run = state.get('run') or None
     if run:
         # Derived on read rather than stored: a run killed by a timeout or the
@@ -14600,6 +14602,41 @@ def admin_update_apply():
              request_id=request_id)
     return jsonify({'status': 'requested', 'request_id': request_id,
                     'message': 'Update requested. Waiting for the updater to pick it up.',
+                    'update': _update_blob()}), 200
+
+
+@app.route('/admin/update/auto', methods=['POST'])
+@admin_required
+def admin_update_auto():
+    """
+    Turn automatic updates on or off.
+
+    Only writes a flag. The nightly timer reads it on every run, so this takes
+    effect immediately and needs nothing privileged to happen here.
+    """
+    data = request.get_json(silent=True) or {}
+    on = bool(data.get('enabled'))
+
+    state = _update_blob()
+    if not state.get('self_update'):
+        return jsonify({
+            'status': 'error',
+            'message': ('This instance cannot update itself, so there is nothing to '
+                        'automate.'),
+            'update': state}), 400
+
+    from server_config import set_auto_update
+    ok, error = set_auto_update(on)
+    if not ok:
+        return jsonify({'status': 'error',
+                        'message': f'Could not save that setting: {error}',
+                        'update': _update_blob()}), 500
+
+    log_info(app.logger, 'UPDATE',
+             f'Admin {current_user.id} turned automatic updates {"on" if on else "off"}')
+    message = ('Updates will be installed automatically, at midnight.' if on
+               else 'Automatic updates are off.')
+    return jsonify({'status': 'success', 'message': message,
                     'update': _update_blob()}), 200
 
 @app.route('/admin/create-user', methods=['POST'])

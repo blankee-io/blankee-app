@@ -49,6 +49,7 @@ RESET_KEY = 'RESET_ADMIN_PASSWORD'
 SELF_UPDATE_KEY = 'SELF_UPDATE'
 UPDATE_REQUESTED_KEY = 'UPDATE_REQUESTED'
 UPDATE_REQUEST_ID_KEY = 'UPDATE_REQUEST_ID'
+AUTO_UPDATE_KEY = 'AUTO_UPDATE'
 
 # Written verbatim when the file does not exist. The installer calls
 # ensure_config_file() so there is one template, at one path, with no copy in a
@@ -103,6 +104,23 @@ SELF_UPDATE=0
 # "the updater finished my request" from "I am reading last week's result".
 UPDATE_REQUESTED=0
 UPDATE_REQUEST_ID=
+
+# ---------------------------------------------------------------------------
+# AUTO_UPDATE
+# ---------------------------------------------------------------------------
+# Apply updates without being asked. When this is 1, a systemd timer checks
+# once a day, at midnight local time, and installs anything newer.
+#
+# Off by default, and worth a moment's thought before turning on: it means code
+# from the internet is installed and run on this machine while nobody is
+# watching. It also means a release with a problem reaches this instance before
+# anybody has had a chance to notice. The trade is that security fixes arrive
+# without you having to remember.
+#
+# Nothing else changes: the same updater runs, refuses a modified working tree,
+# verifies the schema first, and stops at the first failure rather than pressing
+# on. Results are in `journalctl -u blankee-update`.
+AUTO_UPDATE=0
 """
 
 # One creation attempt per process. Retrying on every request would mean a
@@ -389,4 +407,20 @@ def clear_update_request():
     ok, error = _set_keys({UPDATE_REQUESTED_KEY: '0'})
     if not ok:
         log_error(logger, 'UPDATE', f'Could not clear the update request: {error}')
+    return (ok, error)
+
+
+def auto_update_enabled():
+    """Whether updates are applied without being asked. Fails closed."""
+    return _read().get(AUTO_UPDATE_KEY, '').lower() in _TRUTHY
+
+
+def set_auto_update(on):
+    """Turn automatic updates on or off. Returns (ok, error)."""
+    ok, error = _set_keys({AUTO_UPDATE_KEY: '1' if on else '0'})
+    if ok:
+        log_info(logger, 'UPDATE',
+                 f'Automatic updates turned {"on" if on else "off"}')
+    else:
+        log_error(logger, 'UPDATE', f'Could not change {AUTO_UPDATE_KEY}: {error}')
     return (ok, error)

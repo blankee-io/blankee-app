@@ -74,7 +74,7 @@ def say(message):
 
 def read_flag():
     """
-    (requested, request_id), read defensively.
+    (requested, request_id, auto), read defensively.
 
     This file is written by the web process, so it is treated as hostile input
     however it is meant to be used:
@@ -85,26 +85,26 @@ def read_flag():
                   that remaining true.
       fstat       must be a regular file, owned by root or by the web user.
       size cap    read a bounded amount, before parsing.
-      one key     exactly two keys are recognised, and the flag must be 0 or 1.
+      few keys    three keys are recognised, and each flag must be 0 or 1.
                   Everything else in the file is ignored.
     """
     try:
         fd = os.open(CONFIG_FILE, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError as e:
         if e.errno in (errno.ENOENT, errno.ELOOP):
-            return (False, None)
+            return (False, None, False)
         say(f'  cannot open {CONFIG_FILE}: {e}')
-        return (False, None)
+        return (False, None, False)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             say(f'  {CONFIG_FILE} is not a regular file; ignoring it')
-            return (False, None)
+            return (False, None, False)
         raw = os.read(fd, MAX_CONFIG_BYTES)
     finally:
         os.close(fd)
 
-    requested, request_id = False, None
+    requested, request_id, auto = False, None, False
     for line in raw.decode('utf-8', 'replace').splitlines():
         line = line.strip()
         if not line or line.startswith('#') or '=' not in line:
@@ -116,12 +116,15 @@ def read_flag():
                 say(f'  UPDATE_REQUESTED is not 0 or 1; treating as off')
                 continue
             requested = value.lower() in TRUTHY
+        elif key == 'AUTO_UPDATE':
+            if value.lower() in TRUTHY:
+                auto = True
         elif key == 'UPDATE_REQUEST_ID':
             # Opaque, and only ever echoed back into the status file. Bounded
             # and stripped of anything that is not plausibly an id.
             cleaned = ''.join(c for c in value if c.isalnum() or c in '-_')[:64]
             request_id = cleaned or None
-    return (requested, request_id)
+    return (requested, request_id, auto)
 
 
 def clear_flag():
@@ -608,6 +611,8 @@ def main():
                         help='update even if no request flag is set')
     parser.add_argument('--dry-run', action='store_true',
                         help='check and fetch, change nothing')
+    parser.add_argument('--auto', action='store_true',
+                        help='run only if AUTO_UPDATE is on (used by the daily timer)')
     parser.add_argument('--mark-aborted', action='store_true',
                         help='stamp an unfinished run as failed (used by systemd)')
     args = parser.parse_args()
@@ -633,21 +638,33 @@ def main():
         return 1
 
     try:
-        requested, request_id = read_flag()
-        if not requested and not args.force:
+        requested, request_id, auto = read_flag()
+
+        if args.auto:
+            # The daily timer. Nothing to do unless automatic updates are on -
+            # and this is the only thing that consults that flag, so turning it
+            # off in blankee.conf is immediate and needs no restart.
+            if not auto:
+                return 0
+            say('Automatic update (AUTO_UPDATE is on).')
+            request_id = f'auto-{int(time.time())}'
+            # A request from the console is still honoured; it just gets folded
+            # into this run rather than repeating it a minute later.
+            if requested:
+                clear_flag()
+        elif requested:
+            say(f'Update requested (id {request_id}).')
+            # Cleared before any work, so a crash cannot make it repeat.
+            clear_flag()
+        elif args.force:
+            say('Forced update (no request flag).')
+        else:
             # The ordinary case, once a minute, and it must stay cheap and
             # silent. Do not "fix" this into logging something: it would fill
             # the journal with a message meaning nothing happened.
             return 0
 
-        if requested:
-            say(f'Update requested (id {request_id}).')
-            # Cleared before any work, so a crash cannot make it repeat.
-            clear_flag()
-        else:
-            say('Forced update (no request flag).')
-
-        status_init(request_id, forced=args.force and not requested)
+        status_init(request_id, forced=args.force and not requested and not args.auto)
         return do_update(args.dry_run)
     finally:
         try:

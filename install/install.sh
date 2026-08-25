@@ -39,6 +39,8 @@ PERMISSIONS_ONLY=0
 SELF_UPDATE=1
 UPDATER_SERVICE="/etc/systemd/system/blankee-update.service"
 UPDATER_TIMER="/etc/systemd/system/blankee-update.timer"
+UPDATER_AUTO_SERVICE="/etc/systemd/system/blankee-update-auto.service"
+UPDATER_AUTO_TIMER="/etc/systemd/system/blankee-update-auto.timer"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -447,8 +449,58 @@ Unit=blankee-update.service
 WantedBy=timers.target
 EOF
 
-  chmod 644 "$UPDATER_SERVICE" "$UPDATER_TIMER"
+  cat > "$UPDATER_AUTO_SERVICE" <<EOF
+[Unit]
+Description=Blankee automatic update (daily, when AUTO_UPDATE is on)
+Documentation=file://$APP_DIR/docs/RELEASING.md
+After=network-online.target mysql.service apache2.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Same updater, same privileges, same refusals. The only difference is that it
+# runs on a schedule and exits immediately unless AUTO_UPDATE is set, which is
+# read from blankee.conf on every run - so turning it off takes effect at once.
+ExecStart=/usr/bin/python3 $APP_DIR/install/blankee_update.py --auto
+ExecStopPost=/usr/bin/python3 $APP_DIR/install/blankee_update.py --mark-aborted
+Environment=BLANKEE_APP_DIR=$APP_DIR
+Environment=BLANKEE_CONFIG_DIR=$CONFIG_DIR
+Environment=BLANKEE_CONFIG=$CONF_FILE
+Environment=BLANKEE_VENV=$VENV_DIR
+Environment=BLANKEE_WSGI=$WSGI_FILE
+Environment=BLANKEE_DB_CONF=$DB_CONF
+UMask=0022
+TimeoutStartSec=1800
+Nice=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blankee-update
+EOF
+
+  cat > "$UPDATER_AUTO_TIMER" <<EOF
+[Unit]
+Description=Apply Blankee updates nightly when AUTO_UPDATE is on
+
+[Timer]
+# Local midnight. Persistent so a machine that was off overnight catches up on
+# the next boot rather than skipping a day silently.
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+# Spread the load on the source a little, and avoid every instance in the world
+# fetching at the same second.
+RandomizedDelaySec=900
+Unit=blankee-update-auto.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  chmod 644 "$UPDATER_SERVICE" "$UPDATER_TIMER" "$UPDATER_AUTO_SERVICE" "$UPDATER_AUTO_TIMER"
   systemctl daemon-reload
+  # The nightly timer is enabled either way; it does nothing at all unless
+  # AUTO_UPDATE is on, and enabling it here means the toggle in the console
+  # needs no privileged action to take effect.
+  systemctl enable --now blankee-update-auto.timer >/dev/null 2>&1 || true
   if systemctl enable --now blankee-update.timer >/dev/null 2>&1; then
     # Only now is the flag true. It answers "can this instance update itself",
     # so writing it before the timer is actually enabled would make the console

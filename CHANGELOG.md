@@ -8,6 +8,45 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.1.0 — 2026-08-25
+
+Updating, from the administrator console.
+
+### Added
+- An **Updates** section at the top of the administrator console: the running
+  version, and a button that checks for a newer one. If there is an update it
+  offers to install it — pulling the code, installing any new dependencies,
+  applying migrations and reloading.
+- **Update automatically**, off by default. When on, a nightly timer checks at
+  midnight and installs anything newer. Turning it off takes effect immediately.
+- The check also notices when the installed Python packages do not match
+  `requirements.txt`, or when a migration is outstanding, and says so — but only
+  when something is wrong.
+- `install/check_requirements.py`, which fails if the code imports something
+  `requirements.txt` does not declare. That is the class of bug that made `httpx`
+  and `PyJWT` break clean installs.
+- The version now appears in the footer of every page.
+
+### Changed
+- The documented upgrade steps were wrong in two ways and are now right. They
+  omitted `pip install -r requirements.txt`, so a release adding a dependency
+  failed at import; and the `migrate.py` command supplied no database
+  credentials, so it exited immediately with "Missing environment variables".
+
+### Security
+- The web server cannot apply an update itself, and gains no privilege from this
+  feature. It writes a request flag into a file it owns; a root-owned systemd
+  unit reads that flag, treats it as hostile input, and does the work.
+- Reloading touches the WSGI script rather than restarting Apache, so no request
+  is dropped. Measured: 120 of 120 requests survived a reload; an Apache restart
+  dropped two.
+
+### Notes
+- An update refuses to run if the working tree has local modifications, verifies
+  the existing schema before changing anything, and stops at the first failure
+  rather than pressing on. There is no automatic rollback: a code rollback cannot
+  undo an applied migration, so it would risk newer schema under older code.
+
 ## 1.0.0 — 2026-08-24
 
 First published version.
@@ -30,19 +69,6 @@ First published version.
   configuration, gated on a flag only someone with server access can set.
 - Font Awesome Pro is used when present and falls back to a bundled Free build
   otherwise, so every icon renders either way.
-
-### Added (since 1.0.0 was cut)
-- The administrator console reports whether newer code exists, whether the
-  installed Python packages match `requirements.txt`, and whether any database
-  migration is outstanding. Checking contacts GitHub only when the button is
-  pressed; nothing runs on a schedule.
-- Updates can be applied from the console. The web process only sets a flag in a
-  file it owns; a root systemd timer does the work, so the web user gains no
-  privilege. Reloading touches the WSGI script rather than restarting Apache, so
-  no connection is dropped.
-- `install/check_requirements.py` fails if the code imports something
-  `requirements.txt` does not declare — the class of bug that made `httpx` and
-  `PyJWT` break clean installs.
 
 ### Security
 - The web user cannot write in the configuration directory. Write permission on
