@@ -32,6 +32,17 @@
         <div class="profile-box">
             <div class="profile-content">
                 <div class="profile-actions">
+                    <div class="updates-section">
+                        <div class="section-liner">
+                            <div class="update-line">
+                                <span class="update-line-name">Blankee{% if update.version %} v{{ update.version }}{% endif %}</span>
+                                <button type="button" class="update-check-link" id="update-check-btn">
+                                    <span>Check for updates</span>
+                                    <i class="fa-solid fa-arrows-rotate" id="update-check-icon"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                     <div class="admin-users-section">
                         <div class="section-liner">
                             <div class="admin-users-header">
@@ -701,14 +712,19 @@
         // Delegated from the tbody: the row markup is replaced wholesale after
         // a create or delete, so a handler bound to the buttons themselves
         // would stop working after the first change.
-        $('#admin-user-list').on('click', '.admin-user-delete-btn', function() {
+        $('#admin-user-list').on('click', '.admin-user-delete-btn', async function() {
             const row = $(this).closest('tr');
             const userId = row.data('user-id');
             const username = row.data('username');
-            if (!confirm('Delete ' + username + '? This removes their account and all '
-                         + 'of their data, and cannot be undone.')) {
-                return;
-            }
+            const confirmed = await showConfirmModal({
+                title: 'Delete User',
+                message: 'Delete ' + username + '? This removes their account and all of '
+                       + 'their data, and cannot be undone.',
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) { return; }
             adminUserStatus('Deleting ' + username + '...', false);
             $.ajax({
                 url: '/admin/delete-user/' + userId,
@@ -729,11 +745,16 @@
         });
 
         // ===== Clear email settings =====
-        $('#smtp-clear-btn').on('click', function() {
-            if (!confirm('Clear the email settings? This removes the server, address, '
-                         + 'username and password, and turns delivery off.')) {
-                return;
-            }
+        $('#smtp-clear-btn').on('click', async function() {
+            const confirmed = await showConfirmModal({
+                title: 'Clear Email Settings',
+                message: 'Clear the email settings? This removes the server, address, '
+                       + 'username and password, and turns delivery off.',
+                confirmText: 'Clear',
+                cancelText: 'Cancel',
+                danger: true
+            });
+            if (!confirmed) { return; }
             const btn = $(this);
             btn.prop('disabled', true);
             smtpStatus('Clearing email settings...', false);
@@ -759,6 +780,204 @@
                 }
             });
         });
+
+        // ===== Updates =====
+        //
+        // One line, one button. Nothing to report is a toast; something to
+        // report is the confirm modal, which is also where the update is
+        // agreed to. Deliberately quiet: an administrator opening this page is
+        // almost never here about updates.
+        const updateState = {{ update | tojson }};
+
+        function spinCheck(on) {
+            $('#update-check-icon').toggleClass('fa-spin', !!on);
+            $('#update-check-btn').prop('disabled', !!on);
+        }
+
+        function describeProblems(u) {
+            // Only ever mentioned when there is something wrong. This is the
+            // check that would have caught httpx being undeclared, so it is
+            // worth surfacing - but not worth a permanent row on the page.
+            const out = [];
+            const d = u.dependencies || {}, s = u.schema || {};
+            if ((d.missing || []).length) {
+                out.push(d.missing.length + ' package(s) required but not installed');
+            }
+            if ((d.mismatched || []).length) {
+                out.push(d.mismatched.length + ' package(s) at the wrong version');
+            }
+            if ((d.undeclared || []).length) {
+                out.push(d.undeclared.length + ' package(s) imported but not in requirements.txt');
+            }
+            if ((s.pending || []).length) {
+                out.push(s.pending.length + ' database migration(s) pending');
+            }
+            if (s.error) { out.push(s.error); }
+            return out;
+        }
+
+        async function offerUpdate(u, message) {
+            const lines = [message];
+            const problems = describeProblems(u);
+            if (problems.length) {
+                lines.push('Also on this instance: ' + problems.join('; ') + '.');
+            }
+
+            if (!u.self_update) {
+                const dir = (u.install || {}).app_dir || '/opt/blankee';
+                const how = (u.install || {}).kind === 'docker'
+                    ? 'git pull && docker compose up -d --build'
+                    : 'sudo git -C ' + dir + ' pull && sudo ' + dir + '/install/install.sh';
+                await showConfirmModal({
+                    title: 'Update Available',
+                    message: lines.join(' ') + ' This instance cannot update itself, so '
+                           + 'apply it from a shell: ' + how,
+                    confirmText: 'OK',
+                    hideCancel: true
+                });
+                return;
+            }
+
+            const go = await showConfirmModal({
+                title: 'Update Available',
+                message: lines.join(' ') + ' Installing replaces the application code, '
+                       + 'installs any new dependencies, applies pending migrations and '
+                       + 'reloads the application. It cannot be undone automatically.',
+                confirmText: 'Update',
+                cancelText: 'Not now',
+                danger: true
+            });
+            if (go) { startUpdate(); }
+        }
+
+        function startUpdate() {
+            spinCheck(true);
+            showToast('Update requested. This takes a minute or two.', 'info', 6000);
+            $.ajax({
+                url: "{{ url_for('admin_update_apply') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(res) {
+                    watchUpdate(res.request_id, Date.now() + 150000);
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    if (xhr.status === 409) {
+                        // Someone else already asked. Follow that run rather
+                        // than queuing a second one.
+                        const run = ((res.update || {}).run) || {};
+                        showToast('An update is already running.', 'info');
+                        watchUpdate(run.request_id, Date.now() + 150000);
+                        return;
+                    }
+                    spinCheck(false);
+                    showToast(res.message || 'Could not request an update.', 'error', 8000);
+                }
+            });
+        }
+
+        function watchUpdate(requestId, pickupBy, errors) {
+            errors = errors || 0;
+            $.ajax({
+                url: "{{ url_for('admin_update_status') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(res) {
+                    const u = res.update || {};
+                    const run = u.run;
+
+                    if (run && run.request_id === requestId && run.terminal) {
+                        spinCheck(false);
+                        if (!run.ok) {
+                            showToast(run.message, 'error', 12000);
+                            return;
+                        }
+                        // Confirmed by the commit the new process reports, not by
+                        // the run claiming success - the two differ if the reload
+                        // did not take.
+                        const proved = run.to && (u.commit || {}).short === run.to.short;
+                        showToast(proved ? run.message
+                                         : run.message + ' Reload this page to see it.',
+                                  'success', 8000);
+                        return;
+                    }
+                    if (run && run.stale) {
+                        spinCheck(false);
+                        showToast('The updater stopped without finishing. Check '
+                                + 'journalctl -u blankee-update on the server.', 'error', 12000);
+                        return;
+                    }
+                    // Nothing has picked the request up. Almost always means the
+                    // timer is not running, which is worth saying rather than
+                    // spinning forever.
+                    if ((!run || run.request_id !== requestId) && Date.now() > pickupBy) {
+                        spinCheck(false);
+                        showToast('The updater has not picked this up. On the server: '
+                                + 'sudo systemctl status blankee-update.timer', 'error', 12000);
+                        return;
+                    }
+                    setTimeout(function() { watchUpdate(requestId, pickupBy, 0); }, 2000);
+                },
+                error: function() {
+                    // Expected while the application is being reloaded: the
+                    // daemon process is replaced under the request. Only a long
+                    // run of failures means anything.
+                    if (errors > 40) {
+                        spinCheck(false);
+                        showToast('The site stopped answering. Check journalctl -u '
+                                + 'blankee-update on the server.', 'error', 12000);
+                        return;
+                    }
+                    setTimeout(function() {
+                        watchUpdate(requestId, pickupBy, errors + 1);
+                    }, 2000);
+                }
+            });
+        }
+
+        $('#update-check-btn').on('click', function() {
+            spinCheck(true);
+            $.ajax({
+                url: "{{ url_for('admin_update_check') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: async function(res) {
+                    spinCheck(false);
+                    const u = res.update || {};
+                    if (res.status === 'error') {
+                        showToast(res.message, 'error', 10000);
+                        return;
+                    }
+                    if ((u.code || {}).up_to_date) {
+                        const problems = describeProblems(u);
+                        if (problems.length) {
+                            showToast('No update available, but: ' + problems.join('; ') + '.',
+                                      'warning', 10000);
+                        } else {
+                            showToast(res.message, 'success');
+                        }
+                        return;
+                    }
+                    await offerUpdate(u, res.message);
+                },
+                error: function(xhr) {
+                    spinCheck(false);
+                    const res = xhr.responseJSON || {};
+                    showToast(res.message || 'Could not check for updates.', 'error', 8000);
+                }
+            });
+        });
+
+        // An update may already be running - somebody else started it, or this
+        // page was reloaded mid-flight.
+        if (updateState && updateState.run && !updateState.run.terminal
+                && !updateState.run.stale) {
+            spinCheck(true);
+            watchUpdate(updateState.run.request_id, Date.now() + 150000);
+        }
     </script>
 {% include 'footer.html' %}
 

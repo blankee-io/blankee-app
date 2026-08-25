@@ -14438,8 +14438,169 @@ def admin_console():
         landing_page=landing_page,
         users=_admin_user_rows(),
         smtp=get_smtp_config_for_display(),
+        # No network on page load - check_remote defaults to False. Opening the
+        # console must not make this instance contact GitHub; only the button
+        # does. The local answers and any run in progress still appear, so a
+        # reopened console picks the thread back up.
+        update=_update_blob(),
     )
 
+
+
+def _update_state(check_remote=False):
+    """
+    version_info.update_state(), but it can never raise.
+
+    The admin console must render even when this cannot be worked out - a broken
+    git directory or an unreachable database is exactly when somebody opens the
+    page. Returns a shape the template can read either way.
+    """
+    empty = {'checked': False, 'up_to_date': None, 'behind_by': None, 'status': None,
+             'remote': None, 'remote_host': None, 'latest_sha': None,
+             'latest_short': None, 'latest_version': None, 'commits': [],
+             'signals': [], 'error': None}
+    try:
+        from version_info import update_state
+        return update_state(check_remote=check_remote)
+    except Exception as e:
+        log_error(app.logger, 'UPDATE', f'Could not assemble the update state: {e}')
+        empty['error'] = str(e)
+        return {'version': '', 'commit': {},
+                'install': {'kind': 'unknown', 'app_dir': ''},
+                'code': empty,
+                'dependencies': {'ok': None, 'pinned_count': 0, 'missing': [],
+                                 'mismatched': [], 'undeclared': [], 'unpinned': [],
+                                 'error': str(e)},
+                'schema': {'ok': None, 'applied_count': 0, 'pending': [],
+                           'missing_files': [], 'unlisted': [], 'unknown': [],
+                           'error': str(e)},
+                'run': None}
+
+
+def _update_blob(check_remote=False):
+    """The state, plus whether this instance can apply an update itself."""
+    state = _update_state(check_remote=check_remote)
+    try:
+        from server_config import self_update_enabled
+        state['self_update'] = self_update_enabled()
+    except Exception:
+        state['self_update'] = False
+    run = state.get('run') or None
+    if run:
+        # Derived on read rather than stored: a run killed by a timeout or the
+        # OOM killer would otherwise leave the console polling forever.
+        import time as _time
+        state['run']['terminal'] = bool(run.get('finished_at'))
+        try:
+            updated = _time.mktime(_time.strptime(run.get('updated_at', ''),
+                                                  '%Y-%m-%dT%H:%M:%SZ'))
+            state['run']['stale'] = (not run.get('finished_at')
+                                     and (_time.time() - updated) > 900)
+        except Exception:
+            state['run']['stale'] = False
+    return state
+
+
+@app.route('/admin/update/check', methods=['POST'])
+@admin_required
+def admin_update_check():
+    """
+    Look for a newer version. The only route here that touches the network.
+
+    A remote that cannot be reached is an answer, not a server error, so this
+    returns 200 with status 'error' and a message naming which signal failed.
+    A 5xx would make the client show a generic failure instead of the reason.
+    """
+    state = _update_blob(check_remote=True)
+    code = state.get('code') or {}
+    log_info(app.logger, 'UPDATE', f'Admin {current_user.id} checked for updates',
+             up_to_date=code.get('up_to_date'), behind_by=code.get('behind_by'),
+             signals=code.get('signals'))
+    if code.get('error'):
+        return jsonify({'status': 'error', 'message': code['error'],
+                        'update': state}), 200
+    if code.get('up_to_date'):
+        short = (state.get('commit') or {}).get('short') or 'this commit'
+        return jsonify({'status': 'success', 'message': f'Up to date at {short}.',
+                        'update': state}), 200
+    behind = code.get('behind_by')
+    latest = code.get('latest_version')
+    parts = []
+    if behind:
+        parts.append(f"{behind} new commit{'s' if behind != 1 else ''} on main")
+    if latest and latest != state.get('version'):
+        parts.append(f"{state.get('version') or 'unknown'} to {latest}")
+    detail = f" - {', '.join(parts)}." if parts else '.'
+    return jsonify({'status': 'success', 'message': f'An update is available{detail}',
+                    'update': state}), 200
+
+
+@app.route('/admin/update/status', methods=['POST'])
+@admin_required
+def admin_update_status():
+    """
+    The current state, without touching the network. Polled while a run is going.
+
+    POST although it only reads: it is polled every couple of seconds through
+    whatever sits in front of a self-hosted instance, and a cached GET would keep
+    reporting a finished update for as long as something held the cache.
+    """
+    return jsonify({'status': 'success', 'message': '', 'update': _update_blob()}), 200
+
+
+@app.route('/admin/update/apply', methods=['POST'])
+@admin_required
+def admin_update_apply():
+    """
+    Ask the privileged updater to apply an update.
+
+    This writes a flag and returns. It does not - and must not be able to - do
+    the work: this process cannot write the code, the virtualenv or the web
+    server configuration, and that is the whole security model. A root systemd
+    timer reads the flag, does the work, and records the outcome in a file this
+    process can only read.
+
+    So the client polls /admin/update/status for the result. That polling
+    survives the reload, because reloading touches the WSGI script rather than
+    restarting Apache.
+    """
+    state = _update_blob()
+
+    if (state.get('install') or {}).get('kind') == 'docker':
+        return jsonify({
+            'status': 'error',
+            'message': ('This instance runs in a container, so its code is part of '
+                        'the image and cannot be replaced from here. Rebuild from the '
+                        'host: docker compose up -d --build'),
+            'update': state}), 400
+
+    if not state.get('self_update'):
+        return jsonify({
+            'status': 'error',
+            'message': ('The privileged updater is not installed here, so updates are '
+                        'applied from a shell. One run of the installer adds it.'),
+            'update': state}), 400
+
+    run = state.get('run') or {}
+    if run and not run.get('terminal') and not run.get('stale'):
+        # Somebody already asked. Hand the state back so the client attaches to
+        # the run in progress instead of queuing a second one.
+        return jsonify({'status': 'running',
+                        'message': 'An update is already running.',
+                        'update': state}), 409
+
+    from server_config import request_update
+    ok, request_id, error = request_update()
+    if not ok:
+        return jsonify({'status': 'error',
+                        'message': f'Could not record the request: {error}',
+                        'update': state}), 500
+
+    log_info(app.logger, 'UPDATE', f'Admin {current_user.id} requested an update',
+             request_id=request_id)
+    return jsonify({'status': 'requested', 'request_id': request_id,
+                    'message': 'Update requested. Waiting for the updater to pick it up.',
+                    'update': _update_blob()}), 200
 
 @app.route('/admin/create-user', methods=['POST'])
 @admin_required

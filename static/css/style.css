@@ -7502,17 +7502,8 @@ transform: scale(1.2);
     display: none;
 }
 
-.email-delivery-error {
-    color: var(--danger);
-}
 
-.email-delivery-warning {
-    color: var(--warning);
-}
 
-.email-delivery-verified {
-    color: var(--success);
-}
 
 /* Verification rows and status lines come and go as state changes. A class
    rather than an inline style so the JS toggles one name, per the no-inline-
@@ -7783,6 +7774,130 @@ transform: scale(1.2);
 
 /* Status line inside the create-user modal. Errors are the common case here -
    duplicate address, weak password - so it needs to read against the modal's
+/* ===== Updates panel (admin console) =====
+   Same panel treatment as .admin-users-section, with its own label. The third
+   near-copy of these rules in this file; the alternative is a shared class the
+   ::before content would have to be layered onto, which reads worse than the
+   repetition. */
+
+.updates-section {
+    position: relative;
+    margin: 30px 0 35px;
+    padding: 16px;
+    background-color: var(--text-light);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    box-shadow: 0 -6px 8px var(--shadow-sm);
+}
+
+.updates-section::before {
+    content: "Updates";
+    position: absolute;
+    top: -25px;
+    left: 20px;
+    padding: 4px 12px 6px;
+    background-color: var(--text-light);
+    border-radius: 8px 8px 0 0;
+    box-shadow: 0 -6px 8px var(--shadow-sm);
+    color: var(--primary);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+/* Boxed to the same metrics as .profile-form .input-group, so help text and
+   input rows line up. overflow-wrap matters here: a 40-character SHA and a path
+   like /var/www/budget_env/blankee.conf both set a min-content floor otherwise,
+   and the panel stops shrinking. */
+.updates-section .setting-description {
+    padding: 12px 16px;
+    background-color: var(--white);
+    border-radius: 10px;
+    margin: 0 0 8px;
+    width: 100%;
+    box-sizing: border-box;
+    overflow-wrap: break-word;
+}
+
+
+/* Canonical names for the three result colours. The email-delivery-* ones are
+   kept working because existing markup uses them, but "email-delivery-error" in
+   an Updates panel reads as a copy-paste mistake, so new code says this. */
+.status-error,
+.email-delivery-error {
+    color: var(--danger);
+}
+
+.status-warning,
+.email-delivery-warning {
+    color: var(--warning);
+}
+
+.status-ok,
+.email-delivery-verified {
+    color: var(--success);
+}
+
+/* One line: the version, and a button to check. Deliberately not a panel of
+   status rows - an administrator opening this page is almost never here about
+   updates, and anything worth saying is said in a toast or the confirm modal. */
+.update-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    width: 100%;
+    padding: 12px 16px;
+    background-color: var(--white);
+    border-radius: 10px;
+    box-sizing: border-box;
+}
+
+.update-line-name {
+    color: var(--text-dark);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.update-check-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--primary);
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.update-check-link:hover:not(:disabled) {
+    color: var(--primary-hover);
+}
+
+.update-check-link:disabled {
+    color: var(--secondary-dark);
+    cursor: default;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
    own background rather than the panel's. */
 .add-user-modal-status {
     margin: 8px 0 0;

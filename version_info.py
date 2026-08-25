@@ -542,21 +542,45 @@ def fetch_remote_state(slug, local_sha):
                         f'cannot be read from here. Updating still works.')
         return out
 
+    # Constructing the client is inside the try, not just the import. httpx pulls
+    # in httpcore, which imports h2 for HTTP/2 - and an old h2/hyperframe raises
+    # AttributeError there rather than ImportError, so importing httpx succeeds
+    # and building a client explodes. That happened on a real deployment. If it
+    # escaped this function it would take the whole report down, and the
+    # dependency check - which is what diagnoses it - would be the first
+    # casualty.
     try:
         import httpx
+        # Same client shape as push_notifications.py: an explicit timeout, so a
+        # blocked or slow network cannot hang the request waiting on this.
+        client = httpx.Client(
+            timeout=httpx.Timeout(10.0, connect=10.0),
+            follow_redirects=True,
+            headers={'Accept': 'application/vnd.github+json',
+                     'X-GitHub-Api-Version': '2022-11-28',
+                     'User-Agent': f'blankee/{read_version() or "unknown"}'})
     except Exception as e:
-        out['error'] = f'httpx is not available, so the check could not run ({e}).'
+        detail = f'{type(e).__name__}: {e}'
+        # One cause accounts for essentially all of these, and it has an exact
+        # fix, so say it rather than making somebody search for it. An old
+        # h2/hyperframe - pulled in by the hyper pin that requirements.txt no
+        # longer has - raises AttributeError inside httpcore's HTTP/2 import.
+        # pip does not remove what requirements.txt stopped naming, so an
+        # upgraded install still has them.
+        if 'MutableSet' in detail or 'hyperframe' in detail or 'h2' in detail:
+            out['error'] = (
+                'The HTTP client could not start because an old h2/hyperframe is '
+                'installed. They came from dependencies this application no longer '
+                'uses, and pip leaves them behind. On the server: '
+                'pip uninstall -y apns2 hyper hyperframe h2')
+        else:
+            out['error'] = (f'The HTTP client could not be started, so the check could '
+                            f'not run ({detail}). install/check_requirements.py usually '
+                            f'says why.')
+        log_warning(logger, 'UPDATE', 'Could not build an HTTP client', error=detail)
         return out
-
-    # Same client shape as push_notifications.py: an explicit timeout, so a
-    # blocked or slow network cannot hang the request that is waiting on this.
-    client = httpx.Client(
-        timeout=httpx.Timeout(10.0, connect=10.0),
-        follow_redirects=True,
-        headers={'Accept': 'application/vnd.github+json',
-                 'X-GitHub-Api-Version': '2022-11-28',
-                 'User-Agent': f'blankee/{read_version() or "unknown"}'})
     errors = []
+    not_found = False
     try:
         # Signal 1: the published VERSION.
         try:
@@ -566,7 +590,12 @@ def fetch_remote_state(slug, local_sha):
                 if _VERSION_RE.match(candidate):
                     out['latest_version'] = candidate
                     out['signals'].append('VERSION')
-            elif r.status_code != 404:
+            elif r.status_code == 404:
+                # Either this branch has no VERSION file, or the repository is
+                # not visible to an unauthenticated request. Which one it is
+                # becomes clear once the compare result is in.
+                not_found = True
+            else:
                 errors.append(f'VERSION lookup returned HTTP {r.status_code}')
         except Exception as e:
             errors.append(f'VERSION lookup failed ({e})')
@@ -603,10 +632,11 @@ def fetch_remote_state(slug, local_sha):
                         f'{reset}). Unauthenticated requests are limited per source '
                         f'address, so a shared connection reaches it sooner.')
                 elif r.status_code == 404:
-                    # This commit is unknown to GitHub - a local build, or a
-                    # fork. The VERSION signal still means something.
-                    errors.append('GitHub does not know this commit, so the exact '
-                                  'distance from main could not be measured.')
+                    # Either the commit is unknown to GitHub - a local build - or
+                    # the whole repository is invisible to us. Both give a 404.
+                    not_found = True
+                    errors.append('GitHub does not know this commit, so the distance '
+                                  'from main could not be measured.')
                 else:
                     errors.append(f'compare returned HTTP {r.status_code}')
             except Exception as e:
@@ -618,7 +648,17 @@ def fetch_remote_state(slug, local_sha):
             pass
 
     if not out['signals']:
-        out['error'] = ' '.join(errors) or 'Nothing could be reached.'
+        if not_found:
+            # Everything 404s when the repository is private, which is the usual
+            # reason: an unauthenticated request cannot see it at all. Saying
+            # that is more use than repeating two 404s.
+            out['error'] = (
+                f'Could not read {owner}/{repo} from GitHub. Both the version file and '
+                f'the commit came back "not found", which is what a private repository '
+                f'looks like to an unauthenticated request - update checks work on a '
+                f'deployment cloned from a public repository.')
+        else:
+            out['error'] = ' '.join(errors) or 'Nothing could be reached.'
     elif out['up_to_date'] is None and out['latest_version']:
         # No compare, but a VERSION - fall back to comparing versions.
         out['up_to_date'] = out['latest_version'] == read_version()
