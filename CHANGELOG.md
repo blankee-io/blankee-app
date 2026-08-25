@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.1.3 — 2026-08-25
+
+### Fixed
+- The version line and the automatic-update toggle now line up with the rest of
+  the administrator console. Both sat hard left with their control pushed to the
+  far right, while every other row puts its label in the same right-aligned
+  column, so the Updates section did not read as part of the same form.
+
 ## 1.1.2 — 2026-08-25
 
 ### Fixed

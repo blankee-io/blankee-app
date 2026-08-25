@@ -7843,20 +7843,30 @@ transform: scale(1.2);
 /* One line: the version, and a button to check. Deliberately not a panel of
    status rows - an administrator opening this page is almost never here about
    updates, and anything worth saying is said in a toast or the confirm modal. */
-.update-line {
+/* Both rows deliberately mirror .profile-form .input-group: same padding, same
+   gap, a label in the same 30% right-aligned column, and a .hidden-spacer doing
+   the pushing. Without that the version and the toggle sat hard left while every
+   other row in the console lined its label up on the right. */
+.update-line,
+.update-auto-row {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px 12px;
+    gap: 8px;
     width: 100%;
+    margin-bottom: 8px;
     padding: 12px 16px;
     background-color: var(--white);
     border-radius: 10px;
     box-sizing: border-box;
 }
 
-.update-line-name {
+.update-line-name,
+.update-auto-row label {
+    flex-shrink: 0;
+    width: 30%;
+    min-width: 40px;
+    margin: 0;
+    text-align: right;
     color: var(--text-dark);
     font-size: 14px;
     font-weight: 500;
@@ -7883,26 +7893,6 @@ transform: scale(1.2);
 .update-check-link:disabled {
     color: var(--secondary-dark);
     cursor: default;
-}
-
-/* The automatic-update toggle, on its own row under the version line. Same
-   spacing as .update-line so the two read as one block. */
-.update-auto-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px 12px;
-    width: 100%;
-    margin-top: 8px;
-    padding: 8px 16px;
-    background-color: var(--white);
-    border-radius: 10px;
-    box-sizing: border-box;
-}
-
-.update-auto-row label {
-    color: var(--secondary-dark);
-    font-size: 13px;
 }
 
 
