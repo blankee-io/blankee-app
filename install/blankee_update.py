@@ -537,6 +537,20 @@ def do_update(dry_run):
                              [f'sudo {APP_DIR}/install/install.sh --permissions-only'])
     step_done()
 
+    step('units', 'Refreshing the updater units')
+    # A release can change a unit file or add one, and until this ran the new
+    # file just sat in the repository while the old one stayed installed. That is
+    # how 1.1.0 shipped an automatic-update toggle whose nightly timer nobody had
+    # installed. Not fatal if it fails: the code is already updated and the site
+    # still works, it is the next update that would be affected.
+    rc, out = run(['bash', os.path.join(APP_DIR, 'install', 'install.sh'),
+                   '--units-only'], timeout=120)
+    if rc == 0:
+        step_done()
+    else:
+        step_done(f'could not refresh the units (rc={rc}); '
+                  f'run install.sh to fix: {out[-200:]}', ok=False)
+
     if file_hash(os.path.join(APP_DIR, 'requirements.txt')) != requirements_before:
         step('dependencies', 'Installing changed dependencies')
         rc, out = run([os.path.join(VENV_DIR, 'bin', 'pip'), 'install', '--no-input',

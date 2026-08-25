@@ -14634,10 +14634,22 @@ def admin_update_auto():
 
     log_info(app.logger, 'UPDATE',
              f'Admin {current_user.id} turned automatic updates {"on" if on else "off"}')
+    state = _update_blob()
+
+    if on and not (state.get('install') or {}).get('auto_timer'):
+        # The setting is saved and correct, but nothing is scheduled to act on
+        # it. Saying "on" here would be a lie by omission - the instance would
+        # simply never update and nobody would know why.
+        return jsonify({
+            'status': 'warning',
+            'message': ('Saved, but the nightly timer is not installed on this '
+                        'instance, so nothing will act on it yet. Run '
+                        'sudo ./install/install.sh --units-only on the server.'),
+            'update': state}), 200
+
     message = ('Updates will be installed automatically, at midnight.' if on
                else 'Automatic updates are off.')
-    return jsonify({'status': 'success', 'message': message,
-                    'update': _update_blob()}), 200
+    return jsonify({'status': 'success', 'message': message, 'update': state}), 200
 
 @app.route('/admin/create-user', methods=['POST'])
 @admin_required

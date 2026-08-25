@@ -216,6 +216,24 @@ def remote_slug():
         return {}
 
 
+AUTO_TIMER_UNIT = '/etc/systemd/system/blankee-update-auto.timer'
+
+
+def auto_timer_installed():
+    """
+    Whether the nightly timer unit actually exists.
+
+    Setting AUTO_UPDATE only records an intention; something has to be running to
+    act on it. Updating does not install systemd units on its own before 1.1.1,
+    so an instance can have the toggle and no timer - which would silently never
+    update. Cheap to check, and the answer is worth showing.
+    """
+    try:
+        return os.path.exists(AUTO_TIMER_UNIT)
+    except Exception:
+        return False
+
+
 def install_kind():
     """'docker', 'bare-metal' or 'unknown'."""
     try:
@@ -700,7 +718,8 @@ def update_state(check_remote=False):
     return {
         'version': read_version(),
         'commit': commit,
-        'install': {'kind': install_kind(), 'app_dir': REPO_ROOT},
+        'install': {'kind': install_kind(), 'app_dir': REPO_ROOT,
+                    'auto_timer': auto_timer_installed()},
         'code': code,
         'dependencies': dependency_report(),
         'schema': migration_report(),
