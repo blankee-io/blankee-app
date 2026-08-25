@@ -8,6 +8,35 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.2.0 — 2026-08-25
+
+### Added
+- A **Buy me a coffee** button in the footer, opening the widget centred on
+  screen and sized to fit the viewport.
+- A copyright line in the footer.
+
+### Changed
+- The navbar logo now goes to your own landing page rather than to
+  `blankee.io`. Signed-out pages still point at the marketing site, which is
+  the only useful destination when there is no account to land in.
+- The current-period button uses Font Awesome Free's calendar-day icon, so it
+  renders the same with or without a Pro licence.
+- The footer wordmark is sized to the text beside it rather than to a round
+  number of pixels: the wordmark fills 0.434 of the SVG's box, so 20px puts it
+  at the cap height of the 12px text it sits next to.
+- The "member since" badge sits above the current-week outline on the dashboard
+  and three-month views.
+
+### Fixed
+- The footer was missing from the dashboard summary page - the one full page
+  that never included it.
+- The caret on the current-period button sat lower on hover than at rest. It
+  was a `fa-caret-down` glyph, and two fonts hinted at two different pixel
+  sizes do not keep their ink in the same relative place, so the button's
+  hover `scale(1.2)` re-rasterised both and they drifted apart. It is drawn
+  with borders now, which is pure box geometry with nothing to hint.
+- The current-period button's hover matches the other navigation buttons.
+
 ## 1.1.5 — 2026-08-25
 
 ### Added
