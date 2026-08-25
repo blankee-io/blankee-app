@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.2.1 — 2026-08-25
+
+### Fixed
+- The Buy Me a Coffee widget's close button sat on every page. It is created
+  hidden and the vendor only reveals it on narrow screens, because elsewhere its
+  floating button doubles as the close control - and 1.2.0 hides that floating
+  button, so the close button was forced visible unconditionally to compensate.
+  It is now shown only while the overlay is actually open, read off the iframe's
+  inline transform since the widget marks the open state nowhere else.
+
 ## 1.2.0 — 2026-08-25
 
 ### Added
