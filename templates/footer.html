@@ -6,11 +6,24 @@
 #}
 <footer class="app-footer">
     <div class="app-footer-inner">
-        <span class="app-footer-brand">Blankee</span>
+        {# The teal mark, not the orange one the navbar uses: the footer sits on #}
+        {# the page background rather than the dark bar. #}
+        <img class="app-footer-brand" alt="Blankee"
+             src="{{ url_for('static', filename='teallogotext.svg') }}">
         {# Version only, never the commit: a SHA tells an anonymous visitor exactly #}
         {# which commit is running, and therefore which fixes are missing. The #}
         {# exact commit belongs in the admin console, behind admin_required. #}
         {% if app_version %}<span class="app-footer-version">v{{ app_version }}</span>{% endif %}
+        {% set notice = update_notice() %}
+        {% if notice %}
+        {# Only an administrator ever sees this: nobody else can act on it. #}
+        <a class="app-footer-link app-footer-update" href="{{ url_for('admin_console') }}"
+           title="Version {{ notice.to_version or notice.to_short }} is available">
+            <i class="fa-solid fa-cloud-arrow-down"></i><span>Update available</span>
+        </a>
+        {% endif %}
+        {# The brand is already the word beside it, so this is just the notice. #}
+        <span class="app-footer-copyright">&copy; {{ copyright_years() }}</span>
         <span class="app-footer-sep" aria-hidden="true"></span>
         <a class="app-footer-link" href="https://github.com/blankee-io/blankee-app"
            target="_blank" rel="noopener noreferrer">
@@ -21,4 +34,81 @@
             <i class="fa-solid fa-scale-balanced"></i><span>AGPL-3.0</span>
         </a>
     </div>
+
+    {# Its own row so the licence line above stays the licence line. The button
+       is ours; the overlay it opens is the vendor's widget, loaded below. #}
+    <div class="app-footer-support">
+        <button type="button" class="app-footer-bmc" id="footer-bmc-btn"
+                title="Buy me a coffee">
+            <img src="{{ url_for('static', filename='bmac/bmc-full-logo.svg') }}"
+                 alt="Buy me a coffee">
+        </button>
+    </div>
 </footer>
+
+{% if notice %}
+<script>
+    // Uses the shared confirm modal rather than a bespoke one - see CLAUDE.md
+    // section 5a. The checkbox persists on either outcome and suppresses the
+    // dialog next time rather than auto-confirming it, which is what
+    // skipResult: false means.
+    (function () {
+        if (typeof showConfirmModal !== 'function') { return; }
+        var key = 'blankee-update-dismissed-{{ notice.to_short }}';
+        if (localStorage.getItem(key) === '1') { return; }
+        document.addEventListener('DOMContentLoaded', function () {
+            showConfirmModal({
+                title: 'Update Available',
+                message: 'Blankee {{ notice.to_version or notice.to_short }} is '
+                       + 'available. Installing replaces the application code, '
+                       + 'applies any new dependencies and migrations, and reloads '
+                       + 'the application.',
+                confirmText: 'Update',
+                cancelText: 'Dismiss',
+                checkbox: {
+                    label: 'Do not show again for this update',
+                    storageKey: key,
+                    persistOn: 'both',
+                    skipResult: false
+                }
+            }).then(function (go) {
+                if (!go) { return; }
+                fetch('{{ url_for("admin_update_apply") }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                }).then(function (r) { return r.json(); }).then(function (res) {
+                    showToast(res.message || 'Update requested.',
+                              res.status === 'requested' ? 'info' : 'error', 8000);
+                }).catch(function () {
+                    showToast('Could not request the update.', 'error', 8000);
+                });
+            });
+        });
+    })();
+</script>
+{% endif %}
+
+<!-- Buy Me a Coffee widget. Its own floating button is hidden by CSS: the
+     footer button opens it instead, so there is one entry point rather than
+     two, and nothing sits on top of the page content. -->
+<script data-name="BMC-Widget" data-cfasync="false"
+        src="https://cdnjs.buymeacoffee.com/1.0.0/widget.prod.min.js"
+        data-id="blankee" data-description="Support me on Buy me a coffee!"
+        data-message="" data-color="#5F7FFF" data-position="Right"
+        data-x_margin="18" data-y_margin="18"></script>
+<script>
+    (function () {
+        var btn = document.getElementById('footer-bmc-btn');
+        if (!btn) { return; }
+        btn.addEventListener('click', function () {
+            // Clicking the widget's own button is the only supported way to
+            // open its overlay. If the script did not load - offline, blocked,
+            // or the vendor changed that id - go to the page instead of doing
+            // nothing at all.
+            var widget = document.getElementById('bmc-wbtn');
+            if (widget) { widget.click(); return; }
+            window.open('https://www.buymeacoffee.com/blankee', '_blank', 'noopener');
+        });
+    })();
+</script>

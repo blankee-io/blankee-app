@@ -38,6 +38,7 @@ import json
 import os
 import shutil
 import stat
+import re
 import subprocess
 import sys
 import tempfile
@@ -433,6 +434,73 @@ def reload_app():
     return (ok, '; '.join(detail))
 
 
+AVAILABLE_FILE = os.environ.get('BLANKEE_UPDATE_AVAILABLE',
+                                os.path.join(CONFIG_DIR, 'update-available.json'))
+
+
+def write_available(record):
+    """
+    Record whether an update is waiting, for the application to read.
+
+    Separate from the status file on purpose: that one describes a run that
+    happened, this one describes the world. Conflating them would mean a
+    successful update erasing the knowledge that a newer one exists.
+    """
+    try:
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(AVAILABLE_FILE),
+                                   prefix='.update-available-')
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(record, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, AVAILABLE_FILE)
+    except Exception as e:
+        say(f'  could not write {AVAILABLE_FILE}: {e}')
+
+
+def check_only():
+    """
+    Fetch and compare, changing nothing else.
+
+    What the nightly timer does when automatic updates are off: an operator who
+    has not opted into unattended updates should still be told that one exists.
+    Nothing is installed, nothing is reloaded, and the working tree is not
+    touched - `git fetch` only writes to .git.
+    """
+    rc, out = git('fetch', '--prune', 'origin', BRANCH, timeout=300)
+    if rc != 0:
+        say(f'  could not reach the remote: {out[-200:]}')
+        return 1
+
+    rc, target = git('rev-parse', f'origin/{BRANCH}')
+    if rc != 0:
+        return 1
+    target = target.strip().splitlines()[-1].strip()
+    rc, current = git('rev-parse', 'HEAD')
+    current = current.strip().splitlines()[-1].strip()
+
+    version = None
+    rc, out = git('show', f'origin/{BRANCH}:VERSION')
+    if rc == 0 and out.strip():
+        candidate = out.strip().splitlines()[-1].strip()
+        if re.fullmatch(r'\d+\.\d+\.\d+(-rc\.\d+)?', candidate):
+            version = candidate
+
+    available = target != current
+    write_available({
+        'available': available,
+        'checked_at': now(),
+        'from_commit': current, 'from_short': current[:7],
+        'from_version': read_version_file(),
+        'to_commit': target if available else None,
+        'to_short': target[:7] if available else None,
+        'to_version': version if available else None,
+    })
+    say(f'  {"an update is available: " + target[:7] if available else "already up to date"}')
+    return 0
+
+
 def preflight(creds, missing):
     """Everything that must be true before anything is changed. None, or a failure."""
     problems = []
@@ -592,6 +660,13 @@ def do_update(dry_run):
              'sudo tail -50 /var/log/apache2/blankee_error.log'])
 
     version = _status['to'].get('version') or target[:7]
+    # Whatever was waiting has just been installed. Clearing this here rather
+    # than waiting for the next nightly check means the console stops offering
+    # an update the moment it has been taken.
+    write_available({'available': False, 'checked_at': now(),
+                     'from_commit': target, 'from_short': target[:7],
+                     'from_version': version,
+                     'to_commit': None, 'to_short': None, 'to_version': None})
     return finish_ok(f'Updated to {version} ({target[:7]}) and reloaded.')
 
 
@@ -655,11 +730,13 @@ def main():
         requested, request_id, auto = read_flag()
 
         if args.auto:
-            # The daily timer. Nothing to do unless automatic updates are on -
-            # and this is the only thing that consults that flag, so turning it
-            # off in blankee.conf is immediate and needs no restart.
+            # The daily timer. With automatic updates off it still checks, and
+            # records the answer for the console to show - an operator who has
+            # not opted into unattended updates should still be told that one
+            # exists. Nothing is installed on that path.
             if not auto:
-                return 0
+                say('Nightly check (automatic updates are off).')
+                return check_only()
             say('Automatic update (AUTO_UPDATE is on).')
             request_id = f'auto-{int(time.time())}'
             # A request from the console is still honoured; it just gets folded

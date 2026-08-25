@@ -58,7 +58,7 @@
             </div>
             <div class="calendarnavbuttons" style="visibility: hidden;"> 
                 <div id="previous-nav-btn" class="nav-button"><i class="fa-solid fa-left"></i></div>
-                <div id="current-nav-btn" class="nav-button"><i class="fa-kit fa-solid-calendar-day-circle-arrow-down-tl"></i></div>
+                <div id="current-nav-btn" class="nav-button"><span class="nav-current-icon"><i class="fa-solid fa-calendar-day"></i></span></div>
                 <div id="next-nav-btn" class="nav-button"><i class="fa-solid fa-right"></i></div>
                 <div id="next-indicator" style="display:none;text-align:center;">
                     <span class="indicator-dot">!</span>
@@ -1639,5 +1639,7 @@
             });
         });
     </script>
+{% include 'footer.html' %}
+
 </body>
 </html>

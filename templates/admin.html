@@ -34,26 +34,28 @@
                 <div class="profile-actions">
                     <div class="updates-section">
                         <div class="section-liner">
-                            <div class="update-line">
-                                <span class="update-line-name">Blankee{% if update.version %} v{{ update.version }}{% endif %}</span>
-                                <input type="text" disabled class="hidden-spacer">
-                                <button type="button" class="update-check-link" id="update-check-btn">
-                                    <span>Check for updates</span>
-                                    <i class="fa-solid fa-arrows-rotate" id="update-check-icon"></i>
-                                </button>
-                            </div>
-                            {% if update.self_update and update.install.kind != 'docker' %}
-                            <div class="update-auto-row">
-                                <label for="auto_update_enabled">Update automatically:</label>
-                                <input type="text" disabled class="hidden-spacer">
-                                <input type="checkbox" id="auto_update_enabled" class="hidden-checkbox"
-                                       {% if update.auto_update %}checked{% endif %}>
-                                <button type="button" class="toggle-switch" data-checkbox="auto_update_enabled"
-                                        id="auto-update-toggle" title="Check nightly and install updates">
-                                    <i class="fa-solid fa-toggle-large-on toggle-icon {% if not update.auto_update %}toggle-off{% endif %}"></i>
-                                </button>
-                            </div>
-                            {% endif %}
+                            <form class="profile-form">
+                                <div class="input-group">
+                                    <span class="update-line-name">Blankee{% if update.version %} v{{ update.version }}{% endif %}</span>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <button type="button" class="update-check-link" id="update-check-btn">
+                                        <span>Check for updates</span>
+                                        <i class="fa-solid fa-cloud-arrow-down" id="update-check-icon"></i>
+                                    </button>
+                                </div>
+                                {% if update.self_update and update.install.kind != 'docker' %}
+                                <div class="input-group">
+                                    <label for="auto_update_enabled">Update automatically:</label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="auto_update_enabled" class="hidden-checkbox"
+                                           {% if update.auto_update %}checked{% endif %}>
+                                    <button type="button" class="toggle-switch" data-checkbox="auto_update_enabled"
+                                            id="auto-update-toggle" title="Check nightly and install updates">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if not update.auto_update %}toggle-off{% endif %}"></i>
+                                    </button>
+                                </div>
+                                {% endif %}
+                            </form>
                         </div>
                     </div>
                     <div class="admin-users-section">
@@ -803,7 +805,12 @@
         const updateState = {{ update | tojson }};
 
         function spinCheck(on) {
-            $('#update-check-icon').toggleClass('fa-spin', !!on);
+            // Swap the glyph rather than spinning the cloud: a rotating download
+            // arrow reads as "downloading", which is not what is happening while
+            // it is only asking.
+            $('#update-check-icon')
+                .toggleClass('fa-cloud-arrow-down', !on)
+                .toggleClass('fa-spinner fa-spin', !!on);
             $('#update-check-btn').prop('disabled', !!on);
         }
 

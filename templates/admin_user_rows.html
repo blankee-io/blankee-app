@@ -2,7 +2,7 @@
 <tr data-user-id="{{ u.id }}" data-username="{{ u.username }}">
     <td class="admin-user-email-cell">
         {{ u.username }}
-        {% if u.is_admin %}<span class="admin-user-tag">administrator</span>{% endif %}
+        {% if u.is_admin %}<span class="admin-user-tag"><span class="admin-user-tag-full">Admin</span><span class="admin-user-tag-short">A</span></span>{% endif %}
     </td>
     <td>{% if u.first_name %}{{ u.first_name }}{% else %}&mdash;{% endif %}</td>
     <td>{% if u.last_name %}{{ u.last_name }}{% else %}&mdash;{% endif %}</td>

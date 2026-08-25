@@ -280,7 +280,7 @@ def get_db_connection():
     return conn
 
 class User(UserMixin):
-    def __init__(self, id, username, password, is_admin=False):
+    def __init__(self, id, username, password, is_admin=False, landing_page=None):
         self.id = id
         self.username = username
         self.password = password
@@ -288,6 +288,10 @@ class User(UserMixin):
         # admin console, and a stale copy of a privilege flag is worth more than
         # the query it saves.
         self.is_admin = bool(is_admin)
+        # Carried here so the navbar logo can link to it on every page. It rides
+        # along in the query above rather than costing one of its own, and views
+        # that need it as a template variable still pass it themselves.
+        self.landing_page = landing_page or None
 
     def get_id(self):
         return str(self.id)
@@ -295,12 +299,13 @@ class User(UserMixin):
     @staticmethod
     def get(user_id):
         with get_db_pool().get_cursor() as cursor:
-            cursor.execute("SELECT id, username, password, is_admin FROM users WHERE id = %s",
-                           (user_id,))
+            cursor.execute("SELECT id, username, password, is_admin, landing_page "
+                           "FROM users WHERE id = %s", (user_id,))
             user = cursor.fetchone()
 
         if user:
-            return User(id=user[0], username=user[1], password=user[2], is_admin=user[3])
+            return User(id=user[0], username=user[1], password=user[2],
+                        is_admin=user[3], landing_page=user[4])
         return None
 
 
@@ -416,6 +421,87 @@ def _app_version():
 
 
 app.jinja_env.globals['app_version'] = _app_version()
+
+
+def _update_notice():
+    """
+    The waiting update, for the footer and the notice modal - or None.
+
+    Only ever returns something for an administrator. Everybody else cannot act
+    on it, and an icon in the footer that a user is unable to do anything about
+    is noise rather than information.
+
+    Never raises: this runs on every page render, and an unreadable file must not
+    be able to take a page down.
+    """
+    try:
+        if not getattr(current_user, 'is_authenticated', False):
+            return None
+        if not getattr(current_user, 'is_admin', False):
+            return None
+        from version_info import update_available
+        return update_available()
+    except Exception as e:
+        log_error(app.logger, 'UPDATE', f'Could not read the update notice: {e}')
+        return None
+
+
+app.jinja_env.globals['update_notice'] = _update_notice
+
+
+def _copyright_years():
+    """
+    The copyright line's year, as "2026" or "2026-2031".
+
+    Rendered rather than hardcoded so it cannot quietly go stale - a footer still
+    claiming 2026 in 2031 is the sort of thing nobody notices for years. Computed
+    per render because a long-running process would otherwise carry the old year
+    across midnight on the 31st of December.
+    """
+    try:
+        from datetime import date
+        first, now = 2026, date.today().year
+        return str(first) if now <= first else f'{first}-{now}'
+    except Exception:
+        return '2026'
+
+
+app.jinja_env.globals['copyright_years'] = _copyright_years
+
+
+# The landing page an unset user gets, and the fallback when one is set to an
+# endpoint that no longer exists. Matches the default in /update_landing_page.
+DEFAULT_LANDING_PAGE = 'dashboard_3m'
+
+
+def _landing_url():
+    """
+    Where the navbar logo goes: the signed-in user's chosen landing page.
+
+    Returns a URL, never an endpoint name, because the caller is an href and a
+    bad endpoint name would raise inside url_for during rendering. An endpoint
+    that no longer exists - renamed, or removed - falls back to the default
+    rather than taking every page down with it.
+
+    Anonymous visitors get the marketing site, which is where the logo used to
+    point for everyone.
+    """
+    try:
+        if not getattr(current_user, 'is_authenticated', False):
+            return 'https://blankee.io/'
+        endpoint = getattr(current_user, 'landing_page', None) or DEFAULT_LANDING_PAGE
+        if endpoint not in app.view_functions:
+            log_warning(app.logger, 'CONFIG',
+                        f'User {current_user.id} has landing_page {endpoint!r}, '
+                        f'which is not a route; using {DEFAULT_LANDING_PAGE}')
+            endpoint = DEFAULT_LANDING_PAGE
+        return url_for(endpoint)
+    except Exception as e:
+        log_error(app.logger, 'CONFIG', f'Could not build the landing page URL: {e}')
+        return '/'
+
+
+app.jinja_env.globals['landing_url'] = _landing_url
 
 
 @app.context_processor

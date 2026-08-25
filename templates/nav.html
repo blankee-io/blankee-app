@@ -2,7 +2,8 @@
 <div class="nav-bar">
     <div class="nav-bar-container">
         <div class="nav-left-content">
-            <a href="https://blankee.io/">
+            {# The signed-in user's own landing page; the marketing site for anyone else. #}
+            <a href="{{ landing_url() }}">
                 <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo">
             </a>
         </div>
