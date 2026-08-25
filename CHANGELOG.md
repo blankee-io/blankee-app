@@ -8,15 +8,29 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.1.2 — 2026-08-25
+
+### Fixed
+- Corrected the 1.1.1 note above, which claimed that taking 1.1.1 was enough to
+  install the missing timer. It is not: an update is carried out by the updater
+  already running, so a fix to the updater takes effect on the update after the
+  one that delivers it.
+
 ## 1.1.1 — 2026-08-25
 
 ### Fixed
 - Updating now installs changed systemd units. It did not before, so 1.1.0
   shipped an automatic-update toggle whose nightly timer was never installed:
-  the switch saved its setting and nothing acted on it. Anyone who took 1.1.0
-  from the console has that gap, and taking 1.1.1 closes it. `install.sh` grew
+  the switch saved its setting and nothing acted on it. `install.sh` grew
   `--units-only` for the purpose, so the installer stays the only place those
   units are defined.
+
+  **Taking 1.1.1 does not close the gap by itself.** The updater that performs
+  an update is the one already running, so 1.1.0's updater installs 1.1.1's code
+  while still following 1.1.0's steps. Either run
+  `sudo ./install/install.sh --units-only` once, or take the update after this
+  one, which will do it. This is inherent to updating in place, and applies to
+  any future change to a unit file.
 - The toggle now says so if the nightly timer is missing, rather than reporting
   success for a setting nothing will act on.
 
