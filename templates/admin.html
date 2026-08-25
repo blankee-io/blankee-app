@@ -41,6 +41,17 @@
                                     <i class="fa-solid fa-arrows-rotate" id="update-check-icon"></i>
                                 </button>
                             </div>
+                            {% if update.self_update and update.install.kind != 'docker' %}
+                            <div class="update-auto-row">
+                                <label for="auto_update_enabled">Update automatically</label>
+                                <input type="checkbox" id="auto_update_enabled" class="hidden-checkbox"
+                                       {% if update.auto_update %}checked{% endif %}>
+                                <button type="button" class="toggle-switch" data-checkbox="auto_update_enabled"
+                                        id="auto-update-toggle" title="Check nightly and install updates">
+                                    <i class="fa-solid fa-toggle-large-on toggle-icon {% if not update.auto_update %}toggle-off{% endif %}"></i>
+                                </button>
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                     <div class="admin-users-section">
@@ -978,6 +989,29 @@
             spinCheck(true);
             watchUpdate(updateState.run.request_id, Date.now() + 150000);
         }
+
+        // The generic .toggle-switch handler above flips the icon; this saves it.
+        $('#auto-update-toggle').on('click', function() {
+            const on = !$('#auto_update_enabled').is(':checked');
+            $.ajax({
+                url: "{{ url_for('admin_update_auto') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ enabled: on }),
+                success: function(res) {
+                    showToast(res.message, on ? 'success' : 'info');
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    // Put the switch back: it moved when the icon flipped, and
+                    // leaving it showing a setting that was not saved is worse
+                    // than the failure itself.
+                    $('#auto_update_enabled').prop('checked', !on);
+                    $('#auto-update-toggle .toggle-icon').toggleClass('toggle-off', on);
+                    showToast(res.message || 'Could not save that setting.', 'error', 8000);
+                }
+            });
+        });
     </script>
 {% include 'footer.html' %}
 
