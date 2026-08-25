@@ -140,9 +140,16 @@ write a request flag, which a root-owned systemd timer picks up within a minute.
 Progress and the result end up in `journalctl -u blankee-update`, and a failure
 leaves the exact recovery commands in the console.
 
-To turn the button off, set `SELF_UPDATE=0` in
-`/var/www/budget_env/blankee.conf`. The console then shows the commands instead.
-It is off automatically under Docker, where the code is part of the image.
+There is also an **Update automatically** toggle, off by default. With it on, a
+nightly timer checks at midnight and installs anything newer. Worth a moment's
+thought before turning on: it means code from the internet is installed and run
+while nobody is watching, and a release with a problem reaches you before anyone
+has noticed. The trade is that fixes arrive without you having to remember.
+
+To turn the button off entirely, set `SELF_UPDATE=0` in
+`/var/www/budget_env/blankee.conf`; the console then shows the commands instead.
+`AUTO_UPDATE=0` in the same file turns off just the nightly run. Both are off
+automatically under Docker, where the code is part of the image.
 
 #### From a shell
 
