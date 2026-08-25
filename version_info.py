@@ -514,6 +514,35 @@ STATUS_FILE = os.environ.get('BLANKEE_UPDATE_STATUS',
 
 _GITHUB_HOSTS = ('github.com', 'www.github.com')
 
+AVAILABLE_FILE = os.environ.get('BLANKEE_UPDATE_AVAILABLE',
+                                '/var/www/budget_env/update-available.json')
+
+
+def update_available():
+    """
+    What the nightly check last found, or None.
+
+    Written by the privileged updater, read here. Deliberately separate from the
+    run status: that describes an update that happened, this describes one that
+    is waiting. A successful run clears it, so the two cannot disagree for long.
+
+    Returns None rather than a falsey dict when nothing is waiting, so callers
+    can write `{% if update_notice %}` without reasoning about the shape.
+    """
+    try:
+        if not os.path.exists(AVAILABLE_FILE):
+            return None
+        import json
+        with open(AVAILABLE_FILE, 'r', encoding='utf-8') as f:
+            record = json.load(f)
+        if not record.get('available'):
+            return None
+        return record
+    except Exception as e:
+        log_warning(logger, 'UPDATE', 'Could not read the update-available file',
+                    error=str(e))
+        return None
+
 
 def read_run_status():
     """The updater's last run, or None if it has never run."""
@@ -724,4 +753,5 @@ def update_state(check_remote=False):
         'dependencies': dependency_report(),
         'schema': migration_report(),
         'run': read_run_status(),
+        'available': update_available(),
     }

@@ -418,6 +418,32 @@ def _app_version():
 app.jinja_env.globals['app_version'] = _app_version()
 
 
+def _update_notice():
+    """
+    The waiting update, for the footer and the notice modal - or None.
+
+    Only ever returns something for an administrator. Everybody else cannot act
+    on it, and an icon in the footer that a user is unable to do anything about
+    is noise rather than information.
+
+    Never raises: this runs on every page render, and an unreadable file must not
+    be able to take a page down.
+    """
+    try:
+        if not getattr(current_user, 'is_authenticated', False):
+            return None
+        if not getattr(current_user, 'is_admin', False):
+            return None
+        from version_info import update_available
+        return update_available()
+    except Exception as e:
+        log_error(app.logger, 'UPDATE', f'Could not read the update notice: {e}')
+        return None
+
+
+app.jinja_env.globals['update_notice'] = _update_notice
+
+
 @app.context_processor
 def inject_unread_notifications():
     """Inject unread notification count and user info into all templates for the nav"""

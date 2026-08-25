@@ -11,6 +11,14 @@
         {# which commit is running, and therefore which fixes are missing. The #}
         {# exact commit belongs in the admin console, behind admin_required. #}
         {% if app_version %}<span class="app-footer-version">v{{ app_version }}</span>{% endif %}
+        {% set notice = update_notice() %}
+        {% if notice %}
+        {# Only an administrator ever sees this: nobody else can act on it. #}
+        <a class="app-footer-link app-footer-update" href="{{ url_for('admin_console') }}"
+           title="Version {{ notice.to_version or notice.to_short }} is available">
+            <i class="fa-solid fa-cloud-arrow-down"></i><span>Update available</span>
+        </a>
+        {% endif %}
         <span class="app-footer-sep" aria-hidden="true"></span>
         <a class="app-footer-link" href="https://github.com/blankee-io/blankee-app"
            target="_blank" rel="noopener noreferrer">
@@ -22,3 +30,46 @@
         </a>
     </div>
 </footer>
+
+{% if notice %}
+<script>
+    // Uses the shared confirm modal rather than a bespoke one - see CLAUDE.md
+    // section 5a. The checkbox persists on either outcome and suppresses the
+    // dialog next time rather than auto-confirming it, which is what
+    // skipResult: false means.
+    (function () {
+        if (typeof showConfirmModal !== 'function') { return; }
+        var key = 'blankee-update-dismissed-{{ notice.to_short }}';
+        if (localStorage.getItem(key) === '1') { return; }
+        document.addEventListener('DOMContentLoaded', function () {
+            showConfirmModal({
+                title: 'Update Available',
+                message: 'Blankee {{ notice.to_version or notice.to_short }} is '
+                       + 'available. Installing replaces the application code, '
+                       + 'applies any new dependencies and migrations, and reloads '
+                       + 'the application.',
+                confirmText: 'Update',
+                cancelText: 'Dismiss',
+                checkbox: {
+                    label: 'Do not show again for this update',
+                    storageKey: key,
+                    persistOn: 'both',
+                    skipResult: false
+                }
+            }).then(function (go) {
+                if (!go) { return; }
+                fetch('{{ url_for("admin_update_apply") }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                }).then(function (r) { return r.json(); }).then(function (res) {
+                    showToast(res.message || 'Update requested.',
+                              res.status === 'requested' ? 'info' : 'error', 8000);
+                }).catch(function () {
+                    showToast('Could not request the update.', 'error', 8000);
+                });
+            });
+        });
+    })();
+</script>
+{% endif %}

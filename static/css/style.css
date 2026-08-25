@@ -7728,6 +7728,32 @@ transform: scale(1.2);
     overflow-wrap: anywhere;
 }
 
+/* Two spellings, one shown at a time. A CSS-only swap rather than one label
+   restyled, because the narrow form is a different word, not the same word
+   smaller - and content: on a pseudo-element is invisible to a screen reader
+   reading the cell.
+
+   The email column is the one that has to give when the table is narrow, so at
+   600px the tag shrinks to a single letter rather than wrapping under the
+   address. */
+.admin-user-tag-short {
+    display: none;
+}
+
+@media (max-width: 600px) {
+    .admin-user-tag-full {
+        display: none;
+    }
+
+    .admin-user-tag-short {
+        display: inline;
+    }
+
+    .admin-user-tag {
+        padding: 2px 6px;
+    }
+}
+
 .admin-user-email-cell .admin-user-tag {
     margin-left: 6px;
 }
@@ -7843,25 +7869,10 @@ transform: scale(1.2);
 /* One line: the version, and a button to check. Deliberately not a panel of
    status rows - an administrator opening this page is almost never here about
    updates, and anything worth saying is said in a toast or the confirm modal. */
-/* Both rows deliberately mirror .profile-form .input-group: same padding, same
-   gap, a label in the same 30% right-aligned column, and a .hidden-spacer doing
-   the pushing. Without that the version and the toggle sat hard left while every
-   other row in the console lined its label up on the right. */
-.update-line,
-.update-auto-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    margin-bottom: 8px;
-    padding: 12px 16px;
-    background-color: var(--white);
-    border-radius: 10px;
-    box-sizing: border-box;
-}
-
-.update-line-name,
-.update-auto-row label {
+/* The version sits where a label would, so it is a span carrying the same rules
+   as .profile-form label - the row itself is a plain .input-group, which is what
+   also gives the toggle its size and colour. */
+.update-line-name {
     flex-shrink: 0;
     width: 30%;
     min-width: 40px;
@@ -15782,6 +15793,18 @@ transform: scale(1.2);
 
 .app-footer-link i {
     font-size: 11px;
+}
+
+/* The one thing in the footer that is asking for attention rather than just
+   being available, so it is the only coloured item there. */
+.app-footer-update {
+    color: var(--accent);
+}
+
+.app-footer-update:hover,
+.app-footer-update:focus-visible {
+    background-color: var(--accent-lighter);
+    color: var(--accent-hover);
 }
 
 .app-footer-link:hover,

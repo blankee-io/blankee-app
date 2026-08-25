@@ -228,13 +228,28 @@ function showEndDateWarning(endDateSelector) {
  * @param {string} [opts.confirmText]- Confirm button label (default: 'Confirm')
  * @param {string} [opts.cancelText] - Cancel button label (default: 'Cancel')
  * @param {boolean}[opts.danger]     - Use red confirm button (default: false)
+ * @param {boolean}[opts.hideCancel] - Hide the cancel button (default: false)
+ * @param {Object} [opts.checkbox]   - Optional "remember this" checkbox
+ * @param {string}  opts.checkbox.label      - Its label
+ * @param {string}  opts.checkbox.storageKey - localStorage key to remember it under
+ * @param {string} [opts.checkbox.persistOn] - 'confirm' (default), 'cancel' or 'both'
+ * @param {*}      [opts.checkbox.skipResult]- what to resolve with when remembered
+ *                                             (default true)
  */
 function showConfirmModal(opts) {
     return new Promise(function(resolve) {
-        // Checkbox with storageKey: auto-confirm if user previously opted out
+        // A remembered checkbox short-circuits the dialog. What it resolves to
+        // depends on what the checkbox meant:
+        //
+        //   "do not ask again"       -> the user already agreed, so confirm.
+        //   "do not show this again" -> the user dismissed it, so do NOT.
+        //
+        // skipResult says which. It defaults to true, the original behaviour,
+        // which is what the entry-update callers in the dashboards expect.
         if (opts.checkbox && opts.checkbox.storageKey) {
             if (localStorage.getItem(opts.checkbox.storageKey) === '1') {
-                resolve(true);
+                resolve(opts.checkbox.skipResult !== undefined
+                        ? opts.checkbox.skipResult : true);
                 return;
             }
         }
@@ -305,14 +320,27 @@ function showConfirmModal(opts) {
             document.removeEventListener('keydown', onKeydown);
             resolve(result);
         }
-        function onConfirm() {
-            // If checkbox is shown and checked, persist the preference
-            if (opts.checkbox && opts.checkbox.storageKey && checkboxEl.checked) {
+        function persistCheckbox(outcome) {
+            // persistOn says which outcomes record the preference. 'confirm' is
+            // the default and the original behaviour; a "do not show again"
+            // checkbox needs 'both', because the point is that it was ticked
+            // while dismissing.
+            if (!opts.checkbox || !opts.checkbox.storageKey || !checkboxEl.checked) {
+                return;
+            }
+            var when = opts.checkbox.persistOn || 'confirm';
+            if (when === 'both' || when === outcome) {
                 localStorage.setItem(opts.checkbox.storageKey, '1');
             }
+        }
+        function onConfirm() {
+            persistCheckbox('confirm');
             cleanup(true);
         }
-        function onCancel()  { cleanup(false); }
+        function onCancel()  {
+            persistCheckbox('cancel');
+            cleanup(false);
+        }
         function onBackdrop(e) { if (e.target === modal) cleanup(false); }
         function onKeydown(e) {
             if (e.key === 'Enter') { e.preventDefault(); onConfirm(); }

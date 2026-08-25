@@ -8,6 +8,30 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.1.5 — 2026-08-25
+
+### Added
+- With automatic updates **off**, the nightly timer now still checks, and
+  records what it found. An operator who has not opted into unattended updates
+  should still be told that an update exists.
+- When one is waiting, administrators see a small orange cloud icon in the
+  footer, and are offered it once in a dialog with **Update**, **Dismiss**, and
+  **Do not show again for this update**. The checkbox is remembered per update,
+  so the next one asks again. Only administrators see either: nobody else can
+  act on it.
+
+### Changed
+- The Updates section uses a cloud-with-arrow icon, and shows a spinner while
+  checking rather than spinning the download arrow.
+- The administrator tag in the user list reads `Admin`, and just `A` on screens
+  600px and under.
+
+### Fixed
+- The automatic-update switch rendered as a small dark box instead of the orange
+  pill used everywhere else. The rules that size and colour a toggle are scoped
+  to `.profile-form`, and the Updates section had none — so it now uses the same
+  form and `.input-group` markup as the rest of the console.
+
 ## 1.1.3 — 2026-08-25
 
 ### Fixed
