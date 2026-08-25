@@ -1304,6 +1304,50 @@ transform: scale(1.2);
     text-align: center;
 }
 
+/* The "go to today" button: a plain calendar-day with a caret notched into its
+   header. It replaces a Font Awesome Pro Kit glyph that drew the same idea in
+   one character - two free icons stacked cost nothing and drop a Pro
+   dependency.
+
+   The caret is painted in the page background so it reads as a piece cut out of
+   the calendar rather than a mark added on top, which is why it must stay
+   var(--bg-page) and not white: the dashboards sit on the tinted background. */
+.nav-current-icon {
+    position: relative;
+    display: inline-block;
+    line-height: 1;
+}
+
+/* The caret is drawn, not set. It used to be a fa-caret-down glyph, and two
+   fonts hinted at two different pixel sizes do not keep their ink in the same
+   relative place - so the button's hover scale(1.2) re-rasterised both and the
+   caret landed lower against the calendar than it sat at rest. Borders are
+   pure box geometry with nothing to hint, so the shape now scales exactly with
+   the glyph it sits on and the two states are the same picture at two sizes.
+
+   Every length is in em, resolved against .nav-current-icon's font-size, so it
+   also tracks the button's clamp() size across viewports. */
+.nav-current-icon::after {
+    content: "";
+    position: absolute;
+    top: 0.16em;
+    left: 42%;
+    /* The -0.02em is by eye: the calendar glyph's header is not centred on the
+       icon's box, so a pure percentage sits slightly right of where it looks
+       right. In em rather than px so it scales with everything else. */
+    transform: translateX(calc(-50% - 0.02em));
+    width: 0;
+    height: 0;
+    border-left: 0.15em solid transparent;
+    border-right: 0.15em solid transparent;
+    border-top: 0.16em solid var(--bg-page);
+    pointer-events: none;
+    /* A blanket `transition: all` applies to every element on the page; without
+       this the caret would animate its own geometry while the button was
+       already carrying it. It needs to do nothing but be carried. */
+    transition: none;
+}
+
 .nav-button {
     position: relative;
     align-items: center;
@@ -1322,14 +1366,13 @@ transform: scale(1.2);
     font-size: 15px;
 }
 
-.nav-button:hover:not(#current-nav-btn):not(.nav-button-focus) {
+/* Every nav button hovers the same way. #current-nav-btn used to be excluded
+   here and given scale(1.07) of its own, from when it carried a larger Pro
+   glyph; with the same calendar icon as its neighbours there is no reason for
+   it to behave differently. */
+.nav-button:hover:not(.nav-button-focus) {
     color: var(--primary-hover);
     transform: scale(1.2);
-}
-
-#current-nav-btn:hover {
-    transform: scale(1.07);
-    color: var(--primary-hover);
 }
 
 .nav-button a {
@@ -2765,7 +2808,11 @@ transform: scale(1.02);
     border-radius: 50%;
     color: white;
     font-size: 10px;
-    z-index: 10;
+    /* Above .current-week-outline, which is 15 and is a sibling in the same
+       container on the monthly and three-month dashboards - so at 10 the
+       outline's 4px border drew straight over the badge. Still below
+       .dashboard-d-today-flag at 20, and nothing else sits between. */
+    z-index: 16;
 }
 
 /* Member Since badge positioning for dashboard_d */
@@ -7728,6 +7775,32 @@ transform: scale(1.2);
     overflow-wrap: anywhere;
 }
 
+/* Two spellings, one shown at a time. A CSS-only swap rather than one label
+   restyled, because the narrow form is a different word, not the same word
+   smaller - and content: on a pseudo-element is invisible to a screen reader
+   reading the cell.
+
+   The email column is the one that has to give when the table is narrow, so at
+   600px the tag shrinks to a single letter rather than wrapping under the
+   address. */
+.admin-user-tag-short {
+    display: none;
+}
+
+@media (max-width: 600px) {
+    .admin-user-tag-full {
+        display: none;
+    }
+
+    .admin-user-tag-short {
+        display: inline;
+    }
+
+    .admin-user-tag {
+        padding: 2px 6px;
+    }
+}
+
 .admin-user-email-cell .admin-user-tag {
     margin-left: 6px;
 }
@@ -7843,25 +7916,10 @@ transform: scale(1.2);
 /* One line: the version, and a button to check. Deliberately not a panel of
    status rows - an administrator opening this page is almost never here about
    updates, and anything worth saying is said in a toast or the confirm modal. */
-/* Both rows deliberately mirror .profile-form .input-group: same padding, same
-   gap, a label in the same 30% right-aligned column, and a .hidden-spacer doing
-   the pushing. Without that the version and the toggle sat hard left while every
-   other row in the console lined its label up on the right. */
-.update-line,
-.update-auto-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    margin-bottom: 8px;
-    padding: 12px 16px;
-    background-color: var(--white);
-    border-radius: 10px;
-    box-sizing: border-box;
-}
-
-.update-line-name,
-.update-auto-row label {
+/* The version sits where a label would, so it is a span carrying the same rules
+   as .profile-form label - the row itself is a plain .input-group, which is what
+   also gives the toggle its size and colour. */
+.update-line-name {
     flex-shrink: 0;
     width: 30%;
     min-width: 40px;
@@ -15744,11 +15802,18 @@ transform: scale(1.2);
     border-top: 1px solid var(--secondary-lighter);
 }
 
+/* The wordmark rather than the word. viewBox is 1356.7x500, so height alone
+   sizes it - a width would squash it. 16px keeps it level with the 12px text
+   beside it without becoming the loudest thing in the footer. */
+/* Sized so the wordmark reads at the same size as the text beside it rather
+   than to a round number. "blankee" occupies 0.434 of the SVG's 500-unit box
+   (measured: ink runs y 140.9..358.0), and the footer's 12px Nunito has a cap
+   height near 0.705em, so 8.5 / 0.434 puts the image at 20px. At the 16px it
+   had, the wordmark came out a third smaller than "v1.1.5" next to it. */
 .app-footer-brand {
-    color: var(--primary);
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
+    height: 20px;
+    width: auto;
+    display: block;
 }
 
 /* Quieter than the brand and not a link: it states a fact about the deployment
@@ -15758,6 +15823,11 @@ transform: scale(1.2);
     color: var(--secondary-dark);
     font-size: 12px;
     letter-spacing: 0.2px;
+}
+
+.app-footer-copyright {
+    color: var(--secondary-dark);
+    font-size: 12px;
 }
 
 /* Hidden when the row wraps, because a separator at the end of a line reads as
@@ -15784,6 +15854,18 @@ transform: scale(1.2);
     font-size: 11px;
 }
 
+/* The one thing in the footer that is asking for attention rather than just
+   being available, so it is the only coloured item there. */
+.app-footer-update {
+    color: var(--accent);
+}
+
+.app-footer-update:hover,
+.app-footer-update:focus-visible {
+    background-color: var(--accent-lighter);
+    color: var(--accent-hover);
+}
+
 .app-footer-link:hover,
 .app-footer-link:focus-visible {
     background-color: var(--primary-lighter);
@@ -15799,4 +15881,73 @@ transform: scale(1.2);
     .app-footer-sep {
         display: none;
     }
+}
+
+/* A second row under the licence line, so the two are not competing for the
+   same sentence. Centred to match the row above. */
+.app-footer-support {
+    display: flex;
+    justify-content: center;
+    margin-top: 10px;
+}
+
+.app-footer-bmc {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    cursor: pointer;
+    opacity: 0.85;
+    transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+
+.app-footer-bmc:hover,
+.app-footer-bmc:focus-visible {
+    background-color: var(--secondary-lighter);
+    opacity: 1;
+}
+
+/* The source is 4169x913, so height alone sizes it - a width would squash it. */
+.app-footer-bmc img {
+    height: 22px;
+    width: auto;
+    display: block;
+}
+
+/* The widget ships its own floating button. Hidden so there is one way in,
+   rather than two controls for the same overlay, one of them covering the page.
+   !important because the widget sets its own inline styles. */
+#bmc-wbtn {
+    display: none !important;
+}
+
+/* Centre the widget and keep it inside the viewport.
+   Everything below is !important because the vendor sets these as inline
+   styles on the element, which nothing else can outrank.
+
+   Centred with inset + margin rather than a transform, deliberately: the widget
+   animates open with transform scale(0) -> scale(1), so a translate here would
+   be overwritten on open and fight the animation on close. inset:0 with
+   margin:auto centres a fixed element of known size and leaves transform alone -
+   only its origin needs moving, so it grows from the middle rather than from a
+   corner that is no longer there. */
+#bmc-iframe {
+    inset: 0 !important;
+    margin: auto !important;
+    transform-origin: center center !important;
+    /* The widget asks for window.innerHeight - 120px, which overflows once any
+       browser chrome is taller than it assumed. Capping here is what makes it
+       fit vertically on a short window. */
+    max-height: calc(100vh - 48px) !important;
+    max-width: calc(100vw - 32px) !important;
+}
+
+/* Its close button is only made visible on narrow screens, because normally the
+   floating button doubles as the close control - and we have hidden that. Its
+   own handler is a no-op; closing works because the click bubbles to the
+   backdrop, so simply showing it is enough. */
+#bmc-close-btn {
+    visibility: visible !important;
 }
