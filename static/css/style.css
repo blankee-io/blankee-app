@@ -15944,10 +15944,25 @@ transform: scale(1.2);
     max-width: calc(100vw - 32px) !important;
 }
 
-/* Its close button is only made visible on narrow screens, because normally the
-   floating button doubles as the close control - and we have hidden that. Its
-   own handler is a no-op; closing works because the click bubbles to the
+/* Its close button is created hidden and only revealed on narrow screens,
+   because normally the floating button doubles as the close control - and we
+   have hidden that. So it does have to be shown here, but only while the
+   overlay is open: forcing it visible unconditionally left a floating close
+   button sitting on every page, closing a widget that was not there.
+
+   The vendor marks the open state nowhere - no class, no attribute, and the
+   container it appends to <body> has no id. The one signal is the iframe's
+   inline transform, which it animates between scale(0) and scale(1), so that
+   is what this reads. :has() on <body> rather than the container because the
+   close button is the iframe's *earlier* sibling and CSS has no
+   previous-sibling combinator.
+
+   Its own handler is a no-op; closing works because the click bubbles to the
    backdrop, so simply showing it is enough. */
 #bmc-close-btn {
+    visibility: hidden !important;
+}
+
+body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     visibility: visible !important;
 }
