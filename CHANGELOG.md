@@ -8,6 +8,21 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.2.2 — 2026-08-25
+
+### Fixed
+- `install/blankee_update.py` shipped without its executable bit, so the command
+  the README gives for checking an update by hand -
+  `sudo ./install/blankee_update.py --dry-run --force` - failed with
+  `Permission denied` on every installation. The admin console was unaffected,
+  because systemd invokes the file through `/usr/bin/python3`; it was only the
+  path an operator reaches for when the updater itself is the problem.
+
+### Changed
+- The footer logo is 22px rather than 20px. Matching cap heights exactly leaves
+  a wordmark looking smaller than the text beside it, because it carries no
+  ascenders past its own letters.
+
 ## 1.2.1 — 2026-08-25
 
 ### Fixed

@@ -15805,13 +15805,14 @@ transform: scale(1.2);
 /* The wordmark rather than the word. viewBox is 1356.7x500, so height alone
    sizes it - a width would squash it. 16px keeps it level with the 12px text
    beside it without becoming the loudest thing in the footer. */
-/* Sized so the wordmark reads at the same size as the text beside it rather
-   than to a round number. "blankee" occupies 0.434 of the SVG's 500-unit box
-   (measured: ink runs y 140.9..358.0), and the footer's 12px Nunito has a cap
-   height near 0.705em, so 8.5 / 0.434 puts the image at 20px. At the 16px it
-   had, the wordmark came out a third smaller than "v1.1.5" next to it. */
+/* Sized against the text beside it rather than to a round number. "blankee"
+   occupies 0.434 of the SVG's 500-unit box (measured: ink runs y 140.9..358.0),
+   and the footer's 12px Nunito has a cap height near 0.705em, so matching cap
+   heights exactly puts the image at 20px. 22px sits a touch above that on
+   purpose - a wordmark set to the same cap height as body text reads smaller
+   than it measures, because it carries no ascenders past the 'b' and 'k'. */
 .app-footer-brand {
-    height: 20px;
+    height: 22px;
     width: auto;
     display: block;
 }
