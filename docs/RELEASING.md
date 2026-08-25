@@ -51,6 +51,17 @@ it is what makes the version a complete signal rather than an approximate one: a
 instance that reports "up to date" while a newer commit exists is worse than one
 that reports a patch bump nobody needed.
 
+## A fix to the updater lands one release late
+
+The updater that carries out an update is the one already running: it reads and
+compiles its whole source before doing anything, then replaces the tree
+underneath itself. So a change to `install/blankee_update.py` is installed by
+the *old* updater, and only takes effect on the following update.
+
+That is worth remembering when a release fixes something in the update process
+itself. Say so in the changelog, and give the one command that closes the gap
+immediately - `sudo ./install/install.sh --units-only`, or a full installer run.
+
 ## What a release must not do
 
 An update applies code, then dependencies, then migrations, then reloads. So for
