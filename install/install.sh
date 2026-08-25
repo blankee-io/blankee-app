@@ -10,6 +10,7 @@
 #   sudo ./install/install.sh --port 18420           # listen here instead of the default
 #   sudo ./install/install.sh --no-self-update       # do not install the updater
 #   sudo ./install/install.sh --permissions-only     # re-apply ownership and exit
+#   sudo ./install/install.sh --units-only           # reinstall the updater units
 #
 # Re-running is safe. Anything already in place is left alone, and existing
 # secrets in the config file are never regenerated - doing so would invalidate
@@ -36,6 +37,7 @@ DB_CONF="$SECURE_DIR/db.conf"
 CONF_FILE="$CONFIG_DIR/blankee.conf"
 CHECK_ONLY=0
 PERMISSIONS_ONLY=0
+UNITS_ONLY=0
 SELF_UPDATE=1
 UPDATER_SERVICE="/etc/systemd/system/blankee-update.service"
 UPDATER_TIMER="/etc/systemd/system/blankee-update.timer"
@@ -48,8 +50,9 @@ while [[ $# -gt 0 ]]; do
     --port)        HTTP_PORT="$2"; shift 2 ;;
     --check)       CHECK_ONLY=1; shift ;;
     --permissions-only) PERMISSIONS_ONLY=1; shift ;;
+    --units-only)       UNITS_ONLY=1; shift ;;
     --no-self-update)   SELF_UPDATE=0; shift ;;
-    -h|--help)     sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)     sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -69,6 +72,132 @@ set_conf_key() {
     sed -i "s|^[[:space:]]*$key=.*|$key=$value|" "$CONF_FILE"
   else
     printf '%s=%s\n' "$key" "$value" >> "$CONF_FILE"
+  fi
+}
+
+install_updater_units() {
+  # Writes and enables the systemd units. A function because the updater calls
+  # it through --units-only after every checkout: a release that changes a unit
+  # file, or adds one, would otherwise leave the new file sitting in the
+  # repository with the old one still installed - which is exactly how 1.1.0
+  # shipped an automatic-update toggle whose timer nobody had installed.
+  cat > "$UPDATER_SERVICE" <<EOF
+[Unit]
+Description=Blankee self-update (applies a request from the admin console)
+Documentation=file://$APP_DIR/docs/RELEASING.md
+After=network-online.target mysql.service apache2.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Root deliberately: it replaces root-owned code, installs into a root-owned
+# virtualenv and reloads the web server. The web process gains nothing from
+# this - it can only set a flag in blankee.conf, which this reads and validates.
+#
+# /usr/bin/python3 rather than the virtualenv's python: the moment this most
+# needs to report clearly is when pip has just broken that virtualenv.
+#
+# ExecStart points at the copy in the repository on purpose. The script rewrites
+# that tree while running, which is safe because CPython compiles the whole file
+# before executing it - and it means there is no second copy to go stale.
+ExecStart=/usr/bin/python3 $APP_DIR/install/blankee_update.py
+ExecStopPost=/usr/bin/python3 $APP_DIR/install/blankee_update.py --mark-aborted
+Environment=BLANKEE_APP_DIR=$APP_DIR
+Environment=BLANKEE_CONFIG_DIR=$CONFIG_DIR
+Environment=BLANKEE_CONFIG=$CONF_FILE
+Environment=BLANKEE_VENV=$VENV_DIR
+Environment=BLANKEE_WSGI=$WSGI_FILE
+Environment=BLANKEE_DB_CONF=$DB_CONF
+UMask=0022
+TimeoutStartSec=1800
+Nice=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blankee-update
+EOF
+
+  cat > "$UPDATER_TIMER" <<EOF
+[Unit]
+Description=Check for a Blankee update request every minute
+
+[Timer]
+# A timer rather than a .path unit watching blankee.conf. A path unit is
+# instant, but: an in-place rewrite truncates the file first, so the watcher can
+# fire on the truncation, read an empty file and exit, and the event for the
+# real content is dropped while the service is still active - the button appears
+# to do nothing, silently. PathModified also never fires retroactively, so a
+# request written while the unit is stopped is lost. A timer re-reads the
+# current state every tick, which makes all of that impossible.
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=blankee-update.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  cat > "$UPDATER_AUTO_SERVICE" <<EOF
+[Unit]
+Description=Blankee automatic update (daily, when AUTO_UPDATE is on)
+Documentation=file://$APP_DIR/docs/RELEASING.md
+After=network-online.target mysql.service apache2.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Same updater, same privileges, same refusals. The only difference is that it
+# runs on a schedule and exits immediately unless AUTO_UPDATE is set, which is
+# read from blankee.conf on every run - so turning it off takes effect at once.
+ExecStart=/usr/bin/python3 $APP_DIR/install/blankee_update.py --auto
+ExecStopPost=/usr/bin/python3 $APP_DIR/install/blankee_update.py --mark-aborted
+Environment=BLANKEE_APP_DIR=$APP_DIR
+Environment=BLANKEE_CONFIG_DIR=$CONFIG_DIR
+Environment=BLANKEE_CONFIG=$CONF_FILE
+Environment=BLANKEE_VENV=$VENV_DIR
+Environment=BLANKEE_WSGI=$WSGI_FILE
+Environment=BLANKEE_DB_CONF=$DB_CONF
+UMask=0022
+TimeoutStartSec=1800
+Nice=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blankee-update
+EOF
+
+  cat > "$UPDATER_AUTO_TIMER" <<EOF
+[Unit]
+Description=Apply Blankee updates nightly when AUTO_UPDATE is on
+
+[Timer]
+# Local midnight. Persistent so a machine that was off overnight catches up on
+# the next boot rather than skipping a day silently.
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+# Spread the load on the source a little, and avoid every instance in the world
+# fetching at the same second.
+RandomizedDelaySec=900
+Unit=blankee-update-auto.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  chmod 644 "$UPDATER_SERVICE" "$UPDATER_TIMER" "$UPDATER_AUTO_SERVICE" "$UPDATER_AUTO_TIMER"
+  systemctl daemon-reload
+  # The nightly timer is enabled either way; it does nothing at all unless
+  # AUTO_UPDATE is on, and enabling it here means the toggle in the console
+  # needs no privileged action to take effect.
+  systemctl enable --now blankee-update-auto.timer >/dev/null 2>&1 || true
+  if systemctl enable --now blankee-update.timer >/dev/null 2>&1; then
+    # Only now is the flag true. It answers "can this instance update itself",
+    # so writing it before the timer is actually enabled would make the console
+    # offer a button whose request nothing would ever read.
+    set_conf_key SELF_UPDATE 1
+    info "blankee-update.timer enabled; updates can be applied from the admin console"
+  else
+    set_conf_key SELF_UPDATE 0
+    warn "could not enable blankee-update.timer; updates stay manual"
   fi
 }
 
@@ -101,6 +230,23 @@ if [[ $PERMISSIONS_ONLY -eq 1 ]]; then
   info "code owned by root and readable; static/uploads writable by www-data"
   exit 0
 fi
+
+# The self-updater calls this after every checkout, so a release that changes or
+# adds a unit file actually installs it. Kept beside --permissions-only for the
+# same reason: the installer owns these rules, and the updater should not carry
+# a second copy of them.
+if [[ $UNITS_ONLY -eq 1 ]]; then
+  [[ $EUID -eq 0 ]] || die "Run with sudo."
+  [[ -f "$APP_DIR/app.py" ]] || die "Cannot find app.py - run this from inside the repository."
+  if ! command -v systemctl >/dev/null; then
+    warn "no systemd here, so there is nothing to install"
+    exit 0
+  fi
+  say "Installing the updater units"
+  install_updater_units
+  exit 0
+fi
+
 
 
 # ---------------------------------------------------------------- checks
@@ -393,124 +539,7 @@ elif ! command -v systemctl >/dev/null; then
   set_conf_key SELF_UPDATE 0
   warn "no systemd here, so the updater was not installed; updates stay manual"
 else
-  cat > "$UPDATER_SERVICE" <<EOF
-[Unit]
-Description=Blankee self-update (applies a request from the admin console)
-Documentation=file://$APP_DIR/docs/RELEASING.md
-After=network-online.target mysql.service apache2.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-# Root deliberately: it replaces root-owned code, installs into a root-owned
-# virtualenv and reloads the web server. The web process gains nothing from
-# this - it can only set a flag in blankee.conf, which this reads and validates.
-#
-# /usr/bin/python3 rather than the virtualenv's python: the moment this most
-# needs to report clearly is when pip has just broken that virtualenv.
-#
-# ExecStart points at the copy in the repository on purpose. The script rewrites
-# that tree while running, which is safe because CPython compiles the whole file
-# before executing it - and it means there is no second copy to go stale.
-ExecStart=/usr/bin/python3 $APP_DIR/install/blankee_update.py
-ExecStopPost=/usr/bin/python3 $APP_DIR/install/blankee_update.py --mark-aborted
-Environment=BLANKEE_APP_DIR=$APP_DIR
-Environment=BLANKEE_CONFIG_DIR=$CONFIG_DIR
-Environment=BLANKEE_CONFIG=$CONF_FILE
-Environment=BLANKEE_VENV=$VENV_DIR
-Environment=BLANKEE_WSGI=$WSGI_FILE
-Environment=BLANKEE_DB_CONF=$DB_CONF
-UMask=0022
-TimeoutStartSec=1800
-Nice=10
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=blankee-update
-EOF
-
-  cat > "$UPDATER_TIMER" <<EOF
-[Unit]
-Description=Check for a Blankee update request every minute
-
-[Timer]
-# A timer rather than a .path unit watching blankee.conf. A path unit is
-# instant, but: an in-place rewrite truncates the file first, so the watcher can
-# fire on the truncation, read an empty file and exit, and the event for the
-# real content is dropped while the service is still active - the button appears
-# to do nothing, silently. PathModified also never fires retroactively, so a
-# request written while the unit is stopped is lost. A timer re-reads the
-# current state every tick, which makes all of that impossible.
-OnBootSec=2min
-OnUnitActiveSec=1min
-AccuracySec=15s
-Unit=blankee-update.service
-
-[Install]
-WantedBy=timers.target
-EOF
-
-  cat > "$UPDATER_AUTO_SERVICE" <<EOF
-[Unit]
-Description=Blankee automatic update (daily, when AUTO_UPDATE is on)
-Documentation=file://$APP_DIR/docs/RELEASING.md
-After=network-online.target mysql.service apache2.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-# Same updater, same privileges, same refusals. The only difference is that it
-# runs on a schedule and exits immediately unless AUTO_UPDATE is set, which is
-# read from blankee.conf on every run - so turning it off takes effect at once.
-ExecStart=/usr/bin/python3 $APP_DIR/install/blankee_update.py --auto
-ExecStopPost=/usr/bin/python3 $APP_DIR/install/blankee_update.py --mark-aborted
-Environment=BLANKEE_APP_DIR=$APP_DIR
-Environment=BLANKEE_CONFIG_DIR=$CONFIG_DIR
-Environment=BLANKEE_CONFIG=$CONF_FILE
-Environment=BLANKEE_VENV=$VENV_DIR
-Environment=BLANKEE_WSGI=$WSGI_FILE
-Environment=BLANKEE_DB_CONF=$DB_CONF
-UMask=0022
-TimeoutStartSec=1800
-Nice=10
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=blankee-update
-EOF
-
-  cat > "$UPDATER_AUTO_TIMER" <<EOF
-[Unit]
-Description=Apply Blankee updates nightly when AUTO_UPDATE is on
-
-[Timer]
-# Local midnight. Persistent so a machine that was off overnight catches up on
-# the next boot rather than skipping a day silently.
-OnCalendar=*-*-* 00:00:00
-Persistent=true
-# Spread the load on the source a little, and avoid every instance in the world
-# fetching at the same second.
-RandomizedDelaySec=900
-Unit=blankee-update-auto.service
-
-[Install]
-WantedBy=timers.target
-EOF
-
-  chmod 644 "$UPDATER_SERVICE" "$UPDATER_TIMER" "$UPDATER_AUTO_SERVICE" "$UPDATER_AUTO_TIMER"
-  systemctl daemon-reload
-  # The nightly timer is enabled either way; it does nothing at all unless
-  # AUTO_UPDATE is on, and enabling it here means the toggle in the console
-  # needs no privileged action to take effect.
-  systemctl enable --now blankee-update-auto.timer >/dev/null 2>&1 || true
-  if systemctl enable --now blankee-update.timer >/dev/null 2>&1; then
-    # Only now is the flag true. It answers "can this instance update itself",
-    # so writing it before the timer is actually enabled would make the console
-    # offer a button whose request nothing would ever read.
-    set_conf_key SELF_UPDATE 1
-    info "blankee-update.timer enabled; updates can be applied from the admin console"
-  else
-    set_conf_key SELF_UPDATE 0
-    warn "could not enable blankee-update.timer; updates stay manual"
-  fi
+  install_updater_units
 fi
 
 # ---------------------------------------------------------------- apache

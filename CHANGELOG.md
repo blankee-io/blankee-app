@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.1.1 — 2026-08-25
+
+### Fixed
+- Updating now installs changed systemd units. It did not before, so 1.1.0
+  shipped an automatic-update toggle whose nightly timer was never installed:
+  the switch saved its setting and nothing acted on it. Anyone who took 1.1.0
+  from the console has that gap, and taking 1.1.1 closes it. `install.sh` grew
+  `--units-only` for the purpose, so the installer stays the only place those
+  units are defined.
+- The toggle now says so if the nightly timer is missing, rather than reporting
+  success for a setting nothing will act on.
+
 ## 1.1.0 — 2026-08-25
 
 Updating, from the administrator console.

@@ -999,7 +999,10 @@
                 contentType: 'application/json',
                 data: JSON.stringify({ enabled: on }),
                 success: function(res) {
-                    showToast(res.message, on ? 'success' : 'info');
+                    showToast(res.message,
+                              res.status === 'warning' ? 'warning'
+                                                       : (on ? 'success' : 'info'),
+                              res.status === 'warning' ? 12000 : 4000);
                 },
                 error: function(xhr) {
                     const res = xhr.responseJSON || {};
