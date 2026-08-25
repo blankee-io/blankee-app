@@ -36,6 +36,7 @@
                         <div class="section-liner">
                             <div class="update-line">
                                 <span class="update-line-name">Blankee{% if update.version %} v{{ update.version }}{% endif %}</span>
+                                <input type="text" disabled class="hidden-spacer">
                                 <button type="button" class="update-check-link" id="update-check-btn">
                                     <span>Check for updates</span>
                                     <i class="fa-solid fa-arrows-rotate" id="update-check-icon"></i>
@@ -43,7 +44,8 @@
                             </div>
                             {% if update.self_update and update.install.kind != 'docker' %}
                             <div class="update-auto-row">
-                                <label for="auto_update_enabled">Update automatically</label>
+                                <label for="auto_update_enabled">Update automatically:</label>
+                                <input type="text" disabled class="hidden-spacer">
                                 <input type="checkbox" id="auto_update_enabled" class="hidden-checkbox"
                                        {% if update.auto_update %}checked{% endif %}>
                                 <button type="button" class="toggle-switch" data-checkbox="auto_update_enabled"
