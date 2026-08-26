@@ -1,0 +1,75 @@
+# Turn a pushed tag into a GitHub release, with the notes taken from CHANGELOG.md.
+#
+# Nothing in Blankee reads releases: the updater compares VERSION fetched from
+# raw.githubusercontent.com and asks the compare API how far ahead main is. This
+# exists so a person can see what changed without opening the changelog, and so
+# anyone running an instance can subscribe - Watch > Custom > Releases is the one
+# thing a bare tag cannot do.
+#
+# The notes come from the file rather than being written here on purpose. A
+# release whose body is retyped by hand is a second copy of the changelog, and it
+# starts drifting from the first immediately.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build a release for (use this to backfill)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # This file is published into the public repository from the private one, so
+    # it exists in both. Without this guard the private repo would cut its own
+    # duplicate releases from its own tags, and bill the Actions minutes.
+    if: github.repository == 'blankee-io/blankee-app'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history and every tag: the previous tag is what decides
+          # how far back the notes reach.
+          fetch-depth: 0
+
+      - name: Resolve the tag and the one before it
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null \
+            || { echo "::error::no such tag: ${TAG}"; exit 1; }
+          # sort -V so 1.2.10 lands after 1.2.9. Empty when TAG is the oldest,
+          # which the notes script reads as "no floor, take everything".
+          PREV="$(git tag -l 'v*' | sort -V \
+                  | awk -v cur="${TAG}" '$0 == cur { print prev; exit } { prev = $0 }')"
+          echo "TAG=${TAG}"   >> "$GITHUB_ENV"
+          echo "PREV=${PREV}" >> "$GITHUB_ENV"
+          echo "releasing ${TAG}, notes reach back to ${PREV:-the beginning}"
+
+      - name: Build the notes from CHANGELOG.md as it stood at the tag
+        run: |
+          set -euo pipefail
+          git show "${TAG}:CHANGELOG.md" > /tmp/CHANGELOG.md
+          python3 .github/scripts/release_notes.py /tmp/CHANGELOG.md "${TAG}" "${PREV}" \
+            > /tmp/notes.md
+          echo "--- notes ---"; cat /tmp/notes.md
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Idempotent so a re-run, or a backfill of something already released,
+          # corrects the body instead of failing.
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release edit "${TAG}" --title "${TAG}" --notes-file /tmp/notes.md
+            echo "updated ${TAG}"
+          else
+            gh release create "${TAG}" --title "${TAG}" --notes-file /tmp/notes.md --verify-tag
+            echo "created ${TAG}"
+          fi
