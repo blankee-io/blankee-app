@@ -195,11 +195,16 @@ interacting with it remotely must be offered the corresponding source. In
 practice that means a visible link to the source repository in the running
 application.
 
-Two places carry that link, so it is reachable whether or not anyone is signed
-in: `templates/footer.html` (the login page, dashboard summary, FAQ and support)
-and a **Source code** entry in the profile dropdown in `templates/nav.html`,
-which puts it on every authenticated page.
+`templates/footer.html` carries that link, and every full page in the
+application includes that footer — signed in or not, which is what makes it
+sufficient on its own. It used to be duplicated as a **Source code** entry in
+the profile dropdown, from when the footer did not yet reach every page; that
+entry was removed in 1.4.1 once it did.
+
+If you move or restyle the footer, this is the constraint to keep in mind: the
+link has to stay reachable from the running application, not merely exist in the
+repository.
 
 The obligation falls on whoever operates an instance. **If you fork this and
-deploy it, repoint both links at your own repository** — the link has to offer
-*your* corresponding source, including any modifications, not this one.
+deploy it, repoint the link at your own repository** — it has to offer *your*
+corresponding source, including any modifications, not this one.

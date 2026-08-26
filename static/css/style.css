@@ -1330,7 +1330,12 @@ transform: scale(1.2);
 .nav-current-icon::after {
     content: "";
     position: absolute;
-    top: 0.16em;
+    /* The button computes to roughly 29px, so 1em here is about 29px and this
+       sits the caret ~5px below where it started. Kept in em rather than px so
+       the whole shape still scales as one with the glyph under it - a fixed
+       offset would drift as the clamp()ed button size changes across
+       viewports. */
+    top: 0.33em;
     left: 42%;
     /* The -0.02em is by eye: the calendar glyph's header is not centred on the
        icon's box, so a pure percentage sits slightly right of where it looks
@@ -1338,9 +1343,9 @@ transform: scale(1.2);
     transform: translateX(calc(-50% - 0.02em));
     width: 0;
     height: 0;
-    border-left: 0.15em solid transparent;
-    border-right: 0.15em solid transparent;
-    border-top: 0.16em solid var(--bg-page);
+    border-left: 0.18em solid transparent;
+    border-right: 0.18em solid transparent;
+    border-top: 0.19em solid var(--bg-page);
     pointer-events: none;
     /* A blanket `transition: all` applies to every element on the page; without
        this the caret would animate its own geometry while the button was
@@ -7853,7 +7858,8 @@ transform: scale(1.2);
    ::before content would have to be layered onto, which reads worse than the
    repetition. */
 
-.updates-section {
+.updates-section,
+.logs-section {
     position: relative;
     margin: 30px 0 35px;
     padding: 16px;
@@ -7865,7 +7871,8 @@ transform: scale(1.2);
     box-shadow: 0 -6px 8px var(--shadow-sm);
 }
 
-.updates-section::before {
+.updates-section::before,
+.logs-section::before {
     content: "Updates";
     position: absolute;
     top: -25px;
@@ -7878,6 +7885,11 @@ transform: scale(1.2);
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 0.5px;
+}
+
+/* Same tab, different word. */
+.logs-section::before {
+    content: "Logs";
 }
 
 /* Boxed to the same metrics as .profile-form .input-group, so help text and
@@ -7919,7 +7931,8 @@ transform: scale(1.2);
 /* The version sits where a label would, so it is a span carrying the same rules
    as .profile-form label - the row itself is a plain .input-group, which is what
    also gives the toggle its size and colour. */
-.update-line-name {
+.update-line-name,
+.logs-line-name {
     flex-shrink: 0;
     width: 30%;
     min-width: 40px;
@@ -7930,8 +7943,10 @@ transform: scale(1.2);
     font-weight: 500;
 }
 
-.update-check-link {
+.update-check-link,
+.logs-open-link {
     display: inline-flex;
+    text-decoration: none;
     align-items: center;
     gap: 8px;
     padding: 0;
@@ -7944,7 +7959,8 @@ transform: scale(1.2);
     transition: color 0.2s ease;
 }
 
-.update-check-link:hover:not(:disabled) {
+.update-check-link:hover:not(:disabled),
+.logs-open-link:hover {
     color: var(--primary-hover);
 }
 
@@ -15974,7 +15990,11 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    things, and the two would quietly fight. */
 
 .logview {
-    max-width: 1600px;
+    /* 875px is what every other page container uses - .profile-actions,
+       .nav-bar-container, .app-footer-inner. A log table wants to be wider, but
+       a page that outgrows the navbar above it looks broken rather than roomy,
+       so the table scrolls inside itself instead. */
+    max-width: 875px;
     margin: 0 auto;
     padding: 0 12px 24px;
     box-sizing: border-box;
@@ -16348,7 +16368,16 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     color: var(--text-dark);
 }
 
-@media (max-width: 700px) {
+/* 600px is this stylesheet's phone breakpoint, used by every other page. */
+@media (max-width: 600px) {
+    .logview {
+        padding: 0 8px 20px;
+    }
+
+    .logview-section {
+        padding: 12px;
+    }
+
     .logview-filter input,
     .logview-filter select,
     .logview-filter-wide input {
@@ -16361,5 +16390,96 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
     .logview-btn-export {
         margin-left: 0;
+    }
+
+    /* Nine columns cannot be read on a phone, and sideways scrolling through
+       them is worse than useless when you are looking for one error. Each entry
+       becomes a card instead, and every cell names itself from its data-label -
+       the same information, stacked. */
+    .logview-tablewrap {
+        overflow-x: visible;
+        border: none;
+        border-radius: 0;
+    }
+
+    .logview-table,
+    .logview-table tbody,
+    .logview-table tr,
+    .logview-table td {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .logview-table thead {
+        display: none;
+    }
+
+    .logview-row {
+        margin-bottom: 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--secondary-lighter);
+        border-radius: 8px;
+        background-color: var(--white);
+    }
+
+    .logview-table td {
+        display: flex;
+        gap: 8px;
+        padding: 2px 0;
+        border-top: none;
+    }
+
+    /* An entry with no endpoint, user or request id should not show three empty
+       rows saying so. The template renders those cells with nothing in them at
+       all, which is what makes :empty work here. */
+    .logview-table td:empty {
+        display: none;
+    }
+
+    .logview-table td::before {
+        content: attr(data-label);
+        flex-shrink: 0;
+        width: 74px;
+        color: var(--secondary-dark);
+        font-size: 10.5px;
+        font-weight: 600;
+        line-height: 1.7;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+
+    .logview-msg {
+        min-width: 0;
+    }
+
+    /* The level stripe moves to the whole card, since there is no longer a
+       first cell for it to sit against. */
+    .logview-level-error {
+        box-shadow: inset 3px 0 0 var(--danger);
+    }
+
+    .logview-level-warning {
+        box-shadow: inset 3px 0 0 var(--warning);
+    }
+
+    .logview-level-error td:first-child,
+    .logview-level-warning td:first-child {
+        box-shadow: none;
+    }
+
+    .logview-detail {
+        margin: -6px 0 10px;
+        padding: 0;
+        border: none;
+    }
+
+    .logview-detail td::before {
+        content: none;
+    }
+
+    .logview-pages {
+        justify-content: center;
+        width: 100%;
     }
 }
