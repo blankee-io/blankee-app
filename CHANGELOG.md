@@ -8,6 +8,28 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.4.1 — 2026-08-26
+
+### Changed
+- The log viewer is 875px wide, matching every other page rather than running to
+  1600px and overhanging the navbar above it. The table scrolls inside its own
+  box instead of widening the page.
+- On screens 600px and under - this stylesheet's phone breakpoint everywhere
+  else - each log entry becomes a card with its fields stacked and labelled,
+  rather than nine columns dragged sideways. Cells with nothing in them are left
+  out, so an entry with no endpoint or user does not show empty rows saying so.
+- **Logs** moved out of the profile menu into its own section on the admin
+  console, beside Updates.
+- The caret on the current-period button is slightly larger and sits about 5px
+  lower. Still in em, so it scales as one piece with the glyph beneath it.
+
+### Removed
+- The **Source code** entry in the profile dropdown. It was there because the
+  footer did not reach every page; since 1.2.0 it does, so the AGPL section 13
+  link is still on every page, signed in or not, from one place instead of two.
+  `THIRD-PARTY-NOTICES.md` records the change and what to keep in mind if the
+  footer is ever moved.
+
 ## 1.4.0 — 2026-08-26
 
 ### Added
