@@ -188,20 +188,44 @@ To check the schema without changing it, add `--verify-only`.
 
 ## Logs
 
-The application logs to stderr, so mod_wsgi puts everything in
-`/var/log/apache2/blankee_error.log`, one JSON object per line. The self-updater
-writes there too, tagged `UPDATE`, as well as to the journal.
+Sign in as the administrator and open **Logs** from the profile menu, or go to
+`/admin/logs`. It reads the instance's own log files — filter by level, tag,
+user, endpoint or request id, search the message text, and export what matches
+as CSV. Updates appear there too, tagged `UPDATE`.
 
-Debian's stock logrotate rule already rotates that file daily and keeps 14 days.
-The installer adds a second, complementary job in `/etc/cron.d/blankee-logs`
-that runs at 23:59 and keeps a dated copy of each day in `/var/log/blankee` as
-`blankee_app_YYYYMMDD.log`, for **180 days**.
+Everything lives in **`/var/log/blankee`**, which Blankee owns rather than
+sharing with Apache:
 
-The separate directory is the point. The apache2 rule globs
-`/var/log/apache2/*.log`, so a dated copy left beside the live log would be
-picked up by logrotate as well and deleted on day 14 — quietly cutting the
-retention to a fortnight. Set `BLANKEE_ROTATED_LOG_DIR` if you want them
-somewhere else.
+```
+/var/log/blankee/
+    blankee_error.log            # live; the application and the updater
+    blankee_access.log           # live
+    blankee_app_YYYYMMDD.log     # one per day, kept 180 days
+```
+
+The directory is `root:www-data 750`, which is what lets the viewer read it as
+the web user. The alternative — adding `www-data` to the `adm` group — would
+also hand it `syslog`, `auth.log` and `mail.log`, and a flaw in the web
+application has no business reaching those.
+
+Rotation is `/etc/cron.d/blankee-logs`, installed for you, running at 23:59.
+It is the *only* thing rotating these files: because they are no longer under
+`/var/log/apache2`, Debian's apache2 logrotate rule does not glob them, and
+nothing ships a second rule. It copies and truncates rather than renaming, so
+Apache keeps writing to the same open file. `BLANKEE_LOG_DIR` overrides the
+location, `BLANKEE_ROTATED_LOG_DIR` the archive destination.
+
+**Upgrading from before 1.4.0:** the log path is set in the Apache vhost, and
+the updater cannot reload a vhost — it reloads the WSGI application. Run the
+installer once to move them:
+
+```bash
+sudo /opt/blankee/install/install.sh --server-name budget.example.com
+```
+
+Until you do, the viewer says so plainly rather than showing an empty table.
+Under Docker there are no log files at all — gunicorn writes to standard output,
+so use `docker compose logs -f app`, which the page also tells you.
 
 ---
 

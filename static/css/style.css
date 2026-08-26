@@ -15967,3 +15967,399 @@ transform: scale(1.2);
 body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     visibility: visible !important;
 }
+
+/* ------------------------------------------------------------------ log viewer
+   /admin/logs. Every class is prefixed logview- because a log table wants names
+   like .row, .badge and .pagination that this stylesheet already uses for other
+   things, and the two would quietly fight. */
+
+.logview {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 0 12px 24px;
+    box-sizing: border-box;
+}
+
+.logview-section {
+    background-color: var(--white);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* A note standing in for the whole table when there is nothing to read - a
+   container, or a log directory the web user cannot see. */
+.logview-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0;
+    padding: 14px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-dark);
+}
+
+.logview-note code {
+    background-color: var(--secondary-lighter);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 13px;
+}
+
+.logview-note-info {
+    background-color: var(--primary-lighter);
+}
+
+.logview-note-info i {
+    color: var(--primary);
+}
+
+.logview-note-warning {
+    background-color: var(--accent-lighter);
+}
+
+.logview-note-warning i {
+    color: var(--accent);
+}
+
+/* --- filters --- */
+
+.logview-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--secondary-lighter);
+}
+
+.logview-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.logview-filter label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--secondary-dark);
+}
+
+.logview-filter input,
+.logview-filter select {
+    height: 32px;
+    width: 130px;
+    box-sizing: border-box;
+    padding: 0 8px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 6px;
+    background-color: var(--white);
+    color: var(--text-dark);
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.logview-filter input:focus,
+.logview-filter select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.logview-filter-wide input {
+    width: 220px;
+}
+
+.logview-filter-actions {
+    flex-direction: row;
+    gap: 8px;
+}
+
+/* --- buttons --- */
+
+.logview-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 6px;
+    background-color: var(--white);
+    color: var(--text-dark);
+    font-family: inherit;
+    font-size: 13px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.logview-btn:hover {
+    background-color: var(--secondary-lighter);
+}
+
+.logview-btn-primary {
+    border-color: var(--primary);
+    background-color: var(--primary);
+    color: var(--text-light);
+}
+
+.logview-btn-primary:hover {
+    background-color: var(--primary-hover);
+}
+
+.logview-btn-export {
+    margin-left: auto;
+}
+
+/* --- which files are being read --- */
+
+.logview-scope {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 0;
+}
+
+.logview-scope-label {
+    margin-right: 4px;
+    color: var(--secondary-dark);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.logview-chip {
+    padding: 4px 10px;
+    border-radius: 20px;
+    background-color: var(--secondary-lighter);
+    color: var(--text-dark);
+    font-size: 12px;
+    text-decoration: none;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.logview-chip:hover {
+    background-color: var(--primary-lighter);
+    color: var(--primary);
+}
+
+.logview-chip-on {
+    background-color: var(--primary);
+    color: var(--text-light);
+}
+
+.logview-chip-on:hover {
+    background-color: var(--primary);
+    color: var(--text-light);
+}
+
+/* --- counts and paging --- */
+
+.logview-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    padding: 10px 0;
+}
+
+.logview-bar-bottom {
+    border-top: 1px solid var(--secondary-lighter);
+}
+
+.logview-count {
+    color: var(--secondary-dark);
+    font-size: 12px;
+}
+
+/* Which files this page actually read. Worth showing rather than hiding: the
+   default scope is the live file only, and without saying so a search that
+   found nothing looks like an answer instead of a narrower question. */
+.logview-scanned {
+    padding: 2px 8px;
+    border-radius: 20px;
+    background-color: var(--secondary-lighter);
+}
+
+.logview-pages {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+}
+
+.logview-page {
+    min-width: 28px;
+    padding: 3px 6px;
+    border-radius: 6px;
+    color: var(--text-dark);
+    font-size: 12px;
+    text-align: center;
+    text-decoration: none;
+}
+
+.logview-page:hover {
+    background-color: var(--primary-lighter);
+    color: var(--primary);
+}
+
+.logview-page-here {
+    background-color: var(--primary);
+    color: var(--text-light);
+}
+
+.logview-page-off {
+    color: var(--secondary-hover);
+}
+
+/* --- the table --- */
+
+/* Nine columns of log data do not fold onto a phone, and squeezing them makes
+   every one unreadable. It scrolls inside its own box instead, so the page
+   itself never scrolls sideways. */
+.logview-tablewrap {
+    overflow-x: auto;
+    border: 1px solid var(--secondary-lighter);
+    border-radius: 8px;
+}
+
+.logview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+}
+
+.logview-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 8px 10px;
+    background-color: var(--secondary-lighter);
+    color: var(--secondary-dark);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.logview-table td {
+    padding: 7px 10px;
+    border-top: 1px solid var(--secondary-lighter);
+    color: var(--text-dark);
+    vertical-align: top;
+}
+
+.logview-row:hover td {
+    background-color: var(--bg-page);
+}
+
+.logview-ts,
+.logview-table code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    white-space: nowrap;
+}
+
+/* The message is the column worth reading, so it gets the room and is the only
+   one allowed to wrap. */
+.logview-msg {
+    min-width: 280px;
+    overflow-wrap: anywhere;
+}
+
+.logview-empty {
+    padding: 28px 10px;
+    color: var(--secondary-dark);
+    text-align: center;
+}
+
+/* A left edge coloured by level: scanning for the red line is how anybody
+   actually reads a log. */
+.logview-level-error td:first-child {
+    box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.logview-level-warning td:first-child {
+    box-shadow: inset 3px 0 0 var(--warning);
+}
+
+.logview-badge {
+    display: inline-block;
+    min-width: 58px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-align: center;
+}
+
+.logview-badge-error {
+    background-color: var(--danger);
+    color: var(--text-light);
+}
+
+.logview-badge-warning {
+    background-color: var(--warning);
+    color: var(--text-light);
+}
+
+.logview-badge-info {
+    background-color: var(--primary-lighter);
+    color: var(--primary);
+}
+
+.logview-badge-debug {
+    background-color: var(--secondary-lighter);
+    color: var(--secondary-dark);
+}
+
+/* --- structured extras and tracebacks --- */
+
+.logview-detail td {
+    padding-top: 0;
+    border-top: none;
+}
+
+.logview-json,
+.logview-trace {
+    margin: 0 0 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    border-radius: 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.45;
+    white-space: pre;
+}
+
+.logview-json {
+    background-color: var(--bg-page);
+    color: var(--text-dark);
+}
+
+.logview-trace {
+    background-color: var(--accent-lighter);
+    color: var(--text-dark);
+}
+
+@media (max-width: 700px) {
+    .logview-filter input,
+    .logview-filter select,
+    .logview-filter-wide input {
+        width: 100%;
+    }
+
+    .logview-filter {
+        flex: 1 1 140px;
+    }
+
+    .logview-btn-export {
+        margin-left: 0;
+    }
+}

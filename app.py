@@ -18,7 +18,7 @@ from log_config import JsonFormatter, get_logger, log_info, log_error, log_warni
 logger = get_logger(__name__)
 
 from flask import (Flask, render_template, request, redirect, url_for, session,
-                   flash, send_file, abort)
+                   flash, send_file, abort, Response)
 from flask_bcrypt import Bcrypt
 from flask import jsonify
 from datetime import date as datetime_date, date, datetime, timedelta
@@ -502,6 +502,21 @@ def _landing_url():
 
 
 app.jinja_env.globals['landing_url'] = _landing_url
+
+
+@app.template_filter('urlencode_page')
+def _urlencode_page(args, page):
+    """
+    The current query string with `page` swapped out, for pagination links.
+
+    Rebuilt from request.args rather than string-appended, so a filter someone
+    has set survives paging - and so a value containing & or = cannot break out
+    of its own parameter.
+    """
+    from urllib.parse import urlencode
+    params = dict(args)
+    params['page'] = page
+    return urlencode(params, doseq=True)
 
 
 @app.context_processor
@@ -14529,6 +14544,171 @@ def admin_console():
         # does. The local answers and any run in progress still appear, so a
         # reopened console picks the thread back up.
         update=_update_blob(),
+    )
+
+
+# ----------------------------------------------------------------- log viewer
+#
+# Reading the instance's own logs, which before this shipped as a second Flask
+# application with its own database of users. It is here instead because the
+# only people who should read these lines are the ones @admin_required already
+# identifies, and a second account to create and rotate is a poor trade for a
+# page that renders a file.
+
+_LOG_PER_PAGE_MAX = 500
+
+
+def _install_is_docker():
+    """True on a container image, where there is no Apache log to read."""
+    try:
+        from version_info import install_kind
+        return install_kind() == 'docker'
+    except Exception:
+        return False
+
+
+def _int_arg(name, default, low, high):
+    """
+    A query-string integer, clamped, that cannot 500 the page.
+
+    int(request.args.get(...)) throws on anything non-numeric, and these values
+    arrive in links people edit by hand and in bookmarks that outlive a release.
+    """
+    try:
+        value = int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(value, high))
+
+
+def _log_filters():
+    return {
+        'level': request.args.get('level', 'ALL'),
+        'tag': request.args.get('tag', 'ALL'),
+        'user_id': request.args.get('user_id', ''),
+        'endpoint': request.args.get('endpoint', ''),
+        'search': request.args.get('search', ''),
+        'request_id': request.args.get('request_id', ''),
+        'date_from': request.args.get('date_from', ''),
+        'date_to': request.args.get('date_to', ''),
+    }
+
+
+def _log_scope():
+    """(scope, day). Anything unrecognised reads as the cheap default."""
+    scope = request.args.get('scope', 'current')
+    if scope not in ('current', 'day', 'all'):
+        scope = 'current'
+    day = request.args.get('day', '')
+    # A label, not a path - log_reader matches it against what it already found.
+    if not re.fullmatch(r'\d{8}', day or ''):
+        day = ''
+    if scope == 'day' and not day:
+        scope = 'current'
+    return scope, day
+
+
+@app.route('/admin/logs', methods=['GET'])
+@admin_required
+def admin_logs():
+    """The log viewer. Defaults to the live file: see log_reader.load()."""
+    import log_reader
+
+    status, explanation = log_reader.dir_status()
+    scope, day = _log_scope()
+    filters = _log_filters()
+
+    entries, files, scanned = ([], [], [])
+    if status == 'ok':
+        entries, files, scanned = log_reader.load(filters, scope, day)
+
+    page = _int_arg('page', 1, 1, 1000000)
+    per_page = _int_arg('per_page', 100, 1, _LOG_PER_PAGE_MAX)
+    rows, total, total_pages = log_reader.paginate(entries, page, per_page)
+
+    return render_template(
+        'admin_logs.html',
+        entries=rows,
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        files=files,
+        scanned=[f['name'] for f in scanned],
+        tags=log_reader.available_tags(entries),
+        levels=log_reader.available_levels(entries),
+        filters=filters,
+        scope=scope,
+        day=day,
+        log_dir=log_reader.LOG_DIR,
+        log_status=status,
+        log_explanation=explanation,
+        max_archive_files=log_reader.MAX_ARCHIVE_FILES,
+        # Under Docker there is no Apache and no log directory: gunicorn logs to
+        # stdout for `docker compose logs`. Saying so beats an empty table that
+        # reads as a broken page. Imported here like every other version_info
+        # call in this file - it is never a module-level import.
+        is_container=_install_is_docker(),
+    )
+
+
+@app.route('/admin/logs/api/logs', methods=['GET'])
+@admin_required
+def admin_logs_api():
+    """The same query as the page, for refreshing without a reload."""
+    import log_reader
+
+    status, explanation = log_reader.dir_status()
+    if status != 'ok':
+        return jsonify({'status': 'error', 'message': explanation,
+                        'entries': [], 'total': 0}), 200
+
+    scope, day = _log_scope()
+    entries, files, scanned = log_reader.load(_log_filters(), scope, day)
+    page = _int_arg('page', 1, 1, 1000000)
+    per_page = _int_arg('per_page', 100, 1, _LOG_PER_PAGE_MAX)
+    rows, total, total_pages = log_reader.paginate(entries, page, per_page)
+
+    return jsonify({
+        'status': 'success',
+        'entries': rows,
+        'total': total,
+        'page': page,
+        'total_pages': total_pages,
+        'tags': log_reader.available_tags(entries),
+        'levels': log_reader.available_levels(entries),
+        'files': [{'name': f['name'], 'date_label': f['date_label'],
+                   'size_bytes': f['size_bytes']} for f in files],
+        'scanned': [f['name'] for f in scanned],
+    }), 200
+
+
+@app.route('/admin/logs/export', methods=['GET'])
+@admin_required
+def admin_logs_export():
+    """Everything matching the current filters as CSV - not just this page."""
+    import csv as _csv
+    import log_reader
+
+    status, _ = log_reader.dir_status()
+    entries = []
+    if status == 'ok':
+        scope, day = _log_scope()
+        entries, _files, _scanned = log_reader.load(_log_filters(), scope, day)
+
+    columns = ['timestamp', 'level', 'tag', 'logger', 'endpoint',
+               'user_id', 'request_id', 'message']
+    buf = io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(columns)
+    for e in entries:
+        writer.writerow([e.get(c, '') for c in columns])
+
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    return Response(
+        buf.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename=blankee-logs-{stamp}.csv'},
     )
 
 

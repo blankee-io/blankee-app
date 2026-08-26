@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Blankee - Logs</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blankee">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="profile-body">
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">
+            <div class="nav-buttons">
+                <a href="{{ url_for('admin_console') }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back to Admin Console</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+{% macro pages(page, total_pages) %}
+<div class="logview-pages">
+    {% if page > 1 %}
+    <a class="logview-page" href="?{{ request.args|urlencode_page(1) }}">&laquo;</a>
+    <a class="logview-page" href="?{{ request.args|urlencode_page(page - 1) }}">&lsaquo;</a>
+    {% else %}
+    <span class="logview-page logview-page-off">&laquo;</span>
+    <span class="logview-page logview-page-off">&lsaquo;</span>
+    {% endif %}
+
+    {# A window of ten around the current page: a year of logs is thousands of
+       pages, and rendering every number is a wall of links nobody clicks. #}
+    {% set first = [1, page - 5]|max %}
+    {% set last = [total_pages, first + 9]|min %}
+    {% set first = [1, last - 9]|max %}
+    {% for p in range(first, last + 1) %}
+        {% if p == page %}
+        <span class="logview-page logview-page-here">{{ p }}</span>
+        {% else %}
+        <a class="logview-page" href="?{{ request.args|urlencode_page(p) }}">{{ p }}</a>
+        {% endif %}
+    {% endfor %}
+
+    {% if page < total_pages %}
+    <a class="logview-page" href="?{{ request.args|urlencode_page(page + 1) }}">&rsaquo;</a>
+    <a class="logview-page" href="?{{ request.args|urlencode_page(total_pages) }}">&raquo;</a>
+    {% else %}
+    <span class="logview-page logview-page-off">&rsaquo;</span>
+    <span class="logview-page logview-page-off">&raquo;</span>
+    {% endif %}
+</div>
+{% endmacro %}
+
+    <div class="logview">
+        <div class="logview-section">
+
+        {% if is_container %}
+        {# gunicorn logs to stdout in the image; there is no file to read. #}
+        <p class="logview-note logview-note-info">
+            <i class="fa-solid fa-circle-info"></i>
+            This installation runs in a container, where Blankee logs to standard
+            output rather than to a file. Read them with
+            <code>docker compose logs -f app</code>.
+        </p>
+        {% elif log_status != 'ok' %}
+        <p class="logview-note logview-note-warning">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            No logs to show: {{ log_explanation }}.
+            {% if log_status == 'missing' %}
+            Re-run <code>sudo ./install/install.sh</code> once to move Blankee's
+            logs into <code>{{ log_dir }}</code>.
+            {% endif %}
+        </p>
+        {% else %}
+
+        <form method="GET" action="{{ url_for('admin_logs') }}" class="logview-filters">
+            {# The scope rides along in every filter submission, or changing a
+               filter would silently drop you back to the live file. #}
+            <input type="hidden" name="scope" value="{{ scope }}">
+            <input type="hidden" name="day" value="{{ day }}">
+
+            <div class="logview-filter">
+                <label for="lv-from">From</label>
+                <input type="date" id="lv-from" name="date_from" value="{{ filters.date_from }}">
+            </div>
+            <div class="logview-filter">
+                <label for="lv-to">To</label>
+                <input type="date" id="lv-to" name="date_to" value="{{ filters.date_to }}">
+            </div>
+            <div class="logview-filter">
+                <label for="lv-level">Level</label>
+                <select id="lv-level" name="level">
+                    <option value="ALL">All</option>
+                    {% for lv in ['ERROR', 'WARNING', 'INFO', 'DEBUG'] %}
+                    <option value="{{ lv }}" {% if filters.level == lv %}selected{% endif %}>{{ lv }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="logview-filter">
+                <label for="lv-tag">Tag</label>
+                <select id="lv-tag" name="tag">
+                    <option value="ALL">All</option>
+                    {% for t in tags %}
+                    <option value="{{ t }}" {% if filters.tag == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="logview-filter">
+                <label for="lv-uid">User</label>
+                <input type="text" id="lv-uid" name="user_id" value="{{ filters.user_id }}" placeholder="22">
+            </div>
+            <div class="logview-filter">
+                <label for="lv-ep">Endpoint</label>
+                <input type="text" id="lv-ep" name="endpoint" value="{{ filters.endpoint }}" placeholder="/update-entry">
+            </div>
+            <div class="logview-filter">
+                <label for="lv-rid">Request</label>
+                <input type="text" id="lv-rid" name="request_id" value="{{ filters.request_id }}" placeholder="a1b2c3d4">
+            </div>
+            <div class="logview-filter logview-filter-wide">
+                <label for="lv-q">Search</label>
+                <input type="text" id="lv-q" name="search" value="{{ filters.search }}" placeholder="message text">
+            </div>
+            <div class="logview-filter logview-filter-actions">
+                <button type="submit" class="logview-btn logview-btn-primary">Filter</button>
+                <a href="{{ url_for('admin_logs') }}" class="logview-btn">Clear</a>
+            </div>
+        </form>
+
+        <div class="logview-scope">
+            <span class="logview-scope-label">Reading</span>
+            <a class="logview-chip {% if scope == 'current' %}logview-chip-on{% endif %}"
+               href="{{ url_for('admin_logs') }}?scope=current">Today</a>
+            <a class="logview-chip {% if scope == 'all' %}logview-chip-on{% endif %}"
+               href="{{ url_for('admin_logs') }}?scope=all">Last {{ max_archive_files }} days</a>
+            {% for f in files if f.date_label != 'current' %}
+            <a class="logview-chip {% if scope == 'day' and day == f.date_label %}logview-chip-on{% endif %}"
+               href="{{ url_for('admin_logs') }}?scope=day&amp;day={{ f.date_label }}">{{ f.date_label }}</a>
+            {% endfor %}
+        </div>
+
+        <div class="logview-bar">
+            <span class="logview-count">{{ total }} entries</span>
+            <span class="logview-count">Page {{ page }} of {{ total_pages }}</span>
+            <span class="logview-count logview-scanned">{{ scanned|length }} file{% if scanned|length != 1 %}s{% endif %} read</span>
+            {{ pages(page, total_pages) }}
+            <a class="logview-btn logview-btn-export"
+               href="{{ url_for('admin_logs_export') }}?{{ request.query_string.decode() }}">
+                <i class="fa-solid fa-file-csv"></i> Export
+            </a>
+        </div>
+
+        <div class="logview-tablewrap">
+            <table class="logview-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th><th>Level</th><th>Tag</th><th>Module</th>
+                        <th>Function</th><th>Endpoint</th><th>User</th><th>Request</th><th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in entries %}
+                    <tr class="logview-row logview-level-{{ (e.level or 'info')|lower }}">
+                        <td class="logview-ts">{{ e.timestamp[:23] if e.timestamp else '' }}</td>
+                        <td><span class="logview-badge logview-badge-{{ (e.level or 'info')|lower }}">{{ e.level }}</span></td>
+                        <td>{{ e.tag or '' }}</td>
+                        <td>{{ e.module or '' }}</td>
+                        <td>{{ e.function or '' }}</td>
+                        <td>{{ e.endpoint or '' }}</td>
+                        <td>{{ e.user_id if e.user_id is not none else '' }}</td>
+                        <td><code>{{ e.request_id or '' }}</code></td>
+                        <td class="logview-msg">{{ e.message or '' }}</td>
+                    </tr>
+                    {% if e.extra or e.exception %}
+                    <tr class="logview-detail">
+                        <td colspan="9">
+                            {% if e.extra %}<pre class="logview-json">{{ e.extra|tojson(indent=2) }}</pre>{% endif %}
+                            {% if e.exception %}<pre class="logview-trace">{{ e.exception }}</pre>{% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% else %}
+                    <tr><td colspan="9" class="logview-empty">Nothing matches these filters.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="logview-bar logview-bar-bottom">
+            <span class="logview-count">{{ total }} entries</span>
+            {{ pages(page, total_pages) }}
+        </div>
+
+        {% endif %}
+        </div>
+    </div>
+
+{% include 'footer.html' %}
+
+</body>
+</html>

@@ -19,6 +19,9 @@ set -euo pipefail
 
 # ---------------------------------------------------------------- settings
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Blankee's own log directory: the live logs the vhost writes, the dated
+# copies the nightly job keeps, and what /admin/logs reads.
+LOG_DIR=/var/log/blankee
 CONFIG_DIR="${CONFIG_DIR:-/var/www/budget_env}"
 ENV_FILE="$CONFIG_DIR/.env"
 WSGI_FILE="$CONFIG_DIR/blankee.wsgi"
@@ -202,17 +205,17 @@ EOF
 }
 
 install_log_rotation() {
-  # The app logs to stderr, so mod_wsgi puts everything in blankee_error.log,
-  # and Debian's stock apache2 logrotate rule already rotates that daily and
-  # keeps 14. This adds the dated copies the log viewer reads - one file per
-  # day named blankee_app_YYYYMMDD.log, kept for 180 days.
+  # This is the only thing that rotates Blankee's logs, and deliberately so.
+  # Nothing ships an /etc/logrotate.d/blankee rule: the vhost writes into
+  # $LOG_DIR, which Debian's apache2 rule does not glob, so there is no second
+  # rotator to collide with. Two of them on one file is exactly the bug 1.3.0
+  # had to work around.
   #
-  # They go in /var/log/blankee rather than beside the live logs on purpose:
-  # the apache2 rule globs /var/log/apache2/*.log, so a dated copy left there
-  # would be rotated again by logrotate and deleted at day 14, silently
-  # shortening the retention this exists to provide.
-  local rotated_dir=/var/log/blankee
-  install -d -o root -g adm -m 750 "$rotated_dir"
+  # It keeps one dated copy per day - blankee_app_YYYYMMDD.log, 180 days - which
+  # is what /admin/logs lists as its archive. cp plus truncate -s 0 rather than a
+  # rename, because Apache holds the live file open in append mode and truncating
+  # keeps the inode it is writing to.
+  local rotated_dir="$LOG_DIR"
 
   cat > /etc/cron.d/blankee-logs <<EOF
 # Blankee log rotation. Installed by install.sh - edits here are overwritten on
@@ -220,11 +223,31 @@ install_log_rotation() {
 # dated file.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-59 23 * * * root BLANKEE_ROTATED_LOG_DIR=$rotated_dir $APP_DIR/cron_scripts/rotate_blankee_logs.sh >> $rotated_dir/rotate.log 2>&1
+59 23 * * * root BLANKEE_LOG_DIR=$rotated_dir BLANKEE_ROTATED_LOG_DIR=$rotated_dir $APP_DIR/cron_scripts/rotate_blankee_logs.sh >> $rotated_dir/rotate.log 2>&1
 EOF
   chmod 644 /etc/cron.d/blankee-logs
   chown root:root /etc/cron.d/blankee-logs
   info "daily log rotation installed; dated copies in $rotated_dir, kept 180 days"
+}
+
+migrate_old_logs() {
+  # Before 1.4.0 the vhost logged into /var/log/apache2. Apache has just been
+  # restarted onto the new path by the caller, so the old file is closed and
+  # safe to move.
+  #
+  # It lands as a dated archive rather than beside the new live log: that is the
+  # shape /admin/logs indexes, and a stray blankee_error.log in there would be
+  # taken for the live file and shadow the real one.
+  local old=/var/log/apache2/blankee_error.log
+  [[ -s "$old" ]] || return 0
+  local dest="$LOG_DIR/blankee_app_$(date -u +%Y%m%d).log"
+  # Appended, not moved: today's archive may already exist if the nightly job
+  # has run, and truncating it would throw away the day it just saved.
+  cat "$old" >> "$dest" || return 0
+  rm -f "$old"
+  chown root:www-data "$dest"
+  chmod 640 "$dest"
+  info "previous logs moved into $dest"
 }
 
 apply_permissions() {
@@ -244,6 +267,21 @@ apply_permissions() {
   mkdir -p "$APP_DIR/static/uploads"
   chown -R www-data:www-data "$APP_DIR/static/uploads"
   chmod 775 "$APP_DIR/static/uploads"
+
+  # Apache writes the live logs here as root and /admin/logs reads them as
+  # www-data, so the group is www-data and the mode is 750: readable by the web
+  # user, and by nobody else who happens to have an account on the box.
+  #
+  # Re-asserted here rather than only at install time because the updater calls
+  # --permissions-only after every checkout, which is what repairs a host where
+  # this drifted.
+  install -d -o root -g www-data -m 750 "$LOG_DIR"
+  chgrp www-data "$LOG_DIR"
+  chmod 750 "$LOG_DIR"
+  # Files Apache has already created keep their own mode; make sure the group can
+  # read them. Blankee's own logs only - never a blanket pass over /var/log.
+  find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -exec chgrp www-data {} + 2>/dev/null || true
+  find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -exec chmod 640 {} + 2>/dev/null || true
 }
 
 # The self-updater calls this after every checkout. Kept as early as possible so
@@ -567,7 +605,18 @@ elif ! command -v systemctl >/dev/null; then
   warn "no systemd here, so the updater was not installed; updates stay manual"
 else
   install_updater_units
+fi
+
+# ---------------------------------------------------------------- log rotation
+# Its own step, not part of the block above. Rotation has nothing to do with
+# self-updating: it was nested there when it was added, so --no-self-update - and
+# any host without systemd - quietly got no rotation at all, and a log that grew
+# without bound. It needs cron, not systemd.
+say "Configuring log rotation"
+if [[ -d /etc/cron.d ]]; then
   install_log_rotation
+else
+  warn "no /etc/cron.d here, so log rotation was not installed; rotate $LOG_DIR yourself"
 fi
 
 # ---------------------------------------------------------------- apache
@@ -613,8 +662,13 @@ cat > "$VHOST" <<EOF
         Require all granted
     </Directory>
 
-    ErrorLog \${APACHE_LOG_DIR}/blankee_error.log
-    CustomLog \${APACHE_LOG_DIR}/blankee_access.log combined
+    # Not APACHE_LOG_DIR. Blankee's logs live in a directory Blankee owns, so
+    # the admin log viewer at /admin/logs can read them as www-data without
+    # being put in the adm group - which would also hand it syslog and auth.log.
+    # It keeps Debian's apache2 logrotate rule off these files too: that rule
+    # globs /var/log/apache2/*.log and would fight the 23:59 rotation.
+    ErrorLog $LOG_DIR/blankee_error.log
+    CustomLog $LOG_DIR/blankee_access.log combined
 </VirtualHost>
 EOF
 
@@ -625,6 +679,7 @@ a2dissite 000-default >/dev/null 2>&1 || true
 a2dissite default-ssl >/dev/null 2>&1 || true
 apache2ctl configtest >/dev/null 2>&1 || die "Apache config test failed - run 'apache2ctl configtest'."
 systemctl restart apache2
+migrate_old_logs
 info "vhost $VHOST enabled"
 
 # ---------------------------------------------------------------- verify
@@ -639,8 +694,8 @@ else
   case "$CODE" in
     200) info "GET /register -> 200: ready for the first account" ;;
     302) info "GET /register -> 302: an administrator already exists, so registration is closed" ;;
-    000) warn "GET /register -> no response. Check /var/log/apache2/blankee_error.log" ;;
-    *)   warn "GET /register -> $CODE. Check /var/log/apache2/blankee_error.log" ;;
+    000) warn "GET /register -> no response. Check $LOG_DIR/blankee_error.log" ;;
+    *)   warn "GET /register -> $CODE. Check $LOG_DIR/blankee_error.log" ;;
   esac
 fi
 
@@ -661,7 +716,7 @@ cat <<EOF
 $(for ip in $IPS; do echo "        http://$ip:$HTTP_PORT/"; done)
 
     Configuration:  $ENV_FILE
-    Logs:           /var/log/apache2/blankee_error.log
+    Logs:           $LOG_DIR/blankee_error.log  (or /admin/logs in the browser)
     Serving over plain HTTP. For HTTPS, run certbot and set APP_URL to the
     https:// address in $ENV_FILE.
 EOF

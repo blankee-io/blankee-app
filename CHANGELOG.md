@@ -8,6 +8,41 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.4.0 — 2026-08-26
+
+### Added
+- **A log viewer, at `/admin/logs`.** Filter by level, tag, user, endpoint or
+  request id, search message text, page through, and export what matches as CSV.
+  Reached from **Logs** in the profile menu, behind the same `@admin_required`
+  as the rest of the console.
+
+  This existed as a separate Flask application with its own database of users.
+  It is part of Blankee now because the only people who should read these lines
+  are the ones the app already authenticates, and a second account to create and
+  rotate is a poor trade for a page that renders a file. It needed no new
+  dependencies.
+
+  It defaults to reading only the live file. Archives are kept for 180 days, and
+  parsing every one of them at 50,000 lines each is nine million lines to render
+  one page — a year-old instance would time out on its own log viewer, which is
+  precisely when someone needs it. "Last 14 days" and single-day views are one
+  click away, and the page says how many files it read.
+
+### Changed
+- **Blankee's Apache logs move to `/var/log/blankee`**, owned `root:www-data`
+  and mode 750. That is what lets the viewer read them as the web user. The
+  alternative was adding `www-data` to `adm`, which also grants `syslog`,
+  `auth.log` and `mail.log` — too much for a page that lists log lines.
+
+  A side effect worth having: the files are no longer under `/var/log/apache2`,
+  so Debian's apache2 logrotate rule cannot see them, and the 23:59 job is the
+  only thing rotating them. The directory split 1.3.0 introduced to dodge that
+  rule is no longer a workaround, just where the logs are.
+
+  **Existing installations must run the installer once** — the path is set in
+  the Apache vhost, and the updater reloads the WSGI application, not the vhost.
+  Until then the viewer explains what to run instead of showing an empty table.
+
 ## 1.3.1 — 2026-08-26
 
 ### Added

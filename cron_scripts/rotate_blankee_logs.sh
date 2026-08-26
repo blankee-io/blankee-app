@@ -3,13 +3,19 @@
 # Creates dated log files for app logs and cron job logs
 # Works on both dev (budget_error.log) and prod (blankee_error.log)
 
-LOG_DIR="/var/log/apache2"
+# Where the live logs are. An installed host has them in /var/log/blankee, which
+# is what /admin/logs reads; dev and prod still keep theirs beside Apache's, so
+# the older location is the fallback rather than a second code path.
+if [ -n "$BLANKEE_LOG_DIR" ]; then
+    LOG_DIR="$BLANKEE_LOG_DIR"
+elif [ -f /var/log/blankee/blankee_error.log ]; then
+    LOG_DIR="/var/log/blankee"
+else
+    LOG_DIR="/var/log/apache2"
+fi
 
-# Where the dated copies go. Defaults to LOG_DIR, which is what dev and prod
-# have always done. The installer overrides it to /var/log/blankee, because
-# Debian's stock /etc/logrotate.d/apache2 rule sweeps /var/log/apache2/*.log on
-# a 14 day cycle - and a dated copy left in there matches that glob, so the 180
-# day retention below would be quietly cut to 14.
+# Where the dated copies go. The same directory as the live log, so one place
+# holds a day's file and the fortnight before it, and /admin/logs finds both.
 ROTATED_DIR="${BLANKEE_ROTATED_LOG_DIR:-$LOG_DIR}"
 mkdir -p "$ROTATED_DIR"
 
@@ -25,7 +31,7 @@ rotate_log() {
         cp "$LOG_FILE" "$ROTATED_LOG"
         truncate -s 0 "$LOG_FILE"
         chmod 640 "$ROTATED_LOG"
-        chown root:adm "$ROTATED_LOG"
+        chown root:www-data "$ROTATED_LOG"
         echo "$(date -u): Rotated $LOG_FILE to $ROTATED_LOG (size: $(stat -c%s "$ROTATED_LOG") bytes)"
     else
         echo "$(date -u): No rotation needed for $LOG_FILE - empty or missing"
@@ -33,10 +39,10 @@ rotate_log() {
 }
 
 # Rotate main app error log (check for both dev and prod names)
-if [ -f "/var/log/apache2/blankee_error.log" ]; then
-    rotate_log "/var/log/apache2/blankee_error.log" "blankee_app"
-elif [ -f "/var/log/apache2/budget_error.log" ]; then
-    rotate_log "/var/log/apache2/budget_error.log" "blankee_app"
+if [ -f "$LOG_DIR/blankee_error.log" ]; then
+    rotate_log "$LOG_DIR/blankee_error.log" "blankee_app"
+elif [ -f "$LOG_DIR/budget_error.log" ]; then
+    rotate_log "$LOG_DIR/budget_error.log" "blankee_app"
 else
     echo "$(date -u): No main error log found (checked blankee_error.log and budget_error.log)"
 fi
