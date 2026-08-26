@@ -137,8 +137,10 @@ reloading the application.
 
 The web server cannot do any of that itself, and deliberately so: it can only
 write a request flag, which a root-owned systemd timer picks up within a minute.
-Progress and the result end up in `journalctl -u blankee-update`, and a failure
-leaves the exact recovery commands in the console.
+Progress and the result go to two places: `journalctl -u blankee-update`, and
+`/var/log/apache2/blankee_error.log` alongside the application's own entries, so
+an update is visible in the log you already read. A failure leaves the exact
+recovery commands in the console.
 
 There is also an **Update automatically** toggle, off by default. With it on, a
 nightly timer checks at midnight and installs anything newer. Worth a moment's
@@ -181,6 +183,25 @@ optional** — a release that adds a dependency fails at import without it. And
 "Missing environment variables".
 
 To check the schema without changing it, add `--verify-only`.
+
+---
+
+## Logs
+
+The application logs to stderr, so mod_wsgi puts everything in
+`/var/log/apache2/blankee_error.log`, one JSON object per line. The self-updater
+writes there too, tagged `UPDATE`, as well as to the journal.
+
+Debian's stock logrotate rule already rotates that file daily and keeps 14 days.
+The installer adds a second, complementary job in `/etc/cron.d/blankee-logs`
+that runs at 23:59 and keeps a dated copy of each day in `/var/log/blankee` as
+`blankee_app_YYYYMMDD.log`, for **180 days**.
+
+The separate directory is the point. The apache2 rule globs
+`/var/log/apache2/*.log`, so a dated copy left beside the live log would be
+picked up by logrotate as well and deleted on day 14 — quietly cutting the
+retention to a fortnight. Set `BLANKEE_ROTATED_LOG_DIR` if you want them
+somewhere else.
 
 ---
 
