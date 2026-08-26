@@ -201,6 +201,32 @@ EOF
   fi
 }
 
+install_log_rotation() {
+  # The app logs to stderr, so mod_wsgi puts everything in blankee_error.log,
+  # and Debian's stock apache2 logrotate rule already rotates that daily and
+  # keeps 14. This adds the dated copies the log viewer reads - one file per
+  # day named blankee_app_YYYYMMDD.log, kept for 180 days.
+  #
+  # They go in /var/log/blankee rather than beside the live logs on purpose:
+  # the apache2 rule globs /var/log/apache2/*.log, so a dated copy left there
+  # would be rotated again by logrotate and deleted at day 14, silently
+  # shortening the retention this exists to provide.
+  local rotated_dir=/var/log/blankee
+  install -d -o root -g adm -m 750 "$rotated_dir"
+
+  cat > /etc/cron.d/blankee-logs <<EOF
+# Blankee log rotation. Installed by install.sh - edits here are overwritten on
+# the next run. Ordered before logrotate's 00:00 pass so a full day lands in one
+# dated file.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+59 23 * * * root BLANKEE_ROTATED_LOG_DIR=$rotated_dir $APP_DIR/cron_scripts/rotate_blankee_logs.sh >> $rotated_dir/rotate.log 2>&1
+EOF
+  chmod 644 /etc/cron.d/blankee-logs
+  chown root:root /etc/cron.d/blankee-logs
+  info "daily log rotation installed; dated copies in $rotated_dir, kept 180 days"
+}
+
 apply_permissions() {
   # static/uploads (profile pictures) is the only path the application writes to,
   # so the code stays owned by root and merely readable. Two reasons not to hand
@@ -244,6 +270,7 @@ if [[ $UNITS_ONLY -eq 1 ]]; then
   fi
   say "Installing the updater units"
   install_updater_units
+  install_log_rotation
   exit 0
 fi
 
@@ -540,6 +567,7 @@ elif ! command -v systemctl >/dev/null; then
   warn "no systemd here, so the updater was not installed; updates stay manual"
 else
   install_updater_units
+  install_log_rotation
 fi
 
 # ---------------------------------------------------------------- apache

@@ -66,9 +66,59 @@ MAX_CONFIG_BYTES = 64 * 1024
 TRUTHY = ('1', 'true', 'yes', 'on')
 
 
-def say(message):
-    """To stdout, which systemd captures - journalctl -u blankee-update is the log."""
+# The file mod_wsgi sends the application's own stderr to. Writing here as well
+# as to the journal puts an update in the log an operator already reads, instead
+# of in a second place they have to know about. Overridable for a layout that is
+# not Debian's; on a container there is no Apache and the path will not exist.
+APP_LOG = os.environ.get('BLANKEE_APP_LOG', '/var/log/apache2/blankee_error.log')
+
+
+def _app_log(message, level):
+    """
+    One line in the shape the log viewer parses: an Apache-style prefix with a
+    JSON object at end of line (its reader takes the last {...} on the line and
+    ignores whatever came before).
+
+    Appends only to a file that already exists - creating it would have root
+    guessing an owner and mode for a file Apache manages, and would litter hosts
+    that have no Apache at all. Never raises: logging is not worth failing an
+    update over.
+    """
+    try:
+        if not os.path.exists(APP_LOG):
+            return
+        t = time.time()
+        us = int((t % 1) * 1000000)
+        prefix = '[%s.%06d %s] [blankee-update] [pid %d]' % (
+            time.strftime('%a %b %d %H:%M:%S', time.localtime(t)), us,
+            time.strftime('%Y', time.localtime(t)), os.getpid())
+        entry = {
+            'timestamp': '%s.%03dZ' % (time.strftime('%Y-%m-%dT%H:%M:%S',
+                                                     time.gmtime(t)), us // 1000),
+            'level': level,
+            'logger': 'blankee_update',
+            'module': 'blankee_update',
+            'function': 'say',
+            'line': 0,
+            'tag': 'UPDATE',
+            'endpoint': None,
+            'user_id': None,
+            'request_id': _status.get('request_id'),
+            'message': message,
+        }
+        with open(APP_LOG, 'a', encoding='utf-8') as f:
+            print(prefix, json.dumps(entry, ensure_ascii=False), file=f)
+    except Exception:
+        pass
+
+
+def say(message, level='INFO'):
+    """
+    To stdout, which systemd captures - journalctl -u blankee-update is the log -
+    and to the application log, so an update is visible from either.
+    """
     print(message, flush=True)
+    _app_log(message, level)
 
 
 # ---------------------------------------------------------------- the flag
@@ -251,9 +301,9 @@ def finish_failed(message, detail='', recovery=None):
                    detail=detail[-4000:], finished_at=now(),
                    recovery=recovery or [])
     status_write()
-    say(f'FAILED: {message}')
+    say(f'FAILED: {message}', 'ERROR')
     if detail:
-        say(detail[-2000:])
+        say(detail[-2000:], 'ERROR')
     return 1
 
 
