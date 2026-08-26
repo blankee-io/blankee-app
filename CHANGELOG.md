@@ -8,6 +8,31 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.3.0 — 2026-08-26
+
+### Added
+- The installer now installs the daily log rotation it always shipped but never
+  scheduled. `/etc/cron.d/blankee-logs` runs `rotate_blankee_logs.sh` at 23:59
+  and keeps a dated copy of each day for 180 days.
+
+  The dated copies go to `/var/log/blankee`, not beside the live logs. Debian's
+  stock apache2 logrotate rule globs `/var/log/apache2/*.log` on a 14 day cycle,
+  so a copy left there would be rotated again and deleted on day 14 - silently
+  cutting the retention this exists to provide to a fortnight. Set
+  `BLANKEE_ROTATED_LOG_DIR` to move them; unset, the script behaves as before.
+
+### Changed
+- The self-updater writes its progress to `/var/log/apache2/blankee_error.log`
+  as well as to the journal, as one JSON line per message tagged `UPDATE`,
+  matching the shape the application already writes and the log viewer already
+  parses. Failures are logged at `ERROR`. An update is now visible in the log an
+  operator already reads instead of only in a second place they have to know
+  about. The journal is unchanged, so `journalctl -u blankee-update` still works.
+
+  It appends only to a log that already exists, never creating one: that keeps
+  root from guessing an owner and mode for a file Apache manages, and means
+  installations with no Apache write nothing.
+
 ## 1.2.2 — 2026-08-25
 
 ### Fixed

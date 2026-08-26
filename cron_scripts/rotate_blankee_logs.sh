@@ -4,13 +4,22 @@
 # Works on both dev (budget_error.log) and prod (blankee_error.log)
 
 LOG_DIR="/var/log/apache2"
+
+# Where the dated copies go. Defaults to LOG_DIR, which is what dev and prod
+# have always done. The installer overrides it to /var/log/blankee, because
+# Debian's stock /etc/logrotate.d/apache2 rule sweeps /var/log/apache2/*.log on
+# a 14 day cycle - and a dated copy left in there matches that glob, so the 180
+# day retention below would be quietly cut to 14.
+ROTATED_DIR="${BLANKEE_ROTATED_LOG_DIR:-$LOG_DIR}"
+mkdir -p "$ROTATED_DIR"
+
 DATE=$(date -u +"%Y%m%d")
 
 # Function to rotate a log file
 rotate_log() {
     local LOG_FILE="$1"
     local PREFIX="$2"
-    local ROTATED_LOG="${LOG_DIR}/${PREFIX}_${DATE}.log"
+    local ROTATED_LOG="${ROTATED_DIR}/${PREFIX}_${DATE}.log"
     
     if [ -s "$LOG_FILE" ]; then
         cp "$LOG_FILE" "$ROTATED_LOG"
@@ -43,8 +52,8 @@ fi
 # rotate_log "/var/log/apache2/nightly_sync.log" "nightly_sync"
 
 # Clean up logs older than 180 days (6 months)
-find "$LOG_DIR" -name "blankee_app_*.log" -type f -mtime +180 -delete
+find "$ROTATED_DIR" -name "blankee_app_*.log" -type f -mtime +180 -delete
 # Keep purging any already-rotated files from the removed cron scripts.
-find "$LOG_DIR" -name "quiltt_checker_*.log" -type f -mtime +180 -delete
-find "$LOG_DIR" -name "auto_confirm_*.log" -type f -mtime +180 -delete
-find "$LOG_DIR" -name "nightly_sync_*.log" -type f -mtime +180 -delete
+find "$ROTATED_DIR" -name "quiltt_checker_*.log" -type f -mtime +180 -delete
+find "$ROTATED_DIR" -name "auto_confirm_*.log" -type f -mtime +180 -delete
+find "$ROTATED_DIR" -name "nightly_sync_*.log" -type f -mtime +180 -delete
