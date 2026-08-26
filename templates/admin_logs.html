@@ -170,16 +170,20 @@
                 </thead>
                 <tbody>
                     {% for e in entries %}
+                    {# data-label feeds the stacked layout on a phone, where the
+                       header row is hidden and each cell has to name itself. #}
                     <tr class="logview-row logview-level-{{ (e.level or 'info')|lower }}">
-                        <td class="logview-ts">{{ e.timestamp[:23] if e.timestamp else '' }}</td>
-                        <td><span class="logview-badge logview-badge-{{ (e.level or 'info')|lower }}">{{ e.level }}</span></td>
-                        <td>{{ e.tag or '' }}</td>
-                        <td>{{ e.module or '' }}</td>
-                        <td>{{ e.function or '' }}</td>
-                        <td>{{ e.endpoint or '' }}</td>
-                        <td>{{ e.user_id if e.user_id is not none else '' }}</td>
-                        <td><code>{{ e.request_id or '' }}</code></td>
-                        <td class="logview-msg">{{ e.message or '' }}</td>
+                        <td class="logview-ts" data-label="Time">{{ e.timestamp[:23] if e.timestamp else '' }}</td>
+                        <td data-label="Level"><span class="logview-badge logview-badge-{{ (e.level or 'info')|lower }}">{{ e.level }}</span></td>
+                        <td data-label="Tag">{{ e.tag or '' }}</td>
+                        <td data-label="Module">{{ e.module or '' }}</td>
+                        <td data-label="Function">{{ e.function or '' }}</td>
+                        <td data-label="Endpoint">{{ e.endpoint or '' }}</td>
+                        <td data-label="User">{{ e.user_id if e.user_id is not none else '' }}</td>
+                        {# The <code> only when there is something in it, so an
+                           empty cell is really empty and :empty can hide it. #}
+                        <td data-label="Request">{% if e.request_id %}<code>{{ e.request_id }}</code>{% endif %}</td>
+                        <td class="logview-msg" data-label="Message">{{ e.message or '' }}</td>
                     </tr>
                     {% if e.extra or e.exception %}
                     <tr class="logview-detail">

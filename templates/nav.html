@@ -81,7 +81,6 @@
                 <div class="dropdown-menu-section">
                     <div class="dropdown-profile-label"><span>Administration</span></div>
                     <div class="dropdown-link"><a href="{{ url_for('admin_console') }}">Admin Console</a><i class="fa-regular fa-user-gear"></i></div>
-                    <div class="dropdown-link"><a href="{{ url_for('admin_logs') }}">Logs</a><i class="fa-solid fa-file-lines"></i></div>
                 </div>
                 {% endif %}
                 <div class="dropdown-divider"></div>
@@ -89,7 +88,6 @@
                     {# AGPL section 13: users interacting with this over a network must be
                        offered its source. This is the link that satisfies it on every
                        signed-in page. If you fork and deploy, point it at your own source. #}
-                    <div class="dropdown-link"><a href="https://github.com/blankee-io/blankee-app" target="_blank" rel="noopener noreferrer">Source code</a><i class="fa-solid fa-code-branch"></i></div>
                     <div class="dropdown-link"><a href="{{ url_for('logout') }}">Log out</a><i class="fa-regular fa-arrow-left-from-bracket"></i></div>
                 </div>
             </div>
