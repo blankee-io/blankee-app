@@ -115,11 +115,112 @@ It generates its own secrets and database password into
 because regenerating them would log everyone out and orphan the stored SMTP
 password.
 
-Serving is plain HTTP. For HTTPS, run certbot afterwards, then set `APP_URL` in
-that file to the `https://` address including the port. Note that certbot
-assumes 443 and will want to add its own `Listen`; if you are keeping the
-standard ports clear, point it at your chosen TLS port instead and re-check
-`ports.conf` after it runs.
+Serving is plain HTTP. For HTTPS, see **Putting it on the internet** below —
+in short, certificates cannot be issued for a service on port 18420, so this
+needs either port 80/443 or a reverse proxy in front.
+
+### Putting it on the internet
+
+Reaching Blankee from outside your network takes three things, and the middle
+one is where people get stuck.
+
+**1. DNS.** An `A` record for the name at your public address, and a port forward
+to the machine.
+
+**2. A certificate — and this is the constraint.** Let's Encrypt proves you
+control a name in one of three ways: HTTP-01 on **port 80**, TLS-ALPN-01 on
+**port 443**, or DNS-01 with a TXT record. There is no challenge that validates a
+service listening on port 18420. So certbot cannot issue a certificate for
+Blankee on its own port, however it is invoked.
+
+That leaves three real options:
+
+- **Put a reverse proxy on 443 in front** — the usual answer. The proxy holds the
+  certificate and renews it, and visitors get a normal `https://name/` with no
+  port to remember. Blankee stays on 18420, reachable only from the proxy.
+- **Run Blankee itself on 443**, with `--port 443`, and let certbot manage that
+  vhost. Simplest if the machine serves nothing else.
+- **Use DNS-01**, which needs no open port at all, if your DNS provider has a
+  certbot plugin. Useful when 80 and 443 cannot be opened.
+
+An nginx proxy in front looks like this:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name app.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/app.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/app.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://10.0.0.5:18420;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Uploads are capped by the application; this only stops nginx from
+        # rejecting a profile picture before it ever arrives.
+        client_max_body_size 10m;
+    }
+}
+```
+
+**3. Tell Blankee.** Two settings in `/var/www/budget_env/.env`, or the
+environment under Docker:
+
+```bash
+APP_URL=https://app.example.com     # no port, since the proxy is on 443
+TRUST_PROXY=1                       # number of proxies in front
+```
+
+`APP_URL` is what builds links in password-reset and notification emails, and it
+is also what switches the session cookie to `Secure` — so setting it to the
+`https://` address is what stops that cookie travelling over plain HTTP.
+
+`TRUST_PROXY` is off by default and should stay off unless there really is a
+proxy. `X-Forwarded-For` and `X-Forwarded-Proto` are ordinary request headers, so
+an instance that believes them while directly reachable lets any client claim any
+address and any scheme. Set it to the number of proxies, so only that many hops
+are trusted.
+
+Two things worth checking once it is up:
+
+- **Do not also expose 18420 to the internet.** If both paths work, the proxied
+  one is `https` and the direct one is not, and `Secure` cookies mean signing in
+  over the direct path silently fails to stick.
+- If you must keep a plain-HTTP path working — a LAN address alongside the public
+  name — set `SESSION_COOKIE_SECURE=0`. That is a deliberate weakening, and the
+  reason it exists is that the alternative is a login page that appears to work
+  and then loops.
+
+### If the address changes
+
+Moving the server to a new IP or hostname does not break the site — the vhost
+answers on its port whatever name is used to reach it. What it does break is
+**links in email**: password resets and notification emails are built from
+`APP_URL`, so a stale value sends people to an address that no longer answers,
+while everything you can see keeps working.
+
+If you installed against a *hostname* and only the IP behind it moved, there is
+nothing to do. Otherwise, point `APP_URL` at the new address:
+
+```bash
+sudo sed -i 's|^APP_URL=.*|APP_URL=http://192.168.1.50:18420|' /var/www/budget_env/.env
+sudo systemctl reload apache2
+```
+
+Or re-run the installer, which sets `APP_URL` and the vhost's `ServerName`
+together and is safe to repeat — existing secrets and data are kept:
+
+```bash
+sudo /opt/blankee/install/install.sh --server-name 192.168.1.50
+```
+
+`ServerName` on its own is cosmetic here, because the installer disables every
+other site and this vhost answers for any hostname on its port. `APP_URL` is the
+one that matters. Under Docker it is set in `.env` beside the other settings, so
+change it there and `docker compose up -d`.
 
 ### First run
 

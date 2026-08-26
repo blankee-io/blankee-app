@@ -93,6 +93,38 @@ app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['REMEMBER_COOKIE_HTTPONLY'] = True
 
+# Secure cookies, when the instance says it is served over TLS. APP_URL is the
+# operator's own statement of the canonical address, so an https:// value is the
+# clearest signal available that plain HTTP is not how people are meant to reach
+# this. Without it the session cookie travels over http too, and anything that
+# provokes one plain request to the domain hands over a live session.
+#
+# The trade-off is worth stating because it bites: with this on, reaching the
+# same instance over http - by LAN address, say, while APP_URL names a public
+# https host - will not keep you signed in, because the browser withholds the
+# cookie. SESSION_COOKIE_SECURE=0 overrides that if both paths must work.
+_app_url = os.getenv('APP_URL', '')
+_secure_default = _app_url.lower().startswith('https://')
+_secure_cookies = os.getenv('SESSION_COOKIE_SECURE', '1' if _secure_default else '0')
+_secure_cookies = _secure_cookies.strip().lower() in ('1', 'true', 'yes', 'on')
+app.config['SESSION_COOKIE_SECURE'] = _secure_cookies
+app.config['REMEMBER_COOKIE_SECURE'] = _secure_cookies
+
+# Behind a reverse proxy, the client's address and the scheme they used arrive in
+# X-Forwarded-For and X-Forwarded-Proto; without this the app sees the proxy's
+# address and believes every request is plain http.
+#
+# Off unless TRUST_PROXY says otherwise, and that default is the point: these are
+# request headers like any other, so an instance that trusts them while being
+# directly reachable lets any client claim any address and any scheme. Set it to
+# the number of proxies in front - 1 for a single nginx - so only that many hops
+# are believed.
+_trust_proxy = os.getenv('TRUST_PROXY', '0').strip()
+if _trust_proxy and _trust_proxy not in ('0', 'false', 'no', 'off'):
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    _hops = int(_trust_proxy) if _trust_proxy.isdigit() else 1
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_hops, x_proto=_hops, x_host=_hops)
+
 # Custom Jinja2 filter: ordinal day suffix (1st, 2nd, 3rd, 4th, 11th, 21st, etc.)
 # Renders suffix as superscript (<sup>) for display. Handles comma-separated lists.
 def ordinal_filter(value):
