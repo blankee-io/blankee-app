@@ -8,6 +8,35 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.5.0 — 2026-08-26
+
+### Added
+- `TRUST_PROXY`, for running behind a reverse proxy. Off by default, and set to
+  the number of proxies in front - `1` for a single nginx. Only then are
+  `X-Forwarded-For` and `X-Forwarded-Proto` believed, so the app sees the real
+  client address and the scheme they actually used instead of the proxy's
+  address and plain http.
+
+  Off by default because these are ordinary request headers: an instance that
+  trusts them while being directly reachable lets any client claim any address
+  and any scheme.
+- The session cookie is now marked `Secure` when `APP_URL` names an `https://`
+  address, so it stops travelling over plain HTTP. `SESSION_COOKIE_SECURE=0`
+  overrides it for the case where the same instance must also be reachable over
+  http on a LAN - without that escape hatch the browser silently withholds the
+  cookie and the login page loops.
+
+### Fixed
+- The README said certbot could be pointed at a non-standard TLS port. It
+  cannot: Let's Encrypt validates on port 80, port 443, or DNS, and there is no
+  challenge that reaches a service on 18420, so following that advice fails at
+  issuance. Replaced with **Putting it on the internet** - DNS, the three
+  certificate routes with a worked nginx example, and the two settings the
+  application needs.
+- A new **If the address changes** section. Moving to a new IP or hostname
+  leaves the site working while `APP_URL` still names the old address, so the
+  only visible symptom is that emailed password-reset links go nowhere.
+
 ## 1.4.1 — 2026-08-26
 
 ### Changed
