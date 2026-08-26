@@ -8,6 +8,20 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.3.1 — 2026-08-26
+
+### Added
+- Repository tooling, not application behaviour: pushing a `v*` tag to the
+  public repository now cuts a GitHub release, with the body taken from
+  `CHANGELOG.md` rather than retyped. Nothing in Blankee reads releases - the
+  updater compares `VERSION` over HTTPS - so this is for people: a readable
+  summary on the repository front page, and a feed anyone running an instance
+  can subscribe to, which a bare tag cannot provide.
+
+  The notes reach back to the previous tag rather than covering one version,
+  because public `main` is a squash of private `main` and one published release
+  can carry several private versions - 1.2.0 shipped 1.1.5 inside it.
+
 ## 1.3.0 — 2026-08-26
 
 ### Added
