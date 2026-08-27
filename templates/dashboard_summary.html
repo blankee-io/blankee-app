@@ -204,6 +204,46 @@
         function updateLocalState() { shouldReloadAfterEntry = true; }
         function updateLocalEntryAfterAdd() { shouldReloadAfterEntry = true; }
         
+        /* The bucket confirmation prompt in nav.html answers questions about
+           entries these charts are drawn from, so they have to be redrawn.
+           Defining this hook is how a page tells script.js it can do that
+           without a reload.
+
+           This page's own saveDailyTotalsAndRemainders is no use for it: it
+           returns early unless one of this page's own edits set
+           shouldReloadAfterEntry, and it finishes by reloading - which is the
+           thing being avoided. So the recalculation is posted directly. */
+        window.blankeeBucketRefresh = function (changes) {
+            if (typeof applyBucketChanges === "function") {
+                applyBucketChanges(changes, {
+                    income_entries: incomeEntries,
+                    expense_entries: expenseEntries,
+                    c_expense_entries: cExpenseEntries
+                });
+            }
+
+            fetch("/save_totals_remainders_d", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: "{}"
+            }).catch(function () { /* the nightly recalculation will catch it */ });
+
+            // The same set drawn on load, so the page looks as it would have
+            // done had it been opened after the answers.
+            renderBufferCard();
+            renderBalanceChart('month');
+            renderExpenseBuckets();
+            renderCaGraphs();
+            renderSavingsGraph();
+
+            // Nothing in this page's own refresh lowers the spinner script.js
+            // raised - the other dashboards get it for free from their totals
+            // save, and this page does not use that path.
+            if (typeof showDashboardSpinner === 'function') {
+                showDashboardSpinner(false);
+            }
+        };
+
         function saveDailyTotalsAndRemainders() { 
             if (!shouldReloadAfterEntry) return;
             

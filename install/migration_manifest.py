@@ -31,6 +31,9 @@ MIGRATIONS = [
     'add_smtp_verification.sql',
     'add_admin_user.sql',
     'add_totals_remainders_m_fk.sql',
+    'add_bucket_confirmation.sql',
+    'add_auto_balance.sql',
+    'add_email_notification_types.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and

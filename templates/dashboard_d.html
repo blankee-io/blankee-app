@@ -1278,6 +1278,20 @@
             setTimeout(fitTextToContainer, 150);
         }
 
+        /* The bucket confirmation prompt in nav.html answers questions about
+           entries this view is showing, so the view has to redraw. Defining this
+           hook is how a page tells script.js it can do that without a reload -
+           without it, script.js only posts the totals recalculation and leaves
+           the page alone.
+
+           saveDailyTotalsAndRemainders already does the whole job here: it
+           stores the recalculated totals and then calls updateDashboardDView,
+           which re-fetches the week from /get_dashboard_d_data and re-renders.
+           Redis is the primary store, so the answers are already visible to it. */
+        window.blankeeBucketRefresh = function (changes) {
+            saveDailyTotalsAndRemainders();
+        };
+
         function saveDailyTotalsAndRemainders(startDate = null) {
             let data = {};
             if (startDate) {
@@ -2044,11 +2058,18 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
         // Helper: add a "days late" badge to a bucket entry's amount cell
         function addBucketLateBadge(cell, entry) {
             if (!entry || entry.is_bucket != 1 || !entry.original_date) return;
+            // How far it has been pushed: where it sits now, less where it was
+            // originally due. Measured against the entry's own date rather than
+            // against today - against today, a bucket deferred this evening to
+            // tomorrow reads 0 until tomorrow arrives, so the badge shows up a day
+            // after the deferral that earned it and the answer looks ignored.
             const origDate = new Date(entry.original_date + 'T00:00:00');
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const daysLate = Math.floor((today - origDate) / 86400000);
-            if (daysLate <= 0) return;
+            const entryDateStr = typeof entry.date === 'string'
+                ? entry.date.slice(0, 10)
+                : new Date(entry.date).toISOString().slice(0, 10);
+            const entryDate = new Date(entryDateStr + 'T00:00:00');
+            const daysLate = Math.floor((entryDate - origDate) / 86400000);
+            if (!daysLate || daysLate <= 0) return;
             cell.style.position = 'relative';
             const badge = document.createElement('span');
             badge.className = 'bucket-late-badge';
@@ -3245,7 +3266,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                 // Switch to fixed positioning for bottom placement
                 banner.style.position = 'fixed';
                 banner.style.top = 'auto';
-                banner.style.bottom = '20px';
+                banner.style.bottom = '10px';
                 banner.style.left = wrapperRect.left + 'px';
                 arrow.className = 'fa-solid fa-arrow-down';
                 banner.style.display = 'flex';
@@ -3254,7 +3275,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             else if (containerRect.bottom < navBarHeight) {
                 // Use sticky positioning for top placement
                 banner.style.position = 'sticky';
-                banner.style.top = '120px';
+                banner.style.top = (navBarHeight + 10) + 'px';
                 banner.style.bottom = 'auto';
                 banner.style.left = '0';
                 arrow.className = 'fa-solid fa-arrow-up';

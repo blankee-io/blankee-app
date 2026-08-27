@@ -261,7 +261,18 @@ except Exception as e:
 # Initialize Redis manager with hydration/dehydration workers
 if _redis_client:
     init_redis_manager(_redis_client)
-    
+
+    # The end-of-day bucket prompt. A daemon thread beside the flush and
+    # dehydration workers; it claims each user's evening in the database before
+    # sending anything, so the two gunicorn workers in the Docker image cannot
+    # both prompt the same person.
+    try:
+        import bucket_prompt_scheduler
+        bucket_prompt_scheduler.start()
+    except Exception as _e:
+        log_exception(logger, 'BUCKET_PROMPT',
+                      f"Could not start the bucket prompt scheduler: {_e}")
+
     # Initialize Redis middleware and routes
     init_redis_middleware(app)
     init_redis_routes(app)
@@ -499,6 +510,39 @@ def _copyright_years():
 
 
 app.jinja_env.globals['copyright_years'] = _copyright_years
+
+
+_static_versions = {}
+
+
+def static_v(filename):
+    """
+    A static URL carrying the file's own modification time as ?v=.
+
+    script.js and style.css were served with no version at all, so a browser held
+    the old copy across a deploy and even across a reload - only a hard refresh
+    picked up a change. That turns every front-end fix into "it works for me",
+    and it is invisible: the page loads, it is simply running last week's code.
+
+    The mtime does the versioning, so nothing has to be bumped by hand and only
+    the files that actually changed lose their cache entry. Cached per filename
+    per process, because this runs for every page render; the process restarts on
+    deploy, which is exactly when the value needs to change.
+    """
+    url = url_for('static', filename=filename)
+    if filename in _static_versions:
+        return f'{url}?v={_static_versions[filename]}'
+    try:
+        stamp = int(os.path.getmtime(os.path.join(app.static_folder, filename)))
+    except Exception:
+        # An unreadable file is not worth failing a page render over; serve it
+        # unversioned, as it was before.
+        return url
+    _static_versions[filename] = stamp
+    return f'{url}?v={stamp}'
+
+
+app.jinja_env.globals['static_v'] = static_v
 
 
 # The landing page an unset user gets, and the fallback when one is set to an
@@ -2856,7 +2900,8 @@ def reset_password():
         # Create notification for password reset
         add_notification(
             user_id=user_id,
-            message='Your password was successfully reset. If you did not make this change, please contact support immediately.'
+            message='Your password was successfully reset. If you did not make this change, please contact support immediately.',
+            kind='account'
         )
         
         # Redirect to login with success message
@@ -3348,11 +3393,13 @@ def dashboard_d_add_entry():
             entry_date_parsed = entry_date
         today = date_type.today()
         
-        # PHASE 3 (Feb 2026): Today or future entries become buckets
-        entry_is_bucket = entry_date_parsed >= today
+        # Future entries become buckets, and so does today - but only when a bank
+        # feed exists to confirm it. See _bucket_cutoff_date.
+        bucket_cutoff = _bucket_cutoff_date(current_user.id)
+        entry_is_bucket = entry_date_parsed >= bucket_cutoff
         
         if entry_is_bucket:
-            log_info(app.logger, 'BUCKET', f"Entry date {entry_date} >= today {today}, will create as bucket")
+            log_info(app.logger, 'BUCKET', f"Entry date {entry_date} >= {bucket_cutoff}, will create as bucket")
         else:
             # PHASE 2 (Feb 2026): Process bucket reduction for past entries
             # Works for BOTH recurring categories and non-recurring categories with manual buckets
@@ -3371,12 +3418,35 @@ def dashboard_d_add_entry():
         # Continue with normal entry creation even if bucket processing fails
         entry_is_bucket = False  # Fallback to non-bucket on error
     
+    # Only merge with an entry of the same kind. A real entry must not be folded
+    # into the bucket sitting on the same day: the depletion above has already
+    # taken this amount out of that bucket, so adding to it as well would count
+    # the money twice and would turn the forecast row into the record.
+    #
+    # This only became reachable when today stopped being a bucket date for users
+    # with no bank feed. Before that a today-dated entry was always a bucket, so
+    # it never took the depletion path and could only ever meet another bucket.
+    if existing_entry is not None and bool(existing_entry.get('is_bucket')) != bool(entry_is_bucket):
+        existing_entry = None
+    
+    # A real entry the user typed is money that actually moved, so it is Paid. A
+    # bucket is a forecast and stays unpaid until something confirms it - either
+    # the evening prompt or a manual entry depleting it.
+    #
+    # Deliberately not keyed on the day the row was typed: that would make two
+    # otherwise identical entries differ by when they were entered. Future-dated
+    # manual entries are buckets anyway, so this only ever marks today and the
+    # past. Paid remains a toggle, so this is a default rather than a verdict.
+    entry_processed = 0 if entry_is_bucket else 1
+
     if existing_entry:
         new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(amount)
         _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(new_amount),
+                              processed=entry_processed,
                               is_bucket=entry_is_bucket, original_amount=float(new_amount) if entry_is_bucket else None)
     else:
         _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, float(amount),
+                              processed=entry_processed,
                               is_bucket=entry_is_bucket, original_amount=float(amount) if entry_is_bucket else None)
     
     # Create bucket record for future entries
@@ -3736,7 +3806,14 @@ def get_dashboard_d_data():
                     'category_name': cat.get('name', ''),
                     'display_order': cat.get('display_order', 0),
                     'is_bucket': entry.get('is_bucket', 0),
-                    'original_amount': entry.get('original_amount')
+                    'original_amount': entry.get('original_amount'),
+                    # Needed for the days-late badge. Without it the badge
+                    # survived only a full page load: the /dashboard_d route
+                    # bakes whole entry rows into the template, while this
+                    # projection dropped the field - so any in-place refresh
+                    # silently removed the badge. c_expense_entries below
+                    # already carried it, which is why cards looked fine.
+                    'original_date': entry.get('original_date')
                 })
             
             # Enrich expense entries
@@ -3753,7 +3830,14 @@ def get_dashboard_d_data():
                     'category_name': cat.get('name', ''),
                     'display_order': cat.get('display_order', 0),
                     'is_bucket': entry.get('is_bucket', 0),
-                    'original_amount': entry.get('original_amount')
+                    'original_amount': entry.get('original_amount'),
+                    # Needed for the days-late badge. Without it the badge
+                    # survived only a full page load: the /dashboard_d route
+                    # bakes whole entry rows into the template, while this
+                    # projection dropped the field - so any in-place refresh
+                    # silently removed the badge. c_expense_entries below
+                    # already carried it, which is why cards looked fine.
+                    'original_date': entry.get('original_date')
                 })
             
             # Enrich c_expense entries
@@ -9243,6 +9327,64 @@ def fetch_latest_data():
     # Your logic to return the latest data
     return jsonify({"data": "latest data"})
 
+def _bucket_days_pushed(entry, orig_date):
+    """
+    How many days a bucket has been carried forward, for the late badge.
+
+    original_date is where the forecast started and the entry's own date is where
+    it sits now, so the difference is the number of times it has been pushed: a
+    bucket due on the 26th and deferred to the 27th reads 1.
+
+    Measured against the entry's date rather than against today deliberately.
+    Against today, a bucket deferred this evening to tomorrow reads 0 until
+    tomorrow arrives - so the badge turns up a day after the action that earned
+    it, which looks like the deferral did nothing.
+    """
+    entry_date = entry.get('date')
+    if isinstance(entry_date, datetime):
+        entry_date = entry_date.date()
+    elif isinstance(entry_date, str):
+        try:
+            entry_date = datetime.strptime(entry_date[:10], '%Y-%m-%d').date()
+        except ValueError:
+            return 0
+    if not entry_date or not orig_date:
+        return 0
+    return max(0, (entry_date - orig_date).days)
+
+
+def _bucket_cutoff_date(user_id):
+    """
+    The first date on which a new entry is still a forecast rather than a record.
+
+    An entry on or after this date is written as a bucket; anything before it is a
+    real entry and depletes the matching bucket instead.
+
+    Normally the boundary is today, because a bank feed will confirm what actually
+    happened and consume the forecast. With no checking account synced nothing
+    will ever confirm it, so an entry the user types for today is the record - the
+    only one there is going to be - and has to behave like any past entry. Left as
+    a bucket it became a second forecast sitting beside the first, and the day was
+    counted twice.
+
+    Future dates stay forecasts either way: nobody can record what has not
+    happened yet.
+    """
+    today = date.today()
+    try:
+        from bank_redis import get_user_linked_account_flags
+        if get_user_linked_account_flags(user_id).get('has_checking'):
+            return today
+    except Exception as e:
+        # Keep the old boundary rather than guess: the evening prompt resolves a
+        # bucket that should not have been one, but nothing resolves a record
+        # that was silently never written as a forecast.
+        log_warning(logger, 'BUCKET',
+                    f"Could not tell whether user {user_id} has a synced checking "
+                    f"account; treating today as a forecast: {e}")
+        return today
+    return today + timedelta(days=1)
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -9407,7 +9549,7 @@ def dashboard():
                         orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
                     elif isinstance(orig_date, datetime):
                         orig_date = orig_date.date()
-                    days_late = (date.today() - orig_date).days
+                    days_late = _bucket_days_pushed(entry, orig_date)
                     if days_late > bucket_info_map[key]['max_days_late']:
                         bucket_info_map[key]['max_days_late'] = days_late
 
@@ -9481,7 +9623,7 @@ def dashboard():
                         orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
                     elif isinstance(orig_date, datetime):
                         orig_date = orig_date.date()
-                    days_late = (date.today() - orig_date).days
+                    days_late = _bucket_days_pushed(entry, orig_date)
                     if days_late > expense_bucket_info_map[key]['max_days_late']:
                         expense_bucket_info_map[key]['max_days_late'] = days_late
 
@@ -9557,7 +9699,7 @@ def dashboard():
                         orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
                     elif isinstance(orig_date, datetime):
                         orig_date = orig_date.date()
-                    days_late = (date.today() - orig_date).days
+                    days_late = _bucket_days_pushed(entry, orig_date)
                     if days_late > c_expense_bucket_info_map[key]['max_days_late']:
                         c_expense_bucket_info_map[key]['max_days_late'] = days_late
 
@@ -11886,7 +12028,15 @@ def update_week_entry():
         # Original behavior - delete all entries in the range
         _delete_entry_in_redis(table_name, current_user.id, category_id, start_date, end_date)
     
-    # Check if this is a future-dated entry (should become a bucket)
+    # Check if this is a future-dated entry (should become a bucket).
+    #
+    # Deliberately still >= today, not _bucket_cutoff_date, even though
+    # /dashboard-d/add_entry now uses the cutoff. This route deletes the whole
+    # range above before the depletion block below runs, so treating today as a
+    # real entry here would delete today's bucket and then have
+    # find_next_bucket_for_category deplete the NEXT bucket in the category -
+    # charging tomorrow's forecast for money spent today. Fixing that means
+    # reordering delete against deplete, which is its own piece of work.
     from datetime import date as date_type
     if isinstance(entry_date, str):
         entry_date_parsed = date_type.fromisoformat(entry_date)
@@ -12192,7 +12342,7 @@ def dashboard_3m():
                         orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
                     elif isinstance(orig_date, datetime):
                         orig_date = orig_date.date()
-                    days_late = (date.today() - orig_date).days
+                    days_late = _bucket_days_pushed(entry, orig_date)
                     if days_late > bucket_info_map[key]['max_days_late']:
                         bucket_info_map[key]['max_days_late'] = days_late
         income_entries = []
@@ -12263,7 +12413,7 @@ def dashboard_3m():
                         orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
                     elif isinstance(orig_date, datetime):
                         orig_date = orig_date.date()
-                    days_late = (date.today() - orig_date).days
+                    days_late = _bucket_days_pushed(entry, orig_date)
                     if days_late > expense_bucket_info_map[key]['max_days_late']:
                         expense_bucket_info_map[key]['max_days_late'] = days_late
         expense_entries = []
@@ -12336,7 +12486,7 @@ def dashboard_3m():
                         orig_date = datetime.strptime(orig_date, '%Y-%m-%d').date()
                     elif isinstance(orig_date, datetime):
                         orig_date = orig_date.date()
-                    days_late = (date.today() - orig_date).days
+                    days_late = _bucket_days_pushed(entry, orig_date)
                     if days_late > c_expense_bucket_info_map[key]['max_days_late']:
                         c_expense_bucket_info_map[key]['max_days_late'] = days_late
         c_expense_entries = []
@@ -16253,6 +16403,392 @@ def _get_category_name_for_mismatch(recurring_table, category_id, user_id):
     return ''
 
 
+# ------------------------------------------------- end-of-day bucket confirmation
+#
+# A bucket is a forecast entry. Until now nothing resolved one whose day had
+# passed, so an unconfirmed forecast stayed in the user's totals for good. These
+# three routes are how the evening prompt asks "did it come through?" and records
+# the answer.
+#
+# All Redis-first: bucket_confirmation writes to Redis and marks the table dirty,
+# and the flush worker carries it to MySQL. The conversion these replace wrote
+# straight to MySQL, which this architecture undoes on the next flush.
+
+
+@app.route('/api/user/timezone', methods=['POST'])
+@login_required
+def set_user_timezone():
+    """
+    Record the browser's IANA timezone, so the evening prompt fires at the
+    user's 20:00 rather than the server's.
+
+    Stored rather than guessed: a wrong zone sends the prompt at the wrong hour,
+    and the user has no way to tell it is wrong. No zone means no prompt.
+    """
+    data = request.get_json(silent=True) or {}
+    tz_name = (data.get('timezone') or '').strip()
+
+    # Shape check only - the scheduler validates it against the real zone
+    # database when it resolves it, and skips the user if it does not exist.
+    if not tz_name or len(tz_name) > 64 or not re.match(r'^[A-Za-z0-9_+\-/]+$', tz_name):
+        return jsonify({'success': False, 'error': 'Invalid timezone'}), 400
+
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            cursor.execute("UPDATE users SET timezone = %s WHERE id = %s",
+                           (tz_name, current_user.id))
+    except Exception as e:
+        log_exception(logger, 'BUCKET_PROMPT', f"Could not store timezone: {e}")
+        return jsonify({'success': False, 'error': 'Could not save timezone'}), 500
+
+    return jsonify({'success': True})
+
+
+@app.route('/api/buckets/pending', methods=['GET'])
+@login_required
+def api_buckets_pending():
+    """
+    The forecast entries waiting to be confirmed, oldest day last.
+
+    Serves both the evening prompt and the backlog of anything already overdue -
+    they are the same question asked about different dates.
+    """
+    import bucket_confirmation
+
+    try:
+        # Listing only. Nothing here removes a bucket: an entry is deleted when
+        # the user says so and at no other time, so simply opening the prompt
+        # cannot cost them data.
+        items, total = bucket_confirmation.pending_buckets(current_user.id)
+    except Exception as e:
+        log_exception(logger, 'BUCKET_CONFIRM', f"Could not list pending buckets: {e}")
+        return jsonify({'success': False, 'error': 'Could not load entries'}), 500
+
+    return jsonify({
+        'success': True,
+        'items': items,
+        'total': total,
+        # When the backlog is longer than one prompt should show, say so rather
+        # than truncating silently.
+        'shown': len(items),
+        'currency_type': getattr(current_user, 'currency_type', 'USD'),
+    })
+
+
+@app.route('/api/buckets/resolve', methods=['POST'])
+@login_required
+def api_buckets_resolve():
+    """
+    Record what actually happened to one forecast entry.
+
+    action is one of came_through, came_through_amount, defer, skip. The amount
+    is required only by came_through_amount.
+    """
+    import bucket_confirmation
+
+    data = request.get_json(silent=True) or {}
+    table = data.get('table')
+    entry_id = data.get('entry_id')
+    action = data.get('action')
+    amount = data.get('amount')
+
+    if entry_id is None or not table or not action:
+        return jsonify({'success': False, 'error': 'Missing entry, table or action'}), 400
+
+    try:
+        ok, message, change = bucket_confirmation.resolve(
+            current_user.id, table, entry_id, action, amount)
+    except Exception as e:
+        log_exception(logger, 'BUCKET_CONFIRM', f"Could not resolve bucket: {e}")
+        return jsonify({'success': False, 'error': 'Could not save that'}), 500
+
+    if not ok:
+        return jsonify({'success': False, 'error': message}), 400
+
+    # A credit-account answer changes the card's running balance, and that is
+    # stored per day rather than derived on render - so nothing recalculates it
+    # unless something asks. The entry routes do exactly this after touching a
+    # ca entry (see /dashboard-d/add_entry), and skipping it here left the card's
+    # totals and remainders showing a balance for spending that no longer exists.
+    #
+    # Server-side rather than in the browser: dashboard_d has no CA balance
+    # function of its own, so leaving it to the page would fix one dashboard and
+    # miss the rest.
+    if table == 'c_expense_entries':
+        try:
+            save_ca_daily_balance()
+        except Exception as e:
+            log_exception(logger, 'BUCKET_CONFIRM',
+                          f"Could not recalculate card balances after answering: {e}")
+
+    # Once the last one is answered, the evening notification is claiming a
+    # backlog that no longer exists, so it goes. Read from Redis rather than
+    # MySQL: the user is in the app and hydrated, and the answer above has only
+    # been written to Redis - MySQL is up to fifteen seconds behind it, so a
+    # count from there would still see the entry just resolved.
+    remaining = None
+    try:
+        _, remaining = bucket_confirmation.pending_buckets(current_user.id)
+        if not remaining:
+            import bucket_prompt_scheduler
+            bucket_prompt_scheduler.clear_prompt(current_user.id)
+    except Exception as e:
+        log_warning(logger, 'BUCKET_CONFIRM',
+                    f"Could not tidy the prompt notification: {e}")
+
+    # change tells the page what this entry now looks like, so it can redraw the
+    # affected cells instead of reloading. None means nothing needs touching.
+    # remaining lets the page set its bubble without asking again.
+    return jsonify({'success': True, 'message': message, 'change': change,
+                    'remaining': remaining})
+
+
+def _hidden_email_kinds(user_id):
+    """
+    Notification kinds not offered a switch on the settings page.
+
+    Hidden rather than removed from notification_kinds.KINDS: the gate still has
+    to recognise them, because the code that sends them has not gone anywhere.
+    This only decides what is worth showing a switch for.
+
+      buds                  held back for now
+      pending_transactions  only reachable with a bank feed, and a switch for
+                            something that can never fire reads as a feature the
+                            user is missing out on
+    """
+    hidden = {'buds'}
+    try:
+        from bank_redis import get_linked_accounts
+        if not get_linked_accounts(user_id):
+            hidden.add('pending_transactions')
+    except Exception as e:
+        log_warning(logger, 'NOTIFICATION',
+                    f"Could not tell whether user {user_id} has a bank feed; "
+                    f"hiding the pending transactions switch: {e}")
+        hidden.add('pending_transactions')
+    return hidden
+
+
+@app.route('/api/email-notification-types', methods=['GET', 'POST'])
+@login_required
+def api_email_notification_types():
+    """
+    Which kinds of notification this user wants emailed.
+
+    The list of kinds comes from notification_kinds rather than from the page, so
+    a kind added in the code gets a switch without anyone remembering to add one.
+
+    Stored as the exceptions: absent means wanted. That is what keeps every kind
+    on by default and a newly added kind on for people who saved their
+    preferences before it existed.
+    """
+    from notification_kinds import KINDS, parse_disabled, format_disabled
+
+    if request.method == 'GET':
+        try:
+            with get_db_pool().get_cursor() as cursor:
+                cursor.execute(
+                    "SELECT email_notify_disabled FROM users WHERE id = %s",
+                    (current_user.id,))
+                row = cursor.fetchone()
+            stored = (row['email_notify_disabled'] if isinstance(row, dict)
+                      else (row[0] if row else None))
+        except Exception as e:
+            log_exception(logger, 'NOTIFICATION',
+                          f"Could not read email notification types: {e}")
+            stored = None
+
+        off = parse_disabled(stored)
+
+        hidden = _hidden_email_kinds(current_user.id)
+        return jsonify({
+            'success': True,
+            'types': [{'key': key, 'label': label, 'description': desc,
+                       'enabled': key not in off}
+                      for key, label, desc in KINDS if key not in hidden],
+        })
+
+    data = request.get_json(silent=True) or {}
+    disabled = data.get('disabled')
+    if not isinstance(disabled, list):
+        return jsonify({'success': False, 'error': 'Nothing to save.'}), 400
+
+    # A hidden kind has no switch, so the page cannot report it either way.
+    # Whatever is stored for it is carried over rather than dropped: otherwise
+    # saving any one switch would quietly re-enable emails for every kind the
+    # page happens not to show.
+    keep = set()
+    try:
+        with get_db_pool().get_cursor() as cursor:
+            cursor.execute("SELECT email_notify_disabled FROM users WHERE id = %s",
+                           (current_user.id,))
+            row = cursor.fetchone()
+        stored = (row['email_notify_disabled'] if isinstance(row, dict)
+                  else (row[0] if row else None))
+        keep = parse_disabled(stored) & _hidden_email_kinds(current_user.id)
+    except Exception as e:
+        log_warning(logger, 'NOTIFICATION',
+                    f"Could not read existing email types for user "
+                    f"{current_user.id}: {e}")
+
+    disabled = list(set(disabled) | keep)
+
+    try:
+        # Redis-first, like every other user setting: _update_user_setting_in_redis
+        # marks the row dirty and the flush worker carries it to MySQL. Writing
+        # here directly would be reverted by that worker.
+        _update_user_setting_in_redis(current_user.id, 'email_notify_disabled',
+                                      format_disabled(disabled))
+    except Exception as e:
+        log_exception(logger, 'NOTIFICATION',
+                      f"Could not save email notification types: {e}")
+        return jsonify({'success': False, 'error': 'Could not save that.'}), 500
+
+    return jsonify({'success': True})
+
+
+@app.route('/api/autobalance/settings', methods=['GET', 'POST'])
+@login_required
+def api_autobalance_settings():
+    """
+    Read or write the auto-balance cadence.
+
+    GET also reports next_due and the last adjustment, so Settings can say when
+    the next prompt is and what the last correction was - a correction that keeps
+    moving the same way is the only signal that something upstream is wrong.
+    """
+    import auto_balance
+
+    if request.method == 'GET':
+        settings = auto_balance.get_settings(current_user.id) or {}
+        return jsonify({
+            'success': True,
+            'enabled': bool(settings.get('enabled')),
+            # Defaults for a user who has never saved: every two weeks on a
+            # Friday evening, which is when someone is most likely to have just
+            # looked at their bank.
+            'cadence_interval': settings.get('cadence_interval') or 2,
+            'cadence_unit': settings.get('cadence_unit') or 'weeks',
+            'weekdays': ([w for w in str(settings.get('weekdays')).split(',') if w]
+                         if settings.get('weekdays') else
+                         ([] if settings else ['friday'])),
+            'monthly_days': ([d for d in str(settings.get('monthly_days')).split(',') if d]
+                             if settings.get('monthly_days') else []),
+            'notify_time': str(auto_balance.notify_at(settings)),
+            'next_due': str(settings.get('next_due')) if settings.get('next_due') else None,
+            'last_balanced': str(settings.get('last_balanced')) if settings.get('last_balanced') else None,
+            'last_adjustment': (float(settings.get('last_adjustment'))
+                                if settings.get('last_adjustment') is not None else None),
+            'units': list(auto_balance.CADENCE_UNITS),
+        })
+
+    data = request.get_json(silent=True) or {}
+    ok, message = auto_balance.save_settings(
+        current_user.id,
+        data.get('enabled'),
+        data.get('cadence_interval', 2),
+        data.get('cadence_unit', 'weeks'),
+        weekdays=data.get('weekdays'),
+        monthly_days=data.get('monthly_days'),
+        notify_time=data.get('notify_time'))
+    if not ok:
+        return jsonify({'success': False, 'error': message}), 400
+    settings = auto_balance.get_settings(current_user.id) or {}
+    return jsonify({'success': True, 'message': message,
+                    'next_due': str(settings.get('next_due')) if settings.get('next_due') else None})
+
+
+@app.route('/api/autobalance/state')
+@login_required
+def api_autobalance_state():
+    """
+    What the balance modal needs to open.
+
+    pending says whether a prompt is waiting; ?force=1 answers the same question
+    for the "Balance now" button in Settings, which has to work whether or not
+    the cadence has come round.
+
+    app_balance is reported before any confirmations are applied, so the user
+    sees the figure the app is currently showing them rather than one they have
+    no way to check. The number that the correction is actually measured against
+    is computed inside apply(), after the confirmations - see auto_balance.
+    """
+    import auto_balance
+
+    force = request.args.get('force') in ('1', 'true', 'yes')
+    settings = auto_balance.get_settings(current_user.id) or {}
+    pending = settings.get('pending_date') is not None
+
+    if not pending and not force:
+        return jsonify({'success': True, 'pending': False})
+
+    balance = auto_balance.app_balance(current_user.id)
+    return jsonify({
+        'success': True,
+        'pending': True,
+        'forced': force and not pending,
+        'app_balance': float(balance) if balance is not None else None,
+        'to_confirm': auto_balance.pending_bucket_count(current_user.id),
+        'currency_type': getattr(current_user, 'currency_type', 'USD'),
+    })
+
+
+@app.route('/api/autobalance/apply', methods=['POST'])
+@login_required
+def api_autobalance_apply():
+    """
+    Reconcile against the balance the user typed.
+
+    Everything of consequence happens in auto_balance.apply, in one order that
+    matters: confirm the outstanding entries, recalculate the stored totals, then
+    measure. Doing it here in pieces is how that order would eventually get
+    rearranged by someone reading this route alone.
+    """
+    import auto_balance
+
+    data = request.get_json(silent=True) or {}
+    if data.get('balance') is None:
+        return jsonify({'success': False, 'error': 'Enter your current balance.'}), 400
+
+    try:
+        ok, result = auto_balance.apply(current_user.id, data.get('balance'))
+    except Exception as e:
+        log_exception(logger, 'AUTOBALANCE', f"Balance failed: {e}")
+        return jsonify({'success': False, 'error': 'Could not balance. Nothing was changed.'}), 500
+
+    if not ok:
+        return jsonify(dict({'success': False}, **result)), 400
+
+    # The confirmations may have emptied the bucket backlog, which makes the
+    # evening notification a claim about nothing.
+    try:
+        import bucket_confirmation
+        _, remaining = bucket_confirmation.pending_buckets(current_user.id)
+        if not remaining:
+            import bucket_prompt_scheduler
+            bucket_prompt_scheduler.clear_prompt(current_user.id)
+        result['remaining'] = remaining
+    except Exception as e:
+        log_warning(logger, 'AUTOBALANCE', f"Could not tidy the prompt notification: {e}")
+
+    return jsonify(dict({'success': True}, **result))
+
+
+@app.route('/api/autobalance/skip', methods=['POST'])
+@login_required
+def api_autobalance_skip():
+    """
+    Not now. Nothing is written and the cadence is untouched.
+
+    next_due was already advanced when the prompt was raised, so skipping simply
+    means the next occurrence asks again. That is the whole mechanism - there is
+    no separate snooze to get out of step with the cadence.
+    """
+    import auto_balance
+    auto_balance.clear_pending(current_user.id)
+    return jsonify({'success': True})
+
+
 @app.route('/mark-notification-read', methods=['POST'])
 @login_required
 def mark_notification_read():
@@ -16793,7 +17329,8 @@ def update_username():
     # Create notification
     add_notification(
         user_id=current_user.id,
-        message=f'Email address changed from {current_email} to {new_username}. Use the new address to sign in.'
+        message=f'Email address changed from {current_email} to {new_username}. Use the new address to sign in.',
+        kind='account'
     )
 
     return redirect(url_for('profile', success='email'))
@@ -19924,7 +20461,7 @@ def get_user_device_tokens(user_id, platform=None):
         cursor.close()
         return tokens or []
 
-def add_notification(user_id, message, notification_date=None):
+def add_notification(user_id, message, notification_date=None, kind=None):
     """
     Create a new notification for a user and optionally send via email.
     
@@ -19932,6 +20469,9 @@ def add_notification(user_id, message, notification_date=None):
         user_id: The user ID to create the notification for
         message: The notification message text
         notification_date: Optional datetime for the notification (defaults to now)
+        kind: Which sort of notification this is, from notification_kinds. Only
+            the email is affected - the in-app notification is always created,
+            because the per-type switches are about what lands in a mailbox.
     
     Returns:
         The ID of the created notification
@@ -19951,7 +20491,7 @@ def add_notification(user_id, message, notification_date=None):
         
         # Check if user has email notifications enabled
         cursor.execute("""
-            SELECT email, email_notifications, first_name
+            SELECT email, email_notifications, first_name, email_notify_disabled
             FROM users
             WHERE id = %s
         """, (user_id,))
@@ -19978,7 +20518,7 @@ def add_notification(user_id, message, notification_date=None):
     if user:
         try:
             from email_utils import send_notification_email_for_user
-            send_notification_email_for_user(user, message, notification_date)
+            send_notification_email_for_user(user, message, notification_date, kind=kind)
         except Exception as e:
             log_error(app.logger, 'NOTIFICATION', f"Failed to send notification email to user {user_id}: {str(e)}")
 
@@ -20097,7 +20637,7 @@ def _create_pending_transactions_notification(user_id, new_count):
     message = f'You have {total_pending} pending {txn_word} synced from your bank accounts that {need_word} to be categorized. <a href="/pending-transactions">Click here to review</a>.'
     
     # Create new notification
-    add_notification(user_id, message)
+    add_notification(user_id, message, kind='pending_transactions')
     log_info(app.logger, 'NOTIFICATION', f"Created pending transactions notification for user {user_id}: {total_pending} pending")
 
 
@@ -20247,7 +20787,7 @@ def check_negative_remainders(user_id):
     formatted_date = first_negative_date.strftime('%B %d, %Y')
     message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
     try:
-        notification_id = add_notification(user_id, message)
+        notification_id = add_notification(user_id, message, kind='low_balance')
         log_info(app.logger, 'NOTIFICATION', f"Created negative remainder notification for user {user_id}: {formatted_date}")
     except Exception as e:
         log_error(app.logger, 'NOTIFICATION', f"Error creating notification: {e}")
@@ -21315,10 +21855,10 @@ def toggle_bud_active():
     if active == 1:
         check_and_hide_bud_category(bud_id)
         # Add notification for activation
-        add_notification(current_user.id, f"Bud '{bud_name}' has been activated.")
+        add_notification(current_user.id, f"Bud '{bud_name}' has been activated.", kind='buds')
     else:
         # Add notification for deactivation
-        add_notification(current_user.id, f"Bud '{bud_name}' has been deactivated.")
+        add_notification(current_user.id, f"Bud '{bud_name}' has been deactivated.", kind='buds')
         
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
