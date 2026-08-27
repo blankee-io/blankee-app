@@ -39,11 +39,40 @@
             <div class="profile-content">
                 <!-- Section for changing email and password -->
                 <div class="profile-actions">                
+                    <div class="notification-section">
+                        <div class="section-liner">
+                            <form id="email-notifications-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="email_notifications">Email Notifications:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Sends notifications by email as well as in the app. It cannot be turned on until email delivery is set up and verified in the admin console, because until then there is nowhere for notifications to go.</span></span></label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <input type="checkbox" id="email_notifications" {% if email_notifications == 1 %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="email_notifications">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if email_notifications != 1 %}toggle-off{% endif %}"></i>
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Which kinds get emailed. Only shown when email
+                                 notifications are on at all, and boxed so it reads as
+                                 part of that switch. -->
+                            <!-- Inside a .profile-form on purpose: every label, input
+                                 and toggle rule on this page is scoped to that class, so
+                                 a panel outside one inherits none of it and the rows
+                                 render as bare checkboxes. -->
+                            <form id="email-types-form" class="profile-form">
+                                <div id="email-types-panel" class="email-types-panel" style="display:none;">
+                                    <p class="email-types-heading">Send an email for<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which kinds of notification are emailed. All of them are on unless you turn one off, and the switch above still controls whether any email is sent at all.</span></span></p>
+                                    <div id="email-types-list"></div>
+                                </div>
+                            </form>
+
+                        </div>
+                    </div>
                     <div class="data-section">
                         <div class="section-liner">
                             <form id="currency-type-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="currency_type">Currency:</label>
+                                    <label for="currency_type">Currency:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The currency symbol used throughout the app. It changes how amounts are displayed and does not convert anything.</span></span></label>
                                     <select name="currency_type" id="currency_type" class="login-input" required>
                                         <option value="USD" {% if currency_type == 'USD' %}selected{% endif %}>USD</option>
                                         <option value="EUR" {% if currency_type == 'EUR' %}selected{% endif %}>EUR</option>
@@ -56,7 +85,7 @@
                             <!-- Balance Threshold Form -->
                             <form id="balance-threshold-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="balance_threshold">Threshold:</label>
+                                    <label for="balance_threshold">Threshold:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">You are warned when a projected balance falls below this figure, so a shortfall shows up before it arrives.</span></span></label>
                                     <div class="currency-input-container">
                                         <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
                                         <input type="number" name="balance_threshold" id="balance_threshold" class="login-input" value="{{ balance_threshold }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
@@ -68,7 +97,7 @@
                             </form>
                             <form id="landing-page-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="landing_page">Landing Page:</label>
+                                    <label for="landing_page">Landing Page:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which dashboard opens when you sign in or tap the logo.</span></span></label>
                                     <select class="login-input" name="landing_page" id="landing_page">
                                         <option value="dashboard" {% if landing_page == 'dashboard' %}selected{% endif %}>Week View</option>
                                         <option value="dashboard_d" {% if landing_page == 'dashboard_d' %}selected{% endif %}>Day View</option>
@@ -81,7 +110,7 @@
                             </form>
                             <form id="goofy-week-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="goofy_week_mode">Friday Start Week:</label>
+                                    <label for="goofy_week_mode">Friday Start Week:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Shifts your budget week to Friday-Thursday instead of the default Saturday-Friday, so weekly totals line up with a Friday payday.</span></span></label>
                                     <input type="text" disabled class="hidden-spacer">
                                     <input type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %} class="hidden-checkbox">
                                     <button type="button" class="toggle-switch" data-checkbox="goofy_week_mode">
@@ -89,27 +118,76 @@
                                     </button>
                                 </div>
                             </form>
-                            <p class="setting-description">Shifts your budget week to Friday–Thursday instead of the default Saturday–Friday.</p>
-                        </div>
-                    </div>
-                    <div class="notification-section">
-                        <div class="section-liner">
-                            <form id="email-notifications-form" class="profile-form">
+                            <!-- Balance Reminder: asks, on a cadence, whether the
+                                 user wants to reconcile against their real balance. The
+                                 cadence controls are the same widget as the recurring
+                                 income page, so the ids and classes match it. -->
+                            <form id="balance-notification-form" class="profile-form">
                                 <div class="input-group">
-                                    <label for="email_notifications">Email Notifications:</label>
+                                    <label for="balance_reminder_enabled">Balance Reminder:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Asks, on the cadence below, whether you want to reconcile against your real bank balance. Nothing is changed unless you say yes.</span></span></label>
                                     <input type="text" disabled class="hidden-spacer">
-                                    <input type="checkbox" id="email_notifications" {% if email_notifications == 1 %}checked{% endif %} class="hidden-checkbox">
-                                    <button type="button" class="toggle-switch" data-checkbox="email_notifications">
-                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if email_notifications != 1 %}toggle-off{% endif %}"></i>
+                                    <input type="checkbox" id="balance_reminder_enabled" class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="balance_reminder_enabled">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon toggle-off"></i>
+                                    </button>
+                                </div>
+
+                                <!-- One grey panel around everything the toggle controls, so
+                                     it reads as belonging to it rather than as three loose rows. -->
+                                <div id="balance-notification-panel" class="balance-notification-panel" style="display:none;">
+                                <div id="balance-cadence-options" class="balance-cadence-options">
+                                    <div class="input-group">
+                                    <label for="balance-cadence-interval">Repeat Every<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">How often to ask. The number and the unit together set the interval, so 2 and Week(s) means once a fortnight.</span></span></label>
+                                    <div class="cadence-row">
+                                        <input type="number" id="balance-cadence-interval" name="cadence_interval" class="login-input" min="1" max="365" value="2" required>
+                                        <select id="balance-cadence-unit" name="cadence_unit" class="login-input" required>
+                                            <option value="days">Day(s)</option>
+                                            <option value="weeks" selected>Week(s)</option>
+                                            <option value="months">Month(s)</option>
+                                        </select>
+                                    </div>
+                                    </div>
+
+                                    <div id="balance-weekly-options" style="display:none;">
+                                        <label>Repeat on:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which weekdays to ask on. The interval still applies, so every 2 weeks on Monday means alternate Mondays.</span></span></label>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="monday"> Mo</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="tuesday"> Tu</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="wednesday"> We</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="thursday"> Th</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="friday" checked> Fr</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="saturday"> Sa</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="sunday"> Su</div>
+                                    </div>
+
+                                    <div id="balance-monthly-options" style="display:none;">
+                                        <label for="balance-monthly-days">Days of the month:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which days of the month to ask on. Last Day follows the length of each month.</span></span></label>
+                                        <div id="balance-monthly-day-container"></div>
+                                        <button type="button" id="balance-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
+                                    </div>
+                                </div>
+
+                                <!-- A standard settings row rather than part of the indented
+                                     group above, so the check button sits where every other
+                                     submit button on the page does. -->
+                                <div class="input-group" id="balance-time-row">
+                                    <label for="balance-notify-time">At:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The time of day to send it, in your own timezone.</span></span></label>
+                                    <input type="time" id="balance-notify-time" name="notify_time" class="login-input" value="20:00" required>
+                                    <button type="submit" class="submit-button">
+                                        <i id="balance-notification-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                                <p class="balance-next-check" id="balance-next-check"></p>
+                                </div>
+                            </form>
+                            <form id="balance-now-form" class="profile-form">
+                                <div class="input-group">
+                                    <label>Balance now:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Reconcile straight away rather than waiting for the next scheduled check.</span></span></label>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <button type="button" id="balance-now-btn" class="submit-button">
+                                        <i class="fa-solid fa-scale-balanced"></i>
                                     </button>
                                 </div>
                             </form>
-                            <p class="setting-description email-delivery-warning{% if email_delivery_verified() %} email-delivery-hidden{% endif %}"
-                               id="email-notifications-hint">
-                                Email delivery must be set up and switched on in the admin
-                                console before this can be turned on. Until then there is
-                                nowhere for notifications to go.
-                            </p>
                         </div>
                     </div>
                 </div>
@@ -128,6 +206,13 @@
         const currencyType = "{{ currency_type }}";
         const currencySymbols = { USD: "$", EUR: "€" };
         const currencySymbol = currencySymbols[currencyType] || currencyType;
+
+        // The Email Notifications handler gates on this before saving. It was
+        // being read without ever being declared, so every toggle threw a
+        // ReferenceError, the save never fired, and a refresh showed the
+        // unchanged server value - which looked like the switch turning itself
+        // off. Rendered from the same helper the hint text below it uses.
+        const emailDeliveryVerified = {{ 'true' if email_delivery_verified() else 'false' }};
 
         // Helper function to show success messages
         function showSuccessMessage(message) {
@@ -428,6 +513,348 @@
         }
 
 
+
+        // ---- Balance Notification -----------------------------------------
+        // The cadence controls mirror the recurring income page, including the
+        // dynamic day-of-month list, so that one widget behaves the same in
+        // both places. Settings live in autobalance_settings rather than on the
+        // user row because next_due there is a cross-process claim - see
+        // auto_balance.
+        (function () {
+            var form = document.getElementById('balance-notification-form');
+            if (!form) { return; }
+
+            var enabled = document.getElementById('balance_reminder_enabled');
+            var interval = document.getElementById('balance-cadence-interval');
+            var unit = document.getElementById('balance-cadence-unit');
+            var weekly = document.getElementById('balance-weekly-options');
+            var monthly = document.getElementById('balance-monthly-options');
+            var monthlyBox = document.getElementById('balance-monthly-day-container');
+            var addDay = document.getElementById('balance-add-monthly-day-btn');
+            var timeField = document.getElementById('balance-notify-time');
+            var panel = document.getElementById('balance-notification-panel');
+            var nextCheck = document.getElementById('balance-next-check');
+
+            function daySelect(value) {
+                // Same structure, classes and rules as createMonthlyDaySelect on
+                // the recurring income page - including the Last Day option and
+                // refusing to remove the final row. That function lives in that
+                // template rather than in script.js, so it cannot be called from
+                // here; matching it by hand is the cost of not moving it.
+                var wrap = document.createElement('div');
+                wrap.className = 'monthly-day-select-container';
+
+                var sel = document.createElement('select');
+                sel.name = 'balance_monthly_days';
+                sel.className = 'monthly-day-select';
+                for (var d = 1; d <= 31; d++) {
+                    var opt = document.createElement('option');
+                    opt.value = String(d);
+                    opt.text = String(d);
+                    sel.appendChild(opt);
+                }
+                var last = document.createElement('option');
+                last.value = 'Last Day';
+                last.text = 'Last Day';
+                sel.appendChild(last);
+                if (value) { sel.value = String(value); }
+                wrap.appendChild(sel);
+
+                var minus = document.createElement('button');
+                minus.type = 'button';
+                minus.className = 'remove-day-btn';
+                minus.textContent = '-';
+                minus.addEventListener('click', function () {
+                    var box = wrap.parentNode;
+                    if (box.querySelectorAll('.monthly-day-select-container').length > 1) {
+                        box.removeChild(wrap);
+                    } else {
+                        showToast('At least one day must be selected.', 'warning');
+                    }
+                });
+                wrap.appendChild(minus);
+                return wrap;
+            }
+
+            function showForUnit() {
+                // Days needs only a time; weeks adds weekdays; months adds the
+                // day-of-month list. Same three cases as the recurring widget.
+                var u = unit.value;
+                weekly.style.display = u === 'weeks' ? '' : 'none';
+                monthly.style.display = u === 'months' ? '' : 'none';
+                if (u === 'months' && !monthlyBox.children.length) {
+                    monthlyBox.appendChild(daySelect(new Date().getDate()));
+                }
+            }
+
+            function showForEnabled() {
+                // Hidden rather than disabled: an unset cadence is meaningless
+                // when the notification is off, and leaving it visible invites
+                // the user to set something that will not happen.
+                if (panel) { panel.style.display = enabled.checked ? '' : 'none'; }
+            }
+
+            function paintToggle() {
+                var icon = form.querySelector('.toggle-switch .toggle-icon');
+                if (icon) { icon.classList.toggle('toggle-off', !enabled.checked); }
+            }
+
+            function showNextCheck(d) {
+                if (!nextCheck) { return; }
+                if (!d.enabled || !d.next_due) {
+                    nextCheck.textContent = '';
+                    return;
+                }
+
+                // Built from the parts rather than from new Date(iso): a
+                // date-only string is parsed as UTC midnight, so anyone behind
+                // UTC would be shown the day before.
+                var parts = String(d.next_due).split('-');
+                var at = String(d.notify_time || '20:00').split(':');
+                var when = new Date(Number(parts[0]), Number(parts[1]) - 1,
+                                    Number(parts[2]), Number(at[0]) || 0,
+                                    Number(at[1]) || 0);
+                if (isNaN(when.getTime())) {
+                    nextCheck.textContent = '';
+                    return;
+                }
+
+                // "today" and "tomorrow" read better than a date the user has to
+                // work out. Compared at midnight and rounded, so an hour lost or
+                // gained to a daylight-saving change cannot make today look like
+                // yesterday.
+                var midnight = new Date();
+                midnight.setHours(0, 0, 0, 0);
+                var target = new Date(when.getTime());
+                target.setHours(0, 0, 0, 0);
+                var days = Math.round((target - midnight) / 86400000);
+
+                var day;
+                if (days === 0) {
+                    day = 'today';
+                } else if (days === 1) {
+                    day = 'tomorrow';
+                } else {
+                    day = when.toLocaleDateString(undefined, {
+                        weekday: 'short', day: 'numeric', month: 'short'
+                    });
+                }
+
+                var time = when.toLocaleTimeString(undefined, {
+                    hour: 'numeric', minute: '2-digit'
+                });
+                nextCheck.textContent = 'Next check ' + day + ' at ' + time;
+            }
+
+            function collect() {
+                var weekdays = Array.prototype.map.call(
+                    weekly.querySelectorAll('input[name="balance_weekdays"]:checked'),
+                    function (el) { return el.value; });
+                var days = Array.prototype.map.call(
+                    monthlyBox.querySelectorAll('select'),
+                    function (el) { return el.value; });
+                return {
+                    enabled: enabled.checked,
+                    cadence_interval: interval.value,
+                    cadence_unit: unit.value,
+                    weekdays: weekdays,
+                    monthly_days: days,
+                    notify_time: timeField.value || '20:00'
+                };
+            }
+
+            function load() {
+                fetch('/api/autobalance/settings', { headers: { 'Accept': 'application/json' } })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (d) {
+                        if (!d || !d.success) { return; }
+                        enabled.checked = !!d.enabled;
+                        interval.value = d.cadence_interval;
+                        unit.value = d.cadence_unit === 'years' ? 'months' : d.cadence_unit;
+                        if (d.notify_time) { timeField.value = d.notify_time.slice(0, 5); }
+
+                        // Cleared first. This only ever set checked = true, so a
+                        // day ticked in the markup could never be unticked by
+                        // what came back - Friday is checked there as the
+                        // default, and so came back on every render however it
+                        // had been saved.
+                        Array.prototype.forEach.call(
+                            weekly.querySelectorAll('input[name="balance_weekdays"]'),
+                            function (box) { box.checked = false; });
+                        (d.weekdays || []).forEach(function (name) {
+                            var box = weekly.querySelector('input[value="' + name + '"]');
+                            if (box) { box.checked = true; }
+                        });
+                        monthlyBox.innerHTML = '';
+                        (d.monthly_days || []).forEach(function (day) {
+                            monthlyBox.appendChild(daySelect(day));
+                        });
+
+                        paintToggle();
+                        showForEnabled();
+                        showForUnit();
+                        showNextCheck(d);
+                    })
+                    .catch(function () { /* leave the defaults showing */ });
+            }
+
+            function save() {
+                fetch('/api/autobalance/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(collect())
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (!d || !d.success) {
+                            showToast((d && d.error) || 'Could not save that.', 'error');
+                            return;
+                        }
+                        showToast('Balance reminder saved.', 'success');
+                        load();
+                    })
+                    .catch(function () { showToast('Could not reach the server.', 'error'); });
+            }
+
+            form.addEventListener('submit', function (e) { e.preventDefault(); save(); });
+            unit.addEventListener('change', showForUnit);
+            if (addDay) {
+                addDay.addEventListener('click', function () {
+                    monthlyBox.appendChild(daySelect(1));
+                });
+            }
+            // jQuery, not addEventListener. The toggle is a button over a hidden
+            // checkbox, and the page's shared handler flips it with .prop() and
+            // then $.trigger('change') - which runs jQuery handlers only. A
+            // native listener here was never called at all, so the options did
+            // not hide when the switch went off and nothing was saved when it
+            // went on.
+            $(enabled).on('change', function () {
+                paintToggle();
+                showForEnabled();
+                save();
+            });
+
+            var now = document.getElementById('balance-now-btn');
+            if (now) {
+                now.addEventListener('click', function () {
+                    // force, so it works whether or not the cadence is due.
+                    showAutoBalancePrompt({ force: true });
+                });
+            }
+
+            load();
+        })();
+
+        // ---- Which notifications get emailed ------------------------------
+        // The list comes from the server (notification_kinds), not from here, so
+        // a kind added in the code gets a switch without anyone remembering to
+        // add one. Only the opt-outs are sent back: everything is on unless it
+        // is named, which is what keeps a future kind on by default.
+        (function () {
+            var panel = document.getElementById('email-types-panel');
+            var list = document.getElementById('email-types-list');
+            var master = document.getElementById('email_notifications');
+            if (!panel || !list || !master) { return; }
+
+            function showPanel() {
+                panel.style.display = master.checked ? '' : 'none';
+            }
+
+            function row(t) {
+                var wrap = document.createElement('div');
+                wrap.className = 'input-group';
+
+                var label = document.createElement('label');
+                label.setAttribute('for', 'email-type-' + t.key);
+                label.textContent = t.label;
+                label.appendChild(infoTip(t.description));
+
+                var spacer = document.createElement('input');
+                spacer.type = 'text';
+                spacer.disabled = true;
+                spacer.className = 'hidden-spacer';
+
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.className = 'hidden-checkbox';
+                box.id = 'email-type-' + t.key;
+                box.checked = !!t.enabled;
+
+                var button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'toggle-switch';
+                button.setAttribute('data-checkbox', box.id);
+                var icon = document.createElement('i');
+                icon.className = 'fa-solid fa-toggle-large-on toggle-icon' +
+                                 (t.enabled ? '' : ' toggle-off');
+                button.appendChild(icon);
+
+                // Bound directly rather than relying on the page's delegated
+                // handler: that one is bound on load and these rows do not exist
+                // yet, so they would never respond to a click.
+                button.addEventListener('click', function () {
+                    box.checked = !box.checked;
+                    icon.classList.toggle('toggle-off', !box.checked);
+                    save();
+                });
+
+                wrap.appendChild(label);
+                wrap.appendChild(spacer);
+                wrap.appendChild(box);
+                wrap.appendChild(button);
+                return wrap;
+            }
+
+            function infoTip(text) {
+                var span = document.createElement('span');
+                span.className = 'info-tip';
+                span.tabIndex = 0;
+                var i = document.createElement('i');
+                i.className = 'fa-solid fa-circle-info';
+                var bubble = document.createElement('span');
+                bubble.className = 'info-tip-text';
+                bubble.textContent = text;
+                span.appendChild(i);
+                span.appendChild(bubble);
+                return span;
+            }
+
+            function save() {
+                var off = [];
+                Array.prototype.forEach.call(
+                    list.querySelectorAll('input[type="checkbox"]'),
+                    function (box) {
+                        if (!box.checked) { off.push(box.id.replace('email-type-', '')); }
+                    });
+                fetch('/api/email-notification-types', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ disabled: off })
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (!d || !d.success) {
+                            showToast((d && d.error) || 'Could not save that.', 'error');
+                        }
+                    })
+                    .catch(function () { showToast('Could not reach the server.', 'error'); });
+            }
+
+            fetch('/api/email-notification-types', { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d || !d.success) { return; }
+                    list.innerHTML = '';
+                    d.types.forEach(function (t) { list.appendChild(row(t)); });
+                    showPanel();
+                })
+                .catch(function () { /* leave the panel hidden */ });
+
+            // jQuery, because the page's toggle handler fires change through
+            // $.trigger, which native listeners never see.
+            $(master).on('change', showPanel);
+        })();
     </script>    
 {% include 'footer.html' %}
 

@@ -355,7 +355,7 @@ def send_notification_email(to_email, user_name, message, notification_date):
     return send_email(to_email, subject, html_content, text_content)
 
 
-def send_notification_email_for_user(user, message, notification_date):
+def send_notification_email_for_user(user, message, notification_date, kind=None):
     """
     Send one notification email, if this user has opted in and a destination
     exists. Returns True when a message was actually handed to SMTP.
@@ -367,8 +367,21 @@ def send_notification_email_for_user(user, message, notification_date):
 
     Recipient is the instance mailbox, not user['email']: notifications are sent
     from and to the configured address. The per-user opt-in still gates it.
+
+    kind names which sort of notification this is, so the per-type switches can
+    narrow what gets sent - see notification_kinds. The gate belongs here rather
+    than at each call site for the same reason the opt-in does: three senders,
+    one rule. Omitting it sends, which keeps a caller that has not been given a
+    kind yet working rather than silently muting it.
     """
     if not user or not user.get('email_notifications'):
+        return False
+
+    from notification_kinds import emails_enabled_for
+    if not emails_enabled_for(user, kind):
+        log_info(logger, 'EMAIL',
+                 f"Notification of kind {kind!r} not emailed: the user has that "
+                 f"type switched off")
         return False
 
     from instance_settings import get_notification_recipient, get_smtp_config

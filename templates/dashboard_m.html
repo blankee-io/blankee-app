@@ -668,6 +668,19 @@
             generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
         });
 
+        /* The bucket confirmation prompt in nav.html answers questions about
+           entries this view is showing, so the view has to redraw. Defining this
+           hook is how a page tells script.js it can do that without a reload -
+           without it, script.js only posts the totals recalculation and leaves
+           the page alone.
+
+           This is a calendar of stored daily totals rather than of entries, so
+           recalculating and regenerating it is the whole refresh -
+           saveDailyTotalsAndRemainders calls generateCalendar on success. */
+        window.blankeeBucketRefresh = function (changes) {
+            saveDailyTotalsAndRemainders();
+        };
+
         function saveDailyTotalsAndRemainders() {
 
             $.ajax({
