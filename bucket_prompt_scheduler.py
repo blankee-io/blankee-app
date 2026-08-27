@@ -193,6 +193,12 @@ def _raise_balance_prompt(user_id, local_now):
     if local_date == due_date and local_now.time() < auto_balance.notify_at(settings):
         return False
 
+    # Nothing to ask about means nothing to send. Checked before the claim so
+    # the day is not consumed - if they unlink an account tomorrow, the reminder
+    # should come round normally rather than having been silently used up.
+    if not auto_balance.anything_to_reconcile(user_id, local_date):
+        return False
+
     if not auto_balance.claim_due(user_id, local_date):
         return False
 

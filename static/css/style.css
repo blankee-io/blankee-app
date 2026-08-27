@@ -561,13 +561,16 @@ body {
 }
 
 /* Notification badge (red dot) */
+/* Red, like the two counts beside it. It was --accent, which is the orange used
+   for actions the user can take; a badge is not an action, and having one of the
+   three nav markers a different colour read as though it meant something. */
 .notification-badge {
     position: absolute;
     top: 8px;
     right: 8px;
     width: 10px;
     height: 10px;
-    background-color: var(--accent);
+    background-color: var(--danger);
     border-radius: 50%;
     border: 2px solid var(--primary);
 }
@@ -2678,13 +2681,12 @@ transform: scale(1.02);
         margin-right: 0;
     }
 
-    #next-indicator span,
-    #previous-indicator span {
-        top: 7px !important;
-        left: -35px !important;
-        width: 13px !important;
-        height: 13px !important;
-        font-size: 11px !important;
+    /* Anchored to the button now, so this needs no second guess at where the
+       button is - only a size that suits a smaller one. */
+    .next-indicator .indicator-dot {
+        width: 13px;
+        height: 13px;
+        font-size: 9px;
     }
 }
 
@@ -2695,47 +2697,50 @@ transform: scale(1.02);
         font-size: 1.5em;
     }
 }
-#next-indicator,
-#previous-indicator {
-    position: relative;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 0;
-    margin: 0;
-    padding: 0;
+/* The shortfall marker, on the corner of the next-period button.
+
+   It used to sit after the button as a sibling and reach back over it with
+   left: -41px, plus a second offset for mobile - so it drifted off the corner
+   whenever the button's width or margin changed. It is inside the button now,
+   which is already position: relative, so one rule holds at every width.
+
+   #previous-indicator went with it: no template has ever rendered one. */
+.next-indicator {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 2;
+    pointer-events: none;
 }
 
-#next-indicator span,
-#previous-indicator span {
+.next-indicator .indicator-dot {
     position: absolute;
-    top: -5px;
-    left: -41px;
-    z-index: 2;
+    top: -2px;
+    right: -2px;
     display: inline-flex;
     justify-content: center;
     align-items: center;
     width: 15px;
     height: 15px;
-
-    /* default yellow */
-    background: var(--accent); 
-    border: 3px solid var(--secondary-dark);
+    background: var(--accent);
     border-radius: 50%;
-    color: var(--text-dark);
-    font-size: 11px;
+    color: var(--text-light);
+    font-size: 10px;
     font-weight: bold;
+    line-height: 1;
     pointer-events: none;
 }
 
-.below-threshold-indicator span {
-    background: var(--warning) !important;
-    color: var(--text-dark) !important;
+/* Below the threshold is a warning; actually negative is not. The script
+   puts one of these on the wrapper, so they reach the dot through it. */
+.below-threshold-indicator .indicator-dot {
+    background: var(--warning);
+    color: var(--text-dark);
 }
 
-.negative-indicator span {
-    background: var(--danger) !important;
-    color: var(--text-light) !important;
+.negative-indicator .indicator-dot {
+    background: var(--danger);
+    color: var(--text-light);
 }
 
 /* Login Page Styles */
@@ -3075,10 +3080,13 @@ tr[data-category-id] td.before-member-since {
 .paid {
     font-weight: bold;
     position: relative;
-    z-index: 2;
+    /* Above .current-week-outline at 15. This is a stacking context, so the
+       tick in ::after cannot clear the outline unless the cell does. */
+    z-index: 16;
 }
 
 .paid::after {
+    z-index: 16;
     position: absolute;
     top: -6px;
     right: -8px;
@@ -3095,7 +3103,6 @@ tr[data-category-id] td.before-member-since {
     content: '\f00c';
     color: var(--white);
     background-color: var(--success);
-    border: 1.5px solid var(--text-dark);
     border-radius: 50%;
     display: inline-flex;
     align-items: center;
@@ -3144,12 +3151,11 @@ tr[data-category-id] td.before-member-since {
     pointer-events: none;
     color: var(--white);
     background-color: var(--danger);
-    border: 1.5px solid var(--text-dark);
     border-radius: 50%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    z-index: 1;
+    z-index: 16;
     line-height: 1;
     text-align: center;
     padding: 0;
@@ -4973,14 +4979,13 @@ td:has(.bucket-progress-container) {
     position: absolute;
     top: -6px;
     right: -8px;
-    z-index: 10;
+    z-index: 16;
     display: inline-flex;
     justify-content: center;
     align-items: center;
     width: 11px;
     height: 11px;
     background: var(--danger);
-    border: 1.5px solid var(--text-dark);
     border-radius: 50%;
     box-shadow: 0 1px 4px var(--shadow-md);
     color: var(--text-light);
@@ -5057,23 +5062,36 @@ td:has(.bucket-progress-container) {
     font-style: italic;
 }
 
+/* The count of hidden categories, over the toggle's top-right corner. Same
+   red, size and shape as .pending-txn-badge and .bucket-launcher-count - a
+   count is a count, and three different treatments for one idea is how a
+   palette stops meaning anything.
+
+   It was transparent and sat off the left edge, so the number floated beside
+   the button with nothing tying it to it. */
 .hidden-count-bubble {
     position: absolute;
-    left: -10px;
+    top: -2px;
+    right: -2px;
     z-index: 10;
-    display: flex;
-    justify-content: center;
+    display: inline-flex;
     align-items: center;
-    width: 12px;
+    justify-content: center;
+    min-width: 12px;
     height: 12px;
-    padding: 0 4px;
-    background: transparent;
-    border-radius: 50%;
+    padding: 0 3px;
+    background-color: var(--danger);
+    border-radius: 6px;
     color: var(--text-light);
-    font-size: 9px;
-    font-weight: bold;
-    transform: translateY(-1px);
-    pointer-events: none;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* Nothing hidden, nothing to say. :empty rather than a class, so the only thing
+   the script has to get right is the number. */
+.hidden-count-bubble:empty {
+    display: none;
 }
 
 #dashboard-context-menu.context-top-right-square {
@@ -5491,14 +5509,13 @@ td:has(.bucket-progress-container) {
     position: absolute;
     top: -6px;
     right: -8px;
-    z-index: 2;
+    z-index: 16;
     display: inline-flex;
     justify-content: center;
     align-items: center;
     width: 11px;
     height: 11px;
     background: var(--warning);
-    border: 1.5px solid var(--text-dark);
     border-radius: 50%;
     box-shadow: 0 1px 4px var(--shadow-md);
     color: var(--text-dark);
@@ -16685,28 +16702,30 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 /* Dismissed with work left, the prompt becomes this: a corner bubble
    carrying the count. Bottom left, away from the footer support button on
    the right, and clear of the mobile keyboard. */
+/* One of the nav icons, so it is built to the same measurements as .nav-faq and
+   .nav-notifications: a 40px circle, transparent until hovered. It was a
+   floating pill at the bottom left and kept its own shape when it moved up
+   here, which left it smaller than its neighbours and sitting off their centre
+   line.
+
+   Horizontal spacing needs nothing: .nav-right-content is a flex row with
+   gap: 10px, so being the same width as the others is what evens it out. */
 .bucket-launcher {
-    position: fixed;
-    left: 18px;
-    bottom: 18px;
-    /* Above .today-floating-banner, which sits at 999. The bubble is the thing
-       asking for a decision, so nothing should cover it. It is hidden outright
-       whenever the prompt itself is open, so this never competes with the
-       dialog at 200. */
-    z-index: 1000;
-    display: inline-flex;
+    position: relative;
+    display: flex;
+    justify-content: center;
     align-items: center;
-    gap: 8px;
-    padding: 10px 16px 10px 14px;
+    width: 40px;
+    height: 40px;
+    padding: 0;
     border: none;
-    border-radius: 24px;
-    background-color: var(--primary);
-    color: var(--text-light);
+    border-radius: 50%;
+    background-color: transparent;
+    color: white;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 20px;
     cursor: pointer;
-    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.18);
-    transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
 /* A slow breath while it waits, so it stays noticeable without demanding
@@ -16750,36 +16769,36 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
 .bucket-launcher:hover {
     background-color: var(--primary-hover);
-    transform: translateY(-1px);
-    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.2);
 }
 
+/* Inherited from the button, like the other nav icons, so all three are the
+   same size. It was pinned to 16px to suit the smaller floating pill. */
 .bucket-launcher i {
-    font-size: 16px;
+    font-size: inherit;
 }
 
+/* Over the icon's top-right corner, in the same red and the same shape as
+   .pending-txn-badge - this is the third count in the app and they should not
+   each look different. */
 .bucket-launcher-count {
-    min-width: 22px;
-    padding: 1px 6px;
-    border-radius: 12px;
-    background-color: var(--accent);
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 12px;
+    height: 12px;
+    padding: 0 3px;
+    background-color: var(--danger);
+    border-radius: 6px;
     color: var(--text-light);
-    font-size: 12.5px;
+    font-size: 8px;
     font-weight: 700;
-    text-align: center;
+    line-height: 1;
 }
 
-@media (max-width: 600px) {
-    .bucket-launcher {
-        left: 12px;
-        /* Clear of the Today banner, which sits at bottom:10px and is about
-           25px tall in its down state. Unconditional rather than tied to
-           whether the banner is showing: it is toggled by script as you
-           scroll, and a bubble hopping up and down in response would be worse
-           than one sitting a little high over empty space. */
-        bottom: 52px;
-    }
-}
+
 
 /* Closing the prompt with entries still unanswered does not simply hide it -
    it shrinks into the corner bubble it becomes, so the count that appears
@@ -16969,6 +16988,21 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     gap: 12px;
     width: 100%;
     text-align: left;
+}
+
+/* One reconciliation block per account. The rule between them is what stops
+   three or four of these reading as one long list of numbers. */
+.autobalance-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--secondary-hover);
+}
+
+.autobalance-item:last-of-type {
+    padding-bottom: 0;
+    border-bottom: none;
 }
 
 .autobalance-row {
