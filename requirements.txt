@@ -31,3 +31,7 @@ six==1.16.0
 urllib3==1.26.5
 Werkzeug==3.0.4
 redis==6.4.0
+# IANA timezone database for zoneinfo. The Debian install has it from the
+# system, but python:3.10-slim does not reliably, and the end-of-day bucket
+# prompt has to resolve a user's zone to know when their evening is.
+tzdata==2025.2

@@ -527,7 +527,7 @@
                 <button id="confirmEditCategoryBtn" class="confirm-edit-category-btn">Rename</button>
             </div>
             <div id="editCategoryGroupRow" class="category-edit-group-row" style="display:none;">
-                <label for="editCategoryGroupSelect" class="category-edit-group-label">Group</label>
+                <label for="editCategoryGroupSelect" class="category-edit-group-label">Group<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">An optional grouping for the category, used to subtotal related categories together on the dashboards.</span></span></label>
                 <select id="editCategoryGroupSelect" class="category-edit-group-select"></select>
             </div>
             <div class="category-edit-actions-row">
@@ -542,24 +542,24 @@
         <div class="convert-recurring-form-container">
             <h2>Convert to Recurring</h2>
             <form id="convert-to-recurring-form">
-                <label>Category</label>
+                <label>Category<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which category this recurring entry belongs to. Start typing to search your categories, or enter a new name to create one.</span></span></label>
                 <input type="text" id="convert-category-name" readonly class="convert-category-name-input" />
 
                 <div class="form-row">
-                    <label for="convert-wage-bill-select">Type:</label>
+                    <label for="convert-wage-bill-select">Type:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Wages and Bills are all-or-nothing: one entry settles the whole forecast. Variable and Allowance deplete gradually, so each entry reduces what is left for the period.</span></span></label>
                     <select id="convert-wage-bill-select" name="wage_bill">
                         <option value="1" id="convert-wage-bill-option-1">Bill (fixed expense)</option>
                         <option value="0" id="convert-wage-bill-option-0">Allowance (flexible spending)</option>
                     </select>
                 </div>
 
-                <label for="convert-amount">Recurring Amount</label>
+                <label for="convert-amount">Recurring Amount<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The amount forecast for each occurrence. Future occurrences appear as forecast entries and count toward your totals until you confirm them.</span></span></label>
                 <div class="currency-input-container">
                     <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
                     <input type="number" class="recurring-amount" id="convert-amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
                 </div>
 
-                <label for="convert-cadence-interval">Repeat Every</label>
+                <label for="convert-cadence-interval">Repeat Every<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">How often this recurs. The number and the unit together set the interval, so 2 and Week(s) means once a fortnight.</span></span></label>
                 <div class="cadence-row">
                     <input type="number" id="convert-cadence-interval" name="cadence_interval" placeholder="1" step="1" min="1" required>
                     <select id="convert-cadence-unit" name="cadence_unit" required>
@@ -571,7 +571,7 @@
                 </div>
 
                 <div id="convert-weekly-options" style="display:none;">
-                    <label>Repeat on:</label>
+                    <label>Repeat on:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which weekdays it falls on. The interval still applies, so every 2 weeks on Monday means alternate Mondays rather than every Monday.</span></span></label>
                     <div class="weekday"><input type="checkbox" name="convert_weekdays" value="monday"> Mo</div>
                     <div class="weekday"><input type="checkbox" name="convert_weekdays" value="tuesday"> Tu</div>
                     <div class="weekday"><input type="checkbox" name="convert_weekdays" value="wednesday"> We</div>
@@ -582,15 +582,15 @@
                 </div>
 
                 <div id="convert-monthly-options" style="display:none;">
-                    <label>Days of the month:</label>
+                    <label>Days of the month:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which days of the month it falls on. Add more than one for something that recurs twice a month. Last Day follows the length of each month.</span></span></label>
                     <div id="convert-monthly-day-container"></div>
                     <button type="button" id="convert-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
                 </div>
 
                 <div id="convert-yearly-options" style="display:none;">
-                    <label for="convert-yearly-day">Day of the year:</label>
+                    <label for="convert-yearly-day">Day of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The day of the month this yearly entry falls on.</span></span></label>
                     <input type="number" id="convert-yearly-day" name="yearly_day" min="1" max="31">
-                    <label for="convert-yearly-month">Month of the year:</label>
+                    <label for="convert-yearly-month">Month of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The month this yearly entry falls in.</span></span></label>
                     <select id="convert-yearly-month" name="yearly_month">
                         <option value="1">January</option>
                         <option value="2">February</option>
@@ -609,9 +609,9 @@
 
                 <div class="date-row">
                     <div class="date-label-row">
-                        <label for="convert-start-date">Start Date</label>
+                        <label for="convert-start-date">Start Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The first occurrence. Forecast entries are generated from this date forward, so a past date will create entries you can confirm.</span></span></label>
                         <div class="end-date-container" id="convert-end-date-label-container">
-                            <label for="convert-end-date">End Date</label>
+                            <label for="convert-end-date">End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The last occurrence. Leave it to No End Date to keep going indefinitely.</span></span></label>
                         </div>
                     </div>
                     <div class="date-input-row">
@@ -623,12 +623,12 @@
                     <div class="date-checkbox-row">
                         <span class="date-checkbox-label">Or</span>
                         <input type="checkbox" id="convert-no-end-date-checkbox">
-                        <label for="convert-no-end-date-checkbox">No End Date</label>
+                        <label for="convert-no-end-date-checkbox">No End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Keeps generating occurrences with no finish date. Turn it off to set an end date or a number of repeats instead.</span></span></label>
                     </div>
                     <div class="date-checkbox-row">
                         <span class="date-checkbox-label">Or</span>
                         <input type="checkbox" id="convert-use-occurrences-checkbox">
-                        <label for="convert-use-occurrences-checkbox">Repeat this many times:</label>
+                        <label for="convert-use-occurrences-checkbox">Repeat this many times:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Stop after this many occurrences. The end date is worked out for you from the interval.</span></span></label>
                         <input type="number" id="convert-occurrences-count" name="occurrences_count" min="1" style="width:60px;" disabled>
                     </div>
                 </div>
@@ -3326,6 +3326,30 @@
                 savingsEntries = updatedSavings;
             }
         }
+
+        /* The bucket confirmation prompt in nav.html answers questions about
+           entries this grid is showing, so the grid has to redraw. Defining this
+           hook is how a page tells script.js it can do that without a reload.
+
+           script.js cannot reach these arrays - they are declared with let at
+           template scope, which is not the same as being on window - so it hands
+           the changes over and this page folds them in. applyBucketChanges does
+           the folding, because the mutation is identical on every page; the
+           redraw below is not. */
+        window.blankeeBucketRefresh = function (changes) {
+            if (typeof applyBucketChanges === "function") {
+                applyBucketChanges(changes, {
+                    income_entries: incomeEntries,
+                    expense_entries: expenseEntries,
+                    c_expense_entries: c_expense_entries
+                });
+            }
+            // The entry cells, straight from the arrays just patched.
+            updateView(["all"]);
+            // And the totals, which are stored rather than derived: this posts
+            // the recalculation and refreshes them in place when it returns.
+            saveDailyTotalsAndRemainders();
+        };
 
         function saveDailyTotalsAndRemainders(startDate = null) {
             let data = {};

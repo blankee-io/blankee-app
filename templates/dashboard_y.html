@@ -576,6 +576,18 @@
             storeLatestViewedYear(selectedYear); // Store the latest viewed year
         }
 
+        /* The bucket confirmation prompt in nav.html answers questions about
+           entries this view is showing, so the view has to redraw. Defining this
+           hook is how a page tells script.js it can do that without a reload -
+           without it, script.js only posts the totals recalculation and leaves
+           the page alone.
+
+           As with the monthly calendar: this draws stored totals, and
+           saveDailyTotalsAndRemainders regenerates it on success. */
+        window.blankeeBucketRefresh = function (changes) {
+            saveDailyTotalsAndRemainders();
+        };
+
         function saveDailyTotalsAndRemainders() {
 
             $.ajax({
