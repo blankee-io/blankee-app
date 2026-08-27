@@ -53,7 +53,7 @@
                                     <i class="fa-solid fa-chevron-down faq-chevron"></i>
                                 </button>
                                 <div class="faq-answer">
-                                    <p>Blankee is a personal budgeting app that helps you track your income and expenses on a weekly, daily, monthly, or yearly basis. You set up income and expense categories, log entries as you earn and spend, and see your running balance (your "remainder") update in real time. You can also connect your bank accounts to import transactions automatically.</p>
+                                    <p>Blankee is a personal budgeting app that helps you track your income and expenses on a weekly, daily, monthly, or yearly basis. You set up income and expense categories, log entries as you earn and spend, and see your running balance (your "remainder") update in real time. Recurring income and bills are forecast ahead of time, and Blankee asks you to confirm each one as its day arrives.</p>
                                 </div>
                             </div>
 
@@ -63,7 +63,7 @@
                                     <i class="fa-solid fa-chevron-down faq-chevron"></i>
                                 </button>
                                 <div class="faq-answer">
-                                    <p>After registering, you'll be guided through a setup flow where you can connect a bank account or skip that step, add your income and expense categories, and choose a starting savings balance. Once complete, you'll land on your main dashboard where you can start logging entries right away.</p>
+                                    <p>After registering, you'll be guided through a setup flow where you add your income and expense categories and choose a starting savings balance. Once complete, you'll land on your main dashboard where you can start logging entries right away.</p>
                                 </div>
                             </div>
 
@@ -130,10 +130,43 @@
                                     <i class="fa-solid fa-chevron-down faq-chevron"></i>
                                 </button>
                                 <div class="faq-answer">
-                                    <p>Buckets let you split a recurring entry across multiple periods or adjust individual occurrences without changing the whole recurring schedule. For example, if you receive a paycheck that varies slightly, you can tweak a single bucket's amount without affecting future occurrences. Buckets are shown with a filled indicator on the dashboard.</p>
+                                    <p>A bucket is a <em>forecast</em> entry. When you create a recurring entry, Blankee writes one for every future occurrence so your dashboard shows what is coming, not just what has already happened. They count toward your totals and your remainder from the moment they are created.</p>
+                                    <p>How a bucket is consumed depends on the type you chose:</p>
+                                    <ul>
+                                        <li><strong>Wages and Bills</strong> are all-or-nothing. One entry settles the whole occurrence, because a bill is either paid or it is not.</li>
+                                        <li><strong>Variable income and Allowances</strong> deplete gradually. Each entry you record reduces what is left for that period, so the bucket shows how much of the allowance remains.</li>
+                                    </ul>
+                                    <p>A bucket whose day has arrived is resolved by the confirmation prompt described below, or by recording a matching entry yourself. Nothing removes one silently.</p>
                                 </div>
                             </div>
 
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What is the end-of-day confirmation prompt?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Forecast entries need to become records at some point, and only you know whether they actually happened. At a time you choose, Blankee lists the day's forecast entries and asks about each one:</p>
+                                    <ul>
+                                        <li><strong>Yes</strong> — it happened. The forecast becomes a real entry.</li>
+                                        <li><strong>Yes, for a different amount</strong> — it happened, but not for the figure that was forecast.</li>
+                                        <li><strong>No</strong> — not yet. It moves to tomorrow, and a small badge counts how many days it has been carried.</li>
+                                        <li><strong>Skip</strong> — it is not going to happen, and the entry is removed.</li>
+                                    </ul>
+                                    <p>An entry keeps being asked about until you answer it. The only time one disappears without you saying so is when a push lands on a day that already has an entry for that category, in which case the two are merged.</p>
+                                </div>
+                            </div>
+                            <div class="faq-item">
+                                <button class="faq-question" aria-expanded="false">
+                                    <span>What is the Balance Reminder?</span>
+                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
+                                </button>
+                                <div class="faq-answer">
+                                    <p>Without a bank feed, nothing corrects the small differences that build up over time — a wage that arrived for a slightly different amount, a cash spend never recorded. On a cadence you set under <strong>Settings</strong>, Blankee asks what your balances actually are and records the difference.</p>
+                                    <p>You are asked separately about your current account, your savings, and each credit card, because they are different kinds of number and nothing is netted across them. Any entries still waiting to be confirmed are confirmed first, and each difference is recorded as a single Uncategorized entry so you can see exactly what was adjusted.</p>
+                                    <p>Nothing is changed unless you say yes, and declining costs nothing — the next occurrence asks again. Balances that a connected bank keeps up to date are not offered, since a sync would overwrite whatever you typed.</p>
+                                </div>
+                            </div>
                             <div class="faq-item">
                                 <button class="faq-question" aria-expanded="false">
                                     <span>Can I hide a category without deleting it?</span>
@@ -176,41 +209,21 @@
 
                             <div class="faq-item">
                                 <button class="faq-question" aria-expanded="false">
-                                    <span>How do I import a bank transaction into my budget?</span>
+                                    <span>Can Blankee import my bank transactions?</span>
                                     <i class="fa-solid fa-chevron-down faq-chevron"></i>
                                 </button>
                                 <div class="faq-answer">
-                                    <p>Go to <strong>Pending Transactions</strong> in the nav menu. You'll see a list of unimported transactions from your connected bank accounts. For each one, you can select an existing budget category and click <strong>Import</strong> to add it as a budget entry. Imported transactions are marked so you won't be prompted to import them again.</p>
+                                    <p>Not in this version. Blankee is built to work with a bank provider, but no provider is enabled by default, so a standard installation records everything by hand. The <strong>Bank Accounts</strong> menu only appears once an account has been connected.</p>
+                                    <p>Everything else works without it: recurring entries forecast what is coming, the confirmation prompt turns those forecasts into records, and the balance reminder keeps Blankee's figures in step with your bank.</p>
                                 </div>
                             </div>
-
-                            <div class="faq-item">
-                                <button class="faq-question" aria-expanded="false">
-                                    <span>What does it mean when a bank connection shows an error?</span>
-                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
-                                </button>
-                                <div class="faq-answer">
-                                    <p>Banks occasionally require you to re-authenticate, especially after a password change or security update on their end. When this happens, you'll receive a notification with a <strong>Reconnect</strong> link. Clicking it will take you to the Bank Accounts page where you can re-authorize the connection without losing any of your existing transaction history.</p>
-                                </div>
-                            </div>
-
-                            <div class="faq-item">
-                                <button class="faq-question" aria-expanded="false">
-                                    <span>Will Blankee automatically update my credit card balances?</span>
-                                    <i class="fa-solid fa-chevron-down faq-chevron"></i>
-                                </button>
-                                <div class="faq-answer">
-                                    <p>Yes. When your bank syncs, Blankee compares the live balance from your bank with your manually entered expenses and automatically creates a balance adjustment entry if there's a discrepancy. This keeps your credit account balance accurate without any manual effort.</p>
-                                </div>
-                            </div>
-
                             <div class="faq-item">
                                 <button class="faq-question" aria-expanded="false">
                                     <span>Is my banking data secure?</span>
                                     <i class="fa-solid fa-chevron-down faq-chevron"></i>
                                 </button>
                                 <div class="faq-answer">
-                                    <p>Yes. Bank connections are handled by a dedicated Open Banking provider — Blankee never stores your bank username or password. Connections use OAuth-based token authentication, and you can revoke access at any time from the Bank Accounts page. We are currently between providers, so new connections are temporarily unavailable.</p>
+                                    <p>Blankee never stores your bank username or password. When a provider is connected, the connection is handled by that provider and Blankee holds only the account details and transactions it returns. Nothing is shared with anyone else.</p>
                                 </div>
                             </div>
                         </div>
@@ -360,7 +373,15 @@
                                     <i class="fa-solid fa-chevron-down faq-chevron"></i>
                                 </button>
                                 <div class="faq-answer">
-                                    <p>Blankee sends in-app notifications for events like your balance dropping below your threshold, a bank connection needing to be re-authorized, and account-related activity like email or password changes. You can view all notifications by clicking the bell icon in the top navigation bar.</p>
+                                    <p>Blankee sends in-app notifications for:</p>
+                                    <ul>
+                                        <li><strong>Entries to confirm</strong> — the day's forecast entries waiting for an answer.</li>
+                                        <li><strong>Balance reminder</strong> — when it is time to reconcile against your real balances.</li>
+                                        <li><strong>Projected shortfall</strong> — when your remainder is set to fall below zero on a future date.</li>
+                                        <li><strong>Allowance spent</strong> — when a recurring allowance is used up, or income arrives above forecast.</li>
+                                        <li><strong>Account changes</strong> — a password reset or a change of email address.</li>
+                                    </ul>
+                                    <p>View them all with the bell icon in the top navigation bar. Under <strong>Settings &rsaquo; Notifications</strong> you can also choose which of these are sent to you by email — they are all on by default, and the Email Notifications switch above them turns email off entirely.</p>
                                 </div>
                             </div>
 

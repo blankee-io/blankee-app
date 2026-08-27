@@ -8,6 +8,61 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.7.0 — 2026-08-27
+
+### Added
+- **Savings and credit cards can be balanced too.** The balance reminder asked
+  only about the current account. It now asks about each balance separately -
+  current account, savings, and every card - because a card balance is a debt
+  and savings is not spendable cash, so netting them into one figure would be
+  asking a question with no single right answer.
+
+  Each correction is contained to the thing it corrects. Savings uses an
+  adjustment row rather than a Savings category entry, which would be a transfer
+  and would move the cash balance as well. A card uses a signed entry on that
+  card rather than a payment, because a payment is created from an expense
+  against the cash balance and would move two figures at once.
+- **An Autobalance category** for the corrections themselves. They used to land
+  in Uncategorized, which means "this needs sorting out" - a correction does
+  not, and mixed in with genuinely uncategorised spending it hid the real
+  backlog. Having them together also makes them add up, which is what turns a
+  run of corrections in one direction into a visible signal that something
+  upstream is wrong.
+
+### Changed
+- **Only balances no bank feed covers are offered.** Checked per account type,
+  since a checking feed says nothing about whether savings is kept current, and
+  a linked card says nothing about the others. When a feed covers everything,
+  the reminder is not sent at all rather than opening an empty prompt.
+- **The entry confirmation prompt waits for its notification.** Entries fall due
+  at midnight and the prompt used to appear as soon as a date rolled over,
+  asking about a day that had barely started. Nothing appears now until the
+  notification for that day has actually gone out.
+- The confirmation launcher moved from a floating bubble at the bottom left into
+  the nav bar, beside the support icon, as an icon with a count over its corner.
+- Counts across the app now share one treatment: the entries count, the hidden
+  categories count and the notification dot are all the same red, and the two
+  numbered ones the same size and shape.
+- The verification email sent while setting up email delivery now looks like the
+  mail those settings will actually send. It was the only message in the app in
+  a different typeface and colour.
+- The FAQ describes the app as it is: bank import is not available without a
+  provider, buckets are forecasts you confirm rather than a way to tweak an
+  occurrence, and the confirmation prompt and balance reminder are explained.
+
+### Fixed
+- The shortfall marker on the next-period button was positioned by reaching
+  backwards over the button from a sibling element, with one hard-coded offset
+  for desktop and another for mobile - so it drifted off the corner whenever the
+  button's size changed. It is part of the button now and needs no offsets.
+- The paid, late, negative and below-threshold markers on entries and remainders
+  sat beneath the current week/month outline and were crossed by it. The paid
+  one needed its cell raised as well as the badge: the cell is a stacking
+  context, so nothing inside it could rise above the outline on its own.
+- A saved cadence could not have its weekday unticked. The settings page only
+  ever ticked boxes and never cleared them, so Friday - which is checked by
+  default - came back on every render whatever had been saved.
+
 ## 1.6.0 — 2026-08-27
 
 ### Added

@@ -193,6 +193,34 @@ def pending_buckets(user_id, on_date=None):
     return items[:MAX_PROMPT_ITEMS], len(items)
 
 
+def prompt_raised_today(user_id):
+    """
+    Whether this user's prompt has already gone out for their local today.
+
+    bucket_prompts carries one row per user per local date, written when the
+    scheduler raises the notification - so its presence is the record of the
+    notification having happened, and no second source is needed.
+
+    The page uses it to decide whether to open anything. Entries fall due at
+    midnight, and a modal appearing the moment a date rolls over is asking about
+    a day that has not happened yet; waiting for the notification means the
+    question arrives when the user chose to be asked.
+
+    False on any error, which errs toward not interrupting.
+    """
+    try:
+        with get_db_pool().get_cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM bucket_prompts "
+                " WHERE user_id = %s AND prompt_date = %s LIMIT 1",
+                (user_id, _user_today(user_id).isoformat()))
+            return cursor.fetchone() is not None
+    except Exception as e:
+        log_warning(logger, 'BUCKET_CONFIRM',
+                    f"Could not tell whether user {user_id} has been prompted: {e}")
+        return False
+
+
 def count_pending_from_db(user_id, on_date=None):
     """
     How many unresolved buckets a user has, read straight from MySQL.

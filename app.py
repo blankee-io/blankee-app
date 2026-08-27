@@ -924,6 +924,16 @@ def _insert_starter_categories(cursor, user_id):
         INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
         VALUES (%s, %s, %s, %s, %s, %s)
     """, (user_id, 'Interest Charge', 0.0003, 0, 1, 1))
+    # Where balance corrections go. Its own category rather than Uncategorized,
+    # which means "needs sorting out" - see auto_balance.CORRECTION_CATEGORY.
+    cursor.execute("""
+        INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (user_id, 'Autobalance', 0.0004, 0, 1, 1))
+    cursor.execute("""
+        INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (user_id, 'Autobalance', 0.0004, 0, 1, 1))
 
 
 def reset_user_data(user_id):
@@ -16460,12 +16470,18 @@ def api_buckets_pending():
         # the user says so and at no other time, so simply opening the prompt
         # cannot cost them data.
         items, total = bucket_confirmation.pending_buckets(current_user.id)
+        prompted = bucket_confirmation.prompt_raised_today(current_user.id)
     except Exception as e:
         log_exception(logger, 'BUCKET_CONFIRM', f"Could not list pending buckets: {e}")
         return jsonify({'success': False, 'error': 'Could not load entries'}), 500
 
     return jsonify({
         'success': True,
+        # Whether tonight's prompt has actually gone out. The page waits for it
+        # before opening anything: entries become due at midnight, and a modal
+        # that appears the moment a day rolls over is asking about a day that
+        # has not happened yet.
+        'prompted': prompted,
         'items': items,
         'total': total,
         # When the backlog is longer than one prompt should show, say so rather
@@ -16722,12 +16738,32 @@ def api_autobalance_state():
     if not pending and not force:
         return jsonify({'success': True, 'pending': False})
 
-    balance = auto_balance.app_balance(current_user.id)
+    # Nothing a feed does not already keep current, so there is nothing to ask.
+    if not auto_balance.anything_to_reconcile(current_user.id):
+        return jsonify({'success': True, 'pending': False,
+                        'reason': 'every balance is covered by a bank feed'})
+
+    # Only the balances no bank feed covers. A synced account is kept current by
+    # the sync, so asking the user to state it invites them to correct a figure
+    # that is about to be replaced - while the correction entry stays behind.
+    allowed = auto_balance.reconcilable(current_user.id)
+
+    balance = auto_balance.app_balance(current_user.id) if allowed['cash'] else None
+    savings = (auto_balance.savings_balance(current_user.id)
+               if allowed['savings'] else None)
+    cards = [c for c in auto_balance.card_balances(current_user.id)
+             if c['account_id'] not in allowed['linked_cards']]
+
     return jsonify({
         'success': True,
         'pending': True,
         'forced': force and not pending,
         'app_balance': float(balance) if balance is not None else None,
+        # None means the user has no savings figure recorded, which is different
+        # from zero: the modal leaves the row out rather than inviting them to
+        # reconcile against a number that does not exist.
+        'savings_balance': float(savings) if savings is not None else None,
+        'cards': cards,
         'to_confirm': auto_balance.pending_bucket_count(current_user.id),
         'currency_type': getattr(current_user, 'currency_type', 'USD'),
     })
@@ -16750,8 +16786,14 @@ def api_autobalance_apply():
     if data.get('balance') is None:
         return jsonify({'success': False, 'error': 'Enter your current balance.'}), 400
 
+    # cards arrives as {account_id: balance}; JSON object keys are strings, so
+    # the account ids come back as strings and are compared as ints downstream.
+    cards = data.get('cards') if isinstance(data.get('cards'), dict) else None
+
     try:
-        ok, result = auto_balance.apply(current_user.id, data.get('balance'))
+        ok, result = auto_balance.apply(current_user.id, data.get('balance'),
+                                        actual_savings=data.get('savings'),
+                                        actual_cards=cards)
     except Exception as e:
         log_exception(logger, 'AUTOBALANCE', f"Balance failed: {e}")
         return jsonify({'success': False, 'error': 'Could not balance. Nothing was changed.'}), 500

@@ -1956,25 +1956,22 @@ var BUCKET_IDLE_MS = 4 * 60 * 60 * 1000;
 var BUCKET_LAST_KEY = "blankee_bucket_last_shown";
 
 function bucketLauncher() {
+    // Rendered by nav.html now, so this finds it rather than building it. The
+    // click handler is attached here all the same - the markup carries no
+    // behaviour, and binding once is what stops a second call stacking another
+    // listener on the same button.
     var el = document.getElementById("bucket-launcher");
-    if (el) { return el; }
-    el = document.createElement("button");
-    el.id = "bucket-launcher";
-    el.type = "button";
-    el.className = "bucket-launcher bucket-prompt-hidden";
-    el.setAttribute("aria-label", "Entries waiting to be confirmed");
-    el.innerHTML =
-        '<i class="fa-solid fa-clipboard-check"></i>' +
-        '<span class="bucket-launcher-count"></span>';
-    el.addEventListener("click", function () {
-        openBucketPrompt();
-    });
-    document.body.appendChild(el);
+    if (!el) { return null; }
+    if (!el.dataset.bound) {
+        el.dataset.bound = "1";
+        el.addEventListener("click", function () { openBucketPrompt(); });
+    }
     return el;
 }
 
 function setBucketLauncher(count) {
     var el = bucketLauncher();
+    if (!el) { return; }
     if (!count) {
         // Everything answered: the launcher goes away entirely rather than
         // sitting there showing a zero.
@@ -2316,8 +2313,33 @@ function _abEscape(text) {
     return d.innerHTML;
 }
 
+function _abEscape(text) {
+    var d = document.createElement("div");
+    d.textContent = text == null ? "" : String(text);
+    return d.innerHTML;
+}
+
 function _abCurrency(type) {
     return type === "EUR" ? "\u20ac" : type === "USD" ? "$" : (type || "$");
+}
+
+function _abBlock(id, label, shown, symbol) {
+    // One reconciliation row: what the app thinks, and a field for what it
+    // actually is. Pre-filled with the app's own figure, because the common case
+    // is agreement and the rest is typing over it.
+    return '<div class="autobalance-item">' +
+             '<div class="autobalance-row">' +
+               '<span class="autobalance-label">' + _abEscape(label) + '</span>' +
+               '<span class="autobalance-figure">' + symbol +
+                 (shown == null ? "\u2014" : shown.toFixed(2)) + '</span>' +
+             '</div>' +
+             '<div class="autobalance-input-wrap">' +
+               '<span class="autobalance-symbol">' + symbol + '</span>' +
+               '<input type="number" step="0.01" inputmode="decimal" ' +
+                 'id="' + id + '" class="autobalance-input" ' +
+                 'value="' + (shown == null ? "" : shown.toFixed(2)) + '">' +
+             '</div>' +
+           '</div>';
 }
 
 function showAutoBalancePrompt(opts) {
@@ -2340,23 +2362,26 @@ function showAutoBalancePrompt(opts) {
                   " waiting to be confirmed will be confirmed first.</p>"
                 : "";
 
-            var body =
-                '<div class="autobalance-body">' +
-                  '<div class="autobalance-row">' +
-                    '<span class="autobalance-label">Blankee says</span>' +
-                    '<span class="autobalance-figure">' + symbol +
-                      (shown == null ? "\u2014" : shown.toFixed(2)) + "</span>" +
-                  "</div>" +
-                  '<label class="autobalance-label" for="autobalance-actual">' +
-                    "What does your bank say?</label>" +
-                  '<div class="autobalance-input-wrap">' +
-                    '<span class="autobalance-symbol">' + symbol + "</span>" +
-                    '<input type="number" step="0.01" inputmode="decimal" ' +
-                      'id="autobalance-actual" class="autobalance-input" ' +
-                      'value="' + (shown == null ? "" : shown.toFixed(2)) + '">' +
-                  "</div>" +
-                  note +
-                "</div>";
+            // One block per thing being reconciled: cash, savings if there is a
+            // figure for it, and each card. Nothing is netted across them - a
+            // card balance is a debt and savings is not spendable cash - so each
+            // gets its own "we think" and its own input.
+            var body = '<div class="autobalance-body">' +
+                _abBlock('autobalance-actual', 'Current account', shown, symbol);
+
+            if (d.savings_balance != null) {
+                body += _abBlock('autobalance-savings', 'Savings',
+                                 Number(d.savings_balance), symbol);
+            }
+
+            (d.cards || []).forEach(function (card) {
+                body += _abBlock('autobalance-card-' + card.account_id,
+                                 card.name || 'Card',
+                                 card.balance == null ? null : Number(card.balance),
+                                 symbol);
+            });
+
+            body += note + "</div>";
 
             return showConfirmModal({
                 title: "Check your balance",
@@ -2387,18 +2412,34 @@ function showAutoBalancePrompt(opts) {
                     showToast("Enter your current balance.", "error");
                     return false;
                 }
-                return _abApply(typed);
+
+                var savingsField = document.getElementById("autobalance-savings");
+                var cards = {};
+                (d.cards || []).forEach(function (card) {
+                    var field = document.getElementById(
+                        "autobalance-card-" + card.account_id);
+                    // Only what the user actually filled in. An empty field is
+                    // "I am not reconciling this one", not "it is zero".
+                    if (field && field.value !== "") {
+                        cards[card.account_id] = field.value;
+                    }
+                });
+
+                return _abApply(typed,
+                                savingsField && savingsField.value !== ""
+                                    ? savingsField.value : null,
+                                cards);
             });
         })
         .catch(function () { return false; });
 }
 
-function _abApply(balance) {
+function _abApply(balance, savings, cards) {
     _bucketSpinner(true);
     return fetch("/api/autobalance/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ balance: balance })
+        body: JSON.stringify({ balance: balance, savings: savings, cards: cards })
     })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -2418,6 +2459,17 @@ function _abApply(balance) {
                            " as Uncategorized " + d.direction + ".");
             } else {
                 parts.push("Your balance matches.");
+            }
+            if (d.savings && d.savings.entry_written) {
+                parts.push("Savings adjusted by " +
+                           d.savings.difference.toFixed(2) + ".");
+            }
+            var cardsFixed = (d.cards || []).filter(function (c) {
+                return c.entry_written;
+            }).length;
+            if (cardsFixed) {
+                parts.push("Adjusted " + cardsFixed +
+                           (cardsFixed === 1 ? " card." : " cards."));
             }
             showToast(parts.join(" "), "success");
 
@@ -2546,6 +2598,12 @@ function _openBucketPromptIfDue() {
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d || !d.success || !d.total) { setBucketLauncher(0); return; }
+
+                // Nothing appears until the day's notification has gone out -
+                // not the modal and not the count in the nav. Before that the
+                // entries are due but the user has not been told, and asking
+                // early is asking about a day that has barely started.
+                if (!d.prompted) { setBucketLauncher(0); return; }
 
                 var last = parseInt(localStorage.getItem(BUCKET_LAST_KEY) || "0", 10);
                 var away = !last || (Date.now() - last) > BUCKET_IDLE_MS;
