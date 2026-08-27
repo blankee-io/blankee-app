@@ -9,6 +9,17 @@
         </div>
 
         <div class="nav-right-content">
+            <!-- Entries waiting to be confirmed. Rendered here rather than
+                 created by script so it sits in the nav row with the other
+                 icons; script.js finds it by id and only shows it once the
+                 day's prompt has been raised. -->
+            <button type="button" class="bucket-launcher bucket-prompt-hidden"
+                    id="bucket-launcher" title="Entries to confirm"
+                    aria-label="Entries waiting to be confirmed">
+                <i class="fa-solid fa-clipboard-check"></i>
+                <span class="bucket-launcher-count"></span>
+            </button>
+
             <!-- Support icon -->
             <a href="{{ url_for('support_page') }}" class="nav-faq" title="Support">
                 <i class="fa-solid fa-headset"></i>

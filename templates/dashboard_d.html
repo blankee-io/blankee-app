@@ -64,11 +64,7 @@
             <div class="calendarnavbuttons"> 
                 <a id="previous-nav-btn" class="nav-button" href="javascript:previousWeek()"><i class="fa-solid fa-left"></i><span class="nav-tooltip">Previous Week</span></a>
                 <a id="current-nav-btn" class="nav-button" href="javascript:goToCurrentWeek()"><span class="nav-current-icon"><i class="fa-solid fa-calendar-day"></i></span><span class="nav-tooltip">Go to Current Week</span></a>
-                <a id="next-nav-btn" class="nav-button" href="javascript:nextWeek()"><i class="fa-solid fa-right"></i><span class="nav-tooltip">Next Week</span></a>
-                <div id="next-indicator" style="display:none;text-align:center;">
-                    <span class="indicator-dot">!</span>
-                    <span class="nav-tooltip">An entry in the future is negative/below threshold!</span>
-                </div>
+                <a id="next-nav-btn" class="nav-button" href="javascript:nextWeek()"><i class="fa-solid fa-right"></i><span class="nav-tooltip">Next Week</span><span id="next-indicator" class="next-indicator" style="display:none;"><span class="indicator-dot" title="An entry in the future is negative or below your threshold">!</span></span></a>
             </div>
         </div>
     </div>
