@@ -29,8 +29,20 @@ remainder is stored per day rather than derived on render, so nothing guarantees
 it reflects the confirmations, and it also makes sure today has a row at all -
 app_balance has nothing to return otherwise.
 
-Deliberately cash only. A credit card balance is a debt, not a position, and
-netting the two would ask the user a question with no single right answer.
+Cash, savings and each credit card are reconciled separately, and each
+correction is contained to the thing it corrects:
+
+  cash     an Autobalance income or expense entry dated today
+  savings  a savings_adjustments row - the same mechanism as "Initial savings
+           balance" - because a Savings category entry would move money out of
+           the cash balance as well, and cash is being reconciled on its own
+  cards    a signed entry in that card's Autobalance category, not a payment.
+           A payment is created from an expense against the cash balance, so it
+           would move two figures when the user has already stated both.
+
+Nothing is netted across them. A card balance is a debt and a savings balance
+is not spendable cash; asking for one number covering all three would be
+asking a question with no single right answer.
 
 Redis-first for entry data, as everywhere: the correction goes into Redis and is
 marked dirty for the flush worker. The settings row is MySQL only, because
@@ -66,9 +78,16 @@ _SCAN_LIMIT = 800
 # same day in April and different in May.
 LAST_DAY = 'Last Day'
 
-# The category every correction lands in. Never a credit-account category - see
-# the module docstring.
-UNCATEGORIZED = 'Uncategorized'
+# The category every correction lands in - its own, not Uncategorized.
+#
+# Uncategorized means "this needs sorting out". A correction does not: it is the
+# app's entry rather than the user's, and it is already as sorted as it will get.
+# Mixed into Uncategorized it hides the real backlog and invites someone to
+# recategorise a figure whose only job is to make two balances agree.
+#
+# Having them together also makes them addable up, which is what turns a run of
+# corrections in the same direction into a visible signal.
+CORRECTION_CATEGORY = 'Autobalance'
 
 # Differences below this are treated as agreement. Rounding on the user's side
 # and ours will not always agree to the cent, and writing a 1p correction every
@@ -491,20 +510,154 @@ def app_balance(user_id, on_date=None):
     return Decimal(str(value or 0))
 
 
+def reconcilable(user_id):
+    """
+    Which balances this user can usefully state by hand.
+
+    Only the ones no bank feed already covers. Where a feed exists it is the
+    authority, and asking the user to type a figure that a sync will overwrite is
+    worse than not asking: they would be correcting a number that is about to be
+    replaced, and the correction entry would survive.
+
+    Per account type, not per user, because the three are independent - a
+    checking feed says nothing about whether the savings balance is being kept up
+    to date, and a linked card says nothing about the others.
+
+    Returns {'cash': bool, 'savings': bool, 'cards': set of unlinked account ids}.
+    On failure everything is reconcilable: the feature not working is a smaller
+    problem than a balance nobody can correct.
+    """
+    try:
+        from bank_redis import get_user_linked_account_flags
+        flags = get_user_linked_account_flags(user_id) or {}
+        linked = {int(i) for i in (flags.get('linked_credit_ids') or [])}
+        return {
+            'cash': not flags.get('has_checking'),
+            'savings': not flags.get('has_savings'),
+            'linked_cards': linked,
+        }
+    except Exception as e:
+        log_warning(logger, 'AUTOBALANCE',
+                    f"Could not read bank flags for user {user_id}; offering "
+                    f"every balance: {e}")
+        return {'cash': True, 'savings': True, 'linked_cards': set()}
+
+
+def anything_to_reconcile(user_id, on_date=None):
+    """
+    Whether there is any balance worth asking this user about.
+
+    False when a feed covers the current account and the savings account and
+    every card - there is nothing left they could usefully state, so the reminder
+    is not sent and the modal does not open. A prompt that opens with no rows in
+    it is worse than no prompt.
+    """
+    allowed = reconcilable(user_id)
+    if allowed['cash'] or allowed['savings']:
+        return True
+    return any(card['account_id'] not in allowed['linked_cards']
+               for card in card_balances(user_id, on_date))
+
+
+def savings_balance(user_id, on_date=None):
+    """
+    What the app thinks the savings balance is at the end of on_date.
+
+    savings_entries.amount is the running balance for that day, not that day's
+    movement - it is computed as previous + transfers in - transfers out +
+    adjustments, and stored per day the same way remainder is.
+
+    Returns Decimal, or None when there is no row for the date.
+    """
+    on_date = on_date or date.today()
+    try:
+        with get_db_pool().get_cursor() as cursor:
+            cursor.execute(
+                "SELECT amount FROM savings_entries "
+                " WHERE user_id = %s AND date = %s", (user_id, on_date.isoformat()))
+            row = cursor.fetchone()
+    except Exception as e:
+        log_exception(logger, 'AUTOBALANCE',
+                      f"Could not read the savings balance for user {user_id}: {e}")
+        return None
+    if not row:
+        return None
+    value = row['amount'] if isinstance(row, dict) else row[0]
+    return Decimal(str(value or 0))
+
+
+def card_balances(user_id, on_date=None):
+    """
+    Each credit card and what the app thinks its balance is at the end of on_date.
+
+    c_a_balances_d is keyed on account_id rather than user_id, so this joins
+    through credit_accounts. balance there is computed as previous +
+    total_expenses - total_payments, stored per day per card.
+
+    A card with no row for the date is still listed, with None for its balance:
+    the user can still say what the card actually holds, and a card quietly
+    missing from the list looks like the feature not working.
+    """
+    on_date = on_date or date.today()
+    cards = []
+    try:
+        with get_db_pool().get_cursor() as cursor:
+            cursor.execute(
+                "SELECT a.id, a.name, b.balance "
+                "  FROM credit_accounts a "
+                "  LEFT JOIN c_a_balances_d b "
+                "    ON b.account_id = a.id AND b.date = %s "
+                " WHERE a.user_id = %s "
+                " ORDER BY a.display_order, a.id",
+                (on_date.isoformat(), user_id))
+            for row in cursor.fetchall() or []:
+                if isinstance(row, dict):
+                    account_id, name, balance = row['id'], row['name'], row['balance']
+                else:
+                    account_id, name, balance = row[0], row[1], row[2]
+                cards.append({
+                    'account_id': int(account_id),
+                    'name': name,
+                    'balance': float(balance) if balance is not None else None,
+                })
+    except Exception as e:
+        log_exception(logger, 'AUTOBALANCE',
+                      f"Could not read card balances for user {user_id}: {e}")
+    return cards
+
+
+def _card_uncategorized_id(user_id, account_id):
+    """
+    A card's Uncategorized category.
+
+    c_expense_categories hang off an account rather than a user, so every card
+    has its own. Matched by name like the cash one, and None rather than a guess:
+    a correction landing in a category the user did not expect is worse than one
+    that does not happen and says so.
+    """
+    rows = redis_manager.get_table_cache('c_expense_categories', user_id) or []
+    for row in rows:
+        if (int(row.get('account_id') or 0) == int(account_id)
+                and str(row.get('name', '')).strip().lower() == CORRECTION_CATEGORY.lower()):
+            return int(row.get('id'))
+    return None
+
+
 def _uncategorized_id(table, user_id):
     """
     The user's Uncategorized category for an entry table.
 
     Matched by name because that is what it is: a system category every user
-    gets at signup. Returns None rather than guessing at another category - a
-    correction landing somewhere the user did not expect is worse than one that
-    does not happen and says so.
+    gets, seeded at signup and backfilled by add_autobalance_category.sql.
+    Returns None rather than guessing at another category - a correction landing
+    somewhere the user did not expect is worse than one that does not happen and
+    says so.
     """
     cat_table = ('income_categories' if table == 'income_entries'
                  else 'expense_categories')
     rows = redis_manager.get_table_cache(cat_table, user_id) or []
     for row in rows:
-        if str(row.get('name', '')).strip().lower() == UNCATEGORIZED.lower():
+        if str(row.get('name', '')).strip().lower() == CORRECTION_CATEGORY.lower():
             return int(row.get('id'))
     return None
 
@@ -557,7 +710,98 @@ def confirm_pending_buckets(user_id, on_date=None):
     return confirmed
 
 
-def apply(user_id, actual_balance, on_date=None):
+def _correct_savings(user_id, actual, on_date):
+    """
+    Move the savings balance to `actual` with an adjustment row.
+
+    savings_adjustments, not an entry in the Savings category. A Savings expense
+    is a transfer - it moves money out of the cash balance and into savings - and
+    the user is stating their cash balance separately in the same breath, so a
+    transfer here would correct savings by moving cash that was already correct.
+    An adjustment is the mechanism "Initial savings balance" uses, and it touches
+    nothing else.
+
+    Returns (ok, difference) with difference as a Decimal, zero when in balance.
+    """
+    from app import (_get_savings_adjustments_from_redis,
+                     _set_savings_adjustments_to_redis)
+
+    current = savings_balance(user_id, on_date)
+    if current is None:
+        return False, None
+
+    difference = actual - current
+    if abs(difference) < TOLERANCE:
+        return True, Decimal('0')
+
+    rows = _get_savings_adjustments_from_redis(user_id)
+    if rows is None:
+        rows = []
+    rows.append({
+        'user_id': user_id,
+        'date': on_date.isoformat(),
+        'amount': float(difference),
+        'description': 'Autobalance',
+        'linked_account_id': None,
+    })
+    _set_savings_adjustments_to_redis(user_id, rows)
+
+    log_info(logger, 'AUTOBALANCE',
+             f"User {user_id} savings corrected by {difference} "
+             f"(app {current}, actual {actual})")
+    return True, difference
+
+
+def _correct_card(user_id, account_id, actual, on_date):
+    """
+    Move one card's balance to `actual` with a signed entry in its Uncategorized.
+
+    Not a payment, even when the balance needs to come down. A payment is created
+    from an expense against the cash balance, so recording one would move the
+    card and the cash together - and the cash figure has just been stated by the
+    user, so moving it would undo that.
+
+    A negative entry is therefore how a card balance comes down: the card's
+    balance is previous + expenses - payments, so an expense of -20 says plainly
+    "twenty pounds of spending was recorded here that did not happen". That reads
+    oddly in a list of expenses, and it is still the honest entry - the
+    alternative writes a payment that never left the current account.
+
+    Returns (ok, difference).
+    """
+    from app import _update_entry_in_redis
+
+    current = None
+    for card in card_balances(user_id, on_date):
+        if card['account_id'] == int(account_id):
+            current = (Decimal(str(card['balance']))
+                       if card['balance'] is not None else None)
+            break
+    if current is None:
+        return False, None
+
+    difference = actual - current
+    if abs(difference) < TOLERANCE:
+        return True, Decimal('0')
+
+    category_id = _card_uncategorized_id(user_id, account_id)
+    if category_id is None:
+        log_warning(logger, 'AUTOBALANCE',
+                    f"No {CORRECTION_CATEGORY} category on card {account_id} for "
+                    f"user {user_id}; nothing written")
+        return False, None
+
+    _update_entry_in_redis('c_expense_entries', user_id, category_id,
+                           on_date.isoformat(), float(difference), processed=1)
+
+    log_info(logger, 'AUTOBALANCE',
+             f"User {user_id} card {account_id} corrected by {difference} "
+             f"(app {current}, actual {actual})")
+    return True, difference
+
+
+def apply(user_id, actual_balance, on_date=None, actual_savings=None,
+          actual_cards=None):
     """
     Reconcile the app against a real balance.
 
@@ -565,9 +809,15 @@ def apply(user_id, actual_balance, on_date=None):
     what the app now thinks the balance is, and writes the difference as one
     Uncategorized entry dated today.
 
+    actual_savings and actual_cards are optional: the savings balance the user
+    reports, and {account_id: balance} for whichever cards they filled in. Each
+    is corrected independently and none of them touches the cash figure, so the
+    order among them does not matter - only that the confirmations and the
+    recalculation happen first.
+
     Returns (ok, result) where result carries what happened, so the caller can
     say it rather than guess: confirmed, app_balance, actual, difference,
-    direction, entry written or not.
+    direction, entry written or not, and the same for savings and each card.
     """
     from app import _update_entry_in_redis, save_totals_remainders_d
 
@@ -612,8 +862,12 @@ def apply(user_id, actual_balance, on_date=None):
     if abs(difference) < TOLERANCE:
         _record_balanced(user_id, Decimal('0'))
         clear_pending(user_id)
+        # Savings and the cards are corrected here as well. Returning early
+        # because the cash figure agreed would silently skip them, and the two
+        # have nothing to do with each other.
+        _correct_the_rest(user_id, on_date, actual_savings, actual_cards, result)
         log_info(logger, 'AUTOBALANCE',
-                 f"User {user_id} balanced with no adjustment "
+                 f"User {user_id} cash balanced with no adjustment "
                  f"(confirmed {confirmed})")
         return True, result
 
@@ -627,10 +881,10 @@ def apply(user_id, actual_balance, on_date=None):
     category_id = _uncategorized_id(table, user_id)
     if category_id is None:
         log_warning(logger, 'AUTOBALANCE',
-                    f"No {UNCATEGORIZED} category in {table} for user {user_id}; "
-                    f"nothing written")
+                    f"No {CORRECTION_CATEGORY} category in {table} for user "
+                    f"{user_id}; nothing written")
         return False, dict(result,
-                           error=f'No {UNCATEGORIZED} category to put the '
+                           error=f'No {CORRECTION_CATEGORY} category to put the '
                                  f'difference in.')
 
     # Dated today and Paid: it is money that has already moved, which is the
@@ -643,11 +897,97 @@ def apply(user_id, actual_balance, on_date=None):
     result['category_id'] = category_id
     _record_balanced(user_id, difference)
     clear_pending(user_id)
+    _correct_the_rest(user_id, on_date, actual_savings, actual_cards, result)
 
     log_info(logger, 'AUTOBALANCE',
              f"User {user_id} balanced: app {current}, actual {actual}, "
              f"{direction} adjustment {amount} (confirmed {confirmed})")
     return True, result
+
+
+def _correct_the_rest(user_id, on_date, actual_savings, actual_cards, result):
+    """
+    Apply the savings and card corrections and record what they did.
+
+    Separate from apply() only because both of its exit paths need it: the one
+    where the cash figure needed correcting and the one where it did not.
+
+    Card balances are recalculated at the end rather than per card - it walks
+    every account, so doing it once for a user with four cards is three fewer
+    passes over the same data.
+    """
+    from app import save_ca_daily_balance, save_totals_remainders_d
+
+    allowed = reconcilable(user_id)
+
+    # Checked here and not only in the route: the page decides what to show, this
+    # decides what may be written. A stale page - one open since before an account
+    # was linked - would otherwise post a figure for a balance the feed now owns.
+    if actual_savings is not None and not allowed['savings']:
+        log_info(logger, 'AUTOBALANCE',
+                 f"Ignoring a savings figure for user {user_id}: a savings "
+                 f"account is synced")
+        actual_savings = None
+
+    if actual_savings is not None:
+        try:
+            ok, diff = _correct_savings(user_id, Decimal(str(actual_savings)), on_date)
+            result['savings'] = {
+                'ok': ok,
+                'difference': float(diff) if diff is not None else None,
+                'entry_written': bool(ok and diff and abs(diff) >= TOLERANCE),
+            }
+        except Exception as e:
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Could not correct savings for user {user_id}: {e}")
+            result['savings'] = {'ok': False, 'difference': None,
+                                 'entry_written': False}
+
+    if actual_cards:
+        result['cards'] = []
+        touched = False
+        for account_id, actual in actual_cards.items():
+            if actual is None or actual == '':
+                continue
+            if int(account_id) in allowed['linked_cards']:
+                log_info(logger, 'AUTOBALANCE',
+                         f"Ignoring a balance for card {account_id}: it is linked "
+                         f"to a bank account")
+                continue
+            try:
+                ok, diff = _correct_card(user_id, account_id,
+                                         Decimal(str(actual)), on_date)
+            except Exception as e:
+                log_exception(logger, 'AUTOBALANCE',
+                              f"Could not correct card {account_id} for user "
+                              f"{user_id}: {e}")
+                ok, diff = False, None
+            written = bool(ok and diff and abs(diff) >= TOLERANCE)
+            touched = touched or written
+            result['cards'].append({
+                'account_id': int(account_id),
+                'ok': ok,
+                'difference': float(diff) if diff is not None else None,
+                'entry_written': written,
+            })
+        if touched:
+            # The card's daily balance is stored per day, so an entry alone does
+            # not move it - the same reason the cash correction recalculates
+            # totals.
+            try:
+                save_ca_daily_balance()
+            except Exception as e:
+                log_exception(logger, 'AUTOBALANCE',
+                              f"Could not recalculate card balances: {e}")
+
+    if result.get('savings', {}).get('entry_written'):
+        # savings_entries is a stored running balance, rebuilt by the same pass
+        # that rebuilds the remainders.
+        try:
+            save_totals_remainders_d()
+        except Exception as e:
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Could not recalculate savings: {e}")
 
 
 def _record_balanced(user_id, difference):

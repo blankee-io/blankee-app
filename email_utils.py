@@ -415,18 +415,92 @@ def send_smtp_verification_email(to_email, code):
     address comes straight from the saved config instead.
     """
     subject = 'Your Blankee email verification code'
+
+    # Same shell as send_notification_email - white card, teal heading, the grey
+    # box with a teal left border, the same footer rule - so the mail a user gets
+    # while setting delivery up looks like the mail delivery will actually send.
+    # It was Arial with a purple heading, matching nothing else.
     html = f"""
+    <!DOCTYPE html>
     <html>
-      <body style="font-family: Arial, sans-serif; color: #333;">
-        <h2 style="color: #6665DD;">Verify this address</h2>
-        <p>Enter this code in Blankee to confirm that notification emails
-           reach this mailbox:</p>
-        <p style="font-size: 32px; font-weight: bold; letter-spacing: 6px;
-                  color: #6665DD; margin: 24px 0;">{code}</p>
-        <p>The code is valid for about five minutes. If you did not just save
-           email settings in Blankee, you can ignore this message - but you may
-           want to check who has access to the instance.</p>
-      </body>
+    <head>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 20px;
+            }}
+            .container {{
+                background-color: #ffffff;
+                border-radius: 10px;
+                padding: 30px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            .header {{
+                text-align: center;
+                margin-bottom: 30px;
+            }}
+            .header h1 {{
+                color: #2aaaa8;
+                margin: 0;
+                font-size: 28px;
+            }}
+            .code-box {{
+                background-color: #f8f9fa;
+                border-left: 4px solid #2aaaa8;
+                padding: 20px;
+                margin: 20px 0;
+                border-radius: 4px;
+                text-align: center;
+            }}
+            .code {{
+                color: #2aaaa8;
+                font-size: 32px;
+                font-weight: bold;
+                letter-spacing: 6px;
+            }}
+            .note {{
+                color: #666;
+                font-size: 13px;
+            }}
+            .footer {{
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                text-align: center;
+                color: #666;
+                font-size: 12px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Verify this address</h1>
+            </div>
+
+            <p>Enter this code in Blankee to confirm that notification emails
+               reach this mailbox:</p>
+
+            <div class="code-box">
+                <div class="code">{code}</div>
+            </div>
+
+            <p class="note">The code is valid for about five minutes.</p>
+
+            <p>If you did not just save email settings in Blankee, you can ignore
+               this message - but you may want to check who has access to the
+               instance.</p>
+        </div>
+        <div class="footer">
+            <p>This message was sent through the mail settings that were just
+               saved, which is how its arrival proves they work.</p>
+            <p>This is an automated email. Please do not reply to this message.</p>
+        </div>
+    </body>
     </html>
     """
     text = (f'Your Blankee verification code is {code}\n\n'
