@@ -265,6 +265,10 @@ function showConfirmModal(opts) {
                     '<span id="generic-confirm-close" class="close-modal">&times;</span>' +
                     '<h2 id="generic-confirm-title">Confirm</h2>' +
                     '<p id="generic-confirm-message"></p>' +
+                    // A slot for callers needing more than a sentence - the
+                    // end-of-day bucket prompt puts a list of entries here.
+                    // Empty and hidden for every existing caller.
+                    '<div id="generic-confirm-body"></div>' +
                     '<div id="generic-confirm-checkbox-row" class="modal-checkbox-row" style="display:none;">' +
                         '<input type="checkbox" id="generic-confirm-checkbox">' +
                         '<label for="generic-confirm-checkbox" id="generic-confirm-checkbox-label"></label>' +
@@ -294,6 +298,33 @@ function showConfirmModal(opts) {
         // Hide cancel button if requested (for OK-only informational modals)
         cancelBtn.style.display = opts.hideCancel ? 'none' : '';
 
+        // bodyHtml puts arbitrary content in the dialog; hideConfirm drops the
+        // default action button for callers whose content carries its own.
+        // This is why there is one modal implementation and not two: a second
+        // one diverges on focus, escape and backdrop handling immediately, and
+        // the difference stays invisible until someone hits it.
+        var bodyEl = document.getElementById('generic-confirm-body');
+        if (opts.bodyHtml) {
+            bodyEl.innerHTML = opts.bodyHtml;
+            bodyEl.style.display = '';
+        } else {
+            bodyEl.innerHTML = '';
+            bodyEl.style.display = 'none';
+        }
+        confirmBtn.style.display = opts.hideConfirm ? 'none' : '';
+
+        // A modifier class for callers that need this dialog to look or behave
+        // differently - the bucket prompt blurs the page behind it. Cleared
+        // every time, because the element is shared with every other caller.
+        if (modal.dataset.modifier) {
+            modal.classList.remove(modal.dataset.modifier);
+            delete modal.dataset.modifier;
+        }
+        if (opts.modalClass) {
+            modal.classList.add(opts.modalClass);
+            modal.dataset.modifier = opts.modalClass;
+        }
+
         if (opts.danger) {
             confirmBtn.classList.add('danger');
         } else {
@@ -311,7 +342,39 @@ function showConfirmModal(opts) {
 
         modal.classList.add('modal--open');
 
+        // onReady lets a caller with custom body content wire its own handlers
+        // and close the dialog with whatever result it likes, while still
+        // reusing this shell's escape, backdrop and cleanup behaviour.
+        if (typeof opts.onReady === 'function') {
+            try { opts.onReady(bodyEl, function (r) { cleanup(r); }); }
+            catch (e) { /* a caller's wiring must not trap the dialog open */ }
+        }
+
+        // Guards against a second close arriving mid-animation - escape while
+        // the dialog is already flying to the corner, say.
+        var closing = false;
+
         function cleanup(result) {
+            if (closing) { return; }
+            closing = true;
+
+            // beforeClose lets a caller animate the dialog out before it is
+            // dismantled. Returning a promise holds the teardown until it
+            // settles; anything else, or a rejection, closes immediately -
+            // a broken animation must never leave the dialog stuck open.
+            if (typeof opts.beforeClose === 'function') {
+                var pending;
+                try { pending = opts.beforeClose(result); } catch (e) { pending = null; }
+                if (pending && typeof pending.then === 'function') {
+                    pending.then(function () { finishClose(result); },
+                                 function () { finishClose(result); });
+                    return;
+                }
+            }
+            finishClose(result);
+        }
+
+        function finishClose(result) {
             modal.classList.remove('modal--open');
             confirmBtn.removeEventListener('click', onConfirm);
             cancelBtn.removeEventListener('click', onCancel);
@@ -1580,3 +1643,922 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // ===== End Styled Select Dropdown =====
+
+/* ------------------------------------------- end-of-day bucket confirmation
+
+   A bucket is a forecast entry. Until a user says what actually happened, it
+   sits in their totals as though the money moved. This is the asking: once an
+   evening, list what is outstanding and let each one be confirmed, corrected,
+   deferred or dropped.
+
+   Built on showConfirmModal rather than beside it. That helper already handles
+   escape, the backdrop, focus and its own listener cleanup; a second modal
+   would re-implement all four slightly differently and nobody would notice
+   until one of them behaved oddly.
+   ------------------------------------------------------------------------ */
+
+var BUCKET_PROMPT_HOUR = 20;
+
+function _bucketCurrency(code) {
+    return code === "EUR" ? "\u20ac" : code === "GBP" ? "\u00a3" : "$";
+}
+
+function _bucketEscape(text) {
+    var d = document.createElement("div");
+    d.textContent = text == null ? "" : String(text);
+    return d.innerHTML;
+}
+
+function _bucketItemHtml(item, symbol) {
+    var when = item.days_overdue === 0
+        ? "due today"
+        : item.days_overdue === 1 ? "1 day ago" : item.days_overdue + " days ago";
+    // Named for direction, which is how the user thinks about it: money in is
+    // a Wage, money out a Bill. The flexible kind splits the same way - income
+    // that varies is Variable Income, spending you allot yourself an Allowance.
+    var income = item.table === "income_entries";
+    var credit = item.table === "c_expense_entries";
+    var kind = item.wage_bill
+        ? (income ? "Wage" : "Bill")
+        : (income ? "Variable Income" : "Allowance");
+
+    // Three tones, not two. Credit spending is money out, but it leaves a card
+    // rather than the bank, and telling them apart at a glance is the point of
+    // colouring the rows at all.
+    var tone = credit ? "bucket-prompt-credit"
+             : income ? "bucket-prompt-income"
+             : "bucket-prompt-expense";
+
+
+    // Which card, in the title rather than the meta line: "Groceries" on one
+    // card is not "Groceries" on another, so the card is part of the name
+    // rather than a detail about it.
+    var title = credit && item.account_name
+        ? _bucketEscape(item.account_name) + " - " + _bucketEscape(item.category_name)
+        : _bucketEscape(item.category_name);
+    return "" +
+      '<div class="bucket-prompt-item ' + tone + '" data-entry-id="' + _bucketEscape(item.entry_id) +
+          '" data-table="' + _bucketEscape(item.table) + '">' +
+        '<div class="bucket-prompt-head">' +
+          '<span class="bucket-prompt-cat">' + title + '</span>' +
+          '<span class="bucket-prompt-amount">' + symbol +
+              Number(item.amount).toFixed(2) + '</span>' +
+        '</div>' +
+        '<div class="bucket-prompt-meta">' + _bucketEscape(item.date) + ' \u00b7 ' +
+            when + ' \u00b7 <span class="bucket-prompt-kind">' + kind + '</span></div>' +
+        '<div class="bucket-prompt-actions">' +
+          // Yes does not confirm outright - it opens the amount, because the
+          // figure is the thing most likely to differ from the forecast, and
+          // it is one tap either way.
+          '<button type="button" class="bucket-prompt-btn bucket-prompt-yes" data-action="open_amount">Yes</button>' +
+          '<button type="button" class="bucket-prompt-btn" data-action="defer">No</button>' +
+          '<button type="button" class="bucket-prompt-btn bucket-prompt-skip" data-action="skip">Skip</button>' +
+        '</div>' +
+        '<div class="bucket-prompt-amount-row bucket-prompt-hidden">' +
+          '<span class="bucket-prompt-symbol">' + symbol + '</span>' +
+          '<input type="number" class="bucket-prompt-input" step="0.01" min="0" ' +
+              'value="' + Number(item.amount).toFixed(2) + '" inputmode="decimal">' +
+          '<button type="button" class="bucket-prompt-tick" data-action="came_through_amount" ' +
+              'aria-label="Confirm this amount"><i class="fas fa-check"></i></button>' +
+        '</div>' +
+      '</div>';
+}
+
+function fitBucketTitles(bodyEl) {
+    // A long card-and-category name has to give way, not push the amount off
+    // the row or widen the dialog. CSS cannot size text to its container, so
+    // this steps the font down until it fits or hits a floor - below which
+    // ellipsis takes over, because unreadably small is worse than truncated.
+    var titles = bodyEl.querySelectorAll(".bucket-prompt-cat");
+    Array.prototype.forEach.call(titles, function (el) {
+        var size = 15;                 // matches .bucket-prompt-cat in the stylesheet
+        el.style.fontSize = size + "px";
+        // scrollWidth exceeds clientWidth only when the text is actually
+        // overflowing its box, which is the whole test.
+        while (el.scrollWidth > el.clientWidth && size > 11) {
+            size -= 0.5;
+            el.style.fontSize = size + "px";
+        }
+    });
+}
+
+function resolveAllBucketRows(bodyEl, action, close) {
+    // Sequential, not parallel. Each answer rewrites the same Redis key for
+    // this user, so firing them together would have the last write win and
+    // quietly lose the others.
+    var rows = Array.prototype.slice.call(bodyEl.querySelectorAll(".bucket-prompt-item"));
+    if (!rows.length) { return; }
+    var bulkRow = bodyEl.querySelector(".bucket-prompt-bulk");
+    if (bulkRow) { bulkRow.classList.add("bucket-prompt-busy"); }
+
+    function next() {
+        var row = rows.shift();
+        if (!row) {
+            close(true);
+            return;
+        }
+        row.classList.add("bucket-prompt-busy");
+        fetch("/api/buckets/resolve", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                entry_id: row.getAttribute("data-entry-id"),
+                table: row.getAttribute("data-table"),
+                action: action
+            })
+        }).then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (res && res.success) {
+                if (res.change) {
+                    bucketPromptChanges.push(res.change);
+                    scheduleBucketRefresh();
+                }
+                row.remove();
+            }
+            else { row.classList.remove("bucket-prompt-busy"); }
+            next();
+          })
+          .catch(function () {
+            row.classList.remove("bucket-prompt-busy");
+            if (bulkRow) { bulkRow.classList.remove("bucket-prompt-busy"); }
+            showToast("Could not reach the server.", "error");
+          });
+    }
+    next();
+}
+
+function showBucketPrompt(opts) {
+    opts = opts || {};
+    return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+            if (!data || !data.success || !data.total) {
+                if (opts.announceEmpty) {
+                    showToast("Nothing waiting to be confirmed.", "info");
+                }
+                return false;
+            }
+
+            var symbol = _bucketCurrency(data.currency_type);
+            var html = data.items.map(function (i) {
+                return _bucketItemHtml(i, symbol);
+            }).join("");
+
+            // Never truncate in silence - if the backlog is longer than the
+            // list shown, say so, or the remainder looks like it was handled.
+            if (data.total > data.shown) {
+                html += '<p class="bucket-prompt-more">' +
+                    (data.total - data.shown) +
+                    ' more waiting. Answer these and reopen to see the rest.</p>';
+            }
+
+            // One answer for every row. Below the list and separated, because
+            // these act on all of them at once.
+            html += '<div class="bucket-prompt-bulk">' +
+                '<button type="button" class="bucket-prompt-btn bucket-prompt-yes" data-bulk="came_through">Yes to all</button>' +
+                '<button type="button" class="bucket-prompt-btn" data-bulk="defer">No to all</button>' +
+                '<button type="button" class="bucket-prompt-btn bucket-prompt-skip" data-bulk="skip">Skip all</button>' +
+                '</div>';
+
+            return showConfirmModal({
+                title: "Did these come through?",
+                modalClass: "bucket-prompt-modal",
+                // Forwarded, not swallowed. Leaving this out was why the
+                // dialog vanished instead of shrinking into the corner: the
+                // hook existed and nothing ever handed it to the helper.
+                beforeClose: opts.beforeClose,
+                message: "",
+                bodyHtml: html,
+                hideConfirm: true,
+                // No footer button: the three bulk actions below the list are
+                // the ways out, and the X and escape still work.
+                hideCancel: true,
+                onReady: function (bodyEl, close) {
+                    // The bubble bounces, then the dialog grows out of it. Run
+                    // here rather than before the fetch, so the bubble survives
+                    // until the dialog is genuinely ready to take over.
+                    startBucketOpenSequence();
+                    // After the rows exist, before anyone reads them.
+                    fitBucketTitles(bodyEl);
+                    // Leaving the field closes it again, so an abandoned "Yes"
+                    // does not sit there half-open.
+                    //
+                    // Capture, because blur does not bubble. And clicking the
+                    // tick blurs the field first, so focus landing inside the
+                    // same row is not a reason to close - otherwise the button
+                    // would vanish from under the pointer before its click.
+                    bodyEl.addEventListener("blur", function (ev) {
+                        var field = ev.target;
+                        if (!field || !field.classList ||
+                            !field.classList.contains("bucket-prompt-input")) { return; }
+                        var panel = field.closest(".bucket-prompt-amount-row");
+                        if (!panel) { return; }
+                        if (ev.relatedTarget && panel.contains(ev.relatedTarget)) { return; }
+                        // Safari reports relatedTarget as null for button clicks,
+                        // so confirm where focus actually landed a tick later.
+                        setTimeout(function () {
+                            if (!panel.contains(document.activeElement)) {
+                                panel.classList.add("bucket-prompt-hidden");
+                            }
+                        }, 120);
+                    }, true);
+
+                    bodyEl.addEventListener("click", function (ev) {
+                        var bulk = ev.target.closest("button[data-bulk]");
+                        if (bulk) {
+                            // "Yes to all" takes each row at its forecast amount:
+                            // correcting a figure is a per-row decision and there
+                            // is nothing sensible to apply to all of them.
+                            resolveAllBucketRows(bodyEl, bulk.getAttribute("data-bulk"), close);
+                            return;
+                        }
+
+                        var btn = ev.target.closest("button[data-action]");
+                        if (!btn) { return; }
+                        var row = btn.closest(".bucket-prompt-item");
+                        if (!row) { return; }
+                        var action = btn.getAttribute("data-action");
+
+                        if (action === "open_amount") {
+                            var panel = row.querySelector(".bucket-prompt-amount-row");
+                            if (panel) {
+                                panel.classList.remove("bucket-prompt-hidden");
+                                var input = panel.querySelector("input");
+                                // Pre-selected: the common case - the forecast
+                                // was right - is a tap on the tick, and the rest
+                                // is typing over it. Neither needs a step first.
+                                if (input) { input.focus(); input.select(); }
+                            }
+                            return;
+                        }
+
+                        var payload = {
+                            entry_id: row.getAttribute("data-entry-id"),
+                            table: row.getAttribute("data-table"),
+                            action: action
+                        };
+                        if (action === "came_through_amount") {
+                            var field = row.querySelector(".bucket-prompt-input");
+                            payload.amount = field ? field.value : null;
+                        }
+
+                        // Disable the row while it is in flight, so a double
+                        // tap cannot resolve the same entry twice.
+                        row.classList.add("bucket-prompt-busy");
+                        fetch("/api/buckets/resolve", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(payload)
+                        }).then(function (r) { return r.json(); })
+                          .then(function (res) {
+                            row.classList.remove("bucket-prompt-busy");
+                            if (!res || !res.success) {
+                                showToast((res && res.error) || "Could not save that.", "error");
+                                return;
+                            }
+                            if (res.change) {
+                                bucketPromptChanges.push(res.change);
+                                scheduleBucketRefresh();
+                            }
+                            row.remove();
+                            if (!bodyEl.querySelector(".bucket-prompt-item")) {
+                                close(true);
+                            }
+                          }).catch(function () {
+                            row.classList.remove("bucket-prompt-busy");
+                            showToast("Could not reach the server.", "error");
+                          });
+                    });
+                }
+            });
+        })
+        .catch(function () { return false; });
+}
+
+/* ---- the floating prompt ---------------------------------------------------
+
+   Three states, one job:
+
+     centred    on arrival, over a blurred page - unmissable, because the
+                numbers are wrong until these are answered
+     bubble     dismissed with work left: a corner icon carrying the count,
+                so it nags quietly instead of blocking
+     gone       everything answered
+
+   The centred state is showConfirmModal, not a second modal - escape, the
+   backdrop, focus and listener cleanup are all already solved there. The
+   bubble is a launcher, not a dialog, so it is its own small element.
+   -------------------------------------------------------------------------- */
+
+// How long counts as "away". Re-opening centred on every page navigation would
+// be intolerable; only after a real gap does it take over the screen again.
+var BUCKET_IDLE_MS = 4 * 60 * 60 * 1000;
+var BUCKET_LAST_KEY = "blankee_bucket_last_shown";
+
+function bucketLauncher() {
+    var el = document.getElementById("bucket-launcher");
+    if (el) { return el; }
+    el = document.createElement("button");
+    el.id = "bucket-launcher";
+    el.type = "button";
+    el.className = "bucket-launcher bucket-prompt-hidden";
+    el.setAttribute("aria-label", "Entries waiting to be confirmed");
+    el.innerHTML =
+        '<i class="fa-solid fa-clipboard-check"></i>' +
+        '<span class="bucket-launcher-count"></span>';
+    el.addEventListener("click", function () {
+        openBucketPrompt();
+    });
+    document.body.appendChild(el);
+    return el;
+}
+
+function setBucketLauncher(count) {
+    var el = bucketLauncher();
+    if (!count) {
+        // Everything answered: the launcher goes away entirely rather than
+        // sitting there showing a zero.
+        el.classList.add("bucket-prompt-hidden");
+        return;
+    }
+    el.querySelector(".bucket-launcher-count").textContent = count > 99 ? "99+" : count;
+    el.classList.remove("bucket-prompt-hidden");
+}
+
+// How long the dialog takes to fly to the corner. Must match the transition
+// declared for .bucket-prompt-minimising in style.css.
+var BUCKET_MINIMISE_MS = 420;
+
+// Set by any answer that actually changed something. The page behind the
+// prompt is showing figures those answers have just invalidated, so it has to
+// be re-rendered - but only if something really did change, or closing the
+// prompt untouched would pointlessly reload the page underneath it.
+// What each answer did, as the server reported it, waiting to be shown. The
+// page holds its own copy of these entries and has to reflect the outcome
+// without reloading, so it needs the specifics: which entry, whether it is
+// gone, and what its date, amount and is_bucket now are.
+var bucketPromptChanges = [];
+var bucketRefreshTimer = null;
+
+function scheduleBucketRefresh(immediate) {
+    // Show each answer as it lands, rather than banking them until the dialog
+    // closes. Waiting made every answer look like it had done nothing: the page
+    // behind the prompt went on showing the day the entry had just left.
+    //
+    // Debounced, because answering all of them fires these one after another
+    // and each refresh is a round trip - without this, N answers cost N of them
+    // and every result but the last is stale before it arrives. Closing the
+    // dialog flushes whatever is still queued.
+    if (bucketRefreshTimer) {
+        clearTimeout(bucketRefreshTimer);
+        bucketRefreshTimer = null;
+    }
+
+    var run = function () {
+        bucketRefreshTimer = null;
+        if (!bucketPromptChanges.length) { return; }
+        // Drained, so a page that folds these into its own arrays cannot
+        // apply the same change twice.
+        var changes = bucketPromptChanges;
+        bucketPromptChanges = [];
+        refreshAfterBucketAnswers(changes);
+    };
+
+    if (immediate) { run(); } else { bucketRefreshTimer = setTimeout(run, 300); }
+}
+
+// How long the bubble takes to bounce and clear out. The dialog waits this
+// long before it starts growing, so the two read as one handover rather than
+// two things moving at once.
+var BUCKET_BOUNCE_MS = 300;
+
+function applyBucketChanges(changes, arrays) {
+    /* Fold the server's answers into a page's own entry arrays.
+
+       Shared because the mutation is identical everywhere - same entry shape,
+       same three tables - while the redraw that follows is not. A page passes
+       the arrays it actually holds; anything it does not hold is skipped.
+
+       Every field comes from the server. Deriving them here would mean a second
+       copy of the rules in bucket_confirmation.resolve, and the two would drift
+       the first time one changed. */
+    if (!changes || !changes.length || !arrays) { return 0; }
+    var touched = 0;
+
+    changes.forEach(function (ch) {
+        var arr = arrays[ch.table];
+        if (!arr || !arr.length) { return; }
+        for (var i = arr.length - 1; i >= 0; i--) {
+            if (String(arr[i].id) !== String(ch.entry_id)) { continue; }
+            if (ch.removed) {
+                arr.splice(i, 1);
+            } else {
+                // ISO date strings, matching what the templates and
+                // /get_dashboard_d_data already put in these arrays - the
+                // renderers feed them straight to new Date().
+                arr[i].date = ch.date;
+                arr[i].amount = ch.amount;
+                arr[i].is_bucket = ch.is_bucket;
+                arr[i].original_date = ch.original_date;
+            }
+            touched++;
+            break;
+        }
+    });
+    return touched;
+}
+
+function _bucketSpinner(show) {
+    // Guarded: the prompt appears on every page, and the spinner's container
+    // comes from loading_modals.html, which not every page includes.
+    // showDashboardSpinner reaches straight into it without checking.
+    if (typeof showDashboardSpinner !== "function") { return; }
+    if (!document.getElementById("dashboard-loading-spinner-container")) { return; }
+    showDashboardSpinner(!!show);
+}
+
+function refreshAfterBucketAnswers(changes) {
+    // Answering moves entries between days, changes amounts and removes rows,
+    // so both the entry cells and the stored totals behind the prompt are now
+    // wrong. Totals are stored rather than derived on render, so something has
+    // to recalculate them server-side either way.
+    //
+    // Nothing here reloads the page. It used to, on the grounds that entries are
+    // baked into each dashboard at render time - but every dashboard already
+    // redraws itself in place after an edit, and saveDailyTotalsAndRemainders is
+    // the entry point to that: on the daily view it re-fetches and re-renders,
+    // on the calendars it regenerates them. Reloading threw all of that away and
+    // made answering a question cost a page load.
+    // The bottom-right spinner, the same one an added entry raises. Each page's
+    // hook ends in a path that already calls showDashboardSpinner(false), so
+    // raising it once here is balanced - the helper counts shows against hides.
+    _bucketSpinner(true);
+
+    if (typeof window.blankeeBucketRefresh === "function") {
+        // The page knows how to redraw itself and has said so. It gets the
+        // changes because it holds arrays this file cannot reach: they are
+        // declared with let/const at template scope, not hung off window.
+        try {
+            window.blankeeBucketRefresh(changes || []);
+            return;
+        } catch (e) { /* fall through to the recalculation below */ }
+    }
+
+    // No hook: this page does not show dated entries, or has not said it can
+    // redraw them. Post the recalculation so the stored figures are right the
+    // next time a dashboard is opened, and leave this page untouched.
+    //
+    // Deliberately not calling the page's own saveDailyTotalsAndRemainders as a
+    // fallback. Most of them redraw in place, but buds.html reloads inside it
+    // and dashboard_summary.html's returns early unless one of its own edits set
+    // a flag - so "call whatever the page has" quietly reloads on one page and
+    // silently skips the recalculation on another. Pages that can redraw say so
+    // by defining the hook.
+    fetch("/save_totals_remainders_d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+    }).catch(function () { /* the nightly recalculation will catch it */ })
+      // Nothing on a page without a hook will lower it, so this does.
+      .then(function () { _bucketSpinner(false); },
+            function () { _bucketSpinner(false); });
+}
+
+function bounceBucketLauncherOut() {
+    // The bubble acknowledges the click before handing over: a small swell,
+    // then it clears the corner for the dialog. Returns how long to wait, so
+    // the caller can time the handover off one number.
+    var el = document.getElementById("bucket-launcher");
+    if (!el || el.classList.contains("bucket-prompt-hidden")) { return 0; }
+
+    var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) { el.classList.add("bucket-prompt-hidden"); return 0; }
+
+    el.classList.add("bucket-launcher-bounce-out");
+    setTimeout(function () {
+        el.classList.remove("bucket-launcher-bounce-out");
+        el.classList.add("bucket-prompt-hidden");
+    }, BUCKET_BOUNCE_MS);
+    return BUCKET_BOUNCE_MS;
+}
+
+function prepareBucketExpand() {
+    // Collapse the dialog onto the bubble immediately, with transitions off.
+    //
+    // Two reasons it has to happen now rather than when the growth starts.
+    // The dialog is already on screen by the time this runs, so anything later
+    // shows it full size first and then snaps small. And reading
+    // getBoundingClientRect below flushes styles, which makes the browser
+    // record the full-size box as the state to animate from - so the class
+    // must be applied while transitions are suppressed, or the dialog
+    // animates INTO the corner instead of out of it.
+    var modal = document.getElementById("generic-confirm-modal");
+    var content = modal && modal.querySelector(".modal-content");
+    var launcher = bucketLauncher();
+    if (!content) { return null; }
+
+    var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) { return null; }
+
+    var wasHidden = launcher.classList.contains("bucket-prompt-hidden");
+    if (wasHidden) { launcher.classList.remove("bucket-prompt-hidden"); }
+    var to = launcher.getBoundingClientRect();
+    if (wasHidden) { launcher.classList.add("bucket-prompt-hidden"); }
+
+    var from = content.getBoundingClientRect();
+    if (!from.width || !to.width) { return null; }
+
+    content.style.setProperty("--bucket-fly-x",
+        ((to.left + to.width / 2) - (from.left + from.width / 2)) + "px");
+    content.style.setProperty("--bucket-fly-y",
+        ((to.top + to.height / 2) - (from.top + from.height / 2)) + "px");
+
+    content.classList.add("bucket-prompt-instant");
+    modal.classList.add("bucket-prompt-expanding");
+    void content.offsetWidth;          // compute it while transitions are off
+    content.classList.remove("bucket-prompt-instant");
+
+    return { modal: modal, content: content };
+}
+
+function releaseBucketExpand(prepared) {
+    if (!prepared) { return; }
+    requestAnimationFrame(function () {
+        prepared.modal.classList.remove("bucket-prompt-expanding");
+        setTimeout(function () {
+            prepared.content.style.removeProperty("--bucket-fly-x");
+            prepared.content.style.removeProperty("--bucket-fly-y");
+        }, BUCKET_MINIMISE_MS);
+    });
+}
+
+function startBucketOpenSequence() {
+    // Beat one: the dialog is hidden at the corner and the bubble bounces.
+    // Beat two: the bubble is gone and the dialog grows into its place.
+    var prepared = prepareBucketExpand();
+    var wait = bounceBucketLauncherOut();
+    if (!wait) { releaseBucketExpand(prepared); return; }
+    setTimeout(function () { releaseBucketExpand(prepared); }, wait);
+}
+function minimiseBucketPrompt(remaining) {
+    // Shrink the dialog into the bubble it is becoming, so the count in the
+    // corner is visibly the same thing that was just on screen rather than a
+    // new object that appeared from nowhere.
+    return new Promise(function (resolve) {
+        var modal = document.getElementById("generic-confirm-modal");
+        var content = modal && modal.querySelector(".modal-content");
+        if (!content || !remaining) { resolve(); return; }
+
+        // Someone who has asked for less motion gets the destination without
+        // the journey.
+        var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (still) { resolve(); return; }
+
+        // The bubble has to exist and be laid out before it can be measured,
+        // so reveal it first - it is behind the dialog and cannot be seen yet.
+        // Measured while still hidden, and revealed only once the dialog has
+        // gone. Showing it up front looked safe - it sits behind the modal -
+        // but the backdrop is transparent, it is only a blur, and that blur is
+        // fading out during this very animation. The bubble came into view
+        // under the shrinking dialog. The two are never both on screen.
+        var launcher = bucketLauncher();
+        var wasHidden = launcher.classList.contains("bucket-prompt-hidden");
+        if (wasHidden) { launcher.classList.remove("bucket-prompt-hidden"); }
+        var from = content.getBoundingClientRect();
+        var to = launcher.getBoundingClientRect();
+        if (wasHidden) { launcher.classList.add("bucket-prompt-hidden"); }
+        if (!from.width || !to.width) { resolve(); return; }
+
+        // Two numbers into CSS custom properties; the transition, easing and
+        // final scale all live in the stylesheet where they belong. The values
+        // cannot: they depend on where the dialog happens to be on screen.
+        content.style.setProperty("--bucket-fly-x",
+            ((to.left + to.width / 2) - (from.left + from.width / 2)) + "px");
+        content.style.setProperty("--bucket-fly-y",
+            ((to.top + to.height / 2) - (from.top + from.height / 2)) + "px");
+
+        modal.classList.add("bucket-prompt-minimising");
+
+        // transitionend would be tidier, but it never fires if the element is
+        // hidden mid-flight or the transition is interrupted, and that would
+        // leave the dialog open for good. The timer always fires.
+        setTimeout(function () {
+            // Resolve FIRST, so the shared helper hides the dialog while it is
+            // still shrunk. Clearing the class before that let the content snap
+            // back to full size for one frame before disappearing, which read as
+            // a blink rather than a fade - that was the bug.
+            resolve();
+            setTimeout(function () {
+                modal.classList.remove("bucket-prompt-minimising");
+                content.style.removeProperty("--bucket-fly-x");
+                content.style.removeProperty("--bucket-fly-y");
+                // Only now, with the dialog gone, does the bubble appear.
+                setBucketLauncher(remaining);
+                launcher.classList.add("bucket-launcher-pop");
+                setTimeout(function () {
+                    launcher.classList.remove("bucket-launcher-pop");
+                }, 340);
+            }, 40);
+        }, BUCKET_MINIMISE_MS);
+    });
+}
+
+function openBucketPrompt(opts) {
+    opts = opts || {};
+
+    return showBucketPrompt({
+        announceEmpty: !!opts.announceEmpty,
+        // Runs while the dialog is still on screen. Counts what is left, and
+        // if anything is, flies the dialog into the corner bubble before the
+        // shared helper dismantles it.
+        beforeClose: function () {
+            return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    var left = (d && d.success) ? d.total : 0;
+                    return left ? minimiseBucketPrompt(left) : null;
+                })
+                .catch(function () { /* close without the flourish */ });
+        }
+    })
+        .then(function () {
+            // However the dialog closed, ask what is left: answered rows are
+            // gone, so this is what decides bubble-or-nothing.
+            return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    setBucketLauncher((d && d.success) ? d.total : 0);
+
+                    // Flush anything the debounce is still holding. Answers
+                    // already applied themselves as they landed; this catches
+                    // the last one, which is usually what closed the dialog.
+                    scheduleBucketRefresh(true);
+                })
+                .catch(function () { /* leave the bubble as it was */ });
+        });
+}
+
+
+/* ---- auto-balance ----------------------------------------------------------
+
+   Asks what the bank actually says, and records the difference. Built on
+   showConfirmModal like everything else - see CLAUDE.md 5a; a second modal
+   implementation diverges on escape, focus and close behaviour within a week.
+
+   The arithmetic is entirely server-side, in auto_balance.apply, because the
+   order matters: outstanding entries are confirmed first, then the stored
+   totals are recalculated, and only then is the balance measured. Working any
+   of that out here would put a second copy of that order in the browser. */
+
+function _abEscape(text) {
+    var d = document.createElement("div");
+    d.textContent = text == null ? "" : String(text);
+    return d.innerHTML;
+}
+
+function _abCurrency(type) {
+    return type === "EUR" ? "\u20ac" : type === "USD" ? "$" : (type || "$");
+}
+
+function showAutoBalancePrompt(opts) {
+    opts = opts || {};
+    var url = "/api/autobalance/state" + (opts.force ? "?force=1" : "");
+
+    return fetch(url, { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+            if (!d || !d.success || !d.pending) {
+                if (opts.force) { showToast("Nothing to balance right now.", "info"); }
+                return false;
+            }
+
+            var symbol = _abCurrency(d.currency_type);
+            var shown = d.app_balance == null ? null : Number(d.app_balance);
+            var note = d.to_confirm
+                ? '<p class="autobalance-note">' + d.to_confirm + " " +
+                  (d.to_confirm === 1 ? "entry" : "entries") +
+                  " waiting to be confirmed will be confirmed first.</p>"
+                : "";
+
+            var body =
+                '<div class="autobalance-body">' +
+                  '<div class="autobalance-row">' +
+                    '<span class="autobalance-label">Blankee says</span>' +
+                    '<span class="autobalance-figure">' + symbol +
+                      (shown == null ? "\u2014" : shown.toFixed(2)) + "</span>" +
+                  "</div>" +
+                  '<label class="autobalance-label" for="autobalance-actual">' +
+                    "What does your bank say?</label>" +
+                  '<div class="autobalance-input-wrap">' +
+                    '<span class="autobalance-symbol">' + symbol + "</span>" +
+                    '<input type="number" step="0.01" inputmode="decimal" ' +
+                      'id="autobalance-actual" class="autobalance-input" ' +
+                      'value="' + (shown == null ? "" : shown.toFixed(2)) + '">' +
+                  "</div>" +
+                  note +
+                "</div>";
+
+            return showConfirmModal({
+                title: "Check your balance",
+                message: "",
+                bodyHtml: body,
+                confirmText: "Balance",
+                cancelText: "Not now",
+                modalClass: "autobalance-modal",
+                onReady: function (bodyEl) {
+                    var input = bodyEl.querySelector("#autobalance-actual");
+                    // Pre-filled with what the app thinks, because the common
+                    // case is agreement and the rest is typing over it.
+                    if (input) { input.focus(); input.select(); }
+                }
+            }).then(function (confirmed) {
+                var input = document.getElementById("autobalance-actual");
+                var typed = input ? input.value : null;
+
+                if (!confirmed) {
+                    // Nothing written, and the cadence is untouched: next_due
+                    // was advanced when the prompt was raised, so "not now"
+                    // simply means the next occurrence asks again.
+                    return fetch("/api/autobalance/skip", { method: "POST" })
+                        .then(function () { return false; })
+                        .catch(function () { return false; });
+                }
+                if (typed === null || typed === "") {
+                    showToast("Enter your current balance.", "error");
+                    return false;
+                }
+                return _abApply(typed);
+            });
+        })
+        .catch(function () { return false; });
+}
+
+function _abApply(balance) {
+    _bucketSpinner(true);
+    return fetch("/api/autobalance/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ balance: balance })
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d || !d.success) {
+                _bucketSpinner(false);
+                showToast((d && d.error) || "Could not balance.", "error");
+                return false;
+            }
+
+            var parts = [];
+            if (d.confirmed) {
+                parts.push("Confirmed " + d.confirmed + " " +
+                           (d.confirmed === 1 ? "entry" : "entries") + ".");
+            }
+            if (d.entry_written) {
+                parts.push("Recorded " + Math.abs(d.difference).toFixed(2) +
+                           " as Uncategorized " + d.direction + ".");
+            } else {
+                parts.push("Your balance matches.");
+            }
+            showToast(parts.join(" "), "success");
+
+            // The confirmations and the correction between them can have moved
+            // a lot of entries, so there is no useful per-row patch here - the
+            // page's own refresh is the honest option.
+            setBucketLauncher(d.remaining || 0);
+            refreshAfterBucketAnswers([]);
+            return true;
+        })
+        .catch(function () {
+            _bucketSpinner(false);
+            showToast("Could not reach the server.", "error");
+            return false;
+        });
+}
+
+/* Place an info bubble against the viewport, clamped to stay on screen.
+
+   The bubble is position: fixed, so no ancestor can clip it - which is the
+   whole point: these labels sit inside modals and panels that set overflow, and
+   an absolutely positioned bubble was being cut in half by them.
+
+   Below the icon when there is room, above when there is not, and the arrow is
+   pointed at the icon rather than at the bubble's own centre, because a bubble
+   clamped against the edge of the screen is no longer centred on it. */
+var INFO_TIP_GAP = 8;
+
+function positionInfoTip(tip) {
+    var bubble = tip.querySelector(".info-tip-text");
+    if (!bubble) { return; }
+
+    // Measured while shown but transparent: a hidden element has no size.
+    bubble.classList.add("info-tip-shown");
+    bubble.classList.remove("info-tip-above", "info-tip-below");
+
+    var icon = tip.getBoundingClientRect();
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var box = bubble.getBoundingClientRect();
+
+    var left = icon.left + icon.width / 2 - box.width / 2;
+    left = Math.max(INFO_TIP_GAP,
+                    Math.min(left, vw - box.width - INFO_TIP_GAP));
+
+    var below = icon.bottom + INFO_TIP_GAP;
+    var above = icon.top - box.height - INFO_TIP_GAP;
+    var placeBelow = (below + box.height + INFO_TIP_GAP) <= vh || above < INFO_TIP_GAP;
+
+    bubble.style.left = Math.round(left) + "px";
+    bubble.style.top = Math.round(placeBelow ? below : above) + "px";
+    bubble.classList.add(placeBelow ? "info-tip-below" : "info-tip-above");
+    bubble.style.setProperty("--tip-arrow",
+        Math.round(icon.left + icon.width / 2 - left) + "px");
+}
+
+function hideInfoTip(tip) {
+    var bubble = tip.querySelector(".info-tip-text");
+    if (bubble) { bubble.classList.remove("info-tip-shown"); }
+}
+
+/* Delegated, because there are well over a hundred of these and binding four
+   listeners to each would be the only expensive thing on the page.
+
+   focus as well as hover: a touch screen has no hover, and tapping a focusable
+   element focuses it. Scroll and resize dismiss rather than reposition - a fixed
+   bubble would otherwise sit still while its icon moves away underneath it. */
+["mouseenter", "focus"].forEach(function (evt) {
+    document.addEventListener(evt, function (e) {
+        var tip = e.target && e.target.closest ? e.target.closest(".info-tip") : null;
+        if (tip) { positionInfoTip(tip); }
+    }, true);
+});
+
+["mouseleave", "blur"].forEach(function (evt) {
+    document.addEventListener(evt, function (e) {
+        var tip = e.target && e.target.closest ? e.target.closest(".info-tip") : null;
+        if (tip) { hideInfoTip(tip); }
+    }, true);
+});
+
+window.addEventListener("scroll", function () {
+    var open = document.querySelectorAll(".info-tip-text.info-tip-shown");
+    Array.prototype.forEach.call(open, function (b) {
+        b.classList.remove("info-tip-shown");
+    });
+}, true);
+
+
+/* An info tip lives inside its option's <label>, which is what keeps it in the
+   right place across five different modal layouts - but a label forwards clicks
+   to the control it names, so tapping the icon on a toggle row would flip the
+   toggle and tapping it on a checkbox would tick it. Swallowing the click here
+   rather than on each icon: there are over a hundred of them.
+
+   Capture phase, so it runs before the label acts. Focus is set explicitly
+   because preventDefault stops the label handing focus on, and focus is what
+   shows the bubble on a touch screen, which has no hover. */
+document.addEventListener("click", function (e) {
+    var tip = e.target && e.target.closest ? e.target.closest(".info-tip") : null;
+    if (!tip) { return; }
+    e.preventDefault();
+    e.stopPropagation();
+    try { tip.focus(); } catch (err) { /* focus is a nicety here */ }
+}, true);
+
+
+document.addEventListener("DOMContentLoaded", function () {
+    try {
+        if (typeof showConfirmModal !== "function") { return; }
+
+        // The balance prompt goes first when one is waiting, and the bucket
+        // prompt is skipped entirely for this load: balancing confirms every
+        // outstanding entry itself, so asking about them first and then
+        // confirming them again is the same question twice.
+        showAutoBalancePrompt().then(function (shown) {
+            if (shown !== false) { return; }
+            _openBucketPromptIfDue();
+        });
+    } catch (e) { /* never let this break a page */ }
+});
+
+function _openBucketPromptIfDue() {
+    try {
+        fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.success || !d.total) { setBucketLauncher(0); return; }
+
+                var last = parseInt(localStorage.getItem(BUCKET_LAST_KEY) || "0", 10);
+                var away = !last || (Date.now() - last) > BUCKET_IDLE_MS;
+
+                if (away) {
+                    localStorage.setItem(BUCKET_LAST_KEY, String(Date.now()));
+                    openBucketPrompt();
+                } else {
+                    // Seen recently - stay out of the way, but keep the count
+                    // visible so it is one click away.
+                    setBucketLauncher(d.total);
+                }
+            })
+            .catch(function () { /* no prompt, no error */ });
+    } catch (e) { /* never let this break a page */ }
+}

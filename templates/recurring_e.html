@@ -74,7 +74,13 @@
                             <td class="editable expense-cadence" data-column="cadence" title="{{ record.cadence_description }}"><span class="cadence-top">{{ record.cadence_interval }} {% if record.cadence_unit == 'years' %}<i class="fa-solid fa-calendars"></i>{% elif record.cadence_unit == 'months' %}<i class="fa-solid fa-calendar-days"></i>{% elif record.cadence_unit == 'weeks' %}<i class="fa-solid fa-calendar-week"></i>{% else %}<i class="fa-solid fa-calendar-day"></i>{% endif %}</span>{% if record.cadence_unit == 'years' and record.yearly_month and record.yearly_day %}<span class="cadence-detail">{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][record.yearly_month | int] }} {{ record.yearly_day | ordinal }}</span>{% elif record.cadence_unit == 'months' and record.monthly_days %}<span class="cadence-detail">{{ record.monthly_days | ordinal }}</span>{% elif record.cadence_unit == 'weeks' and record.weekdays %}<span class="cadence-detail">{{ record.weekdays | replace('monday','Mo') | replace('tuesday','Tu') | replace('wednesday','We') | replace('thursday','Th') | replace('friday','Fr') | replace('saturday','Sa') | replace('sunday','Su') }}</span>{% endif %}</td>
                             <td class="expense-bucket" data-column="bucket">
                                 {% set CUR = "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type %}
-                                {% if record.prev_bucket_original is not none and record.wage_bill == 1 %}
+                                {# Latest bucket beside the next one, for every kind. This was gated on
+                                   wage_bill == 1, so only Bills and Wages showed both and an
+                                   Allowance showed the upcoming one alone - with no way to see
+                                   whether the period just gone was spent. The wage_bill
+                                   branches inside were written for both cases and were simply
+                                   unreachable for one of them. #}
+                                {% if record.prev_bucket_original is not none %}
                                 <div class="bucket-dual">
                                     <div class="bucket-side bucket-prev">
                                         {% if record.wage_bill == 1 %}
@@ -191,7 +197,7 @@
             <!-- No need for action or method attributes since we will use AJAX -->
             <form id="add-recurring-expense-form">
             
-                <label>Category</label>
+                <label>Category<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which category this recurring entry belongs to. Start typing to search your categories, or enter a new name to create one.</span></span></label>
                 <div class="category-input-wrapper">
                     <input type="text" class="category-input" id="category_name" name="category_name" placeholder="Search or create category..." autocomplete="off" required maxlength="20">
                     <input type="hidden" class="category-hidden" id="category_id_hidden" name="category_id" value="">
@@ -199,21 +205,21 @@
                 </div>
 
                 <div class="form-row">
-                    <label for="wage-bill-select">Type:</label>
+                    <label for="wage-bill-select">Type:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Wages and Bills are all-or-nothing: one entry settles the whole forecast. Variable and Allowance deplete gradually, so each entry reduces what is left for the period.</span></span></label>
                     <select id="wage-bill-select" name="wage_bill">
                         <option value="1">Bill (fixed expense)</option>
                         <option value="0">Allowance (flexible spending)</option>
                     </select>
                 </div>
             
-                <label for="amount">Recurring Amount</label>
+                <label for="amount">Recurring Amount<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The amount forecast for each occurrence. Future occurrences appear as forecast entries and count toward your totals until you confirm them.</span></span></label>
                 <div class="currency-input-container">
                     <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
                     <input type="number" class="recurring-amount" id="amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
                 </div>
             
                 <!-- Cadence Interval (e.g., "Every X days/weeks/months/years") -->
-                <label for="cadence-interval">Repeat Every</label>
+                <label for="cadence-interval">Repeat Every<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">How often this recurs. The number and the unit together set the interval, so 2 and Week(s) means once a fortnight.</span></span></label>
                 <div class="cadence-row">
                     <input type="number" id="cadence-interval" name="cadence_interval" placeholder="0" step="1" min="1" required>
                     <select id="cadence-unit" name="cadence_unit" required>
@@ -225,7 +231,7 @@
                 </div>
 
                 <div id="weekly-options" style="display:none;">
-                    <label>Repeat on:</label>
+                    <label>Repeat on:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which weekdays it falls on. The interval still applies, so every 2 weeks on Monday means alternate Mondays rather than every Monday.</span></span></label>
                     <div class="weekday"><input type="checkbox" name="weekdays" value="monday"> Mo</div>
                     <div class="weekday"><input type="checkbox" name="weekdays" value="tuesday"> Tu</div>
                     <div class="weekday"><input type="checkbox" name="weekdays" value="wednesday"> We</div>
@@ -238,7 +244,7 @@
 
                 <!-- Monthly Options (for repeating on multiple days of the month) -->
                 <div id="monthly-options" style="display:none;">
-                    <label for="monthly-days">Days of the month:</label>
+                    <label for="monthly-days">Days of the month:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which days of the month it falls on. Add more than one for something that recurs twice a month. Last Day follows the length of each month.</span></span></label>
 
                     <!-- Container to hold the dynamic select dropdowns -->
                     <div id="monthly-day-container">
@@ -251,10 +257,10 @@
 
                 <!-- Yearly Options (for selecting a specific day and month) -->
                 <div id="yearly-options" style="display:none;">
-                    <label for="yearly-day">Day of the year:</label>
+                    <label for="yearly-day">Day of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The day of the month this yearly entry falls on.</span></span></label>
                     <input type="number" id="yearly-day" name="yearly_day" min="1" max="31">
 
-                    <label for="yearly-month">Month of the year:</label>
+                    <label for="yearly-month">Month of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The month this yearly entry falls in.</span></span></label>
                     <select id="yearly-month" name="yearly_month">
                         <option value="1">January</option>
                         <option value="2">February</option>
@@ -273,9 +279,9 @@
 
                 <div class="date-row">
                     <div class="date-label-row">
-                        <label for="start_date">Start Date</label>
+                        <label for="start_date">Start Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The first occurrence. Forecast entries are generated from this date forward, so a past date will create entries you can confirm.</span></span></label>
                         <div class="end-date-container" id="end-date-label-container">
-                            <label for="end_date">End Date</label>
+                            <label for="end_date">End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The last occurrence. Leave it to No End Date to keep going indefinitely.</span></span></label>
                         </div>
                     </div>
                     <div class="date-input-row">
@@ -287,12 +293,12 @@
                     <div class="date-checkbox-row">
                         <span class="date-checkbox-label">Or</span>
                         <input type="checkbox" id="no-end-date-checkbox">
-                        <label for="no-end-date">No End Date</label>
+                        <label for="no-end-date">No End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Keeps generating occurrences with no finish date. Turn it off to set an end date or a number of repeats instead.</span></span></label>
                     </div>
                     <div class="date-checkbox-row">
                         <span class="date-checkbox-label">Or</span>
                         <input type="checkbox" id="use-occurrences-checkbox">
-                        <label for="use-occurrences-checkbox">Repeat this many times:</label>
+                        <label for="use-occurrences-checkbox">Repeat this many times:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Stop after this many occurrences. The end date is worked out for you from the interval.</span></span></label>
                         <input type="number" id="occurrences-count" name="occurrences_count" min="1" style="width:60px;" disabled>
                     </div>
                 </div>
@@ -311,25 +317,25 @@
                 <input type="hidden" id="edit-recurring-id" name="recurring_id">  <!-- Hidden input for recurring ID -->
             
                 <!-- Update Category Name directly -->
-                <label for="edit-category-name">Category Name</label>
+                <label for="edit-category-name">Category Name<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The name of the category this recurring entry belongs to.</span></span></label>
                 <input type="text" id="edit-category-name" name="category_name" required maxlength="20">
 
                 <div class="form-row">
-                    <label for="edit-wage-bill-select">Type:</label>
+                    <label for="edit-wage-bill-select">Type:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Wages and Bills are all-or-nothing: one entry settles the whole forecast. Variable and Allowance deplete gradually, so each entry reduces what is left for the period.</span></span></label>
                     <select id="edit-wage-bill-select" name="wage_bill">
                         <option value="1">Bill (fixed expense)</option>
                         <option value="0">Allowance (flexible spending)</option>
                     </select>
                 </div>
             
-                <label for="edit-amount">Recurring Amount</label>
+                <label for="edit-amount">Recurring Amount<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The amount forecast for each occurrence. Future occurrences appear as forecast entries and count toward your totals until you confirm them.</span></span></label>
                 <div class="currency-input-container">
                     <span class="r-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
                     <input type="number" class="recurring-amount" id="edit-amount" name="amount" placeholder="0.00" step="0.01" min="0" required inputmode="decimal">
                 </div>
             
                 <!-- Same structure for editing cadence -->
-                <label for="edit-cadence-interval">Repeat Every</label>
+                <label for="edit-cadence-interval">Repeat Every<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">How often this recurs. The number and the unit together set the interval, so 2 and Week(s) means once a fortnight.</span></span></label>
                 <div class="cadence-row">
                     <input type="number" id="edit-cadence-interval" name="cadence_interval" min="1" placeholder="0" step="1" required>
                     <select id="edit-cadence-unit" name="cadence_unit" required>
@@ -342,7 +348,7 @@
 
                 <!-- Edit Weekly Options -->
                 <div id="edit-weekly-options" style="display:none;">
-                    <label>Repeat on:</label>
+                    <label>Repeat on:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which weekdays it falls on. The interval still applies, so every 2 weeks on Monday means alternate Mondays rather than every Monday.</span></span></label>
                     <div class="weekday"><input type="checkbox" name="edit_weekdays" value="monday"> Mo</div>
                     <div class="weekday"><input type="checkbox" name="edit_weekdays" value="tuesday"> Tu</div>
                     <div class="weekday"><input type="checkbox" name="edit_weekdays" value="wednesday"> We</div>
@@ -354,7 +360,7 @@
 
                 <!-- Edit Monthly Options -->
                 <div id="edit-monthly-options" style="display:none;">
-                    <label for="edit-monthly-days">Days of the month:</label>
+                    <label for="edit-monthly-days">Days of the month:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which days of the month it falls on. Add more than one for something that recurs twice a month. Last Day follows the length of each month.</span></span></label>
 
                     <!-- Container to hold the dynamic select dropdowns for editing -->
                     <div id="edit-monthly-day-container">
@@ -367,10 +373,10 @@
 
                 <!-- Edit Yearly Options -->
                 <div id="edit-yearly-options" style="display:none;">
-                    <label for="edit-yearly-day">Day of the year:</label>
+                    <label for="edit-yearly-day">Day of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The day of the month this yearly entry falls on.</span></span></label>
                     <input type="number" id="edit-yearly-day" name="yearly_day" min="1" max="31">
 
-                    <label for="edit-yearly-month">Month of the year:</label>
+                    <label for="edit-yearly-month">Month of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The month this yearly entry falls in.</span></span></label>
                     <select id="edit-yearly-month" name="yearly_month">
                         <option value="1">January</option>
                         <option value="2">February</option>
@@ -389,9 +395,9 @@
 
                 <div class="date-row">
                     <div class="date-label-row">
-                        <label for="edit-start-date">Start Date</label>
+                        <label for="edit-start-date">Start Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The first occurrence. Forecast entries are generated from this date forward, so a past date will create entries you can confirm.</span></span></label>
                         <div class="end-date-container" id="edit-end-date-label-container">
-                            <label for="edit-end-date">End Date</label>
+                            <label for="edit-end-date">End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The last occurrence. Leave it to No End Date to keep going indefinitely.</span></span></label>
                         </div>
                     </div>
 
@@ -405,12 +411,12 @@
                     <div class="date-checkbox-row">
                         <span class="date-checkbox-label">Or</span>
                         <input type="checkbox" id="edit-no-end-date-checkbox">
-                        <label for="edit-no-end-date-checkbox">No End Date</label>
+                        <label for="edit-no-end-date-checkbox">No End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Keeps generating occurrences with no finish date. Turn it off to set an end date or a number of repeats instead.</span></span></label>
                     </div>
                     <div class="date-checkbox-row">
                         <span class="date-checkbox-label">Or</span>
                         <input type="checkbox" id="edit-use-occurrences-checkbox">
-                        <label for="edit-use-occurrences-checkbox">Repeat this many times:</label>
+                        <label for="edit-use-occurrences-checkbox">Repeat this many times:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Stop after this many occurrences. The end date is worked out for you from the interval.</span></span></label>
                         <input type="number" id="edit-occurrences-count" name="occurrences_count" min="1" style="width:60px;" disabled>
                     </div>
                 </div>

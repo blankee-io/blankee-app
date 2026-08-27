@@ -1,0 +1,31 @@
+-- =========================================================================
+-- Migration: Per-type email notification preferences
+-- =========================================================================
+-- Purpose: Let a user choose which kinds of notification reach them by email,
+--          rather than only all or nothing.
+--
+--          Email Notifications was a single switch, so someone who wanted the
+--          evening reminder also had to accept a mail every time a bud was
+--          activated. In practice that meant turning the lot off.
+--
+-- One column:
+--
+--   users.email_notify_disabled
+--     A comma-separated list of the notification kinds this user does NOT want
+--     emailed. The kinds themselves live in notification_kinds.py.
+--
+--     Storing the exceptions rather than the selections is deliberate. Every
+--     kind is on by default, so an empty column means "email me everything" -
+--     which is what an existing user expects to keep, and what a new user gets
+--     without a row having to be written for them. It also means a kind added
+--     later is on for everyone automatically, instead of silently off for every
+--     account that saved its preferences before that kind existed.
+--
+--     The general Email Notifications switch still gates everything: this only
+--     narrows what gets sent when that is on.
+--
+-- Run on: each environment in turn, production last
+-- =========================================================================
+
+ALTER TABLE users
+  ADD COLUMN email_notify_disabled VARCHAR(255) DEFAULT NULL;

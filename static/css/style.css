@@ -7459,7 +7459,12 @@ transform: scale(1.2);
     align-items: center;
     width: 100%;
     max-width: 100%;
-    overflow: hidden;
+
+    /* Was hidden, which clipped the info tip bubbles - the one on the first
+       row lost its top half against the edge of the panel. It sits beside
+       max-width: 100%, which is what actually stops a wide child stretching
+       the column, so hiding overflow as well was belt and braces. */
+    overflow: visible;
 }
 
 /* Notification section */
@@ -9498,6 +9503,7 @@ transform: scale(1.2);
 }
 
 /* Weekly Options */
+#balance-weekly-options,
 #weekly-options,
 #edit-weekly-options,
 #expense-weekly-options,
@@ -9508,6 +9514,7 @@ transform: scale(1.2);
     gap: 15px;
 }
 
+#balance-weekly-options label,
 #weekly-options label,
 #edit-weekly-options label,
 #expense-weekly-options label,
@@ -9519,6 +9526,7 @@ transform: scale(1.2);
     width: 100%;
 }
 
+#balance-weekly-options .weekday,
 #weekly-options .weekday,
 #edit-weekly-options .weekday,
 #expense-weekly-options .weekday,
@@ -9539,6 +9547,7 @@ transform: scale(1.2);
 }
 
 /* Monthly Options Label */
+#balance-monthly-options label,
 #monthly-options label,
 #edit-monthly-options label,
 #expense-monthly-options label,
@@ -9639,6 +9648,8 @@ transform: scale(1.2);
 #edit-category-yearly-options,
 #edit-category-weekly-options,
 #edit-category-monthly-options,
+#balance-weekly-options,
+#balance-monthly-options,
 #convert-yearly-options,
 #convert-weekly-options,
 #convert-monthly-options {
@@ -9652,6 +9663,7 @@ transform: scale(1.2);
     padding: 12px;
 }
 
+#balance-weekly-options,
 #weekly-options,
 #edit-weekly-options,
 #expense-weekly-options,
@@ -9662,6 +9674,7 @@ transform: scale(1.2);
 }
 
 /* Monthly options need display: block, not flex */
+#balance-monthly-options,
 #monthly-options,
 #edit-monthly-options,
 #expense-monthly-options,
@@ -16482,4 +16495,790 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
         justify-content: center;
         width: 100%;
     }
+}
+
+/* ------------------------------------------- end-of-day bucket confirmation
+   The list inside the shared confirm modal, where a user says what actually
+   happened to each forecast entry. */
+
+/* The body slot added to showConfirmModal. Empty for every other caller, so
+   it collapses to nothing rather than adding a gap. */
+#generic-confirm-body {
+    width: 100%;
+    overflow-y: auto;
+    margin: 6px 0 14px;
+    text-align: left;
+}
+
+/* The prompt is a column that takes the screen height available and gives
+   whatever is left over to the list. A fixed 52vh cap wasted half the screen
+   on a short list and scrolled early on a long one; this scrolls only once
+   there is genuinely no more room.
+
+   dvh rather than vh: on a phone, vh counts the space behind the browser
+   chrome, so a vh-sized dialog is taller than the screen it is on. */
+.bucket-prompt-modal .modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 40px);
+    max-height: calc(100dvh - 40px);
+}
+
+.bucket-prompt-modal #generic-confirm-body {
+    /* min-height:0 lets this shrink inside the flex column. Without it a
+       flex item refuses to go below its content height and the scrollbar
+       never appears - the dialog just grows off the screen instead. */
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.bucket-prompt-item {
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    border: 1px solid var(--secondary-lighter);
+    border-radius: 10px;
+    background-color: var(--white);
+}
+
+.bucket-prompt-busy {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.bucket-prompt-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.bucket-prompt-cat {
+    /* One line, and allowed to shrink rather than wrap or push the amount off
+       the row. min-width:0 is what lets a flex item narrow below its content;
+       without it the row would simply widen. The ellipsis is the floor, for
+       when even the smallest step still will not fit. */
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--text-dark);
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.bucket-prompt-amount {
+    flex-shrink: 0;
+    color: var(--text-dark);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.bucket-prompt-meta {
+    margin-top: 2px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+}
+
+.bucket-prompt-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.bucket-prompt-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 8px;
+    background-color: var(--white);
+    color: var(--text-dark);
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.bucket-prompt-btn:hover {
+    background-color: var(--secondary-lighter);
+}
+
+/* The affirmative answer carries the weight - it is the one most rows want,
+   and the one that makes the numbers correct. */
+.bucket-prompt-yes {
+    border-color: var(--primary);
+    background-color: var(--primary);
+    color: var(--text-light);
+}
+
+.bucket-prompt-yes:hover {
+    background-color: var(--primary-hover);
+}
+
+/* Skip deletes the entry, so it reads as the destructive choice it is,
+   without shouting - it is a legitimate answer, not a mistake. */
+.bucket-prompt-skip {
+    color: var(--danger);
+}
+
+.bucket-prompt-skip:hover {
+    border-color: var(--danger);
+    background-color: var(--accent-lighter);
+}
+
+.bucket-prompt-amount-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.bucket-prompt-hidden {
+    display: none;
+}
+
+.bucket-prompt-symbol {
+    color: var(--secondary-dark);
+    font-size: 14px;
+}
+
+.bucket-prompt-input {
+    width: 120px;
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 8px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 14px;
+}
+
+.bucket-prompt-input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.bucket-prompt-more {
+    margin: 4px 0 0;
+    color: var(--secondary-dark);
+    font-size: 12.5px;
+    text-align: center;
+}
+
+@media (max-width: 600px) {
+    /* Left as a wrapping flex row on purpose. A grid stretches each button to
+       its column, which made three short words into three wide slabs; natural
+       widths keep Yes, No and Skip the size of their labels. */
+    .bucket-prompt-input {
+        flex: 1 1 auto;
+        width: auto;
+    }
+}
+
+/* The prompt blurs the page behind it. Only this dialog does - it is the
+   one that says the numbers on the page are not yet true, so the page
+   should not read as authoritative underneath it. */
+.modal.bucket-prompt-modal {
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+/* Dismissed with work left, the prompt becomes this: a corner bubble
+   carrying the count. Bottom left, away from the footer support button on
+   the right, and clear of the mobile keyboard. */
+.bucket-launcher {
+    position: fixed;
+    left: 18px;
+    bottom: 18px;
+    /* Above .today-floating-banner, which sits at 999. The bubble is the thing
+       asking for a decision, so nothing should cover it. It is hidden outright
+       whenever the prompt itself is open, so this never competes with the
+       dialog at 200. */
+    z-index: 1000;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px 10px 14px;
+    border: none;
+    border-radius: 24px;
+    background-color: var(--primary);
+    color: var(--text-light);
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.18);
+    transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* A slow breath while it waits, so it stays noticeable without demanding
+   anything. Stops on hover - once the pointer is on it, the movement is
+   just something to chase. */
+@keyframes bucket-launcher-idle {
+    0%, 100% { transform: scale(1); }
+    /* Two beats rather than one long swell - a heartbeat reads as something
+       waiting, where a slow throb reads as decoration. */
+    18%      { transform: scale(1.11); }
+    32%      { transform: scale(1.02); }
+    48%      { transform: scale(1.08); }
+    64%      { transform: scale(1); }
+}
+
+.bucket-launcher {
+    animation: bucket-launcher-idle 2.4s ease-in-out infinite;
+}
+
+.bucket-launcher:hover,
+/* The arrival and departure animations own the transform while they run;
+   letting the idle pulse share it would fight them mid-flight. */
+.bucket-launcher-pop,
+.bucket-launcher-bounce-out {
+    animation-name: none;
+}
+
+.bucket-launcher-pop {
+    animation: bucket-launcher-pop 380ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.bucket-launcher-bounce-out {
+    animation: bucket-launcher-bounce-out 300ms cubic-bezier(0.3, 0, 0.4, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bucket-launcher {
+        animation: none;
+    }
+}
+
+.bucket-launcher:hover {
+    background-color: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.2);
+}
+
+.bucket-launcher i {
+    font-size: 16px;
+}
+
+.bucket-launcher-count {
+    min-width: 22px;
+    padding: 1px 6px;
+    border-radius: 12px;
+    background-color: var(--accent);
+    color: var(--text-light);
+    font-size: 12.5px;
+    font-weight: 700;
+    text-align: center;
+}
+
+@media (max-width: 600px) {
+    .bucket-launcher {
+        left: 12px;
+        /* Clear of the Today banner, which sits at bottom:10px and is about
+           25px tall in its down state. Unconditional rather than tied to
+           whether the banner is showing: it is toggled by script as you
+           scroll, and a bubble hopping up and down in response would be worse
+           than one sitting a little high over empty space. */
+        bottom: 52px;
+    }
+}
+
+/* Closing the prompt with entries still unanswered does not simply hide it -
+   it shrinks into the corner bubble it becomes, so the count that appears
+   down there is visibly the same thing that was on screen a moment ago and
+   not a new object arriving from nowhere.
+
+   The distance is two custom properties set from script, because it depends
+   on where the dialog happens to be. Everything about how it moves - the
+   duration, the easing, how small it gets - is here. The 420ms matches
+   BUCKET_MINIMISE_MS in script.js; change one and change the other, or the
+   bubble pops before the dialog has finished arriving. */
+.bucket-prompt-modal .modal-content {
+    transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 420ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Both directions share one collapsed state: shrunk to nothing at the corner
+   where the bubble sits. Closing transitions into it, opening out of it, so
+   the two cannot drift apart. */
+.bucket-prompt-modal.bucket-prompt-minimising .modal-content,
+.bucket-prompt-modal.bucket-prompt-expanding .modal-content {
+    transform: translate(var(--bucket-fly-x, 0), var(--bucket-fly-y, 0)) scale(0.08);
+    opacity: 0;
+}
+
+/* The backdrop fades with it, rather than snapping away and leaving the
+   dialog travelling across a page that has already brightened. */
+.bucket-prompt-modal.bucket-prompt-minimising,
+.bucket-prompt-modal.bucket-prompt-expanding {
+    backdrop-filter: blur(0);
+    -webkit-backdrop-filter: blur(0);
+    transition: backdrop-filter 420ms ease, -webkit-backdrop-filter 420ms ease;
+}
+
+/* The bubble catching it. */
+/* The bubble arriving. The opacity ramp matters as much as the scale: without
+   it the element snaps from display:none to fully opaque and the overshoot
+   reads as a blink rather than a bounce. */
+@keyframes bucket-launcher-pop {
+    0%   { transform: scale(0.4);  opacity: 0; }
+    45%  { transform: scale(1.10); opacity: 1; }
+    72%  { transform: scale(0.96); }
+    100% { transform: scale(1);    opacity: 1; }
+}
+
+.bucket-launcher-pop {
+    animation: bucket-launcher-pop 380ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Anyone who has asked for less motion gets the destination without the
+   journey - the bubble simply appears. */
+@media (prefers-reduced-motion: reduce) {
+    .bucket-prompt-modal .modal-content,
+    .bucket-prompt-modal.bucket-prompt-minimising,
+    .bucket-prompt-modal.bucket-prompt-expanding {
+        transition: none;
+    }
+
+    .bucket-launcher-pop {
+        animation: none;
+    }
+}
+
+/* The launcher sets display:inline-flex and appears later in this file than
+   .bucket-prompt-hidden, so at equal specificity it won and the bubble could
+   never be hidden - it sat there through the dialog and all. Two classes beat
+   one, so this settles it regardless of order. */
+.bucket-launcher.bucket-prompt-hidden {
+    display: none;
+}
+
+/* The tick that confirms an amount. The same round button the settings page
+   uses, in teal rather than orange: here it completes a step rather than
+   saving a setting. */
+.bucket-prompt-tick {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background-color: var(--primary);
+    color: var(--text-light);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.bucket-prompt-tick:hover {
+    background-color: var(--primary-hover);
+}
+
+.bucket-prompt-tick i {
+    font-size: 14px;
+}
+
+/* Money in and money out read differently, so the rows say which at a glance
+   rather than making you infer it from the category name. A left edge, not a
+   fill: the row still has to be readable, and colour is the hint. */
+.bucket-prompt-item.bucket-prompt-income {
+    border-left: 4px solid var(--primary);
+}
+
+.bucket-prompt-item.bucket-prompt-expense {
+    border-left: 4px solid var(--accent);
+}
+
+.bucket-prompt-kind {
+    font-weight: 600;
+}
+
+.bucket-prompt-income .bucket-prompt-kind {
+    color: var(--primary);
+}
+
+.bucket-prompt-expense .bucket-prompt-kind {
+    color: var(--accent);
+}
+
+/* Credit spending is money out, but out of a card rather than the bank, so
+   it gets its own neutral tone rather than sharing the expense orange. The
+   kind word matches the edge, so the row reads as one thing. */
+.bucket-prompt-item.bucket-prompt-credit {
+    border-left: 4px solid var(--text-dark);
+}
+
+.bucket-prompt-credit .bucket-prompt-kind {
+    color: var(--text-dark);
+}
+
+/* Answering everything at once. Sits below the list, separated, because these
+   act on every row at the same time and a mis-click is expensive. */
+.bucket-prompt-bulk {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--secondary-lighter);
+}
+
+
+
+/* A caller with nothing to say leaves the paragraph empty; collapse it so
+   it does not open a gap where a sentence used to be. */
+#generic-confirm-message:empty {
+    display: none;
+}
+
+/* Applied for a single frame so a starting position can be set without the
+   element animating into it. Without this the dialog transitions to its
+   collapsed state and the real animation cancels it a few frames later,
+   which looks like nothing happening at all. */
+.bucket-prompt-instant {
+    transition: none !important;
+}
+
+/* The bubble handing over. It swells first - acknowledging the click - then
+   clears the corner so the dialog can grow into the space. The dialog waits
+   out this whole animation before it starts, so the two are a handover and
+   not a collision. */
+@keyframes bucket-launcher-bounce-out {
+    0%   { transform: scale(1);    opacity: 1; }
+    35%  { transform: scale(1.18); opacity: 1; }
+    100% { transform: scale(0.25); opacity: 0; }
+}
+
+.bucket-launcher-bounce-out {
+    animation: bucket-launcher-bounce-out 300ms cubic-bezier(0.3, 0, 0.4, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bucket-launcher-bounce-out {
+        animation: none;
+    }
+}
+
+/* ---- Auto-balance prompt --------------------------------------------------
+   Reuses the shared confirm modal; only the body needs styling. */
+
+.autobalance-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+}
+
+.autobalance-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.autobalance-label {
+    color: var(--text-dark);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.autobalance-figure {
+    /* The app's own number, shown for comparison rather than for editing, so it
+       reads as a statement and the input below reads as the question. */
+    color: var(--text-dark);
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.autobalance-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.autobalance-symbol {
+    color: var(--text-dark);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.autobalance-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color, #ccc);
+    border-radius: 6px;
+    background: var(--input-bg, #fff);
+    color: var(--text-dark);
+    font-size: 16px;
+}
+
+.autobalance-note {
+    margin: 0;
+    color: var(--text-muted, #777);
+    font-size: 13px;
+}
+
+/* The cadence block under the Balance Notification toggle. Everything inside it
+   - .cadence-row, .weekday, .monthly-day-select-container, .add-day-btn,
+   .remove-day-btn - is the recurring income page's widget and is already
+   styled; this only needs to indent the group and hide it when the toggle is
+   off. */
+/* The cadence group under the Balance Notification toggle. The controls inside
+   it are the recurring income widget, joined to that widget's id-scoped rules
+   above; this only positions the group.
+
+   Inset 24px each side, so it reads as sub-options of the toggle rather than as
+   another top-level row. The At row is deliberately outside this group - it is a
+   normal .input-group, which is what puts its check button in line with every
+   other submit button on the page.
+
+   text-align matters: the section right-aligns its labels, which threw "Repeat
+   Every" and "Repeat on" to the far edge away from the fields they name. */
+.balance-cadence-options {
+    width: 100%;
+    margin: 4px 0 10px;
+    text-align: left;
+}
+
+/* Everything in this group lines up with the settings rows around it: the left
+   edge starts where .hidden-spacer does, after the 30% label column and its 8px
+   gap, and the right edge finishes where the toggle switch does, 16px in.
+
+   Using the same 30% the labels use is what makes this work on a phone without a
+   media query - 30% of a narrow row is narrow, and the min-width on the label
+   keeps it from collapsing entirely. */
+/* The per-type email switches, boxed so they read as part of the Email
+   Notifications toggle above rather than as separate settings. Same treatment as
+   the balance reminder's panel - one grey block, rows transparent on it, and
+   their own horizontal padding dropped because the panel supplies it. */
+.email-types-panel {
+    width: auto;
+    margin: 0 16px 8px;
+    padding: 8px 16px;
+    background-color: var(--secondary-lighter);
+    border-radius: 10px;
+    box-sizing: border-box;
+}
+
+.email-types-panel .input-group {
+    padding-left: 0;
+    padding-right: 0;
+    background-color: transparent;
+    margin-bottom: 0;
+}
+
+.email-types-heading {
+    margin: 0 0 4px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    text-align: left;
+}
+
+/* Everything the Balance Notification toggle controls, in one grey panel so it
+   reads as belonging to that switch rather than as three unrelated rows.
+
+   No horizontal padding on purpose: the rows inside are .input-group elements
+   carrying their own 16px, and that is what lines their labels and their check
+   button up with the settings rows outside the panel. Padding here would shift
+   all of it inward by however much was added. */
+.balance-notification-panel {
+    /* width: auto with side margins, rather than width: 100% - the panel is a
+       block child of the form, so this fills the width less the margins instead
+       of overflowing by them. */
+    width: auto;
+    margin: 0 16px 8px;
+    padding: 8px 16px;
+    background-color: var(--secondary-lighter);
+    border-radius: 10px;
+    box-sizing: border-box;
+}
+
+/* The rows sit on the grey rather than on their own white, so the panel reads as
+   one block instead of a stack of cards.
+
+   Their own horizontal padding goes: the panel supplies 16px of its own, and
+   keeping theirs as well would inset the contents by 32 on top of the panel's
+   16px margin. Everything inside therefore sits 32px from the section edge
+   rather than the 16 the rows outside use - deliberate, since the padding is
+   what makes the panel read as a container. */
+.balance-notification-panel .input-group {
+    padding-left: 0;
+    padding-right: 0;
+    background-color: transparent;
+    margin-bottom: 0;
+}
+
+/* Sits at the foot of the grey panel. Status rather than explanation - the info
+   tips carry the explanations now - and it is the only way to tell a saved
+   cadence from one that is actually scheduled. Empty when the notification is
+   off, and :empty collapses it so there is no stray gap. */
+.balance-next-check {
+    margin: 8px 0 0;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    text-align: right;
+}
+
+.balance-next-check:empty {
+    display: none;
+}
+
+/* The day panels have no label of their own, so they are positioned by hand to
+   match the rows that do: starting where .hidden-spacer starts, after the 30%
+   label column and its 8px gap, and finishing where the toggle switch does.
+
+   Using the same 30% the labels use is what makes this work on a phone without a
+   media query - 30% of a narrow row is narrow, and the min-width on the label
+   keeps it from collapsing entirely.
+
+   The Repeat Every row needs none of this: it is a real .input-group, so its
+   label falls in the same column as Currency and Threshold with the field to its
+   right. */
+#balance-weekly-options,
+#balance-monthly-options {
+    margin-left: calc(30% + 8px);
+    margin-right: 0;
+}
+
+/* The day dropdown has no styling of its own anywhere - only its container does
+   - so it renders as a bare native select. Matching the settings inputs here
+   rather than globally: the same select appears in the recurring modals, and
+   restyling those is a change nobody asked for. */
+#balance-monthly-options .monthly-day-select {
+    height: 40px;
+    padding: 8px 12px;
+    background-color: var(--white);
+    border: 1px solid var(--secondary-hover);
+    border-radius: 10px;
+    color: var(--text-dark);
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+#balance-monthly-options .monthly-day-select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-lighter);
+    outline: none;
+}
+
+#balance-monthly-options .monthly-day-select-container {
+    margin-bottom: 8px;
+}
+
+@media (max-width: 600px) {
+    /* The label column is too narrow to align against on a phone, so the panels
+       take the full width instead - inset 16px each side to match the padding on
+       the settings rows above and below them rather than running edge to edge. */
+    #balance-weekly-options,
+    #balance-monthly-options {
+        margin-left: 0;
+        margin-right: 0;
+    }
+}
+
+/* The interval is a two- or three-digit box, not half the row. */
+.balance-cadence-options .cadence-row .login-input[type="number"] {
+    flex: 0 0 84px;
+}
+
+/* A time field has an intrinsic width - stretching it to the row leaves the
+   clock icon floating away from the digits - so margin-left pushes it and the
+   button to the right instead, where every other control in this form ends up
+   because .login-input has flex: 1. */
+#balance-time-row .login-input[type="time"] {
+    width: auto;
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+/* ---- Info tip --------------------------------------------------------------
+
+   An i icon beside an option label, explaining what the option does on hover.
+
+   Modelled on .bud-toggle-tooltip rather than .nav-tooltip: nav tooltips are
+   nowrap and sized for two or three words, which is wrong for a sentence. Same
+   dark bubble, same arrow, same fade, so this reads as the one tooltip style the
+   app already had rather than a second one.
+
+   focus-within as well as hover, and the icon is focusable: a touch screen has
+   no hover, and tapping a focusable element focuses it. Without that the
+   explanations would be unreachable on a phone. */
+
+.info-tip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    color: var(--secondary-hover);
+    font-size: 12px;
+    vertical-align: middle;
+    cursor: help;
+}
+
+.info-tip:hover,
+.info-tip:focus {
+    color: var(--primary);
+    outline: none;
+}
+
+.info-tip-text {
+    /* Fixed, and positioned by script rather than by CSS.
+
+       It was absolute and centred on the icon, which cannot work: the bubble is
+       230px wide and these labels sit near the left edge of a modal, so half of
+       it fell outside and was clipped. No amount of left/transform fixes that,
+       because the clipping ancestor is the modal - and .section-liner did the
+       same thing on the settings page. Anything absolute is at the mercy of
+       whatever has overflow set between it and the page.
+
+       Against the viewport there is nothing to clip it, and the script can clamp
+       it to stay on screen. See positionInfoTip in script.js. */
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 4000;
+    width: 230px;
+    max-width: calc(100vw - 16px);
+    padding: 8px 12px;
+    background-color: var(--text-dark);
+    border-radius: 6px;
+    opacity: 0;
+    color: white;
+    font-size: 11px;
+    font-weight: normal;
+    line-height: 1.4;
+    text-align: left;
+    transition: opacity 0.15s ease;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: normal;
+}
+
+/* The arrow tracks the icon rather than the bubble's own centre, because a
+   clamped bubble is no longer centred on it. --tip-arrow is set by the script. */
+.info-tip-text::after {
+    position: absolute;
+    left: var(--tip-arrow, 50%);
+    margin-left: -6px;
+    border-width: 6px;
+    border-style: solid;
+    content: "";
+}
+
+.info-tip-text.info-tip-below::after {
+    bottom: 100%;
+    border-color: transparent transparent var(--text-dark);
+}
+
+.info-tip-text.info-tip-above::after {
+    top: 100%;
+    border-color: var(--text-dark) transparent transparent;
+}
+
+.info-tip-text.info-tip-shown {
+    visibility: visible;
+    opacity: 1;
 }

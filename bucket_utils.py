@@ -150,68 +150,131 @@ def get_interval_bounds(entry_date, cadence_unit, cadence_interval, start_date, 
     return (start_date, entry_date)
 
 
-def find_next_bucket_for_category(table, category_id, user_id):
+def find_next_bucket_for_category(table, category_id, user_id, wage_bill=None):
     """
-    Find the next reducible bucket entry in a category.
-    
-    This is the NEW bucket selection logic that replaces cadence-based selection.
-    Finds the bucket entry (is_bucket=1) with the earliest date >= lookback_date,
-    where lookback_date is today minus 45 days. This ensures current-period buckets
-    are still found even when the bucket date is a few days before today (e.g., Rent
-    bucket on the 1st, payment on the 3rd).
-    
+    Find the bucket entry a manual entry should deplete.
+
+    Which way the 45-day window points depends on the kind of entry, and the
+    reason is mechanical rather than stylistic.
+
+    Wage/Bill (wage_bill=1) takes the LATEST bucket dated on or before today,
+    or the earliest upcoming one when the series has not started yet. Rent is
+    bucketed on the 1st and paid on the 3rd, and that payment has to consume the
+    1st's bucket or the month gets recorded twice.
+
+    No day count bounds it, because consecutive bucket dates already are the
+    period boundaries - the series encodes the cadence, so nothing has to guess
+    at it. A fixed 45-day look-back was wrong in both directions: on a weekly
+    bill it reached back six occurrences and cleared the oldest unpaid week
+    instead of this one, and on a yearly bill it was shorter than the cadence, so
+    a payment two months late fell outside the window, depleted nothing, and got
+    recorded twice once the prompt was answered.
+
+    Taking the latest rather than the earliest also means that with several
+    occurrences unpaid, a payment settles the current one and leaves the older
+    ones to the prompt - where Skip is the right answer for something that never
+    happened.
+
+    It resolves itself cleanly because three things line up: a wage_bill
+    depletion subtracts the FULL bucket amount, subtract_from_bucket deletes a
+    bucket that reaches zero, and the evening prompt only lists buckets with
+    amount > 0. So paying a bill late removes it from the prompt, and answering
+    the prompt removes it from depletion's reach - whichever happens first, the
+    other never sees it and nothing is counted twice.
+
+    Allowance/Variable (wage_bill=0) looks FORWARD: the earliest live bucket
+    dated between today and today + 45 days - the very next bucket. Depletion
+    here is partial, so an overdue bucket would survive with a reduced figure
+    and the prompt would go on to ask about a number that spending had already
+    eaten. A period that has ended should not absorb what is spent today either;
+    that belongs to the period containing today. Overdue allowance buckets are
+    the prompt's business alone.
+
+    Cadence is deliberately not consulted; this replaced the cadence-based
+    selection in Feb 2026.
+
     Args:
         table: 'income_entries', 'expense_entries', or 'c_expense_entries'
         category_id: The category ID
         user_id: The user ID
-        
+        wage_bill: 1, 0, or None to look it up. Callers that already know it
+            should pass it; everything else gets the same answer from the
+            recurring record, so a probe cannot pick a different bucket from
+            the depletion that follows it, and restoring a deleted entry cannot
+            put money back into a bucket other than the one it came out of.
+
     Returns:
         Dictionary with bucket entry data, or None if no reducible bucket exists
     """
     from flask import current_app
-    
+
+    if wage_bill is None:
+        wage_bill = _get_wage_bill_for_category(table, category_id, user_id)
+    wage_bill = int(wage_bill or 0)
+
     today = date.today()
-    # Look back 45 days to catch current-period buckets whose date has passed
-    # (e.g., monthly billing on the 1st, payment arrives on the 3rd)
-    lookback_date = today - timedelta(days=45)
-    
-    log_info(logger, 'FIND_NEXT_BUCKET', f"Looking for next bucket: table={table}, category_id={category_id}, user_id={user_id}, today={today}, lookback={lookback_date}")
-    
+    forward_window = timedelta(days=45)
+
+    log_info(logger, 'FIND_NEXT_BUCKET',
+             f"Looking for next bucket: table={table}, category_id={category_id}, "
+             f"user_id={user_id}, wage_bill={wage_bill}, today={today}")
+
     # Get all entries from Redis
     from app import _get_entries_from_redis
     entries = _get_entries_from_redis(table, user_id)
-    
+
     if not entries:
-        log_info(logger, 'FIND_NEXT_BUCKET', f"No entries in Redis for user {user_id}, table {table}")
+        log_info(logger, 'FIND_NEXT_BUCKET',
+                 f"No entries in Redis for user {user_id}, table {table}")
         return None
-    
-    # Filter to get only bucket entries for this category with amount > 0 and date >= lookback
-    candidate_buckets = []
+
+    candidates = []
     for entry in entries:
         if (entry.get('category_id') == int(category_id) and
-            entry.get('is_bucket') == 1 and
-            float(entry.get('amount', 0)) > 0):
-            
+                entry.get('is_bucket') == 1 and
+                float(entry.get('amount', 0)) > 0):
             entry_date = entry.get('date')
             if isinstance(entry_date, str):
-                entry_date = date.fromisoformat(entry_date)
-            
-            # Include buckets within lookback window (covers current billing period)
-            if entry_date >= lookback_date:
-                candidate_buckets.append(entry)
-    
-    if not candidate_buckets:
-        log_info(logger, 'FIND_NEXT_BUCKET', f"No current or future buckets found for category {category_id}")
-        return None
-    
-    # Sort by date ascending and return the earliest one
-    candidate_buckets.sort(key=lambda x: x.get('date', ''))
-    
-    next_bucket = candidate_buckets[0]
-    log_info(logger, 'FIND_NEXT_BUCKET', f"Found next bucket: id={next_bucket.get('id')}, date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
-    
-    return next_bucket
+                try:
+                    entry_date = date.fromisoformat(entry_date[:10])
+                except ValueError:
+                    continue
+            if entry_date is None:
+                continue
+            candidates.append((entry_date, entry))
 
+    if wage_bill:
+        # The occurrence whose period contains today: the most recent one due.
+        due = [p for p in candidates if p[0] <= today]
+        if due:
+            chosen, which = max(due, key=lambda p: p[0]), 'latest due'
+        else:
+            # Nothing has come due yet, so the series has not started and the
+            # first occurrence is what an early payment is paying. No bound is
+            # needed: the earliest upcoming bucket IS that occurrence.
+            upcoming = [p for p in candidates if p[0] > today]
+            chosen = min(upcoming, key=lambda p: p[0]) if upcoming else None
+            which = 'first upcoming (none due yet)'
+    else:
+        # Allowance: the period containing today, which is the next bucket
+        # forward. Bounded, so spending today cannot reach a bucket months out
+        # when this category simply has no near-term one.
+        upcoming = [p for p in candidates
+                    if today <= p[0] <= today + forward_window]
+        chosen = min(upcoming, key=lambda p: p[0]) if upcoming else None
+        which = 'upcoming'
+
+    if chosen is None:
+        log_info(logger, 'FIND_NEXT_BUCKET',
+                 f"No bucket via {which} for category {category_id}")
+        return None
+
+    next_bucket = chosen[1]
+    log_info(logger, 'FIND_NEXT_BUCKET',
+             f"Found next bucket via {which}: id={next_bucket.get('id')}, "
+             f"date={next_bucket.get('date')}, amount={next_bucket.get('amount')}")
+
+    return next_bucket
 
 def find_bucket_for_entry(table, category_id, entry_date, user_id, cadence_info):
     """
@@ -619,7 +682,8 @@ def _create_bucket_depleted_notification(user_id, table, category_id, bucket_dat
         if user:
             try:
                 from email_utils import send_notification_email_for_user
-                if send_notification_email_for_user(user, message, notification_date):
+                if send_notification_email_for_user(user, message, notification_date,
+                                                   kind='allowance_spent'):
                     log_info(logger, 'BUCKET_NOTIFICATION', 'Notification email sent')
             except Exception as e:
                 log_error(logger, 'BUCKET_NOTIFICATION', f"Failed to send email: {e}")
@@ -1088,8 +1152,11 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
         log_info(logger, 'BUCKET_DEBUG', f"Entry date {entry_date} is in the future (> {today}), skipping bucket reduction")
         return
     
-    # Find the NEXT bucket for this category (earliest bucket with date > today)
-    bucket = find_next_bucket_for_category(table, category_id, user_id)
+    # Bills reach back for the occurrence they are paying late; allowances take
+    # the next bucket forward. wage_bill is passed rather than looked up again:
+    # cadence_info is the caller's own answer for this entry.
+    bucket = find_next_bucket_for_category(table, category_id, user_id,
+                                           wage_bill=wage_bill)
     
     log_info(logger, 'BUCKET_DEBUG', f"Found next bucket: {bucket}")
     

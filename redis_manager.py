@@ -2815,6 +2815,14 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             email = %s,
                             mfa_secret = %s,
                             email_notifications = %s,
+                            -- COALESCE, not a plain assignment: a cached user
+                            -- blob written before this column existed has no key
+                            -- for it, and a plain assignment would NULL a saved
+                            -- preference on the next flush. NULL here means "the
+                            -- cache does not know", while an empty string means
+                            -- "nothing is disabled" - see
+                            -- notification_kinds.format_disabled.
+                            email_notify_disabled = COALESCE(%s, email_notify_disabled),
                             first_name = %s,
                             last_name = %s,
                             goofy_week_mode = %s,
@@ -2837,6 +2845,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         user_data.get('email') or user_data.get('username'),
                         user_data.get('mfa_secret'),
                         int(_coerce(user_data.get('email_notifications'), 0)),
+                        user_data.get('email_notify_disabled'),
                         user_data.get('first_name'),
                         user_data.get('last_name'),
                         int(_coerce(user_data.get('goofy_week_mode'), 0)),

@@ -8,6 +8,74 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.6.0 — 2026-08-27
+
+### Added
+- **End-of-day entry confirmation.** Nothing ever resolved a forecast entry
+  whose day had passed, so an unconfirmed forecast stayed in the totals
+  indefinitely. At a time you choose, a prompt now lists the day's forecast
+  entries and lets you confirm each one, correct its amount, push it to
+  tomorrow, or skip it.
+
+  An entry disappears in exactly two cases, both of them an answer you gave:
+  skip, or a push that lands on a date the category already has an entry for.
+  There is no sweeper and no automatic expiry - an unanswered entry keeps being
+  asked about until you answer it.
+- **Balance Reminder.** On a cadence you set in Settings, a reminder asks whether
+  you want to reconcile against your real bank balance. If you say yes, any
+  outstanding confirmations are answered and the difference between the app and
+  your bank is recorded as a single Uncategorized entry. Cash only - credit
+  accounts are never touched. Nothing is changed unless you say yes, and
+  declining costs nothing: the next occurrence asks again.
+- **Per-type email notifications.** Email was a single switch, so wanting the
+  evening reminder meant accepting a mail for everything else. Each kind of
+  notification now has its own switch, all on by default, under the general
+  switch that still gates them all.
+- Explanatory tips on every option in Settings and in the recurring income,
+  expense and credit-expense forms - 155 of them, replacing the static
+  descriptions that used to sit under a handful of settings.
+- `tzdata`, so timezone-aware scheduling works on a slim image that ships
+  without the system database.
+
+### Changed
+- **An entry dated today is a real entry when no checking account is synced.**
+  Previously anything dated today or later became a forecast, so recording
+  today's spending created a second forecast beside the first rather than
+  consuming it. With no bank feed there is nothing that will ever confirm it, so
+  what you type for today is the record.
+- **A manual entry now depletes the occurrence whose period contains it.** For a
+  Wage or Bill that is the most recent one due, so paying rent on the 3rd
+  consumes the 1st's forecast rather than next month's. For an Allowance it is
+  the next one forward, because a period that has ended should not absorb what
+  you spend today. This replaces a fixed 45-day look-back that was too long for
+  a weekly cadence and shorter than the cadence itself for a yearly one.
+- Answering a confirmation updates the page in place - entries, totals and
+  remainders - instead of reloading it.
+- Bank Accounts is hidden from the profile menu unless an account or connection
+  exists. The default provider connects nothing, so on a stock install the menu
+  offered a page that could not work.
+
+### Fixed
+- The days-late badge counted from today rather than from the date the entry was
+  originally due, so an entry pushed this evening showed nothing until tomorrow.
+  It now reads 1 the moment it is pushed. Seven places computed this; all seven
+  agree now.
+- Manage Recurring showed the previous and next occurrence side by side only for
+  Wages and Bills. Allowances saw just the upcoming one, with no way to tell
+  whether the period just gone had been spent.
+- `Email Notifications` could not be turned on. The switch read a variable that
+  was never declared, so every click threw before saving and a refresh showed
+  the unchanged value - which looked like the switch turning itself off.
+- `/get_dashboard_d_data` omitted `original_date`, so the days-late badge
+  survived a full page load but vanished on any in-place refresh.
+- A credit-account answer did not recalculate the card's daily balance, leaving
+  the card showing a balance for spending that no longer existed.
+- The evening prompt notification could accumulate: a read one saying "3
+  entries" sat under an unread one saying "11". There is now exactly one, and it
+  removes itself once nothing is left to confirm.
+- A user setting written to Redis but absent from the flush worker's column list
+  never reached MySQL, so it was lost on the next cache cycle.
+
 ## 1.5.0 — 2026-08-26
 
 ### Added

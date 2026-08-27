@@ -46,6 +46,8 @@ EXPECTED_TABLES = (
     'totals_remainders_d', 'totals_remainders_m', 'savings_entries',
     'notifications', 'setup_state', 'password_resets', 'instance_settings',
     'recurring_mismatches', 'recurring_suggestions', 'linked_accounts',
+    'bucket_prompts',
+    'autobalance_settings',
 )
 EXPECTED_COLUMNS = (
     ('users', 'is_admin'),
@@ -56,6 +58,9 @@ EXPECTED_COLUMNS = (
     ('instance_settings', 'smtp_password_encrypted'),
     ('instance_settings', 'verified_at'),
     ('instance_settings', 'verification_secret'),
+    ('users', 'timezone'),
+    ('users', 'email_notify_disabled'),
+    ('notifications', 'type'),
 )
 EXPECTED_CONSTRAINTS = (
     ('totals_remainders_m', 'totals_remainders_m_ibfk_1'),

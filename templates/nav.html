@@ -68,6 +68,15 @@
                     <!--<div class="dropdown-link"><a href="{{ url_for('buds') }}">Manage Buds&trade;</a><i class="fa-regular fa-seedling"></i></div>-->
                     <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-regular fa-sliders"></i></div>
                 </div>
+                {# Bank Accounts is hidden until there is a provider behind it.
+                   BANK_PROVIDER defaults to 'null', so on a stock install this
+                   section offered a page that could not connect anything.
+
+                   Still shown to anyone who already has a connection or an account,
+                   so an installation that does have a provider configured does not
+                   lose its way in. Hidden rather than removed: the page, its routes
+                   and the pending-transactions flow all still work. #}
+                {% if has_bank_connections or has_bank_accounts %}
                 <div class="dropdown-divider"></div>
                 <div class="dropdown-menu-section">
                     <div class="dropdown-profile-label"><span>Bank Accounts</span></div>
@@ -76,6 +85,7 @@
                     <div class="dropdown-link"><a href="{{ url_for('pending_transactions') }}">Pending Transactions{% if pending_transactions_count > 0 %}<span class="pending-txn-badge">{{ pending_transactions_count }}</span>{% endif %}</a><i class="fa-kit fa-light-money-bill-circle-question"></i></div>
                     {% endif %}
                 </div>
+                {% endif %}
                 {% if current_user.is_authenticated and current_user.is_admin %}
                 <div class="dropdown-divider"></div>
                 <div class="dropdown-menu-section">
@@ -136,4 +146,28 @@
             });
         }
     });
+</script>
+
+<script>
+    // Report this browser's timezone once, so the evening bucket prompt can
+    // fire at 20:00 where the user is rather than where the server is. The
+    // server stores it and never guesses one: a prompt at the wrong hour is
+    // worse than no prompt, because nothing about it looks wrong.
+    //
+    // Remembered in localStorage so this costs one request per browser, not
+    // one per page load - and re-fires by itself if the user travels or the
+    // machine's zone changes.
+    (function () {
+        try {
+            var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            if (!tz || localStorage.getItem("blankee_tz") === tz) { return; }
+            fetch("/api/user/timezone", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ timezone: tz })
+            }).then(function (r) {
+                if (r.ok) { localStorage.setItem("blankee_tz", tz); }
+            }).catch(function () { /* offline; it will retry next load */ });
+        } catch (e) { /* no Intl, or storage blocked: no prompt, no error */ }
+    })();
 </script>
