@@ -8,6 +8,25 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.7.1 — 2026-08-27
+
+### Fixed
+- **Tomorrow's entries appeared in the confirmation prompt.** "Today" was taken
+  from the server's clock rather than the user's. The Docker image runs UTC, so
+  for anyone west of it the server is already on tomorrow's date through their
+  evening - from 5pm Pacific, say - and the next day's forecast entries were
+  listed as due.
+
+  The same mistake affected the balance reminder, which read the stored balance
+  for the server's date: west of UTC that fetched tomorrow's row, so the figure
+  offered for reconciliation included a day the user had not had yet. And the
+  boundary deciding whether a new entry is a forecast or a record used the
+  server's date too, so an entry dated tomorrow could be written as a record.
+
+  All of them now use the date where the user is, which the browser already
+  reports on every visit. An account that has never loaded a page since that was
+  introduced has no timezone recorded and still falls back to the server's date.
+
 ## 1.7.0 — 2026-08-27
 
 ### Added
