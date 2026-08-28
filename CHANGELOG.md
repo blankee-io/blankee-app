@@ -8,6 +8,32 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.7.2 — 2026-08-27
+
+### Changed
+- **Balance corrections go where automatic adjustments already went.** 1.7.0
+  gave them a new Autobalance category. It should not have: the app has
+  reconciled against bank balances since long before the balance reminder
+  existed, and that path never used a category of its own - a current-account
+  adjustment goes to Uncategorized, a card adjustment to that card's
+  Uncategorized, and savings to a savings_adjustments row with no category at
+  all. One idea now has one convention again.
+
+  The category is removed by migration, which moves any entries already in it to
+  Uncategorized first. They are not discarded: each one is the difference between
+  the app and a real balance, and deleting it would put the two back out of step
+  by exactly that amount.
+
+### Fixed
+- The Autobalance category carried the `is_auto_adjustment` flag, and the credit
+  branch of the bank reconciliation picks its target by scanning for that flag
+  and keeping the last match. Which category a bank adjustment landed in would
+  therefore have depended on the order rows came back.
+- The paid, late, negative and below-threshold markers sat 3px too far right on
+  the week grid and the month calendar, where the cells are narrower than on the
+  day view, so a marker could overhang its cell and meet the one in the next
+  column.
+
 ## 1.7.1 — 2026-08-27
 
 ### Fixed
