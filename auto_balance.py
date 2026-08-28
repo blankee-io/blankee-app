@@ -32,11 +32,11 @@ app_balance has nothing to return otherwise.
 Cash, savings and each credit card are reconciled separately, and each
 correction is contained to the thing it corrects:
 
-  cash     an Autobalance income or expense entry dated today
+  cash     an Uncategorized income or expense entry dated today
   savings  a savings_adjustments row - the same mechanism as "Initial savings
            balance" - because a Savings category entry would move money out of
            the cash balance as well, and cash is being reconciled on its own
-  cards    a signed entry in that card's Autobalance category, not a payment.
+  cards    a signed entry in that card's Uncategorized category, not a payment.
            A payment is created from an expense against the cash balance, so it
            would move two figures when the user has already stated both.
 
@@ -78,16 +78,19 @@ _SCAN_LIMIT = 800
 # same day in April and different in May.
 LAST_DAY = 'Last Day'
 
-# The category every correction lands in - its own, not Uncategorized.
+# Where a correction lands: the same place the app has always put automatic
+# balance adjustments.
 #
-# Uncategorized means "this needs sorting out". A correction does not: it is the
-# app's entry rather than the user's, and it is already as sorted as it will get.
-# Mixed into Uncategorized it hides the real backlog and invites someone to
-# recategorise a figure whose only job is to make two balances agree.
+# _webhook_autobalance has reconciled against bank balances since long before
+# this feature existed, and it never used a category of its own - a checking
+# adjustment goes to Uncategorized, a credit adjustment to that card's
+# Uncategorized, and savings to a savings_adjustments row with no category at
+# all. Doing anything else here would give the app two conventions for one idea.
 #
-# Having them together also makes them addable up, which is what turns a run of
-# corrections in the same direction into a visible signal.
-CORRECTION_CATEGORY = 'Autobalance'
+# Matched by name rather than by the is_auto_adjustment flag the bank path
+# scans for. That flag is on more than one income category - Savings carries it
+# too - so selecting by it is only deterministic by luck of row order.
+CORRECTION_CATEGORY = 'Uncategorized'
 
 # Differences below this are treated as agreement. Rounding on the user's side
 # and ours will not always agree to the cent, and writing a 1p correction every
@@ -652,10 +655,9 @@ def _uncategorized_id(table, user_id):
     The user's Uncategorized category for an entry table.
 
     Matched by name because that is what it is: a system category every user
-    gets, seeded at signup and backfilled by add_autobalance_category.sql.
-    Returns None rather than guessing at another category - a correction landing
-    somewhere the user did not expect is worse than one that does not happen and
-    says so.
+    gets at signup. Returns None rather than guessing at another category - a
+    correction landing somewhere the user did not expect is worse than one that
+    does not happen and says so.
     """
     cat_table = ('income_categories' if table == 'income_entries'
                  else 'expense_categories')

@@ -924,16 +924,6 @@ def _insert_starter_categories(cursor, user_id):
         INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
         VALUES (%s, %s, %s, %s, %s, %s)
     """, (user_id, 'Interest Charge', 0.0003, 0, 1, 1))
-    # Where balance corrections go. Its own category rather than Uncategorized,
-    # which means "needs sorting out" - see auto_balance.CORRECTION_CATEGORY.
-    cursor.execute("""
-        INSERT INTO income_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (user_id, 'Autobalance', 0.0004, 0, 1, 1))
-    cursor.execute("""
-        INSERT INTO expense_categories (user_id, name, display_order, is_recurring, is_auto_adjustment, is_system)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (user_id, 'Autobalance', 0.0004, 0, 1, 1))
 
 
 def reset_user_data(user_id):
