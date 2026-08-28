@@ -35,6 +35,7 @@ MIGRATIONS = [
     'add_auto_balance.sql',
     'add_email_notification_types.sql',
     'add_autobalance_category.sql',
+    'remove_autobalance_categories.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and
