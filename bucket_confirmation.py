@@ -122,8 +122,12 @@ def pending_buckets(user_id, on_date=None):
 
     Buckets dated in the future are deliberately absent: they are forecasts that
     have not come due, and asking about them is asking the user to predict.
+
+    "Future" is measured on the user's calendar, not the server's. A server in
+    UTC is already on tomorrow's date for most of the Americas' evening, and this
+    listed tomorrow's entries as due for anyone west of it.
     """
-    on_date = on_date or date.today()
+    on_date = on_date or _user_today(user_id)
     items = []
 
     for table in ENTRY_TABLES:
@@ -236,8 +240,11 @@ def count_pending_from_db(user_id, on_date=None):
 
     The interactive route still reads Redis, because by then the user is in the
     app and hydrated.
+
+    Defaults to the user's own date for the same reason pending_buckets does,
+    though the scheduler always passes one explicitly.
     """
-    on_date = on_date or date.today()
+    on_date = on_date or _user_today(user_id)
     total = 0
 
     # One row per bucket. This counted distinct categories while a sweeper

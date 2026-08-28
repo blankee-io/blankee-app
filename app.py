@@ -9363,6 +9363,20 @@ def _bucket_days_pushed(entry, orig_date):
     return max(0, (entry_date - orig_date).days)
 
 
+def _user_today_for(user_id):
+    """
+    Today's date where the user is.
+
+    Thin wrapper over bucket_confirmation._user_today so there is one
+    implementation of "what day is it for this person" rather than a second copy
+    here. The distinction matters on any server not in the user's timezone - the
+    Docker image runs UTC - where the server's date runs ahead of theirs for a
+    good part of their day.
+    """
+    import bucket_confirmation
+    return bucket_confirmation._user_today(user_id)
+
+
 def _bucket_cutoff_date(user_id):
     """
     The first date on which a new entry is still a forecast rather than a record.
@@ -9379,8 +9393,12 @@ def _bucket_cutoff_date(user_id):
 
     Future dates stay forecasts either way: nobody can record what has not
     happened yet.
+
+    "Today" is the user's, not the server's. A UTC server is on tomorrow's date
+    through the Americas' evening, which would make an entry the user dates today
+    look like one they had dated in the past.
     """
-    today = date.today()
+    today = _user_today_for(user_id)
     try:
         from bank_redis import get_user_linked_account_flags
         if get_user_linked_account_flags(user_id).get('has_checking'):

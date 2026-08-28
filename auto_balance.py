@@ -492,8 +492,12 @@ def app_balance(user_id, on_date=None):
 
     Returns Decimal or None when there is no row for the date, which is not an
     error: a user with no entries at all has no rows.
+
+    The user's date, not the server's: on a UTC server this would otherwise read
+    tomorrow's row for anyone whose evening falls after midnight UTC, and report
+    a balance that includes a day they have not had yet.
     """
-    on_date = on_date or date.today()
+    on_date = on_date or _user_now(user_id).date()
     try:
         with get_db_pool().get_cursor() as cursor:
             cursor.execute(
@@ -569,7 +573,7 @@ def savings_balance(user_id, on_date=None):
 
     Returns Decimal, or None when there is no row for the date.
     """
-    on_date = on_date or date.today()
+    on_date = on_date or _user_now(user_id).date()
     try:
         with get_db_pool().get_cursor() as cursor:
             cursor.execute(
@@ -598,7 +602,7 @@ def card_balances(user_id, on_date=None):
     the user can still say what the card actually holds, and a card quietly
     missing from the list looks like the feature not working.
     """
-    on_date = on_date or date.today()
+    on_date = on_date or _user_now(user_id).date()
     cards = []
     try:
         with get_db_pool().get_cursor() as cursor:
@@ -821,7 +825,9 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     """
     from app import _update_entry_in_redis, save_totals_remainders_d
 
-    on_date = on_date or date.today()
+    # The user's date throughout, so the correction is dated the day they are
+    # actually having and measured against that day's stored figures.
+    on_date = on_date or _user_now(user_id).date()
 
     try:
         actual = Decimal(str(actual_balance))
