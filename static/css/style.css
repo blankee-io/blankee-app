@@ -17316,3 +17316,24 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     visibility: visible;
     opacity: 1;
 }
+
+/* ---- Entry markers, week grid and month calendar ---------------------------
+
+   Three pixels further in than the shared rules put them. The cells on these
+   two pages are narrower than on the day view, so a marker at right: -8px
+   overhung the cell edge and collided with the one in the next column.
+
+   Scoped by body id because the same four markers are used on all five
+   dashboards and the other three sit correctly. #dashboard is the week grid,
+   #dashboard-m-body the month calendar. */
+
+#dashboard .paid::after,
+#dashboard-m-body .paid::after,
+#dashboard .negative::before,
+#dashboard-m-body .negative::before,
+#dashboard .below-threshold::before,
+#dashboard-m-body .below-threshold::before,
+#dashboard .bucket-late-badge,
+#dashboard-m-body .bucket-late-badge {
+    right: -5px;
+}
