@@ -1,0 +1,13 @@
+# Public keys trusted to sign Blankee releases, in ssh allowed-signers format.
+#
+# install.sh copies this to /etc/blankee/allowed_signers on a new installation
+# and never overwrites it afterwards, and the updater never rewrites it either.
+# That is deliberate. If this file were refreshed from the repository on every
+# update, an attacker who could push a release could swap the key along with the
+# code and the signature would prove nothing. Pinned once, it means a machine
+# already installed cannot be taken over by pushing to the repository alone -
+# the signing key is needed as well.
+#
+# Rotating a key therefore takes a human on each machine. That is the cost of
+# the guarantee, and it is the right way round.
+76146148+abosada@users.noreply.github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG0xfr8jhmSvBu9kRoDK2zu67kHbbfh2Mr1TaBc4jTIZ

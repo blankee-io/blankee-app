@@ -8,6 +8,44 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.10.0 — 2026-08-30
+
+### Added
+- **Releases are signed, and new installations check the signature.** The
+  updater runs as root and runs the installer out of whatever it just fetched,
+  so anyone able to publish a release could run code as root on every machine
+  that updates. Until now the only thing standing in the way was access to the
+  account that publishes.
+
+  Every release from this one is signed. A new installation pins the public key
+  at install time and refuses an update that is not signed by it, stopping
+  before anything is written, so a machine that rejects an update carries on
+  serving what it already had.
+
+  The key is pinned once and never refreshed automatically - not by a later
+  install, not by an update. That is the point: a key that arrived with the code
+  could be replaced by whoever replaced the code, and the signature would prove
+  nothing. Rotating it takes a person at the machine.
+
+  Existing installations are unaffected and keep updating as before. To turn the
+  check on, copy `install/allowed_signers` to `/etc/blankee/allowed_signers` and
+  set `UPDATE_VERIFY_SIGNERS` to that path in `blankee.conf`. To turn it off
+  again, clear that one line.
+
+### Fixed
+- **Updates can now apply the web server settings the application needs.** A
+  release that required an Apache directive could not reach an installation that
+  updates from the admin console - the updater never touches the web server
+  configuration - so 1.9.0's cache fix only arrived for anyone who re-ran the
+  installer by hand. Browsers on every other machine carried on using stale
+  files, which is the problem that change was meant to solve.
+
+  The directives the application needs now live in their own file, apart from
+  the configuration belonging to whoever runs the server: hostname, TLS,
+  anything added locally. Updates refresh the first and never touch the second.
+  If the web server rejects the result, the new file is removed before anything
+  is reloaded.
+
 ## 1.9.0 — 2026-08-30
 
 ### Added
