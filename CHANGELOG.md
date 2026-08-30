@@ -8,6 +8,46 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.9.0 — 2026-08-30
+
+### Added
+- **A day box for the iOS home screen.** The app can now show today at a
+  glance - income, spending, what is left - without being opened. Two endpoints
+  serve it: one issues a token from inside a signed-in session, the other
+  returns the day.
+
+  A widget runs as its own process and cannot see the app's session, so it
+  carries a token instead. The token is generated with 256 bits of randomness,
+  shown once, and stored only as a SHA-256 hash: a readable copy in the
+  database would be a password sitting in plain text, and nothing needs to read
+  it back. It is accepted only on the widget's own endpoints, so a token taken
+  off a device grants a view of the day and nothing else - and never the ability
+  to issue more tokens, which is why the endpoint that mints them is
+  deliberately not one of them. Revoking is immediate and covers every device.
+
+  The date comes from the phone, not the server. A phone in a timezone behind
+  the server would otherwise be handed tomorrow.
+
+  Adds a `widget_tokens` table; `install/migrate.py` applies it.
+
+### Fixed
+- **Browsers kept using old CSS and JavaScript after an update.** Apache sends
+  no cache instructions for files under `/static` on its own, and with none to
+  follow a browser invents its own - commonly a tenth of the file's age, which
+  for a long-lived file is days. The pages do not carry a version in those URLs
+  either, so an updated installation could serve new markup against an old
+  stylesheet: elements in the wrong place, or appearing where they should have
+  been hidden, with nothing wrong on the server to find.
+
+  Static files now say to revalidate. An unchanged file still answers "not
+  modified", so this costs one small question per file rather than downloading
+  anything again. **Existing installations need `install/install.sh` re-run to
+  pick this up** - updating does not rewrite the web server's configuration.
+
+- The vhost now sets `WSGIPassAuthorization On`. Apache does not pass the
+  `Authorization` header to the application without it, which silently breaks
+  any client that authenticates that way.
+
 ## 1.8.1 — 2026-08-30
 
 ### Fixed

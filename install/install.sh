@@ -622,6 +622,10 @@ fi
 # ---------------------------------------------------------------- apache
 say "Configuring Apache"
 a2enmod wsgi >/dev/null 2>&1 || true
+# headers: the static Alias below sets Cache-Control through it. Not enabled by
+# default on Debian, and the <IfModule> guard means a missing module would fail
+# silently - assets would go back to being cached by guesswork.
+a2enmod headers >/dev/null 2>&1 || true
 
 # Apache must answer on the chosen port and nothing else. Debian ships
 # ports.conf with "Listen 80", plus "Listen 443" inside an ssl_module guard, so
@@ -651,6 +655,11 @@ cat > "$VHOST" <<EOF
     # dies with "PyO3 modules do not yet support subinterpreters" and Flask-Bcrypt
     # reports itself missing. cryptography is in the same family.
     WSGIApplicationGroup %{GLOBAL}
+    # Off by default in mod_wsgi, which strips the Authorization header before
+    # the application sees it. The iOS widget sends its token in its own header
+    # precisely so it does not depend on this, but anything that authenticates
+    # the ordinary way needs it.
+    WSGIPassAuthorization On
     WSGIScriptAlias / $WSGI_FILE
 
     <Directory $APP_DIR>
@@ -660,6 +669,24 @@ cat > "$VHOST" <<EOF
     Alias /static $APP_DIR/static
     <Directory $APP_DIR/static>
         Require all granted
+
+        # Revalidate instead of guessing. The templates link style.css and
+        # script.js with no version in the URL, so a browser holding an old
+        # copy after an update renders the new markup against the old CSS -
+        # which shows up as elements appearing where they should not, or
+        # styling that half-applies, with nothing obviously wrong server-side.
+        #
+        # Apache sends no Cache-Control for static files on its own, and with
+        # neither Cache-Control nor Expires a browser falls back to heuristic
+        # freshness - typically a tenth of the file's age - so a long-lived
+        # asset can go days without being asked for again.
+        #
+        # no-cache means "ask before using", not "do not store": an unchanged
+        # file still answers 304 against its ETag, so the cost is one
+        # conditional request per asset rather than a re-download.
+        <IfModule mod_headers.c>
+            Header set Cache-Control "no-cache"
+        </IfModule>
     </Directory>
 
     # Not APACHE_LOG_DIR. Blankee's logs live in a directory Blankee owns, so

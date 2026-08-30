@@ -171,6 +171,76 @@ def allowed_file(filename):
 def load_user(user_id):
     return User.get(user_id)
 
+
+# The iOS home screen widget runs in its own process and so cannot see the web
+# view's session cookie. It sends a long-lived token instead, issued from
+# inside an authenticated session by /api/widget-token and stored only as a
+# SHA-256 hash - see install/sql/add_widget_tokens.sql.
+#
+# That route is deliberately NOT under the prefix below. Named /api/widget/token
+# it would authenticate with a widget token, and a leaked token could mint its
+# own replacements - which would make revoking one impossible. Minting needs a
+# real session.
+#
+# Scoped to /api/widget/ on purpose. The token sits in a shared app group on a
+# device, well outside the protection a session cookie gets, so it buys read
+# access to the widget's own endpoints and nothing else. Flask-Login consults a
+# request_loader only after the session and remember cookie have both failed,
+# so a signed-in browser is unaffected by any of this.
+WIDGET_TOKEN_PATH_PREFIX = '/api/widget/'
+
+# The token arrives in its own header rather than as "Authorization: Bearer".
+#
+# mod_wsgi strips the Authorization header before the application sees it unless
+# the vhost sets WSGIPassAuthorization On, and Apache with mod_wsgi is how
+# install.sh deploys this. Depending on the header would mean every self-hosted
+# installation had to change its vhost before a widget could talk to it, and the
+# symptom - a widget that says you are signed out while the browser beside it is
+# signed in - gives nobody a reason to suspect Apache.
+#
+# Authorization is still accepted, for deployments behind something that passes
+# it through, and because it is what anyone would try first.
+WIDGET_TOKEN_HEADER = 'X-Blankee-Widget-Token'
+
+
+def _hash_widget_token(token):
+    """Tokens are compared by hash, never stored in the clear."""
+    import hashlib
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
+@login_manager.request_loader
+def load_user_from_widget_token(req):
+    if not req.path.startswith(WIDGET_TOKEN_PATH_PREFIX):
+        return None
+
+    token = (req.headers.get(WIDGET_TOKEN_HEADER) or '').strip()
+    if not token:
+        header = req.headers.get('Authorization') or ''
+        if not header.startswith('Bearer '):
+            return None
+        token = header[len('Bearer '):].strip()
+    if not token:
+        return None
+
+    token_hash = _hash_widget_token(token)
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            cursor.execute("SELECT user_id FROM widget_tokens WHERE token_hash = %s", (token_hash,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            # Only there to tell a live device from one that has not checked in
+            # for months, so it rides along with the lookup rather than costing
+            # a second round trip.
+            cursor.execute("UPDATE widget_tokens SET last_used_at = NOW() WHERE token_hash = %s",
+                           (token_hash,))
+        return User.get(row[0])
+    except Exception as e:
+        log_error(app.logger, 'AUTH', f"Widget token lookup failed: {e}")
+        return None
+
+
 @login_manager.unauthorized_handler
 def unauthorized():
     # Stash the originally-requested URL so we can return there after login.
@@ -14166,6 +14236,69 @@ def dashboard_summary():
 ############################### WIDGET API ENDPOINTS #######################################
 ############################################################################################
 
+# Deliberately /api/widget-token and not /api/widget/token: the request_loader
+# above accepts a widget token for everything under /api/widget/, and minting
+# tokens must not be one of those things. A leaked token that could issue more
+# of itself would never be revocable. This path falls outside the prefix, so it
+# is reachable only with a real session - the app calls it from inside the web
+# view's login, and nowhere else.
+@app.route('/api/widget-token', methods=['POST'])
+@login_required
+def issue_widget_token():
+    """Issue a token for this device's home screen widget.
+
+    The plaintext is returned once, here, and never again - only its hash is
+    kept. Re-issuing for the same label replaces the old row rather than adding
+    to it, so reinstalling the app does not leave a trail of live tokens behind.
+    """
+    import secrets as _tok
+
+    payload = request.get_json(silent=True) or {}
+    label = (payload.get('label') or 'iOS widget').strip()[:100]
+
+    token = _tok.token_urlsafe(32)
+    token_hash = _hash_widget_token(token)
+
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            cursor.execute("DELETE FROM widget_tokens WHERE user_id = %s AND label = %s",
+                           (current_user.id, label))
+            cursor.execute(
+                "INSERT INTO widget_tokens (user_id, token_hash, label) VALUES (%s, %s, %s)",
+                (current_user.id, token_hash, label)
+            )
+    except Exception as e:
+        log_error(app.logger, 'AUTH', f"Could not issue widget token for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': 'server_error'}), 500
+
+    log_info(app.logger, 'AUTH', f"Issued widget token '{label}' for user {current_user.id}")
+    return jsonify({'success': True, 'token': token, 'label': label})
+
+
+@app.route('/api/widget-token', methods=['DELETE'])
+@login_required
+def revoke_widget_tokens():
+    """Drop this user's widget tokens. The app calls it on sign-out and when
+    the server address changes, so a widget cannot keep reading a account the
+    person has walked away from."""
+    payload = request.get_json(silent=True) or {}
+    label = (payload.get('label') or '').strip()[:100]
+
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            if label:
+                cursor.execute("DELETE FROM widget_tokens WHERE user_id = %s AND label = %s",
+                               (current_user.id, label))
+            else:
+                cursor.execute("DELETE FROM widget_tokens WHERE user_id = %s", (current_user.id,))
+            removed = cursor.rowcount
+    except Exception as e:
+        log_error(app.logger, 'AUTH', f"Could not revoke widget tokens for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': 'server_error'}), 500
+
+    return jsonify({'success': True, 'revoked': removed})
+
+
 @app.route('/api/widget/buffer-summary', methods=['GET'])
 @login_required
 def widget_buffer_summary():
@@ -14435,6 +14568,342 @@ def widget_pending_transactions():
         'currency_symbol': currency_symbol,
         'currency_type': currency_type,
         'categorization_url': 'https://app.blankee.io/pending-transactions'
+    })
+
+
+@app.route('/api/widget/day-box', methods=['GET'])
+@login_required
+def widget_day_box():
+    """JSON API for the iOS medium widget: one day's box, as dashboard_d.html draws it.
+
+    Every number the day container shows is computed here rather than on the
+    device, so the widget and the page cannot drift apart. The row order is the
+    page's order: last remainder, income lines, total income, expense lines,
+    total expenses, remainder, then the credit accounts and savings that sit
+    below the teal dividers.
+
+    The day is the *device's* date, passed as ?date=YYYY-MM-DD, because that is
+    what the page uses (toLocaleDateString('en-CA')). The server's UTC date is
+    only a fallback - a phone behind the server would otherwise be handed
+    tomorrow's box.
+    """
+    from datetime import date as date_cls
+    from email.utils import parsedate_to_datetime
+
+    user_id = current_user.id
+
+    requested = (request.args.get('date') or '').strip()
+    try:
+        day = datetime.strptime(requested, '%Y-%m-%d').date()
+    except ValueError:
+        day = datetime.utcnow().date()
+    day_str = day.isoformat()
+
+    def _day_of(value):
+        """The YYYY-MM-DD of a stored date, which Redis may hold as either a
+        plain string or an RFC 1123 'GMT' string."""
+        if value is None:
+            return ''
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date_cls):
+            return value.isoformat()
+        text = str(value)
+        if 'GMT' in text:
+            try:
+                return parsedate_to_datetime(text).date().isoformat()
+            except Exception:
+                return ''
+        return text[:10]
+
+    # --- User settings (currency, threshold, member_since) ---
+    user_data = None
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(f"users:v1:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+        except Exception:
+            pass
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT currency_type, balance_threshold, member_since FROM users WHERE id = %s",
+                (user_id,)
+            )
+            user_data = cursor.fetchone() or {}
+            cursor.close()
+
+    currency_type = (user_data.get('currency_type') or 'USD') if user_data else 'USD'
+    currency_symbols = {
+        'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CAD': 'C$',
+        'AUD': 'A$', 'CHF': 'Fr', 'CNY': '¥', 'INR': '₹', 'MXN': 'Mex$'
+    }
+    currency_symbol = currency_symbols.get(currency_type, '$')
+
+    try:
+        balance_threshold = float(user_data.get('balance_threshold') or 0)
+    except (TypeError, ValueError):
+        balance_threshold = 0.0
+    member_since = _day_of(user_data.get('member_since')) if user_data else ''
+
+    # --- Categories, for the names and the icon each row gets ---
+    income_categories = _get_categories_from_redis('income_categories', user_id)
+    expense_categories = _get_categories_from_redis('expense_categories', user_id)
+    c_expense_categories = _get_categories_from_redis('c_expense_categories', user_id)
+
+    # None means a Redis miss, which is not the same as a user with no
+    # categories - only the miss is worth a query.
+    if income_categories is None or expense_categories is None or c_expense_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            if income_categories is None:
+                cursor.execute(
+                    "SELECT id, name, is_auto_adjustment, hidden, is_recurring, is_savings "
+                    "FROM income_categories WHERE user_id = %s", (user_id,)
+                )
+                income_categories = list(cursor.fetchall())
+            if expense_categories is None:
+                cursor.execute(
+                    "SELECT id, name, is_auto_adjustment, hidden, is_bud, is_recurring, "
+                    "is_credit_account, is_savings FROM expense_categories WHERE user_id = %s", (user_id,)
+                )
+                expense_categories = list(cursor.fetchall())
+            if c_expense_categories is None:
+                cursor.execute("""
+                    SELECT cec.* FROM c_expense_categories cec
+                    JOIN credit_accounts ca ON cec.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                c_expense_categories = list(cursor.fetchall())
+            cursor.close()
+
+    def _by_id(categories):
+        return {str(c.get('id')): c for c in categories}
+
+    income_cats = _by_id(income_categories)
+    expense_cats = _by_id(expense_categories)
+    ca_cats = _by_id(c_expense_categories)
+
+    def _icon_for(cat, category_name=''):
+        """The same choice dashboard_d.html makes, as a name the widget maps to
+        a glyph. Kept in the page's order, because the branches overlap - a
+        recurring savings category is both, and 'savings' wins there too."""
+        if category_name == 'Starting Balance' or (cat and cat.get('name') == 'Starting Balance'):
+            return 'starting-balance'
+        if not cat:
+            return 'folder'
+        if cat.get('is_bud'):
+            return 'bud'
+        if cat.get('is_credit_account') and cat.get('is_recurring'):
+            return 'credit-recurring'
+        if int(cat.get('is_savings') or 0) == 1 and cat.get('is_recurring'):
+            return 'savings-recurring'
+        if int(cat.get('is_savings') or 0) == 1:
+            return 'savings'
+        if cat.get('is_recurring'):
+            return 'recurring'
+        if cat.get('is_auto_adjustment') or cat.get('is_interest'):
+            return 'locked'
+        if cat.get('is_credit_account'):
+            return 'credit'
+        return 'folder'
+
+    def _row(entry, cat, name):
+        pending = int(entry.get('pending') or 0) == 1 or int(entry.get('auto_confirmed') or 0) == 1
+        return {
+            'category_name': name,
+            'amount': round(float(entry.get('amount') or 0), 2),
+            'icon': _icon_for(cat, name),
+            'is_pending': pending,
+            'is_paid': (not pending) and int(entry.get('processed') or 0) == 1,
+            'is_bucket': int(entry.get('is_bucket') or 0) == 1,
+        }
+
+    # --- Income and expense lines for the day ---
+    income_entries = _get_entries_from_redis('income_entries', user_id)
+    expense_entries = _get_entries_from_redis('expense_entries', user_id)
+
+    if income_entries is None or expense_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            if income_entries is None:
+                cursor.execute("""
+                    SELECT ie.id, ie.date, ie.amount, ie.processed, ie.is_bucket, ie.pending,
+                           ie.auto_confirmed, ic.id AS category_id, ic.name AS category_name
+                    FROM income_entries ie
+                    JOIN income_categories ic ON ie.category_id = ic.id
+                    WHERE ic.user_id = %s AND ie.date = %s
+                """, (user_id, day_str))
+                income_entries = list(cursor.fetchall())
+            if expense_entries is None:
+                cursor.execute("""
+                    SELECT ee.id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.pending,
+                           ee.auto_confirmed, ec.id AS category_id, ec.name AS category_name
+                    FROM expense_entries ee
+                    JOIN expense_categories ec ON ee.category_id = ec.id
+                    WHERE ec.user_id = %s AND ee.date = %s
+                """, (user_id, day_str))
+                expense_entries = list(cursor.fetchall())
+            cursor.close()
+
+    income_rows = []
+    for entry in (income_entries or []):
+        if _day_of(entry.get('date')) != day_str:
+            continue
+        cat = income_cats.get(str(entry.get('category_id')))
+        name = entry.get('category_name') or (cat or {}).get('name') or 'Category'
+        income_rows.append(_row(entry, cat, name))
+
+    expense_rows = []
+    for entry in (expense_entries or []):
+        if _day_of(entry.get('date')) != day_str:
+            continue
+        cat = expense_cats.get(str(entry.get('category_id')))
+        name = entry.get('category_name') or (cat or {}).get('name') or 'Category'
+        expense_rows.append(_row(entry, cat, name))
+
+    # --- The stored totals for the day ---
+    totals_remainders_d = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
+    if totals_remainders_d is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT date, total_income, total_expenses, remainder, last_day_remainder "
+                "FROM totals_remainders_d WHERE user_id = %s AND date = %s", (user_id, day_str)
+            )
+            totals_remainders_d = list(cursor.fetchall())
+            cursor.close()
+
+    totals = next((t for t in (totals_remainders_d or []) if _day_of(t.get('date')) == day_str), None)
+
+    def _num(source, key):
+        try:
+            return round(float((source or {}).get(key) or 0), 2)
+        except (TypeError, ValueError):
+            return 0.0
+
+    last_remainder = _num(totals, 'last_day_remainder')
+    total_expenses = _num(totals, 'total_expenses')
+    remainder = _num(totals, 'remainder')
+    # The page shows the sum of the day's own income lines here, not the stored
+    # total_income - that one has last_day_remainder folded into it.
+    total_income = round(sum(r['amount'] for r in income_rows), 2)
+
+    # --- Credit accounts, one balance each ---
+    credit_accounts = _get_credit_accounts_from_redis(user_id)
+    if credit_accounts is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT id, name, mask, display_order FROM credit_accounts WHERE user_id = %s "
+                "ORDER BY display_order DESC", (user_id,)
+            )
+            credit_accounts = list(cursor.fetchall())
+            cursor.close()
+
+    c_expense_entries = _get_entries_from_redis('c_expense_entries', user_id)
+    if c_expense_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT cee.id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.pending,
+                       cee.auto_confirmed, cee.category_id, cec.name AS category_name
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s AND cee.date = %s
+            """, (user_id, day_str))
+            c_expense_entries = list(cursor.fetchall())
+            cursor.close()
+
+    ca_balances = _get_ca_balances_from_redis('c_a_balances_d', user_id)
+    if ca_balances is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT account_id, date, balance FROM c_a_balances_d
+                WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+                  AND date = %s
+            """, (user_id, day_str))
+            ca_balances = list(cursor.fetchall())
+            cursor.close()
+
+    accounts = []
+    for account in (credit_accounts or []):
+        account_id = account.get('id')
+
+        rows = []
+        for entry in c_expense_entries:
+            if _day_of(entry.get('date')) != day_str:
+                continue
+            cat = ca_cats.get(str(entry.get('category_id')))
+            if not cat or str(cat.get('account_id')) != str(account_id):
+                continue
+            name = cat.get('name') or entry.get('category_name') or 'Category'
+            if name == 'Starting Balance':
+                continue
+            rows.append(_row(entry, cat, name))
+
+        balance_row = next(
+            (b for b in (ca_balances or [])
+             if str(b.get('account_id')) == str(account_id) and _day_of(b.get('date')) == day_str),
+            None
+        )
+        mask = account.get('mask') or ''
+        accounts.append({
+            'name': account.get('name') or '',
+            'mask': ('...' + mask[-4:]) if mask else '',
+            'entries': rows,
+            'balance': _num(balance_row, 'balance'),
+        })
+
+    # --- Savings ---
+    savings_entries = _get_savings_entries_from_redis(user_id)
+    if savings_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT date, amount FROM savings_entries WHERE user_id = %s AND date = %s",
+                (user_id, day_str)
+            )
+            savings_entries = list(cursor.fetchall())
+            cursor.close()
+
+    savings_row = next((s for s in (savings_entries or []) if _day_of(s.get('date')) == day_str), None)
+
+    # --- Which colour the remainder gets, on the page's own rule ---
+    if member_since and day_str < member_since:
+        remainder_state = 'neutral'
+    elif remainder < 0:
+        remainder_state = 'negative'
+    elif remainder < balance_threshold:
+        remainder_state = 'below_threshold'
+    else:
+        remainder_state = 'above_threshold'
+
+    return jsonify({
+        'success': True,
+        'date': day_str,
+        'date_label': day.strftime('%A, %b ') + str(day.day) + day.strftime(', %Y'),
+        'currency_symbol': currency_symbol,
+        'currency_type': currency_type,
+        'last_remainder': last_remainder,
+        'income': income_rows,
+        'total_income': total_income,
+        'expenses': expense_rows,
+        'total_expenses': total_expenses,
+        'remainder': remainder,
+        'remainder_state': remainder_state,
+        'balance_threshold': balance_threshold,
+        'credit_accounts': accounts,
+        'savings': _num(savings_row, 'amount'),
+        'is_before_member_since': bool(member_since and day_str < member_since),
+        # Cheap change detector: the widget compares this against what it last
+        # drew and skips the redraw when nothing has moved.
+        'data_version': _get_data_version(user_id),
+        'dashboard_path': '/dashboard_d',
     })
 
 
