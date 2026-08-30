@@ -8,6 +8,33 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.10.1 — 2026-08-30
+
+### Fixed
+- **Entries waiting to be confirmed no longer disappear overnight.** The count in
+  the menu bar was hidden until the evening reminder had gone out, and that
+  reminder is recorded per day - so at midnight the count vanished and did not
+  come back until 8pm, while the entries themselves sat there unanswered the
+  whole time. It read as the app having forgotten them.
+
+  Entries that fell due on an earlier day now stay in the menu bar until they are
+  answered. Today's still wait for the evening reminder, which is the point of
+  the reminder: an entry that became due a minute after midnight is not something
+  to be asked about at a minute past midnight.
+
+- **The confirmation prompt shows every entry, not the first fifty.** There was a
+  cap, so someone with a longer backlog saw a count in the menu bar that the list
+  could not account for, and no way to clear it in one sitting. The same number
+  also limited the balance reminder's "confirm everything outstanding" to fifty
+  entries per run, quietly leaving a backlog behind on exactly the account that
+  most needed clearing.
+
+- The installer ended a successful run on a healthy installation with a warning
+  about `GET /register` returning 404. That is the correct response once an
+  administrator exists - registration closes behind the first account, and the
+  route is meant to look like it never existed - but the check treated it as a
+  fault and pointed at the error log.
+
 ## 1.10.0 — 2026-08-30
 
 ### Added

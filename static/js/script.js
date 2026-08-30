@@ -2599,11 +2599,16 @@ function _openBucketPromptIfDue() {
             .then(function (d) {
                 if (!d || !d.success || !d.total) { setBucketLauncher(0); return; }
 
-                // Nothing appears until the day's notification has gone out -
-                // not the modal and not the count in the nav. Before that the
-                // entries are due but the user has not been told, and asking
-                // early is asking about a day that has barely started.
-                if (!d.prompted) { setBucketLauncher(0); return; }
+                // Today's entries wait for tonight's notification: they are
+                // due but the user has not been told, and asking at 00:01 is
+                // asking about a day that has barely started.
+                //
+                // Anything already late is different. It was asked about on the
+                // day it fell due and never answered, so it stays in the nav
+                // until it is dealt with. Hiding it again each midnight made the
+                // count vanish overnight and come back at 20:00, which reads as
+                // the app having forgotten.
+                if (!d.prompted) { setBucketLauncher(d.overdue || 0); return; }
 
                 var last = parseInt(localStorage.getItem(BUCKET_LAST_KEY) || "0", 10);
                 var away = !last || (Date.now() - last) > BUCKET_IDLE_MS;

@@ -16962,6 +16962,7 @@ def api_buckets_pending():
         # cannot cost them data.
         items, total = bucket_confirmation.pending_buckets(current_user.id)
         prompted = bucket_confirmation.prompt_raised_today(current_user.id)
+        overdue = bucket_confirmation.pending_overdue_count(current_user.id)
     except Exception as e:
         log_exception(logger, 'BUCKET_CONFIRM', f"Could not list pending buckets: {e}")
         return jsonify({'success': False, 'error': 'Could not load entries'}), 500
@@ -16975,6 +16976,10 @@ def api_buckets_pending():
         'prompted': prompted,
         'items': items,
         'total': total,
+        # Of that total, how many are already late. The nav count falls back to
+        # this before the day's notification has gone out, so entries that went
+        # unanswered yesterday do not disappear at midnight and reappear at 20:00.
+        'overdue': overdue,
         # When the backlog is longer than one prompt should show, say so rather
         # than truncating silently.
         'shown': len(items),

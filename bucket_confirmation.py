@@ -52,9 +52,6 @@ ENTRY_TABLES = {
 
 ACTIONS = ('came_through', 'came_through_amount', 'defer', 'skip')
 
-# A first prompt after deploy can face a long backlog. Show a bounded list and
-# say what was left out, rather than truncating silently.
-MAX_PROMPT_ITEMS = 50
 
 
 # ------------------------------------------------------------------ reading
@@ -117,7 +114,12 @@ def pending_buckets(user_id, on_date=None):
     """
     Every unresolved bucket dated on or before `on_date`, newest first.
 
-    Returns (items, total) where items is capped at MAX_PROMPT_ITEMS and total is
+    Returns (items, total). Every outstanding entry is returned - there is no
+    cap. A limit here would decide for the user which of their own entries they
+    are allowed to see, and the count in the nav would stop matching the list the
+    prompt shows.
+
+    Returns (items, total) where total is
     how many there really were, so the caller can say what it is not showing.
 
     Buckets dated in the future are deliberately absent: they are forecasts that
@@ -194,7 +196,24 @@ def pending_buckets(user_id, on_date=None):
             })
 
     items.sort(key=lambda i: (i['date'], i['category_name']), reverse=True)
-    return items[:MAX_PROMPT_ITEMS], len(items)
+    return items, len(items)
+
+
+def pending_overdue_count(user_id):
+    """
+    How many pending buckets are already late - dated before the user's today.
+
+    Kept apart from the day's total because the two are asked about at different
+    times. Today's entries wait for tonight's notification; these were asked
+    about on the day they fell due and never answered, so nothing is gained by
+    hiding them again each midnight.
+
+    Expressed as pending_buckets() bounded to yesterday rather than by filtering
+    its result, so the date arithmetic lives in one place rather than being
+    repeated by every caller that wants to know.
+    """
+    _, total = pending_buckets(user_id, on_date=_user_today(user_id) - timedelta(days=1))
+    return total
 
 
 def prompt_raised_today(user_id):

@@ -814,6 +814,11 @@ else
   case "$CODE" in
     200) info "GET /register -> 200: ready for the first account" ;;
     302) info "GET /register -> 302: an administrator already exists, so registration is closed" ;;
+    # Not a fault. register() aborts 404 once an administrator exists, on the
+    # principle that a closed door should not advertise that it was ever a door.
+    # Reported as a warning, this printed an alarming line at the end of every
+    # re-run on a perfectly healthy installation.
+    404) info "GET /register -> 404: an administrator already exists, so registration is closed" ;;
     000) warn "GET /register -> no response. Check $LOG_DIR/blankee_error.log" ;;
     *)   warn "GET /register -> $CODE. Check $LOG_DIR/blankee_error.log" ;;
   esac

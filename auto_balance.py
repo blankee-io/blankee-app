@@ -697,11 +697,26 @@ def confirm_pending_buckets(user_id, on_date=None):
     """
     import bucket_confirmation
     confirmed = 0
-    for _ in range(bucket_confirmation.MAX_PROMPT_ITEMS + 1):
-        items, _total = bucket_confirmation.pending_buckets(user_id, on_date=on_date)
-        if not items:
-            break
+    items, outstanding = bucket_confirmation.pending_buckets(user_id, on_date=on_date)
+
+    # Bounded by how many there were, not by a fixed number: every one of them
+    # should be answered, and a fixed bound would quietly leave a backlog behind
+    # on exactly the account that most needed clearing. Each success removes one,
+    # so that many passes is enough, and the +1 is there to notice a stall rather
+    # than to allow extra work.
+    attempts = outstanding + 1
+    last_id = None
+    while items and attempts > 0:
+        attempts -= 1
         item = items[0]
+        # resolve() said it worked and the entry is still at the head of the
+        # list. Something is wrong, and going round again would spin forever.
+        if item['entry_id'] == last_id:
+            log_warning(logger, 'AUTOBALANCE',
+                        f"Entry {item['entry_id']} for user {user_id} survived "
+                        f"being confirmed; stopping to avoid looping")
+            break
+        last_id = item['entry_id']
         ok, _msg, _change = bucket_confirmation.resolve(
             user_id, item['table'], item['entry_id'], 'came_through')
         if not ok:
@@ -710,6 +725,9 @@ def confirm_pending_buckets(user_id, on_date=None):
                         f"for user {user_id}; stopping")
             break
         confirmed += 1
+        # Re-read: resolve() rewrites the user's whole entry list, so answering
+        # from a list captured up front would have each answer undo the last.
+        items, _ = bucket_confirmation.pending_buckets(user_id, on_date=on_date)
     if confirmed:
         log_info(logger, 'AUTOBALANCE',
                  f"Auto-confirmed {confirmed} entr(ies) for user {user_id}")
