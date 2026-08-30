@@ -8,6 +8,34 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.8.1 — 2026-08-30
+
+### Fixed
+- **Logging in could land on a page of raw JSON instead of the dashboard.**
+  Every dashboard load asks the server which forecast entries are waiting to be
+  confirmed. When a session had expired, that background request was the first
+  one to reach the handler that remembers where you were going, so it was
+  remembered as the destination - and signing in delivered you to the answer it
+  had wanted, printed as JSON.
+
+  The handler always meant to ignore requests like this; its own comment said
+  so. It only checked that the request was a GET, and a background request is a
+  GET like any other. It now checks that the browser actually asked for a page,
+  so links followed while signed out still return you to the right place after
+  signing in, and nothing the page fetches for itself can take that spot.
+
+- The count of hidden categories on the dashboard was drawn half again bigger
+  on a phone than the identical count on the confirm-entries button, from a
+  mobile-only rule that overrode a size the two are meant to share. It also
+  fixed the badge's width, which would have clipped the number once more than
+  nine categories were hidden.
+
+### Changed
+- **Mobile Options opens the app's server screen directly.** It asked for
+  confirmation first, which was a question with only one answer: the row exists
+  only inside the app, tapping it is already the decision, and the screen it
+  opens has its own way out.
+
 ## 1.8.0 — 2026-08-29
 
 ### Added
