@@ -635,6 +635,42 @@ def do_update(dry_run):
 
     requirements_before = file_hash(os.path.join(APP_DIR, 'requirements.txt'))
 
+    # Nothing about a git fetch says who wrote what it fetched. HTTPS proves the
+    # server is github.com and no more; whoever can push to the release branch
+    # can run code as root on every installation that updates, because this
+    # script is root and runs install.sh out of the checkout it just made. That
+    # is inherent to self-updating, and the control for it is a signature.
+    #
+    # Off unless UPDATE_VERIFY_SIGNERS names an allowed-signers file, because
+    # every release published so far is unsigned and turning this on by default
+    # would strand every existing installation on the version it already has -
+    # including, permanently, any release that would have fixed it.
+    #
+    # Set it once signed releases exist:
+    #   UPDATE_VERIFY_SIGNERS=/etc/blankee/allowed_signers
+    # in blankee.conf, holding the publisher's public key in ssh allowed-signers
+    # format. A commit that fails to verify stops the update; nothing is checked
+    # out, and the deployment keeps serving what it already had.
+    signers = read_kv(CONFIG_FILE, {'UPDATE_VERIFY_SIGNERS'}).get(
+        'UPDATE_VERIFY_SIGNERS', '').strip().strip('"').strip("'")
+    if signers:
+        step('verify', f'Verifying the signature on {target[:7]}')
+        if not os.path.isfile(signers):
+            return finish_failed(
+                f'UPDATE_VERIFY_SIGNERS points at {signers}, which does not exist. '
+                'Refusing to update unverified.', '',
+                [f'check UPDATE_VERIFY_SIGNERS in {CONFIG_FILE}'])
+        rc, out = git('-c', 'gpg.ssh.allowedSignersFile=' + signers,
+                      'verify-commit', '--raw', target, timeout=60)
+        if rc != 0:
+            return finish_failed(
+                f'The signature on {target[:7]} did not verify. Nothing was '
+                'checked out and the deployment is unchanged. Either the '
+                'release is not signed by a trusted key, or it is not what it '
+                'claims to be.', out,
+                [f'cd {APP_DIR}', f'git verify-commit {target[:7]}'])
+        step_done('signed by a trusted key')
+
     step('checkout', f'Moving to {target[:7]}')
     # No `git clean`: it deletes untracked-but-not-ignored files, and the
     # preflight has already refused a dirty tree, so it could only do harm.
@@ -667,6 +703,24 @@ def do_update(dry_run):
         step_done()
     else:
         step_done(f'could not refresh the units (rc={rc}); '
+                  f'run install.sh to fix: {out[-200:]}', ok=False)
+
+    step('apache', 'Refreshing the application Apache directives')
+    # A release can need an Apache directive - 1.9.0 needed a Cache-Control
+    # header on /static - and before this step there was no way for one to reach
+    # an installation that updates through the admin console. The vhost is not
+    # touched: it holds ServerName, TLS and anything the operator added, and the
+    # updater knows none of that. Only the file install.sh owns is rewritten, and
+    # it reverts itself if Apache rejects the result.
+    #
+    # Not fatal. The code is already updated and the site still works without it;
+    # what is lost is a header, not the application.
+    rc, out = run(['bash', os.path.join(APP_DIR, 'install', 'install.sh'),
+                   '--apache-conf'], timeout=120)
+    if rc == 0:
+        step_done()
+    else:
+        step_done(f'could not refresh the Apache directives (rc={rc}); '
                   f'run install.sh to fix: {out[-200:]}', ok=False)
 
     if file_hash(os.path.join(APP_DIR, 'requirements.txt')) != requirements_before:
