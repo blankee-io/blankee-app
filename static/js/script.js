@@ -2620,3 +2620,71 @@ function _openBucketPromptIfDue() {
             .catch(function () { /* no prompt, no error */ });
     } catch (e) { /* never let this break a page */ }
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Mobile Options (iOS app only)
+// ═══════════════════════════════════════════════════════════════════════════
+/* The iOS app loads whichever server the user pointed it at, and the address
+   is stored in the app rather than here. That leaves the app with no visible
+   way to change or forget a server once it is working, so the dropdown row
+   rendered by nav.html opens the native sheet through the bridge the app
+   injects.
+
+   The row ships hidden. Nothing here is reachable in a browser, and a menu
+   item that silently does nothing is worse than no menu item. */
+
+function nativeAppBridge() {
+    // Duck-typed rather than a version check: an older build of the app
+    // injects window.nativeApp without openServerSettings, and should be
+    // treated exactly like a browser.
+    var app = window.nativeApp;
+    return (app && typeof app.openServerSettings === "function") ? app : null;
+}
+
+function mobileOptionsLink() {
+    var el = document.getElementById("mobile-options-link");
+    if (!el) { return null; }
+    if (!el.dataset.bound) {
+        el.dataset.bound = "1";
+        el.addEventListener("click", function (e) {
+            e.preventDefault();
+            openMobileOptions();
+        });
+    }
+    return el;
+}
+
+function openMobileOptions() {
+    if (typeof showConfirmModal !== "function") { return; }
+
+    // Where the page came from is where the app is pointed - it is being
+    // served by that server - so this needs no round trip to the app, and
+    // works on app builds that predate the bridge.
+    var host = _escapeHtml(window.location.host);
+
+    showConfirmModal({
+        title: "Mobile Options",
+        message: "",
+        bodyHtml: '<div class="mobile-options-panel">' +
+                  '<div class="mobile-options-label">Connected to</div>' +
+                  '<div class="mobile-options-server">' + host + '</div>' +
+                  '</div>',
+        confirmText: "Change server",
+        cancelText: "Close"
+    }).then(function (changeServer) {
+        if (!changeServer) { return; }
+        var app = nativeAppBridge();
+        if (app) { app.openServerSettings(); }
+    });
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+    try {
+        // Browsers leave the row hidden. The bridge is injected at document
+        // start, so it is already there by the time this file has parsed.
+        if (!nativeAppBridge()) { return; }
+        var el = mobileOptionsLink();
+        if (el) { el.classList.remove("mobile-options-hidden"); }
+    } catch (e) { /* never let this break a page */ }
+});
