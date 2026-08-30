@@ -48,6 +48,7 @@ EXPECTED_TABLES = (
     'recurring_mismatches', 'recurring_suggestions', 'linked_accounts',
     'bucket_prompts',
     'autobalance_settings',
+    'widget_tokens',
 )
 EXPECTED_COLUMNS = (
     ('users', 'is_admin'),
