@@ -2656,27 +2656,12 @@ function mobileOptionsLink() {
 }
 
 function openMobileOptions() {
-    if (typeof showConfirmModal !== "function") { return; }
-
-    // Where the page came from is where the app is pointed - it is being
-    // served by that server - so this needs no round trip to the app, and
-    // works on app builds that predate the bridge.
-    var host = _escapeHtml(window.location.host);
-
-    showConfirmModal({
-        title: "Mobile Options",
-        message: "",
-        bodyHtml: '<div class="mobile-options-panel">' +
-                  '<div class="mobile-options-label">Connected to</div>' +
-                  '<div class="mobile-options-server">' + host + '</div>' +
-                  '</div>',
-        confirmText: "Change server",
-        cancelText: "Close"
-    }).then(function (changeServer) {
-        if (!changeServer) { return; }
-        var app = nativeAppBridge();
-        if (app) { app.openServerSettings(); }
-    });
+    // Straight to the app's own server screen, with nothing in between.
+    // Tapping a row that exists only inside the app is already the decision,
+    // and the native sheet carries its own cancel - a confirm step here would
+    // only ask the same question twice.
+    var app = nativeAppBridge();
+    if (app) { app.openServerSettings(); }
 }
 
 document.addEventListener("DOMContentLoaded", function () {

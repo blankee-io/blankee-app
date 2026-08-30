@@ -174,9 +174,23 @@ def load_user(user_id):
 @login_manager.unauthorized_handler
 def unauthorized():
     # Stash the originally-requested URL so we can return there after login.
-    # Only stash safe relative GETs (avoid stashing form POSTs / API calls).
+    #
+    # Only a page the browser was actually navigating to. Checking the method
+    # is not enough, because a background fetch is a GET like any other: every
+    # dashboard load calls _openBucketPromptIfDue, and when the session has
+    # expired that request reaches this handler before the user sees the login
+    # page. Stashed, it becomes the post-login destination - and the user lands
+    # on the raw JSON of /api/buckets/pending instead of their dashboard.
+    #
+    # A real navigation asks for HTML. Anything under /api/ is excluded as
+    # well, so a JSON endpoint that omits the header cannot become a landing
+    # page either.
     try:
-        if request.method == 'GET' and request.endpoint != 'login':
+        accept = request.headers.get('Accept') or ''
+        navigating = ('text/html' in accept
+                      and request.headers.get('X-Requested-With') != 'XMLHttpRequest'
+                      and not request.path.startswith('/api/'))
+        if request.method == 'GET' and request.endpoint != 'login' and navigating:
             target = request.full_path if request.query_string else request.path
             # Strip trailing '?' that full_path adds when query_string is empty
             if target.endswith('?'):

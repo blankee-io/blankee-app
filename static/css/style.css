@@ -864,28 +864,12 @@ body {
     opacity: 1;
 }
 
-/* Mobile Options - the dropdown row and its panel, shown only in the iOS app.
-   The row ships hidden and script.js reveals it, the same way the bucket
-   launcher does, so a browser never flashes an item that does nothing. */
+/* Mobile Options - the dropdown row, shown only in the iOS app. It ships
+   hidden and script.js reveals it, the same way the bucket launcher does, so
+   a browser never flashes an item that does nothing. The row opens the app's
+   native server screen directly, so there is no panel of our own to style. */
 .mobile-options-hidden {
     display: none;
-}
-
-.mobile-options-panel {
-    text-align: center;
-}
-
-.mobile-options-label {
-    color: var(--secondary-dark);
-    font-size: 12px;
-}
-
-.mobile-options-server {
-    margin-top: 4px;
-    color: var(--text-dark);
-    font-size: 16px;
-    font-weight: 600;
-    word-break: break-all;
 }
 
 /* Page Tutorial Overlay System */
@@ -5147,13 +5131,6 @@ td:has(.bucket-progress-container) {
     font-weight: bold;
     pointer-events: none;
     content: '';
-}
-
-@media (width <= 600px) {
-    .hidden-count-bubble {
-        width: 18px;
-        height: 18px;
-    }
 }
 
 /* Move the red exclamation circle up by the height of .dashboard-m-date */
