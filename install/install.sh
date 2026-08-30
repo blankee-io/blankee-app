@@ -11,6 +11,7 @@
 #   sudo ./install/install.sh --no-self-update       # do not install the updater
 #   sudo ./install/install.sh --permissions-only     # re-apply ownership and exit
 #   sudo ./install/install.sh --units-only           # reinstall the updater units
+#   sudo ./install/install.sh --apache-conf          # refresh app Apache directives
 #
 # Re-running is safe. Anything already in place is left alone, and existing
 # secrets in the config file are never regenerated - doing so would invalidate
@@ -34,13 +35,19 @@ SERVER_NAME=""
 # configured to bind nothing else.
 HTTP_PORT="${HTTP_PORT:-18420}"
 VHOST="/etc/apache2/sites-available/blankee.conf"
+# Directives the application needs, kept out of the vhost so the updater can
+# refresh them without touching a file the operator owns - see
+# install_apache_conf.
+APACHE_CONF="/etc/apache2/conf-available/blankee-app.conf"
 PORTS_CONF="/etc/apache2/ports.conf"
 SECURE_DIR="/etc/blankee"
 DB_CONF="$SECURE_DIR/db.conf"
+SIGNERS_FILE="$SECURE_DIR/allowed_signers"
 CONF_FILE="$CONFIG_DIR/blankee.conf"
 CHECK_ONLY=0
 PERMISSIONS_ONLY=0
 UNITS_ONLY=0
+APACHE_CONF_ONLY=0
 SELF_UPDATE=1
 UPDATER_SERVICE="/etc/systemd/system/blankee-update.service"
 UPDATER_TIMER="/etc/systemd/system/blankee-update.timer"
@@ -54,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --check)       CHECK_ONLY=1; shift ;;
     --permissions-only) PERMISSIONS_ONLY=1; shift ;;
     --units-only)       UNITS_ONLY=1; shift ;;
+    --apache-conf)      APACHE_CONF_ONLY=1; shift ;;
     --no-self-update)   SELF_UPDATE=0; shift ;;
     -h|--help)     sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
@@ -77,6 +85,34 @@ set_conf_key() {
     printf '%s=%s\n' "$key" "$value" >> "$CONF_FILE"
   fi
 }
+
+# Pin the key that releases are signed with.
+#
+# Copied once and never overwritten - not by a later install.sh run, and not by
+# the updater. That is the whole point. The updater runs as root and executes
+# install.sh out of whatever it just checked out, so anyone who can push to the
+# release branch can run code as root here. A signature is what stops that, and
+# it only stops it if the key cannot be replaced by the same push: refreshing
+# this file from the repository on every update would let an attacker swap the
+# key alongside the code, and the check would prove nothing.
+#
+# The cost is that rotating the key needs a human on each machine. That is the
+# right way round - a trust anchor nobody has to touch is not an anchor.
+install_signers() {
+  [[ -f "$APP_DIR/install/allowed_signers" ]] || return 0
+  mkdir -p "$SECURE_DIR"
+  if [[ -f "$SIGNERS_FILE" ]]; then
+    info "keeping the signing key already pinned in $SIGNERS_FILE"
+  else
+    install -m 644 -o root -g root "$APP_DIR/install/allowed_signers" "$SIGNERS_FILE"
+    info "release signing key pinned in $SIGNERS_FILE"
+  fi
+  # Turn verification on. Safe from this release forward because every release
+  # from here is signed by the publish script, which refuses to push otherwise.
+  # To undo it on a machine that must update regardless, clear this one line.
+  set_conf_key UPDATE_VERIFY_SIGNERS "$SIGNERS_FILE"
+}
+
 
 install_updater_units() {
   # Writes and enables the systemd units. A function because the updater calls
@@ -295,6 +331,50 @@ if [[ $PERMISSIONS_ONLY -eq 1 ]]; then
   exit 0
 fi
 
+# Directives the application requires, in their own file rather than in the vhost.
+#
+# The vhost belongs to whoever runs the server: ServerName, TLS, aliases, any
+# reverse proxy in front. Regenerating it on update would throw all of that away,
+# and the updater does not know the --server-name and --port it was built with,
+# so it cannot regenerate it correctly either. Before this split, a release that
+# needed an Apache directive could not reach an existing installation at all -
+# 1.9.0 shipped a Cache-Control header that only a manual install.sh re-run
+# applied, which meant browsers kept using stale CSS on precisely the machines
+# that had updated.
+#
+# Everything here is scoped by filesystem path, so enabling it server-wide
+# affects only the directory Blankee serves from. Nothing in here names a host or
+# a port, which is what makes it safe to rewrite unattended.
+install_apache_conf() {
+  a2enmod headers >/dev/null 2>&1 || true
+
+  cat > "$APACHE_CONF" <<EOF
+# Managed by install.sh - rewritten on update. Put local changes in the vhost
+# ($VHOST), not here.
+
+<Directory $APP_DIR/static>
+    # Revalidate instead of guessing. The pages link style.css and script.js with
+    # no version in the URL, so a browser holding an old copy after an update
+    # renders new markup against old CSS - elements misplaced, or appearing where
+    # they should be hidden, with nothing wrong on the server to find.
+    #
+    # Apache sends no Cache-Control for static files by itself, and with neither
+    # Cache-Control nor Expires a browser invents its own freshness - commonly a
+    # tenth of the file's age, which for a long-lived file is days.
+    #
+    # no-cache means "ask before using", not "do not store": an unchanged file
+    # still answers 304 against its ETag, so this costs one conditional request
+    # per asset rather than a re-download.
+    <IfModule mod_headers.c>
+        Header set Cache-Control "no-cache"
+    </IfModule>
+</Directory>
+EOF
+
+  a2enconf blankee-app >/dev/null 2>&1 || true
+}
+
+
 # The self-updater calls this after every checkout, so a release that changes or
 # adds a unit file actually installs it. Kept beside --permissions-only for the
 # same reason: the installer owns these rules, and the updater should not carry
@@ -309,6 +389,32 @@ if [[ $UNITS_ONLY -eq 1 ]]; then
   say "Installing the updater units"
   install_updater_units
   install_log_rotation
+  exit 0
+fi
+
+# The self-updater calls this after every checkout too, so a release that needs a
+# new Apache directive gets one without an operator re-running the installer by
+# hand. Deliberately does not touch the vhost, and takes no --server-name or
+# --port: there is nothing host-specific in what it writes.
+if [[ $APACHE_CONF_ONLY -eq 1 ]]; then
+  [[ $EUID -eq 0 ]] || die "Run with sudo."
+  [[ -f "$APP_DIR/app.py" ]] || die "Cannot find app.py - run this from inside the repository."
+  if ! command -v apache2ctl >/dev/null; then
+    warn "no Apache here, so there is nothing to configure"
+    exit 0
+  fi
+  say "Refreshing the application Apache directives"
+  install_apache_conf
+  # Never leave Apache unable to start. A bad config that is only noticed at the
+  # next restart is worse than one caught here, where the old file is still live.
+  if apache2ctl configtest >/dev/null 2>&1; then
+    systemctl reload apache2 >/dev/null 2>&1 || systemctl restart apache2 >/dev/null 2>&1 || true
+    info "$APACHE_CONF written and enabled"
+  else
+    a2disconf blankee-app >/dev/null 2>&1 || true
+    rm -f "$APACHE_CONF"
+    die "Apache rejected the new configuration; it has been removed and nothing changed."
+  fi
   exit 0
 fi
 
@@ -669,25 +775,10 @@ cat > "$VHOST" <<EOF
     Alias /static $APP_DIR/static
     <Directory $APP_DIR/static>
         Require all granted
-
-        # Revalidate instead of guessing. The templates link style.css and
-        # script.js with no version in the URL, so a browser holding an old
-        # copy after an update renders the new markup against the old CSS -
-        # which shows up as elements appearing where they should not, or
-        # styling that half-applies, with nothing obviously wrong server-side.
-        #
-        # Apache sends no Cache-Control for static files on its own, and with
-        # neither Cache-Control nor Expires a browser falls back to heuristic
-        # freshness - typically a tenth of the file's age - so a long-lived
-        # asset can go days without being asked for again.
-        #
-        # no-cache means "ask before using", not "do not store": an unchanged
-        # file still answers 304 against its ETag, so the cost is one
-        # conditional request per asset rather than a re-download.
-        <IfModule mod_headers.c>
-            Header set Cache-Control "no-cache"
-        </IfModule>
     </Directory>
+    # Cache headers for these files live in $APACHE_CONF, written by
+    # install_apache_conf, so that the updater can refresh them without
+    # rewriting this file.
 
     # Not APACHE_LOG_DIR. Blankee's logs live in a directory Blankee owns, so
     # the admin log viewer at /admin/logs can read them as www-data without
@@ -699,6 +790,8 @@ cat > "$VHOST" <<EOF
 </VirtualHost>
 EOF
 
+install_signers
+install_apache_conf
 a2ensite blankee >/dev/null 2>&1 || true
 # The default site would otherwise answer for any hostname that is not this one.
 a2dissite 000-default >/dev/null 2>&1 || true
