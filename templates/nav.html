@@ -78,6 +78,15 @@
                     <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Manage Credit Accounts</a><i class="fa-solid fa-credit-card"></i></div>
                     <!--<div class="dropdown-link"><a href="{{ url_for('buds') }}">Manage Buds&trade;</a><i class="fa-regular fa-seedling"></i></div>-->
                     <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-regular fa-sliders"></i></div>
+                    {# Only means anything inside the iOS app, which injects window.nativeApp
+                       before this page runs. Rendered hidden and revealed by script.js
+                       rather than gated server-side: the server cannot tell which client
+                       is asking, and sniffing the user agent would charge every page
+                       render for a check only the app needs. #}
+                    <div class="dropdown-link mobile-options-hidden" id="mobile-options-link">
+                        <a href="javascript:void(0);" id="mobile-options-btn">Mobile Options</a>
+                        <i class="fa-solid fa-mobile-screen-button"></i>
+                    </div>
                 </div>
                 {# Bank Accounts is hidden until there is a provider behind it.
                    BANK_PROVIDER defaults to 'null', so on a stock install this

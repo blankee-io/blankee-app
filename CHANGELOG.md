@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.8.0 — 2026-08-29
+
+### Added
+- **A Mobile Options entry in the menu, for the iOS app.** The app asks for a
+  server address the first time it is opened and remembers it, which left no
+  visible way to point it somewhere else afterwards - only a gesture nobody
+  would find on their own. The profile menu now carries a Mobile Options row
+  that names the server this app is pointed at and opens the app's own server
+  settings, where it can be changed or forgotten.
+
+  The row is hidden unless the page is running inside the app, and that is
+  decided in the browser rather than on the server. Nothing in a request says
+  which client is asking, and adding a user-agent check would charge every page
+  render for something only the app needs. An older app build, or any real
+  browser, simply leaves the row hidden - a menu item that does nothing is worse
+  than no menu item at all.
+
 ## 1.7.2 — 2026-08-27
 
 ### Changed
