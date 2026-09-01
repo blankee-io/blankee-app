@@ -331,69 +331,6 @@ def bulk_add_entries(table: str, entries: List[Dict[str, Any]], user_id: Optiona
         return new_ids
 
 
-def bulk_update_entries(table: str, updates: List[Dict[str, Any]], user_id: Optional[int] = None) -> bool:
-    """
-    Bulk update entries (each dict must include 'id' key).
-    
-    Args:
-        table: Table name
-        updates: List of dicts with 'id' and columns to update
-        user_id: User ID (defaults to current_user.id)
-        
-    Returns:
-        True if successful
-        
-    Example:
-        success = bulk_update_entries('income_entries', [
-            {'id': 1, 'amount': Decimal('100')},
-            {'id': 2, 'amount': Decimal('200')}
-        ])
-    """
-    if user_id is None:
-        if not current_user.is_authenticated:
-            return False
-        user_id = current_user.id
-    
-    if not updates:
-        return True
-    
-    try:
-        # Update MySQL
-        with get_db_pool().get_cursor(commit=True) as cursor:
-            for update_data in updates:
-                # Make a copy to avoid modifying the original
-                update = dict(update_data)
-                entry_id = update.pop('id')
-                
-                if not update:
-                    continue
-                    
-                set_clause = ', '.join([f"{col} = %s" for col in update.keys()])
-                query = f"UPDATE {table} SET {set_clause} WHERE id = %s"
-                cursor.execute(query, (*update.values(), entry_id))
-            
-            log_info(logger, 'REDIS', f"Bulk updated {len(updates)} entries in {table}")
-        
-        # Update Redis if user is hydrated
-        if is_user_hydrated(user_id):
-            cached_data = _get_from_redis(table, user_id)
-            if cached_data is not None:
-                # Update entries in cache
-                update_map = {u['id']: u for u in updates}
-                for i, entry in enumerate(cached_data):
-                    entry_id = entry.get('id')
-                    if entry_id in update_map:
-                        # Update only the fields that are in the update dict (excluding 'id')
-                        update_fields = {k: v for k, v in update_map[entry_id].items() if k != 'id'}
-                        cached_data[i].update(update_fields)
-                _set_to_redis(table, user_id, cached_data)
-                log_info(logger, 'REDIS', f"Updated Redis cache for {table}")
-        
-        return True
-        
-    except Exception as e:
-        log_exception(logger, 'REDIS', f"Error bulk updating {table}: {e}")
-        return False
 
 
 def get_entries(table: str, filters: Optional[Dict[str, Any]] = None, user_id: Optional[int] = None) -> List[Dict[str, Any]]:

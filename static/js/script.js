@@ -2057,6 +2057,11 @@ function applyBucketChanges(changes, arrays) {
                 arr[i].amount = ch.amount;
                 arr[i].is_bucket = ch.is_bucket;
                 arr[i].original_date = ch.original_date;
+                // Confirming an entry is what marks it paid now that nothing else
+                // can. resolve() has always returned this; dropping it here meant
+                // the week and month grids redrew from these arrays without the
+                // checkmark until the next full reload.
+                arr[i].processed = ch.processed;
             }
             touched++;
             break;

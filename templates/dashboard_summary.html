@@ -1168,43 +1168,72 @@
                 return;
             }
             
-            // Find the first date where remainder - purchaseAmount goes below 0
-            let negativeDate = null;
-            let negativeBalance = null;
-            
-            for (const tr of futureRemainders) {
-                const adjustedBalance = tr.remainder - purchaseAmount;
-                if (adjustedBalance < 0) {
-                    negativeDate = tr.date;
-                    negativeBalance = adjustedBalance;
-                    break;
-                }
+            // Every day of the forecast, as it would look after the purchase.
+            // Computed here rather than asked of the server: totals_remainders_d
+            // is already on the page, read Redis-first by the route that rendered
+            // it, so a round trip would only be a slower way to reach the same
+            // numbers - and would read MySQL if the cache had gone cold.
+            const DAY_MS = 86400000;
+            const projected = futureRemainders.map(tr => ({
+                date: tr.date,
+                balance: tr.remainder - purchaseAmount
+            }));
+
+            // First occurrence wins: with a flat stretch at the bottom, the day it
+            // first reaches the low point is the useful one to name.
+            let lowest = projected[0];
+            for (const p of projected) {
+                if (p.balance < lowest.balance) { lowest = p; }
             }
-            
+
+            const firstNegIdx = projected.findIndex(p => p.balance < 0);
+            const lowestLine = `Lowest projected balance: ${formatCurrency(lowest.balance)} on ${formatDateWithYear(lowest.date)}`;
+
             resultDiv.style.display = 'block';
-            
-            if (negativeDate) {
-                // Purchase would cause negative balance
+
+            if (firstNegIdx !== -1) {
+                const firstNeg = projected[firstNegIdx];
+
+                // When it climbs back out. Measured in calendar days between the
+                // dates rather than by counting rows, so a gap in the forecast
+                // cannot silently shorten the answer.
+                let recovery = null;
+                for (let i = firstNegIdx + 1; i < projected.length; i++) {
+                    if (projected[i].balance >= 0) { recovery = projected[i]; break; }
+                }
+
+                let stretch;
+                if (recovery) {
+                    const days = Math.max(1, Math.round((recovery.date - firstNeg.date) / DAY_MS));
+                    stretch = `Below zero for ${days} day${days === 1 ? '' : 's'}, back above on ${formatDateWithYear(recovery.date)}`;
+                } else {
+                    // Say the horizon ran out rather than implying it recovers the
+                    // day after the last row, or that it stays negative forever.
+                    const last = projected[projected.length - 1];
+                    const days = Math.max(1, Math.round((last.date - firstNeg.date) / DAY_MS) + 1);
+                    stretch = `Below zero for at least ${days} day${days === 1 ? '' : 's'} - still negative on ${formatDateWithYear(last.date)}, the last day forecast`;
+                }
+
                 resultDiv.className = 'test-purchase-result danger';
                 resultDiv.innerHTML = `
                     <i class="fa-solid fa-circle-exclamation"></i>
                     <div class="test-result-message">
-                        <strong>Warning:</strong> Based on your entered income and expenses, 
-                        a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> will bring your balance 
-                        below $0 on <strong>${formatDateWithYear(negativeDate)}</strong>.
-                        <div class="test-result-balance">Projected balance: ${formatCurrency(negativeBalance)}</div>
+                        <strong>Warning:</strong> Based on your entered income and expenses,
+                        a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> will bring your balance
+                        below $0 on <strong>${formatDateWithYear(firstNeg.date)}</strong>.
+                        <div class="test-result-balance">Projected balance that day: ${formatCurrency(firstNeg.balance)}</div>
+                        <div class="test-result-balance">${stretch}</div>
+                        <div class="test-result-balance">${lowestLine}</div>
                     </div>
                 `;
             } else {
-                // Purchase is safe
                 resultDiv.className = 'test-purchase-result success';
-                const lowestBalance = Math.min(...futureRemainders.map(tr => tr.remainder - purchaseAmount));
                 resultDiv.innerHTML = `
                     <i class="fa-solid fa-circle-check"></i>
                     <div class="test-result-message">
-                        <strong>Good news!</strong> Based on your entered income and expenses, 
+                        <strong>Good news!</strong> Based on your entered income and expenses,
                         a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> does not bring your balance below $0.
-                        <div class="test-result-balance">Lowest projected balance: ${formatCurrency(lowestBalance)}</div>
+                        <div class="test-result-balance">${lowestLine}</div>
                     </div>
                 `;
             }
