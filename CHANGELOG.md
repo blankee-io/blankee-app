@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.11.1 — 2026-08-31
+
+### Fixed
+- The update screen added in 1.11.0 showed a broken image where the Blankee mark
+  should be. The logo file it uses had never been added to the repository - it
+  existed only on the machine it was drawn on, so every installation was missing
+  it. The file now ships with the application.
+
 ## 1.11.0 — 2026-08-31
 
 ### Added
