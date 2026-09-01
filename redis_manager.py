@@ -1183,6 +1183,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INSERT INTO income_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, pending, auto_confirmed, is_auto_adjustment)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
+                            date = VALUES(date),
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
                             processed = VALUES(processed),
@@ -1353,6 +1354,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INSERT INTO expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
+                            date = VALUES(date),
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
                             processed = VALUES(processed),
@@ -1529,6 +1531,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INSERT INTO c_expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
+                            date = VALUES(date),
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
                             processed = VALUES(processed),
@@ -1636,6 +1639,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INSERT INTO c_payment_entries (id, account_id, date, amount, recurring_id, processed, auto_confirmed)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
+                            date = VALUES(date),
                             amount = VALUES(amount),
                             processed = VALUES(processed),
                             recurring_id = VALUES(recurring_id),

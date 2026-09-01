@@ -8,6 +8,26 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.10.3 — 2026-08-31
+
+### Fixed
+- **Changing the date of an entry was never saved.** Answering "not yet" to a
+  confirmation, or moving an entry to another day, appeared to work and then
+  undid itself a few minutes later - once for every entry, every time.
+
+  Entries are held in a fast store and written to the database behind the scenes.
+  That write updated every field of an entry except the one that had changed: its
+  date. The entry kept its new date only until the fast copy was next discarded,
+  and then went back to where it had been.
+
+  Anything that moves an entry in time was affected - deferring a confirmation,
+  the move button on the day view, and the same operations on credit card
+  entries and card payments.
+
+  Entries already sitting on the wrong date will correct themselves the next time
+  anything in that list is edited, which is what prompts the write. There is
+  nothing to run by hand.
+
 ## 1.10.2 — 2026-08-31
 
 ### Fixed
