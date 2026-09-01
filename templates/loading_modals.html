@@ -64,6 +64,32 @@
         </div>
     </div>
 
+    <!-- Updating Blankee -->
+    {# Same parts as Building Your Budget above: the hammer, its swing, the
+       container and the title classes are shared rather than copied, so the two
+       screens stay recognisably the same thing happening. The logo replaces the
+       table icon because this is the application being rebuilt, not a budget. #}
+    <div id="app-update-loading-modal" class="loading-screen" style="display: none;">
+        <div class="setup-loading-container app-update-container">
+            <div class="bank-icon-container">
+                <img src="{{ url_for('static', filename='logo.svg') }}" alt=""
+                     class="app-update-logo">
+                <div class="loading-hammer-circle">
+                    <i class="fa-solid fa-hammer loading-hammer-icon"></i>
+                </div>
+            </div>
+            <h2 class="setup-loading-title">Updating Blankee</h2>
+            <p class="setup-loading-subtitle">
+                This takes about a minute. The page reloads by itself when it is done -
+                there is nothing to do but wait.
+            </p>
+            <div class="app-update-progress">
+                <div class="app-update-progress-fill" id="app-update-progress-fill"></div>
+            </div>
+            <p class="app-update-countdown" id="app-update-countdown"></p>
+        </div>
+    </div>
+
     <!-- Fixed loading spinner for bottom left -->
     <div id="dashboard-loading-spinner-container">
         <span class="dashboard-spinner-circle">

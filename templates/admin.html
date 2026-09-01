@@ -884,6 +884,121 @@
             if (go) { startUpdate(); }
         }
 
+        // ---- the updating overlay -------------------------------------
+        // A run takes roughly a minute, and for most of it the server cannot
+        // answer: the application is replaced under the request. So rather than
+        // poll something that is not there, show the work happening, wait out a
+        // minute, and reload. If the reload comes back on the old code the
+        // update has not landed yet, so it waits out another minute.
+        //
+        // Bounded, because the alternative to a cap is a browser that reloads
+        // for ever when an update genuinely fails. After UPDATE_MAX_ROUNDS the
+        // overlay gives up and says where to look.
+        const UPDATE_SECONDS = 60;
+        const UPDATE_MAX_ROUNDS = 10;
+        const UPDATE_KEY = 'blankeeUpdate';
+        let updateTicker = null;
+
+        function updateOverlay(show) {
+            const el = document.getElementById('app-update-loading-modal');
+            if (el) { el.style.display = show ? 'flex' : 'none'; }
+        }
+
+        function runUpdateCountdown(onDone) {
+            const fill = document.getElementById('app-update-progress-fill');
+            const label = document.getElementById('app-update-countdown');
+            let left = UPDATE_SECONDS;
+            updateOverlay(true);
+            if (updateTicker) { clearInterval(updateTicker); }
+
+            function paint() {
+                if (fill) { fill.style.width = (left / UPDATE_SECONDS * 100) + '%'; }
+                if (label) {
+                    label.textContent = left > 0
+                        ? left + ' second' + (left === 1 ? '' : 's') + ' remaining'
+                        : 'Reloading...';
+                }
+            }
+            paint();
+            updateTicker = setInterval(function() {
+                left -= 1;
+                paint();
+                if (left <= 0) {
+                    clearInterval(updateTicker);
+                    updateTicker = null;
+                    onDone();
+                }
+            }, 1000);
+        }
+
+        function updateMemory() {
+            try { return JSON.parse(sessionStorage.getItem(UPDATE_KEY) || 'null'); }
+            catch (e) { return null; }
+        }
+
+        function rememberUpdate(state) {
+            try {
+                if (state) { sessionStorage.setItem(UPDATE_KEY, JSON.stringify(state)); }
+                else { sessionStorage.removeItem(UPDATE_KEY); }
+            } catch (e) { /* private mode: the overlay just will not resume */ }
+        }
+
+        function waitOutUpdate(state) {
+            rememberUpdate(state);
+            runUpdateCountdown(function() { window.location.reload(); });
+        }
+
+        // On load, decide whether the update we started has actually landed.
+        // Proved by the commit the running process reports matching the one the
+        // run was heading for - the same test the older polling used, because a
+        // run reporting success and the new code actually serving are different
+        // things.
+        function resumeUpdateIfUnfinished() {
+            const state = updateMemory();
+            if (!state) { return; }
+
+            $.ajax({
+                url: "{{ url_for('admin_update_status') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({}),
+                success: function(res) {
+                    const u = res.update || {};
+                    const here = (u.commit || {}).short;
+                    const wanted = state.target || ((u.run || {}).to || {}).short;
+
+                    if (wanted && here && here === wanted) {
+                        rememberUpdate(null);
+                        updateOverlay(false);
+                        showToast('Blankee is up to date.', 'success', 6000);
+                        return;
+                    }
+                    if (state.round >= UPDATE_MAX_ROUNDS) {
+                        rememberUpdate(null);
+                        updateOverlay(false);
+                        showToast('The update has not come through after '
+                                + UPDATE_MAX_ROUNDS + ' attempts. On the server: '
+                                + 'journalctl -u blankee-update', 'error', 15000);
+                        return;
+                    }
+                    waitOutUpdate({ target: wanted, round: state.round + 1 });
+                },
+                error: function() {
+                    // Still restarting, most likely. Wait out another minute
+                    // rather than deciding anything from a request that could
+                    // not be made.
+                    if (state.round >= UPDATE_MAX_ROUNDS) {
+                        rememberUpdate(null);
+                        updateOverlay(false);
+                        return;
+                    }
+                    waitOutUpdate({ target: state.target, round: state.round + 1 });
+                }
+            });
+        }
+
+        $(document).ready(resumeUpdateIfUnfinished);
+
         function startUpdate() {
             spinCheck(true);
             showToast('Update requested. This takes a minute or two.', 'info', 6000);
@@ -893,7 +1008,9 @@
                 contentType: 'application/json',
                 data: JSON.stringify({}),
                 success: function(res) {
-                    watchUpdate(res.request_id, Date.now() + 150000);
+                    const target = ((res.update || {}).latest_short)
+                                 || (((res.update || {}).run || {}).to || {}).short;
+                    waitOutUpdate({ target: target, round: 1 });
                 },
                 error: function(xhr) {
                     const res = xhr.responseJSON || {};
@@ -902,71 +1019,11 @@
                         // than queuing a second one.
                         const run = ((res.update || {}).run) || {};
                         showToast('An update is already running.', 'info');
-                        watchUpdate(run.request_id, Date.now() + 150000);
+                        waitOutUpdate({ target: (run.to || {}).short, round: 1 });
                         return;
                     }
                     spinCheck(false);
                     showToast(res.message || 'Could not request an update.', 'error', 8000);
-                }
-            });
-        }
-
-        function watchUpdate(requestId, pickupBy, errors) {
-            errors = errors || 0;
-            $.ajax({
-                url: "{{ url_for('admin_update_status') }}",
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({}),
-                success: function(res) {
-                    const u = res.update || {};
-                    const run = u.run;
-
-                    if (run && run.request_id === requestId && run.terminal) {
-                        spinCheck(false);
-                        if (!run.ok) {
-                            showToast(run.message, 'error', 12000);
-                            return;
-                        }
-                        // Confirmed by the commit the new process reports, not by
-                        // the run claiming success - the two differ if the reload
-                        // did not take.
-                        const proved = run.to && (u.commit || {}).short === run.to.short;
-                        showToast(proved ? run.message
-                                         : run.message + ' Reload this page to see it.',
-                                  'success', 8000);
-                        return;
-                    }
-                    if (run && run.stale) {
-                        spinCheck(false);
-                        showToast('The updater stopped without finishing. Check '
-                                + 'journalctl -u blankee-update on the server.', 'error', 12000);
-                        return;
-                    }
-                    // Nothing has picked the request up. Almost always means the
-                    // timer is not running, which is worth saying rather than
-                    // spinning forever.
-                    if ((!run || run.request_id !== requestId) && Date.now() > pickupBy) {
-                        spinCheck(false);
-                        showToast('The updater has not picked this up. On the server: '
-                                + 'sudo systemctl status blankee-update.timer', 'error', 12000);
-                        return;
-                    }
-                    setTimeout(function() { watchUpdate(requestId, pickupBy, 0); }, 2000);
-                },
-                error: function() {
-                    // Expected while the application is being reloaded: the
-                    // daemon process is replaced under the request. Only a long
-                    // run of failures means anything.
-                    if (errors > 40) {
-                        spinCheck(false);
-                        showToast('The site stopped answering. Check journalctl -u '
-                                + 'blankee-update on the server.', 'error', 12000);
-                        return;
-                    }
-                    setTimeout(function() {
-                        watchUpdate(requestId, pickupBy, errors + 1);
-                    }, 2000);
                 }
             });
         }
@@ -1007,10 +1064,11 @@
 
         // An update may already be running - somebody else started it, or this
         // page was reloaded mid-flight.
+        // Only when the overlay is not already driving itself from
+        // sessionStorage, or the two would each start a countdown.
         if (updateState && updateState.run && !updateState.run.terminal
-                && !updateState.run.stale) {
-            spinCheck(true);
-            watchUpdate(updateState.run.request_id, Date.now() + 150000);
+                && !updateState.run.stale && !updateMemory()) {
+            waitOutUpdate({ target: (updateState.run.to || {}).short, round: 1 });
         }
 
         // The generic .toggle-switch handler above flips the icon; this saves it.
