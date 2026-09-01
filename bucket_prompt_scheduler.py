@@ -268,8 +268,11 @@ def _email_balance(user_id, body):
             'email_notifications': row[3], 'email_notify_disabled': row[4]}
 
         from email_utils import send_notification_email_for_user
-        return send_notification_email_for_user(user, body, datetime.now(),
-                                                kind='balance_reminder')
+        # The time printed in the email is the reader's, not the server's.
+        import auto_balance
+        return send_notification_email_for_user(
+            user, body, auto_balance._user_now(user_id),
+            kind='balance_reminder')
     except Exception as e:
         log_warning(logger, 'AUTOBALANCE',
                     f"Could not email user {user_id}: {e}")
