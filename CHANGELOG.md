@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.10.4 — 2026-08-31
+
+### Fixed
+- **The rest of what 1.10.3 fixed.** Answering "not yet" moves two things: the
+  entry itself, and the forecast record it belongs to. 1.10.3 made the entry's
+  new date save; the record's did not, so the two halves of one fact ended up
+  disagreeing and the confirmation could come back for an entry already dealt
+  with. Both now move together.
+
+  The column holding the record's date is named differently from the entry's,
+  which is how it escaped the first fix.
+
+- A date revised by a bank feed after import - a payment moving from pending to
+  posted, most often - was not saved either. Nothing uses that path today, since
+  no bank provider ships with the app, but it is the same fault waiting for
+  whoever connects one.
+
 ## 1.10.3 — 2026-08-31
 
 ### Fixed
