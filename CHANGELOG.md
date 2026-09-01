@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.12.1 — 2026-09-01
+
+### Fixed
+- **The update screen sat there after the update had already finished.** It
+  waited for the wrong version to appear: which one to expect was worked out
+  before the update started, from a value that is never filled in on that
+  request, and it fell back to the version being replaced. So it compared the
+  freshly updated application against the one it had just replaced, waited ten
+  minutes, and then reported a failure that had not happened.
+
+  It now asks the updater what it actually did. It also stops straight away when
+  a run genuinely fails, instead of waiting out the full ten minutes to report
+  something already recorded, and says which version it arrived at.
+
+  Nothing was wrong with any update that appeared to hang - only with the screen
+  watching it. Closing the tab was always enough.
+
 ## 1.12.0 — 2026-08-31
 
 ### Changed

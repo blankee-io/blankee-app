@@ -964,13 +964,36 @@
                 data: JSON.stringify({}),
                 success: function(res) {
                     const u = res.update || {};
+                    const run = u.run || {};
                     const here = (u.commit || {}).short;
-                    const wanted = state.target || ((u.run || {}).to || {}).short;
+                    const wanted = (run.to || {}).short;
 
-                    if (wanted && here && here === wanted) {
+                    // A run that has finished is the answer, either way. Waiting
+                    // ten minutes to report a failure the updater already recorded
+                    // helps nobody.
+                    if (run.terminal && !run.ok) {
                         rememberUpdate(null);
                         updateOverlay(false);
-                        showToast('Blankee is up to date.', 'success', 6000);
+                        showToast(run.message || 'The update did not complete.',
+                                  'error', 15000);
+                        return;
+                    }
+                    if (run.stale) {
+                        rememberUpdate(null);
+                        updateOverlay(false);
+                        showToast('The updater stopped without finishing. On the '
+                                + 'server: journalctl -u blankee-update', 'error', 15000);
+                        return;
+                    }
+                    // Finished, and the running application reports the commit the
+                    // run was heading for. Both halves matter: the updater saying
+                    // it worked and the new code actually being served are
+                    // different things.
+                    if (run.terminal && run.ok && wanted && here && here === wanted) {
+                        rememberUpdate(null);
+                        updateOverlay(false);
+                        showToast('Updated to ' + ((run.to || {}).version || 'the latest version')
+                                + '.', 'success', 8000);
                         return;
                     }
                     if (state.round >= UPDATE_MAX_ROUNDS) {
@@ -981,7 +1004,7 @@
                                 + 'journalctl -u blankee-update', 'error', 15000);
                         return;
                     }
-                    waitOutUpdate({ target: wanted, round: state.round + 1 });
+                    waitOutUpdate({ round: state.round + 1 });
                 },
                 error: function() {
                     // Still restarting, most likely. Wait out another minute
@@ -992,7 +1015,7 @@
                         updateOverlay(false);
                         return;
                     }
-                    waitOutUpdate({ target: state.target, round: state.round + 1 });
+                    waitOutUpdate({ round: state.round + 1 });
                 }
             });
         }
@@ -1008,9 +1031,12 @@
                 contentType: 'application/json',
                 data: JSON.stringify({}),
                 success: function(res) {
-                    const target = ((res.update || {}).latest_short)
-                                 || (((res.update || {}).run || {}).to || {}).short;
-                    waitOutUpdate({ target: target, round: 1 });
+                    // No target is recorded here. The blob this returns is built
+                    // with check_remote=False, so latest_short is always null, and
+                    // the fallback picked up the *previous* run's target - which
+                    // could never match once the new one landed. The run record
+                    // written by the updater is the only thing that knows.
+                    waitOutUpdate({ round: 1 });
                 },
                 error: function(xhr) {
                     const res = xhr.responseJSON || {};
@@ -1019,7 +1045,7 @@
                         // than queuing a second one.
                         const run = ((res.update || {}).run) || {};
                         showToast('An update is already running.', 'info');
-                        waitOutUpdate({ target: (run.to || {}).short, round: 1 });
+                        waitOutUpdate({ round: 1 });
                         return;
                     }
                     spinCheck(false);
@@ -1068,7 +1094,7 @@
         // sessionStorage, or the two would each start a countdown.
         if (updateState && updateState.run && !updateState.run.terminal
                 && !updateState.run.stale && !updateMemory()) {
-            waitOutUpdate({ target: (updateState.run.to || {}).short, round: 1 });
+            waitOutUpdate({ round: 1 });
         }
 
         // The generic .toggle-switch handler above flips the icon; this saves it.
