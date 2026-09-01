@@ -216,12 +216,12 @@ def save_settings(user_id, enabled, cadence_interval, cadence_unit,
     days_of_month = _clean_monthly_days(monthly_days) if cadence_unit == 'months' else None
     at = _clean_time(notify_time)
 
-    anchor = anchor_date or date.today()
+    anchor = anchor_date or _user_today(user_id)
     if isinstance(anchor, str):
         try:
             anchor = date.fromisoformat(anchor[:10])
         except ValueError:
-            anchor = date.today()
+            anchor = _user_today(user_id)
 
     # Today counts when the cadence includes it and the time has not gone by:
     # choosing every 1 day at 8pm in the afternoon should notify this evening.
@@ -269,6 +269,11 @@ def save_settings(user_id, enabled, cadence_interval, cadence_unit,
              f"weekdays={days_of_week}, monthly_days={days_of_month}, "
              f"next due {next_due}")
     return True, 'Saved.'
+
+
+def _user_today(user_id):
+    """The user's own date. Their clock, dated - not the server's."""
+    return _user_now(user_id).date()
 
 
 def _user_now(user_id):
@@ -1031,7 +1036,7 @@ def _record_balanced(user_id, difference):
                 "UPDATE autobalance_settings "
                 "   SET last_balanced = %s, last_adjustment = %s "
                 " WHERE user_id = %s",
-                (date.today().isoformat(), str(difference), user_id))
+                (_user_today(user_id).isoformat(), str(difference), user_id))
     except Exception as e:
         log_warning(logger, 'AUTOBALANCE',
                     f"Could not record the balance for user {user_id}: {e}")

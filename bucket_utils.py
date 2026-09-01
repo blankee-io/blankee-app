@@ -1253,7 +1253,8 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
             log_warning(logger, 'BUCKET_DEBUG', f"Error reducing bucket record directly: {record_err}")
 
 
-def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount, user_id):
+def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount, user_id,
+                                        only_future=False):
     """
     Simplified bucket restoration when a manual entry is deleted.
     
@@ -1272,6 +1273,11 @@ def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount
         category_id: The category ID
         deleted_entry_amount: Amount of the deleted entry
         user_id: The user ID
+        only_future: Restore only a bucket still ahead of the user. Used when an
+            entry is moved into the future rather than deleted: a bucket whose date
+            has passed belongs to a period that is over, and putting money back into
+            it would raise a forecast nobody can act on. Deletion keeps the old
+            behaviour and restores the earliest depleted one, past or not.
         
     Returns:
         Tuple of (success: bool, bucket: dict or None)
@@ -1287,7 +1293,11 @@ def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount
     log_info(logger, 'RESTORE_BUCKET_V2', f"wage_bill={wage_bill}")
     
     bucket_table = get_bucket_table_for_entry_table(table)
-    today = date_type.today()
+    # The user's day, not the server's: whether a bucket counts as past decides
+    # whether it is restored at all, and a server ahead of the user would call
+    # today's bucket yesterday's for several hours every evening.
+    from bucket_confirmation import _user_today
+    today = _user_today(user_id)
     
     # FIRST: Check for depleted bucket records (amount < original_amount).
     # When there are multiple future buckets, the depleted one is the correct
@@ -1303,6 +1313,8 @@ def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount
                 record_date = date_type.fromisoformat(record_date)
             record_amount = float(record.get('amount', 0))
             record_original = float(record.get('original_amount', 0))
+            if only_future and record_date <= today:
+                continue
             if record_date >= lookback_date and record_amount < record_original:
                 depleted_records.append((record_date, record))
         

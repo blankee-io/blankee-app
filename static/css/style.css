@@ -3164,6 +3164,41 @@ tr[data-category-id] td.before-member-since {
     justify-content: center;
 }
 
+/* Some of a week's or month's entries settled, not all. Deliberately the same
+   badge as .paid in the same place and the same green, carrying a dash instead
+   of a tick - the tri-state checkbox convention, where a tick means all and a
+   dash means some. A different colour would read as a different kind of thing,
+   and it has to stay distinct from the grey question mark of .pending-entry,
+   which means something else entirely. */
+.partially-paid {
+    font-weight: bold;
+    position: relative;
+    /* Same stacking as .paid, for the same reason. */
+    z-index: 16;
+}
+
+.partially-paid::after {
+    z-index: 16;
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    width: 11px;
+    height: 11px;
+    font-size: 8.5px;
+    font-weight: 900;
+    pointer-events: none;
+    font-family: var(--blankee-fa-family, "Font Awesome 7 Pro");
+    /* 068 is fa-minus, present in Free and Pro alike - the same constraint the
+       tick above is written to. */
+    content: '068';
+    color: var(--white);
+    background-color: var(--success);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .pending-entry {
     font-weight: bold;
     position: relative;
@@ -17377,6 +17412,8 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
 #dashboard .paid::after,
 #dashboard-m-body .paid::after,
+#dashboard .partially-paid::after,
+#dashboard-m-body .partially-paid::after,
 #dashboard .negative::before,
 #dashboard-m-body .negative::before,
 #dashboard .below-threshold::before,

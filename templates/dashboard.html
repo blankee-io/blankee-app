@@ -642,11 +642,6 @@
         document.getElementById('loading-screen').style.display = 'flex';
     </script>
 
-    <div id="dashboard-context-menu" class="dashboard-context-menu" style="display: none; position: absolute;">
-        <ul>
-            <li id="dashboard-context-menu-set-processed">Set to Paid</li>
-        </ul>
-    </div>
 
     <!-- Include the recurring modal template -->
     {% include 'recurring_modal.html' %}
@@ -3507,12 +3502,17 @@
                             const weekKey = `${startOfWeek.toISOString()}_${entry.category_id}`; // Unique key for each week-category pair
 
                             if (!weekEntriesMap[weekKey]) {
-                                weekEntriesMap[weekKey] = { processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [] };
+                                weekEntriesMap[weekKey] = { processed: true, anyProcessed: false, hasPending: false, pendingCount: 0, totalCount: 0, cells: [] };
                             }
 
                             // Convert processed to boolean and check if all entries are processed
                             const isEntryProcessed = Number(entry.processed) === 1;
                             weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && isEntryProcessed;
+                            // partially_processed is the server saying this one rollup was itself a
+                            // mix of paid and not; isEntryProcessed covers several rollups landing
+                            // in the same cell.
+                            weekEntriesMap[weekKey].anyProcessed = weekEntriesMap[weekKey].anyProcessed || isEntryProcessed
+                                || Number(entry.partially_processed) === 1;
                             weekEntriesMap[weekKey].totalCount += (entry.total_count || 1);
                             if (Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1) {
                                 weekEntriesMap[weekKey].hasPending = true;
@@ -3537,7 +3537,7 @@
             });
 
             // After processing all entries, update the `data-processed` attribute for each week's cells
-            Object.values(weekEntriesMap).forEach(({ processed, hasPending, pendingCount, totalCount, cells }) => {
+            Object.values(weekEntriesMap).forEach(({ processed, anyProcessed, hasPending, pendingCount, totalCount, cells }) => {
 
                 // Convert to a numeric boolean for consistent logic
                 const isProcessed = Number(processed) === 1;
@@ -3549,7 +3549,7 @@
                     cell.setAttribute('data-processed', isProcessed ? '1' : '0');
 
                     // Toggle paid/pending-entry class based on state
-                    cell.classList.remove('paid', 'pending-entry');
+                    cell.classList.remove('paid', 'partially-paid', 'pending-entry');
                     cell.removeAttribute('title');
                     if (hasPending) {
                         cell.classList.add('pending-entry');
@@ -3558,6 +3558,11 @@
                     } else if (isProcessed) {
                         cell.classList.add('paid');
                         cell.title = 'All entries for this week are marked as paid';
+                    } else if (anyProcessed) {
+                        // Some settled, some not. Without this a cell three-quarters
+                        // dealt with looked exactly like one nobody had touched.
+                        cell.classList.add('partially-paid');
+                        cell.title = 'Some entries for this week are marked as paid';
                     }
                 });
             });
@@ -3571,7 +3576,7 @@
                             input.value = '';
                             td.removeAttribute('data-processed');
                             td.setAttribute('data-processed', '0');
-                            td.classList.remove('paid');
+                            td.classList.remove('paid', 'partially-paid');
                             // Remove any existing progress bar
                             const existingBar = td.querySelector('.bucket-progress-container');
                             if (existingBar) existingBar.remove();
@@ -3610,12 +3615,17 @@
                             const weekKey = `${startOfWeek.toISOString()}_${entry.category_id}`; // Unique key for each week-category pair
 
                             if (!weekEntriesMap[weekKey]) {
-                                weekEntriesMap[weekKey] = { processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [] };
+                                weekEntriesMap[weekKey] = { processed: true, anyProcessed: false, hasPending: false, pendingCount: 0, totalCount: 0, cells: [] };
                             }
 
                             // Convert processed to boolean and check if all entries are processed
                             const isEntryProcessed = Number(entry.processed) === 1;
                             weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && isEntryProcessed;
+                            // partially_processed is the server saying this one rollup was itself a
+                            // mix of paid and not; isEntryProcessed covers several rollups landing
+                            // in the same cell.
+                            weekEntriesMap[weekKey].anyProcessed = weekEntriesMap[weekKey].anyProcessed || isEntryProcessed
+                                || Number(entry.partially_processed) === 1;
                             weekEntriesMap[weekKey].totalCount += (entry.total_count || 1);
                             if (Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1) {
                                 weekEntriesMap[weekKey].hasPending = true;
@@ -3640,7 +3650,7 @@
             });
 
             // After processing all entries, update the `data-processed` attribute for each week's cells
-            Object.values(weekEntriesMap).forEach(({ processed, hasPending, pendingCount, totalCount, cells }) => {
+            Object.values(weekEntriesMap).forEach(({ processed, anyProcessed, hasPending, pendingCount, totalCount, cells }) => {
 
                 // Convert to a numeric boolean for consistent logic
                 const isProcessed = Number(processed) === 1;
@@ -3652,7 +3662,7 @@
                     cell.setAttribute('data-processed', isProcessed ? '1' : '0');
 
                     // Toggle paid/pending-entry class based on state
-                    cell.classList.remove('paid', 'pending-entry');
+                    cell.classList.remove('paid', 'partially-paid', 'pending-entry');
                     cell.removeAttribute('title');
                     if (hasPending) {
                         cell.classList.add('pending-entry');
@@ -3661,6 +3671,11 @@
                     } else if (isProcessed) {
                         cell.classList.add('paid');
                         cell.title = 'All entries for this week are marked as paid';
+                    } else if (anyProcessed) {
+                        // Some settled, some not. Without this a cell three-quarters
+                        // dealt with looked exactly like one nobody had touched.
+                        cell.classList.add('partially-paid');
+                        cell.title = 'Some entries for this week are marked as paid';
                     }
                 });
             });
@@ -3674,7 +3689,7 @@
                             input.value = '';
                             td.removeAttribute('data-processed');
                             td.setAttribute('data-processed', '0');
-                            td.classList.remove('paid');
+                            td.classList.remove('paid', 'partially-paid');
                             // Remove any existing progress bar
                             const existingBar = td.querySelector('.bucket-progress-container');
                             if (existingBar) existingBar.remove();
@@ -3722,7 +3737,7 @@
                                 // Clear processed status when no entry exists
                                 td.removeAttribute('data-processed');
                                 td.setAttribute('data-processed', '0');
-                                td.classList.remove('paid');
+                                td.classList.remove('paid', 'partially-paid');
                                 // Remove any existing progress bar
                                 const existingBar = td.querySelector('.bucket-progress-container');
                                 if (existingBar) existingBar.remove();
@@ -3732,12 +3747,17 @@
                         // Track processed status for week/category
                         const weekKey = `${startOfWeek.toISOString()}_${categoryId}`;
                         if (!weekEntriesMap[weekKey]) {
-                            weekEntriesMap[weekKey] = { processed: true, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], hasEntry: false };
+                            weekEntriesMap[weekKey] = { processed: true, anyProcessed: false, hasPending: false, pendingCount: 0, totalCount: 0, cells: [], hasEntry: false };
                         }
                         if (entry && entry.processed !== undefined) {
                             // Convert processed to boolean and check if all entries are processed
                             const isEntryProcessed = Number(entry.processed) === 1;
                             weekEntriesMap[weekKey].processed = weekEntriesMap[weekKey].processed && isEntryProcessed;
+                            // partially_processed is the server saying this one rollup was itself a
+                            // mix of paid and not; isEntryProcessed covers several rollups landing
+                            // in the same cell.
+                            weekEntriesMap[weekKey].anyProcessed = weekEntriesMap[weekKey].anyProcessed || isEntryProcessed
+                                || Number(entry.partially_processed) === 1;
                             weekEntriesMap[weekKey].totalCount += (entry.total_count || 1);
                             if (Number(entry.pending) === 1 || Number(entry.auto_confirmed) === 1) {
                                 weekEntriesMap[weekKey].hasPending = true;
@@ -3750,13 +3770,13 @@
                 });
 
                 // After processing all entries, update the `data-processed` attribute for each week's cells
-                Object.values(weekEntriesMap).forEach(({ processed, hasPending, pendingCount, totalCount, cells, hasEntry }) => {
+                Object.values(weekEntriesMap).forEach(({ processed, anyProcessed, hasPending, pendingCount, totalCount, cells, hasEntry }) => {
                     // Only mark as processed if there is at least one entry for the week/category
                     const isProcessed = Number(processed) === 1 && hasEntry;
                     cells.forEach(cell => {
                         cell.removeAttribute('data-processed');
                         cell.setAttribute('data-processed', isProcessed ? '1' : '0');
-                        cell.classList.remove('paid', 'pending-entry');
+                        cell.classList.remove('paid', 'partially-paid', 'pending-entry');
                         cell.removeAttribute('title');
                         if (hasPending) {
                             cell.classList.add('pending-entry');
@@ -3765,6 +3785,9 @@
                         } else if (isProcessed) {
                             cell.classList.add('paid');
                             cell.title = 'All entries for this week are marked as paid';
+                        } else if (anyProcessed) {
+                            cell.classList.add('partially-paid');
+                            cell.title = 'Some entries for this week are marked as paid';
                         }
                     });
                 });
@@ -5312,7 +5335,7 @@
                                 // Remove processed status from the cell
                                 td.removeAttribute('data-processed');
                                 td.setAttribute('data-processed', '0');
-                                td.classList.remove('paid');
+                                td.classList.remove('paid', 'partially-paid');
                                 updateLocalState(type, categoryId, fridayDateStr, 0, true, fridayDateStr);
                             }
                             
@@ -5479,7 +5502,7 @@
                                 input.value = '';
                                 td.removeAttribute('data-processed');
                                 td.setAttribute('data-processed', '0');
-                                td.classList.remove('paid');
+                                td.classList.remove('paid', 'partially-paid');
                                 // Remove any bucket progress bar from the deleted cell
                                 const existingBar = td.querySelector('.bucket-progress-container');
                                 if (existingBar) {
@@ -5742,68 +5765,6 @@
             }
         }
 
-        // Function to update the processed status in the global array and UI
-        function updateLocalProcessedStatus(categoryId, date, isProcessed, type) {
-            let entriesArray;
-            if (type === 'income') {
-                entriesArray = incomeEntries;
-            } else if (type === 'expense') {
-                entriesArray = expenseEntries;
-            } else if (type === 'ca') {
-                entriesArray = c_expense_entries;
-            } else {
-                return;
-            }
-            let updated = false;
-            const { startOfWeek, endOfWeek } = calculateWeekRange(date instanceof Date ? date : new Date(date));
-            let currentDate = new Date(startOfWeek);
-
-            while (currentDate <= endOfWeek) {
-                const dateString = currentDate.toISOString().split('T')[0];
-                entriesArray.forEach(entry => {
-                    let entryDateString;
-                    if (entry.date instanceof Date) {
-                        entryDateString = entry.date.toISOString().split('T')[0];
-                    } else {
-                        const parsed = new Date(entry.date);
-                        if (!isNaN(parsed)) {
-                            entryDateString = parsed.toISOString().split('T')[0];
-                        } else {
-                            entryDateString = String(entry.date);
-                        }
-                    }
-                    if (String(entry.category_id) === String(categoryId) && entryDateString === dateString) {
-                        entry.processed = isProcessed;
-                        updated = true;
-                    }
-                });
-                // Update all cells for this entry in the current month view
-                let selector;
-                if (type === 'income') {
-                    selector = `#income-table tr[data-category-id="${categoryId}"]`;
-                } else if (type === 'expense') {
-                    selector = `#expenses-table tr[data-category-id="${categoryId}"]`;
-                } else if (type === 'ca') {
-                    selector = `.cas-table tr[data-category-id="${categoryId}"]`;
-                }
-                const row = document.querySelector(selector);
-                if (row) {
-                    const cells = Array.from(row.querySelectorAll('td'));
-                    cells.forEach(cell => {
-                        if (cell.getAttribute('data-date') === dateString) {
-                            cell.setAttribute('data-processed', isProcessed ? '1' : '0');
-                            if (isProcessed) {
-                                cell.classList.add('paid');
-                            } else {
-                                cell.classList.remove('paid');
-                            }
-                        }
-                    });
-                }
-                currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-            }
-            if (!updated) return;
-        }
 
         function updateNextMonthIndicator() {
             const indicator = document.getElementById('next-indicator');
@@ -6528,220 +6489,6 @@
             document.body.addEventListener('touchend', handleTouchEnd);
         };
 
-        /////////////////////////// Set to paid menu ////////////////////////////////////////
-
-        document.addEventListener('DOMContentLoaded', function () {
-            const contextMenu = document.getElementById('dashboard-context-menu');
-            const setProcessedOption = document.getElementById('dashboard-context-menu-set-processed');
-            let currentCell = null;
-            let pressTimer; // Timer for detecting long press
-            let longPressTriggered = false; // Flag to track if long press was triggered
-
-            // Ensure we are targeting the correct body in both the income and expense tables
-            const incomeCategoriesBody = document.querySelector('#income-table #income-categories-body');
-            const expenseCategoriesBody = document.querySelector('#expenses-table #expense-categories-body');
-
-            if (!incomeCategoriesBody && !expenseCategoriesBody) {
-                return;
-            }
-
-            // Add right-click and long-press listeners for each CA table
-            document.querySelectorAll('tbody[id^="ca-categories-body-"]').forEach(caBody => {
-                addRightClickListener(caBody, 'ca');
-                addLongPressListener(caBody);
-            });
-
-            // Function to toggle "Paid/Unpaid" status directly on long press
-            function togglePaidStatus(targetCell) {
-                currentCell = targetCell;
-
-                const categoryId = currentCell.closest('tr').getAttribute('data-category-id');
-                const cellDateStr = currentCell.getAttribute('data-date');
-
-                // --- Detect table type: income, expense, or ca ---
-                let tableType = null;
-                let accountId = null;
-                const tbody = currentCell.closest('tbody');
-                if (tbody && tbody.id.startsWith('income')) {
-                    tableType = 'income';
-                } else if (tbody && tbody.id.startsWith('expense')) {
-                    tableType = 'expense';
-                } else if (tbody && tbody.id.startsWith('ca-categories-body-')) {
-                    tableType = 'ca';
-                    accountId = tbody.id.replace('ca-categories-body-', '');
-                }
-
-                // Block toggle if entry is locked by bank sync
-                if (isEntryLockedByBankSync(cellDateStr, categoryId, tableType, accountId)) {
-                    return;
-                }
-
-                const processed = currentCell.getAttribute('data-processed') === '1';
-                const newProcessed = processed ? '0' : '1';
-
-                currentCell.setAttribute('data-processed', newProcessed);
-
-                const fridayDate = new Date(cellDateStr);
-                const { startOfWeek, endOfWeek } = calculateWeekRange(fridayDate);
-
-                // AJAX call to update the backend with the new processed status
-                $.ajax({
-                    url: '/update-processed-status-week-range',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({
-                        category_id: categoryId,
-                        category_type: tableType,
-                        start_date: startOfWeek.toISOString().split('T')[0],
-                        end_date: endOfWeek.toISOString().split('T')[0],
-                        processed: newProcessed
-                    }),
-                    success: function (response) {
-                        if (response.status === 'success') {
-                            // Update local data
-                            if (tableType === 'income') {
-                                updateLocalProcessedStatus(categoryId, fridayDate, Number(newProcessed), 'income');
-                                // Recalculate aggregated processed status for all weeks
-                                populateIncomeData();
-                            } else if (tableType === 'expense') {
-                                updateLocalProcessedStatus(categoryId, fridayDate, Number(newProcessed), 'expense');
-                                // Recalculate aggregated processed status for all weeks
-                                populateExpenseData();
-                            } else if (tableType === 'ca') {
-                                updateLocalProcessedStatus(categoryId, fridayDate, Number(newProcessed), 'ca');
-                                // Recalculate aggregated processed status for all weeks
-                                populateCaData();
-                            }
-                        } else {
-                        }
-                    },
-                    error: function (error) {
-                    }
-                });
-            }
-
-            // Function to add right-click event listener to the table cells
-            function addRightClickListener(bodyElement, tableType) {
-                bodyElement.addEventListener('contextmenu', function (event) {
-                    const targetCell = event.target.closest('td'); // Ensure we're targeting a <td>
-                    if (!targetCell) {
-                        return; // Not a cell, ignore
-                    }
-
-                    // Check bank lock before showing context menu
-                    const categoryId = targetCell.closest('tr')?.getAttribute('data-category-id');
-                    const cellDateStr = targetCell.getAttribute('data-date');
-                    let accountId = null;
-                    if (tableType === 'ca') {
-                        const tbody = targetCell.closest('tbody');
-                        accountId = tbody ? tbody.id.replace('ca-categories-body-', '') : null;
-                    }
-                    if (isEntryLockedByBankSync(cellDateStr, categoryId, tableType, accountId)) {
-                        return; // Allow default context menu for locked entries
-                    }
-
-                    event.preventDefault();
-                    event.stopPropagation();
-
-                    // Store the current cell that was right-clicked
-                    currentCell = targetCell;
-
-                    // Get the processed value from the cell
-                    const processed = currentCell.getAttribute('data-processed') === '1';
-                    setProcessedOption.textContent = processed ? 'Set to Unpaid' : 'Set to Paid';
-
-                    // Show the custom context menu at the position of the right-click
-                    showContextMenu(event, contextMenu);
-                });
-            }
-
-            // Function to handle long-press event on dashboard-d amount cells (mobile)
-            function addLongPressListener(bodyElement) {
-                bodyElement.addEventListener('touchstart', function (event) {
-                    const targetCell = event.target.closest('td'); // Ensure we're targeting a <td>
-                    if (!targetCell) {
-                        return;
-                    }
-
-                    // Check bank lock before allowing long-press toggle
-                    const categoryId = targetCell.closest('tr')?.getAttribute('data-category-id');
-                    const cellDateStr = targetCell.getAttribute('data-date');
-                    let lockTableType = null;
-                    let accountId = null;
-                    const tbody = targetCell.closest('tbody');
-                    if (tbody && tbody.id.startsWith('income')) {
-                        lockTableType = 'income';
-                    } else if (tbody && tbody.id.startsWith('expense')) {
-                        lockTableType = 'expense';
-                    } else if (tbody && tbody.id.startsWith('ca-categories-body-')) {
-                        lockTableType = 'ca';
-                        accountId = tbody.id.replace('ca-categories-body-', '');
-                    }
-                    if (isEntryLockedByBankSync(cellDateStr, categoryId, lockTableType, accountId)) {
-                        return;
-                    }
-
-                    longPressTriggered = false; // Reset the flag
-
-                    pressTimer = setTimeout(() => {
-                        longPressTriggered = true; // Set the flag when the long press action is triggered
-                        togglePaidStatus(targetCell); // Directly toggle Paid/Unpaid on long press
-                    }, 500); // 500ms for long press duration
-                });
-
-                bodyElement.addEventListener('touchend', function (event) {
-                    clearTimeout(pressTimer); // Clear the timer if touch ends before 500ms
-
-                    if (longPressTriggered) {
-                        event.preventDefault(); // Prevent the default click action if a long press was triggered
-                    }
-                });
-
-                bodyElement.addEventListener('touchmove', function () {
-                    clearTimeout(pressTimer); // Clear the timer if the user moves their finger
-                });
-            }
-
-            // Prevent click and focus from firing after a long press
-            document.addEventListener('click', function (event) {
-                if (longPressTriggered) {
-                    event.preventDefault(); // Prevent the default click action if long press was triggered
-                    longPressTriggered = false; // Reset the flag for future interactions
-                }
-            });
-
-            // Prevent focus from triggering after a long press (this avoids contenteditable)
-            document.addEventListener('focusin', function (event) {
-                if (longPressTriggered) {
-                    event.preventDefault(); // Prevent focus if a long press occurred
-                    event.target.blur(); // Immediately blur to stop contenteditable activation
-                }
-            });
-
-            // Add right-click listener to both the income and expense categories bodies
-            if (incomeCategoriesBody) {
-                addRightClickListener(incomeCategoriesBody, 'income');
-                addLongPressListener(incomeCategoriesBody); // Add long press listener for income cells
-            }
-
-            if (expenseCategoriesBody) {
-                addRightClickListener(expenseCategoriesBody, 'expense');
-                addLongPressListener(expenseCategoriesBody); // Add long press listener for expense cells
-            }
-
-            // Hide the context menu when clicking anywhere else
-            document.addEventListener('click', function () {
-                contextMenu.style.display = 'none';
-            });
-
-            // Handle the context menu option click (Set to Paid/Unpaid)
-            setProcessedOption.addEventListener('click', function () {
-                if (currentCell) {
-                    togglePaidStatus(currentCell);
-                    contextMenu.style.display = 'none';
-                }
-            });
-        });
 
         // Floating outline for current-week column
         document.addEventListener('DOMContentLoaded', function () {
@@ -6957,43 +6704,6 @@
             });
         });
 
-        // Function to show the context menu with dynamic position and corner rounding
-        function showContextMenu(event, contextMenu) {
-            // Get viewport width and menu width
-            const menuWidth = contextMenu.offsetWidth || 160; // fallback width if not rendered yet
-            const menuHeight = contextMenu.offsetHeight || 30;
-            const padding = 8; // space from edge
-            const viewportWidth = window.innerWidth;
-            const viewportHeight = window.innerHeight;
-            let left, top;
-            let openToLeft = false;
-
-            // Calculate vertical position (keep inside viewport)
-            top = event.pageY;
-            if (top + menuHeight + padding > viewportHeight) {
-                top = viewportHeight - menuHeight - padding;
-            }
-
-                // Open to the left
-                left = event.pageX - menuWidth;
-                openToLeft = true;
-                if (left < padding) left = padding;
-
-            // Set menu position
-            contextMenu.style.display = 'block';
-            contextMenu.style.left = `${left}px`;
-            contextMenu.style.top = `${top}px`;
-
-            // Remove both corner classes first
-            contextMenu.classList.remove('context-top-left-square');
-            contextMenu.classList.remove('context-top-right-square');
-            // Add the correct class for the unrounded corner
-            if (openToLeft) {
-                contextMenu.classList.add('context-top-right-square');
-            } else {
-                contextMenu.classList.add('context-top-left-square');
-            }
-        }
 
         // --- Month/Year Dropdowns Setup ---
         function setupMonthYearDropdowns() {
