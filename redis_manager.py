@@ -2341,6 +2341,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INSERT INTO recurring_income_buckets (id, user_id, category_id, bucket_date, amount, original_amount)
                         VALUES (%s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
+                            bucket_date = VALUES(bucket_date),
                             amount = VALUES(amount),
                             original_amount = VALUES(original_amount)
                     """, update_data)
@@ -2447,6 +2448,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INSERT INTO recurring_expense_buckets (id, user_id, category_id, bucket_date, amount, original_amount)
                         VALUES (%s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
+                            bucket_date = VALUES(bucket_date),
                             amount = VALUES(amount),
                             original_amount = VALUES(original_amount)
                     """, update_data)
@@ -2555,6 +2557,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         INSERT INTO recurring_c_expense_buckets (id, user_id, account_id, category_id, bucket_date, amount, original_amount)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
+                            bucket_date = VALUES(bucket_date),
                             amount = VALUES(amount),
                             original_amount = VALUES(original_amount)
                     """, update_data)
@@ -3222,6 +3225,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                      provider_created_date)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
+                        date = VALUES(date),
                         description = VALUES(description),
                         amount = VALUES(amount),
                         category = VALUES(category),
