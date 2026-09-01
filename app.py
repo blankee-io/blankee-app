@@ -5107,6 +5107,12 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
             if match_entry_id is not None:
                 # Match by specific entry ID
                 if entry.get('id') is not None and int(entry.get('id')) == int(match_entry_id):
+                    # The date too. Matching by id identifies the row; every
+                    # other argument describes what that row should now say, and
+                    # the date is what a move changes. The two callers that
+                    # predate this pass the row's existing date, so nothing moves
+                    # that was not asked to.
+                    entry['date'] = entry_date_str
                     entry['amount'] = float(amount)
                     entry['processed'] = int(processed)
                     if bud_item_id is not None:
@@ -5399,7 +5405,21 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
         # Write filtered entries back to Redis
         _set_entries_to_redis(table_name, user_id, filtered_entries)
         
-        # Track pending deletions to prevent MySQL fallback from resurrecting them
+        # Track pending deletions to prevent MySQL fallback from resurrecting them.
+        #
+        # Only ids that are genuinely gone from the list being written back. An id
+        # that is still present belongs to a row that still exists - and marking
+        # it would delete that row the next time the cache went cold, because the
+        # MySQL fallback filters by id and writes the filtered list back, after
+        # which the flush worker removes the MySQL row as an orphan.
+        #
+        # That is not hypothetical: move_entry_d used to write the moved entry at
+        # its new date under its original id and then delete the old date, so the
+        # id it marked was the id of the row it had just written. The entry
+        # vanished on the next cache miss. The caller is fixed; this makes the
+        # mistake unrepeatable.
+        surviving_ids = {e.get('id') for e in filtered_entries if e.get('id') is not None}
+        deleted_ids = [i for i in deleted_ids if i not in surviving_ids]
         if deleted_ids:
             pending_key = f"pending_deletes:{table_name}:{user_id}"
             _redis_client.sadd(pending_key, *deleted_ids)
@@ -8641,10 +8661,19 @@ def move_entry_d():
                     # Delete old entry
                     _delete_entry_in_redis('income_entries', current_user.id, category_id, old_date, old_date)
                 else:
-                    # Update date on existing entry
-                    _update_entry_in_redis('income_entries', current_user.id, category_id, new_date, float(amount), entry_id=int(entry_id))
-                    # Delete old date entry
-                    _delete_entry_in_redis('income_entries', current_user.id, category_id, old_date, old_date)
+                    # Move the row rather than copying it and deleting the
+                    # original. The two looked equivalent and were not:
+                    # _delete_entry_in_redis records the removed id in
+                    # pending_deletes:<table>:<user_id> so that a MySQL fallback
+                    # cannot resurrect it, and the row written at the new date
+                    # carried that same id - so _filter_pending_deletions, which
+                    # every read path calls, filtered the moved entry out. The
+                    # entry was still in Redis and still in MySQL, and invisible
+                    # for the seven-day life of that key. Moving it again just
+                    # added the id a second time.
+                    _update_entry_in_redis('income_entries', current_user.id, category_id,
+                                           new_date, float(amount),
+                                           match_entry_id=int(entry_id))
 
             elif entry_type == 'expense':
                 # Get entries from Redis first
@@ -8702,10 +8731,19 @@ def move_entry_d():
                     # Delete old entry
                     _delete_entry_in_redis('expense_entries', current_user.id, category_id, old_date, old_date)
                 else:
-                    # Update date on existing entry
-                    _update_entry_in_redis('expense_entries', current_user.id, category_id, new_date, float(amount), entry_id=int(entry_id))
-                    # Delete old date entry
-                    _delete_entry_in_redis('expense_entries', current_user.id, category_id, old_date, old_date)
+                    # Move the row rather than copying it and deleting the
+                    # original. The two looked equivalent and were not:
+                    # _delete_entry_in_redis records the removed id in
+                    # pending_deletes:<table>:<user_id> so that a MySQL fallback
+                    # cannot resurrect it, and the row written at the new date
+                    # carried that same id - so _filter_pending_deletions, which
+                    # every read path calls, filtered the moved entry out. The
+                    # entry was still in Redis and still in MySQL, and invisible
+                    # for the seven-day life of that key. Moving it again just
+                    # added the id a second time.
+                    _update_entry_in_redis('expense_entries', current_user.id, category_id,
+                                           new_date, float(amount),
+                                           match_entry_id=int(entry_id))
 
                 # If is_credit_account, trigger CA balance update
                 if is_credit == 1:
@@ -8767,10 +8805,19 @@ def move_entry_d():
                     # Delete old entry
                     _delete_entry_in_redis('c_expense_entries', current_user.id, category_id, old_date, old_date)
                 else:
-                    # Update date on existing entry
-                    _update_entry_in_redis('c_expense_entries', current_user.id, category_id, new_date, float(amount), entry_id=int(entry_id))
-                    # Delete old date entry
-                    _delete_entry_in_redis('c_expense_entries', current_user.id, category_id, old_date, old_date)
+                    # Move the row rather than copying it and deleting the
+                    # original. The two looked equivalent and were not:
+                    # _delete_entry_in_redis records the removed id in
+                    # pending_deletes:<table>:<user_id> so that a MySQL fallback
+                    # cannot resurrect it, and the row written at the new date
+                    # carried that same id - so _filter_pending_deletions, which
+                    # every read path calls, filtered the moved entry out. The
+                    # entry was still in Redis and still in MySQL, and invisible
+                    # for the seven-day life of that key. Moving it again just
+                    # added the id a second time.
+                    _update_entry_in_redis('c_expense_entries', current_user.id, category_id,
+                                           new_date, float(amount),
+                                           match_entry_id=int(entry_id))
                 
                 ca_triggered = True
 
