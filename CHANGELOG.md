@@ -8,6 +8,60 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.12.0 — 2026-08-31
+
+### Changed
+- **Entries are no longer marked paid by hand.** Right-clicking an amount, or
+  holding it on a phone, used to offer "Set to Paid". The evening prompt now asks
+  whether each forecast entry happened, and answering yes is what marks it - so
+  there were two ways to say the same thing, and the older one was a gesture
+  nothing in the app mentioned.
+
+  The green tick stays. Paid stops being something you assert and becomes
+  something the app knows because you told it, in the one place it asks.
+
+  Two things go with it: marking a whole week or month paid in one gesture, and
+  un-marking. A wrong paid state is now corrected by editing the entry.
+
+- **Moving an entry into the future returns it to being a forecast.** It becomes
+  unpaid again and gives back whatever it had consumed - but only to a forecast
+  still ahead of you. One whose date has passed belongs to a period that is over,
+  and adding money back to it would raise a projection for days you cannot spend
+  in. Moving an entry to today or into the past changes only its date: what
+  happened, happened.
+
+### Added
+- **A week or month that is partly paid now looks it.** Those views only ever
+  showed the tick when every entry underneath was paid, so three of four settled
+  looked exactly like none. A dash now means some, a tick means all.
+
+- **Test a Purchase says when, not just whether.** Alongside the amount it now
+  gives the date a purchase would put you under, how long you would stay under,
+  and the date of your lowest balance. When the forecast runs out before you
+  recover it says so, rather than implying a recovery it cannot see.
+
+### Fixed
+- **Dates are now the ones on your calendar, not the server's.** Fifty-seven
+  places decided what "today" was by asking the machine the app runs on. On a
+  server set to UTC - which is most of them, and every Docker one - that is
+  tomorrow for the last several hours of the day in the Americas, which is why
+  editing a recurring entry could refuse in the evening and work again in the
+  morning.
+
+  It affected far more than that one message: which entries counted as forecasts,
+  which the recurring pages showed, what deleting a category or a bud considered
+  past, the dates new accounts were seeded with, and when the balance reminder
+  thought it was due.
+
+  Timestamps that record when the server did something are unchanged, as is the
+  password-reset expiry, where reading one side in a different zone would have
+  broken resets in exactly the places this helps.
+
+- Editing or moving an entry no longer quietly marks it unpaid.
+- An entry typed on the weekly grid is now born with the same paid state as the
+  same entry typed on the day view.
+- Confirming an entry shows its tick straight away instead of on the next reload.
+
 ## 1.11.1 — 2026-08-31
 
 ### Fixed

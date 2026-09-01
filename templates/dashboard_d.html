@@ -136,11 +136,6 @@
     <!-- Include the recurring modal template -->
     {% include 'loading_modals.html' %}
 
-    <div id="dashboard-context-menu" class="dashboard-context-menu" style="display: none; position: absolute;">
-        <ul>
-            <li id="dashboard-context-menu-set-processed">Set to Paid</li>
-        </ul>
-    </div>    
 
     <!-- Include the navigation bar -->
 
@@ -2386,6 +2381,22 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                         if (response.updated_buckets && response.updated_buckets.length > 0) {
                             updateLocalEntryAfterAdd(entryType, formData, false, response.updated_buckets);
                         }
+                        // The row was drawn before this answered, with data-processed="0".
+                        // A past-dated entry is money already spent and comes back paid,
+                        // so correct the row rather than leaving it to the next reload.
+                        if (typeof response.processed !== 'undefined') {
+                            const addedDate = new Date(formData.date).toISOString().split('T')[0];
+                            const addedRow = document.querySelector(
+                                `.dashboard-d-row[data-category-id="${formData.category}"][data-date="${addedDate}"]`);
+                            const addedCell = addedRow && addedRow.querySelector('.dashboard-d-amount-cell');
+                            if (addedCell) {
+                                const addedInput = addedCell.querySelector('input');
+                                if (addedInput) {
+                                    addedInput.setAttribute('data-processed', response.processed ? '1' : '0');
+                                }
+                                addedCell.classList.toggle('paid', !!response.processed);
+                            }
+                        }
                         // Local entry already updated, just save totals and remainders
                         saveDailyTotalsAndRemainders(formData.date);
                         if (typeof callback === "function") callback(response);
@@ -2407,274 +2418,6 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             });
         }
     
-        /////////////////////////// Set to paid menu ////////////////////////////////////////
-
-        document.addEventListener('DOMContentLoaded', function () {
-            const contextMenu = document.getElementById('dashboard-context-menu');
-            const setProcessedOption = document.getElementById('dashboard-context-menu-set-processed');
-            let currentCell = null;
-            let pressTimer; // Timer for detecting long press
-            let longPressTriggered = false; // Flag to track if long press was triggered
-
-            // Ensure the main container is found
-            const mainContainer = document.getElementById('main-container');
-            if (!mainContainer) {
-                return;
-            }
-
-            // Function to toggle "Paid/Unpaid" status directly on long press
-            function togglePaidStatus(targetCell) {
-                currentCell = targetCell;
-                const input = currentCell.querySelector('input');
-                if (!input) return;
-
-                // Gather necessary data for the request
-                const row = currentCell.closest('.dashboard-d-row');
-                const entryId = row.getAttribute('data-entry-id');
-                const categoryId = row.getAttribute('data-category-id');
-                const entryDateStr = row.getAttribute('data-date');
-                const entryDate = new Date(entryDateStr);
-
-                // Detect type: income, expense, or ca
-                let tableType;
-                let accountId = null;
-                if (row.classList.contains('dashboard-d-credit-row')) {
-                    tableType = 'ca';
-                    accountId = row.getAttribute('data-account-id') || (row.closest('.dashboard-d-credit-account')?.getAttribute('data-account-id'));
-                } else if (row.closest('.dashboard-d-income-entries')) {
-                    tableType = 'income';
-                } else {
-                    tableType = 'expense';
-                }
-
-                // Block toggle if entry is locked by bank sync
-                if (isEntryLockedByBankSync(entryDateStr, categoryId, tableType, accountId)) {
-                    return;
-                }
-
-                const processed = input.getAttribute('data-processed') === '1';
-                const newProcessed = processed ? '0' : '1';
-
-                // AJAX call to update the backend with the new processed status
-                $.ajax({
-                    url: '/update-processed-status-d-entry',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({
-                        entry_id: entryId,
-                        category_id: categoryId,
-                        category_type: tableType,
-                        entry_date: entryDate.toISOString().split('T')[0],
-                        processed: newProcessed
-                    }),
-                    success: function (response) {
-                        if (response.status === 'success') {
-                            // Update local data
-                            if (tableType === 'income') {
-                                updateLocalProcessedStatus(categoryId, entryDate, Number(newProcessed), 'income');
-                            } else if (tableType === 'expense') {
-                                updateLocalProcessedStatus(categoryId, entryDate, Number(newProcessed), 'expense');
-                            } else if (tableType === 'ca') {
-                                updateLocalProcessedStatus(categoryId, entryDate, Number(newProcessed), 'ca');
-                            }
-
-                            // Update the UI by adding/removing the 'paid' class based on the new processed status
-                            input.setAttribute('data-processed', newProcessed);
-                            if (newProcessed === '1') {
-                                input.classList.add('paid');
-                            } else {
-                                input.classList.remove('paid');
-                            }
-                        } else {
-                        }
-                    },
-                    error: function (error) {
-                    }
-                });
-            }
-
-            // Function to handle right-click event on dashboard-d amount cells (desktop)
-            function addRightClickListener() {
-                mainContainer.addEventListener('contextmenu', function (event) {
-                    const targetCell = event.target.closest('.dashboard-d-amount-cell');
-                    if (!targetCell) {
-                        return;
-                    }
-                    // Allow context menu for cells inside income, expense, or credit account entries
-                    const parentSection = targetCell.closest('.dashboard-d-income-entries, .dashboard-d-expense-entries, .dashboard-d-credit-account');
-                    if (!parentSection) {
-                        return;
-                    }
-
-                    // Check bank lock before showing context menu
-                    const row = targetCell.closest('.dashboard-d-row');
-                    if (row) {
-                        const categoryId = row.getAttribute('data-category-id');
-                        const entryDateStr = row.getAttribute('data-date');
-                        let tableType, accountId = null;
-                        if (row.classList.contains('dashboard-d-credit-row')) {
-                            tableType = 'ca';
-                            accountId = row.getAttribute('data-account-id') || (row.closest('.dashboard-d-credit-account')?.getAttribute('data-account-id'));
-                        } else if (parentSection.classList.contains('dashboard-d-income-entries')) {
-                            tableType = 'income';
-                        } else {
-                            tableType = 'expense';
-                        }
-                        if (isEntryLockedByBankSync(entryDateStr, categoryId, tableType, accountId)) {
-                            return; // Allow default context menu for locked entries
-                        }
-                    }
-
-                    event.preventDefault();
-                    event.stopPropagation();
-
-                    currentCell = targetCell;
-
-                    const input = currentCell.querySelector('input');
-                    const processed = input && input.getAttribute('data-processed') === '1';
-                    setProcessedOption.textContent = processed ? 'Set to Unpaid' : 'Set to Paid';
-
-                    showContextMenu(event, contextMenu);
-                });
-            }
-
-            // Function to handle long-press event on dashboard-d amount cells (mobile)
-            function addLongPressListener() {
-                mainContainer.addEventListener('touchstart', function (event) {
-                    const targetCell = event.target.closest('.dashboard-d-amount-cell');
-                    if (!targetCell) {
-                        return;
-                    }
-
-                    // Check bank lock before allowing long-press toggle
-                    const row = targetCell.closest('.dashboard-d-row');
-                    if (row) {
-                        const categoryId = row.getAttribute('data-category-id');
-                        const entryDateStr = row.getAttribute('data-date');
-                        let tableType, accountId = null;
-                        if (row.classList.contains('dashboard-d-credit-row')) {
-                            tableType = 'ca';
-                            accountId = row.getAttribute('data-account-id') || (row.closest('.dashboard-d-credit-account')?.getAttribute('data-account-id'));
-                        } else if (row.closest('.dashboard-d-income-entries')) {
-                            tableType = 'income';
-                        } else {
-                            tableType = 'expense';
-                        }
-                        if (isEntryLockedByBankSync(entryDateStr, categoryId, tableType, accountId)) {
-                            return;
-                        }
-                    }
-
-                    longPressTriggered = false; // Reset the flag
-
-                    pressTimer = setTimeout(() => {
-                        togglePaidStatus(targetCell); // Directly toggle Paid/Unpaid on long press
-                        longPressTriggered = true; // Set the flag when the long press action is triggered
-                    }, 500); // 500ms for long press duration
-                });
-
-                mainContainer.addEventListener('touchend', function (event) {
-                    clearTimeout(pressTimer); // Clear the timer if touch ends before 500ms
-
-                    if (longPressTriggered) {
-                        event.preventDefault(); // Prevent the click event if a long press was triggered
-                    }
-                });
-
-                mainContainer.addEventListener('touchmove', function () {
-                    clearTimeout(pressTimer); // Clear the timer if the user moves their finger
-                });
-            }
-
-            // Prevent click and focus from firing after a long press
-            mainContainer.addEventListener('click', function (event) {
-                if (longPressTriggered) {
-                    event.preventDefault(); // Prevent the default click action if long press was triggered
-                    longPressTriggered = false; // Reset the flag for future interactions
-                }
-            });
-
-            // Prevent focus from triggering after a long press (this avoids contenteditable)
-            mainContainer.addEventListener('focusin', function (event) {
-                if (longPressTriggered) {
-                    event.preventDefault(); // Prevent focus if a long press occurred
-                    event.target.blur(); // Immediately blur to stop contenteditable activation
-                }
-            });
-
-            // Add right-click listener to the dashboard-d cells (for desktop)
-            addRightClickListener();
-
-            // Add long-press listener to the dashboard-d cells (for mobile)
-            addLongPressListener();
-
-            // Hide the context menu when clicking anywhere else
-            document.addEventListener('click', function () {
-                contextMenu.style.display = 'none';
-            });
-
-            // Handle the context menu option click (Set to Paid/Unpaid)
-            setProcessedOption.addEventListener('click', function () {
-                if (currentCell) {
-                    togglePaidStatus(currentCell);
-                    contextMenu.style.display = 'none';
-                }
-            });
-        });
-
-        // Function to update the processed status in the global array and UI
-        function updateLocalProcessedStatus(categoryId, date, isProcessed, type) {
-            // type: 'income', 'expense', or 'ca'
-            let entriesArray;
-            if (type === 'income') {
-                entriesArray = incomeEntries;
-            } else if (type === 'expense') {
-                entriesArray = expenseEntries;
-            } else if (type === 'ca') {
-                entriesArray = c_expense_entries;
-            }
-            let updated = false;
-            // Normalize the date to YYYY-MM-DD
-            const dateObj = date instanceof Date ? date : new Date(date);
-            const dateString = dateObj.toISOString().split('T')[0];
-
-            // Update the processed status in the data array
-            entriesArray.forEach(entry => {
-                let entryDateString;
-                if (entry.date instanceof Date) {
-                    entryDateString = entry.date.toISOString().split('T')[0];
-                } else {
-                    const parsed = new Date(entry.date);
-                    if (!isNaN(parsed)) {
-                        entryDateString = parsed.toISOString().split('T')[0];
-                    } else {
-                        entryDateString = String(entry.date);
-                    }
-                }
-                if (String(entry.category_id) === String(categoryId) && entryDateString === dateString) {
-                    entry.processed = isProcessed;
-                    updated = true;
-                }
-            });
-
-            // Update the UI cell for this entry and date
-            const selector = `.dashboard-d-row[data-category-id="${categoryId}"][data-date="${dateString}"]`;
-            const row = document.querySelector(selector);
-            if (row) {
-                const cell = row.querySelector('.dashboard-d-amount-cell');
-                if (cell) {
-                    const input = cell.querySelector('input');
-                    if (input) {
-                        input.setAttribute('data-processed', isProcessed ? '1' : '0');
-                    }
-                    if (isProcessed) {
-                        cell.classList.add('paid');
-                    } else {
-                        cell.classList.remove('paid');
-                    }
-                }
-            }
-        }
 
         function updateNextWeekIndicator() {
             const indicator = document.getElementById('next-indicator');
@@ -2721,50 +2464,6 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             }
         }
 
-        // Function to show the context menu with dynamic position and corner rounding
-        function showContextMenu(event, contextMenu) {
-            // Only allow context menu for amount cells that are NOT in the credit account balance row
-            const cell = event.target.closest('.dashboard-d-amount-cell');
-            if (!cell) return;
-
-            // Exclude credit account balance rows
-            const isBalanceRow = (cell.parentElement.classList.contains('dashboard-d-credit-balance') || 
-                (cell.parentElement.classList.contains('dashboard-d-credit-row') &&
-                cell.previousElementSibling &&
-                cell.previousElementSibling.textContent.trim() === 'Balance:'));
-            if (isBalanceRow) return;
-
-            // Position the menu so its top right corner is at the mouse click
-            const menuWidth = contextMenu.offsetWidth || 160;
-            const menuHeight = contextMenu.offsetHeight || 40;
-            const padding = 8;
-
-            let left = event.pageX - menuWidth;
-            let top = event.pageY;
-
-            // Prevent menu from going off the left edge
-            if (left < 0) left = 0;
-            // Prevent menu from going off the bottom edge
-            const viewportHeight = window.innerHeight + window.scrollY;
-            if (top + menuHeight > viewportHeight) {
-                top = viewportHeight - menuHeight - padding;
-            }
-
-            contextMenu.style.display = 'block';
-            contextMenu.style.left = `${left}px`;
-            contextMenu.style.top = `${top}px`;
-
-            contextMenu.classList.remove('context-top-left-square');
-            contextMenu.classList.remove('context-top-right-square');
-            contextMenu.classList.add('context-top-right-square');
-        }
-
-        // Disable right-click context menu on all dashboard-d-container elements
-        mainContainer.addEventListener('contextmenu', function(event) {
-            if (event.target.closest('.dashboard-d-container')) {
-                event.preventDefault();
-            }
-        }, true);
 
         $(function() {
             var $toggle = $('#nav-dropdown-toggle');

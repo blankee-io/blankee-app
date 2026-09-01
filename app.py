@@ -18,7 +18,7 @@ from log_config import JsonFormatter, get_logger, log_info, log_error, log_warni
 logger = get_logger(__name__)
 
 from flask import (Flask, render_template, request, redirect, url_for, session,
-                   flash, send_file, abort, Response)
+                   flash, send_file, abort, Response, g)
 from flask_bcrypt import Bcrypt
 from flask import jsonify
 from datetime import date as datetime_date, date, datetime, timedelta
@@ -1304,7 +1304,7 @@ def create_totals_remainders_for_new_user(user_id):
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor()
 
-        today = date.today()
+        today = _user_today_for(user_id)
 
         # Create entries for weekly totals (totals_remainders) for 1 year back and up to 3 years forward
         one_year_back = date(today.year - 1, 1, 1)  # Start from January 1st of last year
@@ -2000,7 +2000,7 @@ def complete_profile_setup():
         _update_user_setting_in_redis(current_user.id, 'currency_type', currency_type)
         
         # Set member_since to TODAY (when user completed setup)
-        member_since_date = date.today().strftime('%Y-%m-%d')
+        member_since_date = _user_today_for(current_user.id).strftime('%Y-%m-%d')
         log_info(logger, 'SETUP_PROFILE', f"Setting member_since to: {member_since_date}")
         _update_user_setting_in_redis(current_user.id, 'member_since', member_since_date)
         
@@ -2353,8 +2353,8 @@ def login():
                 """, (user_obj.id,))
                 last_ca_monthly_date = cursor.fetchone()[0]
 
-                cutoff_date = date.today().replace(month=12, day=31, year=date.today().year + 3)
-                year_3 = date.today().year + 3
+                cutoff_date = _user_today_for(user_obj.id).replace(month=12, day=31, year=_user_today_for(user_obj.id).year + 3)
+                year_3 = _user_today_for(user_obj.id).year + 3
 
                 # 1. Check income categories with no_end_date = 1
                 cursor.execute("""
@@ -2388,7 +2388,7 @@ def login():
                                 'amount': rec[1],
                                 'cadence_interval': rec[2],
                                 'cadence_unit': rec[3],
-                                'start_date': date.today().strftime('%Y-%m-%d'),
+                                'start_date': _user_today_for(user_obj.id).strftime('%Y-%m-%d'),
                                 'end_date': date(year_3, 12, 31).strftime('%Y-%m-%d'),
                                 'weekdays': rec[5].split(',') if rec[5] else [],
                                 'monthly_days': [int(x) for x in rec[6].split(',')] if rec[6] else [],
@@ -2431,7 +2431,7 @@ def login():
                                 'amount': rec[1],
                                 'cadence_interval': rec[2],
                                 'cadence_unit': rec[3],
-                                'start_date': date.today().strftime('%Y-%m-%d'),
+                                'start_date': _user_today_for(user_obj.id).strftime('%Y-%m-%d'),
                                 'end_date': date(year_3, 12, 31).strftime('%Y-%m-%d'),
                                 'weekdays': rec[5].split(',') if rec[5] else [],
                                 'monthly_days': [int(x) for x in rec[6].split(',')] if rec[6] else [],
@@ -2474,7 +2474,7 @@ def login():
                                 'amount': rec[1],
                                 'cadence_interval': rec[2],
                                 'cadence_unit': rec[3],
-                                'start_date': date.today().strftime('%Y-%m-%d'),
+                                'start_date': _user_today_for(user_obj.id).strftime('%Y-%m-%d'),
                                 'end_date': date(year_3, 12, 31).strftime('%Y-%m-%d'),
                                 'weekdays': rec[5].split(',') if rec[5] else [],
                                 'monthly_days': [int(x) for x in rec[6].split(',')] if rec[6] else [],
@@ -2598,7 +2598,7 @@ def add_one_year_of_fridays(user_id):
         end_date = find_nearest_friday(end_date, round_up=True)
 
         # Do not go beyond Dec 31st, 3 years from the current year
-        max_end_date = date(date.today().year + 3, 12, 31)
+        max_end_date = date(_user_today_for(user_id).year + 3, 12, 31)
         end_date = min(end_date, max_end_date)
 
         current_date = start_date
@@ -2627,7 +2627,7 @@ def add_one_year_of_days(user_id):
 
         if last_day is None:
             # No records found, you may want to handle this case (e.g., initialize from today)
-            last_day = date.today()
+            last_day = _user_today_for(user_id)
 
         # Add one day to get the first day to insert
         start_date = last_day + timedelta(days=1)
@@ -2636,7 +2636,7 @@ def add_one_year_of_days(user_id):
         end_date = date(start_date.year + 1, 12, 31)
 
         # Do not go beyond Dec 31st, 3 years from the current year
-        max_end_date = date(date.today().year + 3, 12, 31)
+        max_end_date = date(_user_today_for(user_id).year + 3, 12, 31)
         end_date = min(end_date, max_end_date)
 
         current_date = start_date
@@ -2664,7 +2664,7 @@ def add_one_year_of_months(user_id):
 
         if last_month is None:
             # No records found, you may want to handle this case (e.g., initialize from today)
-            last_month = date.today().replace(day=1)
+            last_month = _user_today_for(user_id).replace(day=1)
 
         # Add one month to get the first month to insert
         if isinstance(last_month, datetime):
@@ -2682,7 +2682,7 @@ def add_one_year_of_months(user_id):
         end_month = date(start_month.year + 1, 12, 31)
 
         # Do not go beyond Dec 31st, 3 years from the current year
-        max_end_date = date(date.today().year + 3, 12, 31)
+        max_end_date = date(_user_today_for(user_id).year + 3, 12, 31)
         end_month = min(end_month, max_end_date)
 
         current_month = start_month
@@ -2719,11 +2719,11 @@ def add_one_year_of_savings(user_id):
         last_day = cursor.fetchone()[0]
 
         if last_day is None:
-            last_day = date.today()
+            last_day = _user_today_for(user_id)
 
         start_date = last_day + timedelta(days=1)
         end_date = date(start_date.year + 1, 12, 31)
-        max_end_date = date(date.today().year + 3, 12, 31)
+        max_end_date = date(_user_today_for(user_id).year + 3, 12, 31)
         end_date = min(end_date, max_end_date)
 
         current_date = start_date
@@ -2750,12 +2750,12 @@ def add_one_year_of_ca_fridays(user_id):
             cursor.execute("SELECT MAX(date) FROM c_a_balances WHERE account_id = %s", (account_id,))
             last_friday = cursor.fetchone()[0]
             if last_friday is None:
-                last_friday = date.today()
+                last_friday = _user_today_for(user_id)
             start_date = last_friday + timedelta(weeks=1)
             end_date = date(start_date.year + 1, 12, 31)
             # Find the nearest Friday for the end date
             end_date = find_nearest_friday(end_date, round_up=True)
-            max_end_date = date(date.today().year + 3, 12, 31)
+            max_end_date = date(_user_today_for(user_id).year + 3, 12, 31)
             end_date = min(end_date, max_end_date)
             current_date = start_date
             while current_date <= end_date:
@@ -2777,10 +2777,10 @@ def add_one_year_of_ca_days(user_id):
             cursor.execute("SELECT MAX(date) FROM c_a_balances_d WHERE account_id = %s", (account_id,))
             last_day = cursor.fetchone()[0]
             if last_day is None:
-                last_day = date.today()
+                last_day = _user_today_for(user_id)
             start_date = last_day + timedelta(days=1)
             end_date = date(start_date.year + 1, 12, 31)
-            max_end_date = date(date.today().year + 3, 12, 31)
+            max_end_date = date(_user_today_for(user_id).year + 3, 12, 31)
             end_date = min(end_date, max_end_date)
             current_date = start_date
             while current_date <= end_date:
@@ -2802,7 +2802,7 @@ def add_one_year_of_ca_months(user_id):
         cursor.execute("SELECT MAX(date) FROM c_a_balances_m WHERE account_id = %s", (account_id,))
         last_month = cursor.fetchone()[0]
         if last_month is None:
-            last_month = date.today().replace(day=1)
+            last_month = _user_today_for(user_id).replace(day=1)
         if isinstance(last_month, datetime):
             last_month = last_month.date()
         year = last_month.year
@@ -2814,7 +2814,7 @@ def add_one_year_of_ca_months(user_id):
             month += 1
         start_month = date(year, month, 1)
         end_month = date(start_month.year + 1, 12, 31)
-        max_end_date = date(date.today().year + 3, 12, 31)
+        max_end_date = date(_user_today_for(user_id).year + 3, 12, 31)
         end_month = min(end_month, max_end_date)
         current_month = start_month
         while current_month <= end_month:
@@ -3475,7 +3475,7 @@ def dashboard_d_add_entry():
             entry_date_parsed = date_type.fromisoformat(entry_date)
         else:
             entry_date_parsed = entry_date
-        today = date_type.today()
+        today = _user_today_for(current_user.id)
         
         # Future entries become buckets, and so does today - but only when a bank
         # feed exists to confirm it. See _bucket_cutoff_date.
@@ -3607,7 +3607,12 @@ def dashboard_d_add_entry():
     # Get updated bucket information to return to frontend
     updated_buckets = _get_updated_buckets_from_redis(table_name, current_user.id, category_id, 'day', entry_date)
 
-    return jsonify({"status": "success", "updated_buckets": updated_buckets})
+    # processed is reported back because the row is drawn optimistically, before
+    # this answers - the page cannot know whether the date it just sent counted as
+    # a forecast or as money already spent, and guessing would be a second copy of
+    # _bucket_cutoff_date's rule waiting to disagree with it.
+    return jsonify({"status": "success", "updated_buckets": updated_buckets,
+                    "processed": entry_processed})
 
 
 @app.route('/dashboard-d/get_categories', methods=['GET'])
@@ -3776,68 +3781,6 @@ def update_totals_for_day():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/update-processed-status-d-entry', methods=['POST'])
-@login_required
-def update_processed_status_d_entry():
-    from redis_crud import get_entries, bulk_update_entries
-    from datetime import datetime
-    
-    data = request.json
-    category_id = data.get('category_id')
-    category_type = data.get('category_type')  # 'income', 'expense', or 'ca'
-    entry_date = data.get('entry_date')
-    processed = data.get('processed')
-
-    if not category_id or not entry_date or processed is None:
-        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
-
-    try:
-        # Determine the table name
-        if category_type == 'income':
-            table_name = 'income_entries'
-        elif category_type == 'expense':
-            table_name = 'expense_entries'
-        elif category_type == 'ca':
-            table_name = 'c_expense_entries'
-        else:
-            return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
-
-        # Get all entries for this category (Redis-first)
-        all_entries = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
-        
-        
-        # Normalize the target date
-        target_date = datetime.strptime(entry_date, '%Y-%m-%d').date() if isinstance(entry_date, str) else entry_date
-        
-        # Filter entries by date (handle both string and date object formats)
-        entries = []
-        for entry in all_entries:
-            entry_date_obj = entry.get('date')
-            if isinstance(entry_date_obj, str):
-                entry_date_obj = datetime.strptime(entry_date_obj, '%Y-%m-%d').date()
-            
-            if entry_date_obj == target_date:
-                entries.append(entry)
-        
-        
-        if not entries:
-            return jsonify({'status': 'success', 'message': 'No entries found for this date'})
-        
-        # Prepare bulk update
-        updates = [{'id': entry['id'], 'processed': processed} for entry in entries]
-        
-        # Update using Redis-first approach
-        success = bulk_update_entries(table_name, updates, user_id=current_user.id)
-        
-        if success:
-            pass
-            return jsonify({'status': 'success'})
-        else:
-            return jsonify({'status': 'error', 'message': 'Failed to update processed status'}), 500
-
-    except Exception as e:
-        log_exception(app.logger, 'ENTRY', f"Error in update_processed_status_d_entry: {str(e)}")
-        return jsonify({'status': 'error', 'message': 'Failed to update processed status'}), 500
 
 @app.route('/get_dashboard_d_data')
 @login_required
@@ -5037,7 +4980,7 @@ def _set_entries_to_redis(table_name, user_id, data):
     except Exception as e:
         pass
 
-def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount, processed=0, entry_id=None, bud_item_id=None, is_bucket=False, original_amount=None, recurring_id=None, is_auto_adjustment=False, match_entry_id=None):
+def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount, processed=None, entry_id=None, bud_item_id=None, is_bucket=None, original_amount=None, recurring_id=None, is_auto_adjustment=False, match_entry_id=None):
     """
     Update or insert a single entry in Redis cache.
     
@@ -5047,10 +4990,20 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
         category_id: Category ID
         entry_date: Entry date (date object or string)
         amount: Entry amount
-        processed: Processed flag (0 or 1)
+        processed: Paid flag (0 or 1), or None to leave an existing entry's alone.
+            None is the default because most callers are editing one field and have
+            no opinion about paid. It used to default to 0, so every caller that did
+            not mention it silently marked the entry unpaid - which is how editing
+            or moving a paid entry cleared it. A new entry with no opinion is still
+            created unpaid.
         entry_id: Existing entry ID (if updating) or None (will generate)
         bud_item_id: Optional bud_item_id for expense entries
-        is_bucket: Whether this is a bucket entry from recurring
+        is_bucket: Whether this is a bucket entry from recurring. None leaves an
+            existing entry's flag alone, which is what every caller that has no
+            opinion wants; a new entry with no opinion is still created is_bucket=0.
+            Only the match_entry_id path can change it, because that path names one
+            row - the legacy category+date match uses this value to *find* the row
+            and so cannot also change it.
         original_amount: Original amount for bucket tracking
         recurring_id: Optional recurring entry ID
         is_auto_adjustment: Whether this is a nightly auto-adjustment entry
@@ -5114,7 +5067,10 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
                     # that was not asked to.
                     entry['date'] = entry_date_str
                     entry['amount'] = float(amount)
-                    entry['processed'] = int(processed)
+                    if processed is not None:
+                        entry['processed'] = int(processed)
+                    if is_bucket is not None:
+                        entry['is_bucket'] = 1 if is_bucket else 0
                     if bud_item_id is not None:
                         entry['bud_item_id'] = int(bud_item_id)
                     if original_amount is not None:
@@ -5128,7 +5084,8 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
                     bool(entry.get('is_bucket', 0)) == bool(is_bucket)):
                     # Update existing entry
                     entry['amount'] = float(amount)
-                    entry['processed'] = int(processed)
+                    if processed is not None:
+                        entry['processed'] = int(processed)
                     if bud_item_id is not None:
                         entry['bud_item_id'] = int(bud_item_id)
                     found = True
@@ -5147,7 +5104,7 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
                 'date': entry_date_str,
                 'amount': float(amount),
                 'recurring_id': int(recurring_id) if recurring_id is not None else None,
-                'processed': int(processed),
+                'processed': int(processed) if processed is not None else 0,
                 'is_bucket': 1 if is_bucket else 0,
                 'is_auto_adjustment': 1 if is_auto_adjustment else 0
             }
@@ -5961,7 +5918,7 @@ def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=
         return
     
     if from_date is None:
-        from_date = datetime.today().date()
+        from_date = _user_now_for(user_id).date()
     elif isinstance(from_date, str):
         from_date = datetime.strptime(from_date, '%Y-%m-%d').date()
     
@@ -6303,7 +6260,7 @@ def _sync_delete_to_credit_accounts(user_id, category_name):
         return
     
     deleted_count = 0
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = _user_today_for(user_id) - timedelta(days=1)
     
     # Get all c_expense_categories from Redis
     c_categories = _get_categories_from_redis('c_expense_categories', user_id)
@@ -8245,7 +8202,7 @@ def save_totals_remainders_d():
                 cursor = conn.cursor()
                 cursor.execute("SELECT MIN(date) FROM totals_remainders_d WHERE user_id = %s", (user_id,))
                 min_date_row = cursor.fetchone()
-                start_date = min_date_row[0] if min_date_row and min_date_row[0] else date.today()
+                start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(current_user.id)
                 cursor.close()
 
         date_to_remainder = {}
@@ -8458,7 +8415,7 @@ def save_ca_daily_balance():
                     WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
                 """, (user_id,))
                 min_date_row = cursor.fetchone()
-                start_date = min_date_row[0] if min_date_row and min_date_row[0] else date.today()
+                start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(current_user.id)
                 cursor.close()
 
         # Update CA balances (daily, weekly, monthly) - these now update Redis automatically
@@ -8591,6 +8548,53 @@ def save_ca_daily_balance():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
     
+def _move_returns_to_forecast(user_id, entry, new_date):
+    """
+    Whether moving this entry to new_date turns it back into a forecast.
+
+    Only a real entry moving past today. A bucket is already a forecast, and a
+    move to today or into the past changes the date and nothing else - paid stays
+    paid, and whatever the entry consumed stays consumed. Money that has moved has
+    moved; putting a different date on it does not undo that.
+
+    The boundary is tomorrow, deliberately, and not _bucket_cutoff_date(). The two
+    differ for a user with a synced checking account, where the cutoff is today -
+    so an entry moved onto today keeps its paid state even though a newly typed
+    entry on that date would be born a forecast. That asymmetry is intended: one
+    is a record of something that happened, the other is a guess about something
+    that has not.
+    """
+    if int(entry.get('is_bucket') or 0) == 1:
+        return False
+    try:
+        target = datetime.strptime(str(new_date)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return False
+    return target > _user_today_for(user_id)
+
+
+def _restore_forecast_for_moved_entry(table, user_id, category_id, amount):
+    """
+    Give back what the moved entry had consumed - but only to a bucket still ahead.
+
+    A bucket whose date has passed belongs to a period that is over. Putting money
+    back into it would raise a forecast for days nobody can spend in, and every
+    subsequent move would raise it again. A bucket still ahead is different: the
+    spending has not happened, so the forecast should be whole.
+
+    Best-effort. Failing to restore leaves the forecast low, which is the safe
+    direction to be wrong in, and must not stop the move itself.
+    """
+    try:
+        from bucket_utils import restore_bucket_for_deleted_entry_v2
+        restore_bucket_for_deleted_entry_v2(table, category_id, float(amount), user_id,
+                                            only_future=True)
+    except Exception as e:
+        log_warning(logger, 'MOVE_ENTRY',
+                    f"Could not restore the forecast for moved entry in {table} "
+                    f"category {category_id}: {e}")
+
+
 @app.route('/move_entry_d', methods=['POST'])
 @login_required
 def move_entry_d():
@@ -8671,9 +8675,30 @@ def move_entry_d():
                     # entry was still in Redis and still in MySQL, and invisible
                     # for the seven-day life of that key. Moving it again just
                     # added the id a second time.
+                    # Past today this stops being a record and becomes a forecast
+                    # again: unpaid, and whatever it consumed handed back.
+                    to_forecast = _move_returns_to_forecast(current_user.id, entry_to_move, new_date)
+                    if to_forecast:
+                        _restore_forecast_for_moved_entry('income_entries', current_user.id,
+                                                          category_id, float(amount))
                     _update_entry_in_redis('income_entries', current_user.id, category_id,
                                            new_date, float(amount),
-                                           match_entry_id=int(entry_id))
+                                           match_entry_id=int(entry_id),
+                                           is_bucket=True if to_forecast else None,
+                                           processed=0 if to_forecast else None,
+                                           original_amount=float(amount) if to_forecast else None)
+                    if to_forecast:
+                        # The record half of a bucket. Best-effort, like every other
+                        # place that writes one: an entry without its record still
+                        # shows and still confirms, it just logs when it does.
+                        try:
+                            from recurring_bucket_manager import create_bucket_record
+                            create_bucket_record('income_entries', current_user.id, category_id,
+                                                 new_date, float(amount))
+                        except Exception as e:
+                            log_warning(logger, 'MOVE_ENTRY',
+                                        f"Moved entry became a forecast but its bucket "
+                                        f"record was not created: {e}")
 
             elif entry_type == 'expense':
                 # Get entries from Redis first
@@ -8741,9 +8766,30 @@ def move_entry_d():
                     # entry was still in Redis and still in MySQL, and invisible
                     # for the seven-day life of that key. Moving it again just
                     # added the id a second time.
+                    # Past today this stops being a record and becomes a forecast
+                    # again: unpaid, and whatever it consumed handed back.
+                    to_forecast = _move_returns_to_forecast(current_user.id, entry_to_move, new_date)
+                    if to_forecast:
+                        _restore_forecast_for_moved_entry('expense_entries', current_user.id,
+                                                          category_id, float(amount))
                     _update_entry_in_redis('expense_entries', current_user.id, category_id,
                                            new_date, float(amount),
-                                           match_entry_id=int(entry_id))
+                                           match_entry_id=int(entry_id),
+                                           is_bucket=True if to_forecast else None,
+                                           processed=0 if to_forecast else None,
+                                           original_amount=float(amount) if to_forecast else None)
+                    if to_forecast:
+                        # The record half of a bucket. Best-effort, like every other
+                        # place that writes one: an entry without its record still
+                        # shows and still confirms, it just logs when it does.
+                        try:
+                            from recurring_bucket_manager import create_bucket_record
+                            create_bucket_record('expense_entries', current_user.id, category_id,
+                                                 new_date, float(amount))
+                        except Exception as e:
+                            log_warning(logger, 'MOVE_ENTRY',
+                                        f"Moved entry became a forecast but its bucket "
+                                        f"record was not created: {e}")
 
                 # If is_credit_account, trigger CA balance update
                 if is_credit == 1:
@@ -8815,9 +8861,39 @@ def move_entry_d():
                     # entry was still in Redis and still in MySQL, and invisible
                     # for the seven-day life of that key. Moving it again just
                     # added the id a second time.
+                    # Past today this stops being a record and becomes a forecast
+                    # again: unpaid, and whatever it consumed handed back.
+                    to_forecast = _move_returns_to_forecast(current_user.id, entry_to_move, new_date)
+                    if to_forecast:
+                        _restore_forecast_for_moved_entry('c_expense_entries', current_user.id,
+                                                          category_id, float(amount))
                     _update_entry_in_redis('c_expense_entries', current_user.id, category_id,
                                            new_date, float(amount),
-                                           match_entry_id=int(entry_id))
+                                           match_entry_id=int(entry_id),
+                                           is_bucket=True if to_forecast else None,
+                                           processed=0 if to_forecast else None,
+                                           original_amount=float(amount) if to_forecast else None)
+                    if to_forecast:
+                        # The record half of a bucket. Best-effort, like every other
+                        # place that writes one: an entry without its record still
+                        # shows and still confirms, it just logs when it does.
+                        try:
+                            from recurring_bucket_manager import create_bucket_record
+                            # A credit bucket record is scoped to the card, and the
+                            # account lives on the category rather than the entry.
+                            # Without it the record is created orphaned.
+                            cursor.execute(
+                                "SELECT account_id FROM c_expense_categories WHERE id = %s",
+                                (category_id,))
+                            acct_row = cursor.fetchone()
+                            acct_id = (acct_row.get('account_id') if isinstance(acct_row, dict)
+                                       else (acct_row[0] if acct_row else None))
+                            create_bucket_record('c_expense_entries', current_user.id, category_id,
+                                                 new_date, float(amount), account_id=acct_id)
+                        except Exception as e:
+                            log_warning(logger, 'MOVE_ENTRY',
+                                        f"Moved entry became a forecast but its bucket "
+                                        f"record was not created: {e}")
                 
                 ca_triggered = True
 
@@ -8881,7 +8957,7 @@ def delete_income_category():
         if not auto_adj_id:
             return jsonify({'status': 'error', 'message': 'Uncategorized category not found'}), 400
 
-        today = date.today()
+        today = _user_today_for(current_user.id)
 
         # 2. Handle entries in MySQL BEFORE deleting category (CASCADE would destroy them)
         with get_db_pool().get_connection() as conn:
@@ -9005,7 +9081,7 @@ def delete_expense_category():
         if not auto_adj_id:
             return jsonify({'status': 'error', 'message': 'Uncategorized category not found'}), 400
 
-        today = date.today()
+        today = _user_today_for(current_user.id)
 
         # 2. Handle entries in MySQL BEFORE deleting category (CASCADE would destroy them)
         with get_db_pool().get_connection() as conn:
@@ -9133,7 +9209,7 @@ def delete_ca_category():
         
         # Recurring category: Convert to non-recurring
         # 1. Remove future entries (today and onward) from Redis
-        today = date.today()
+        today = _user_today_for(current_user.id)
         category_id_int = int(category_id)
         
         entries = _get_entries_from_redis('c_expense_entries', current_user.id)
@@ -9495,7 +9571,77 @@ def _user_today_for(user_id):
     good part of their day.
     """
     import bucket_confirmation
-    return bucket_confirmation._user_today(user_id)
+    if user_id is None:
+        return date.today()
+    # One lookup per request. Each call is a SELECT on users, and this is now
+    # asked several times while rendering a single page.
+    try:
+        cache = g._user_today_cache
+    except AttributeError:
+        cache = g._user_today_cache = {}
+    except RuntimeError:
+        return bucket_confirmation._user_today(user_id)   # outside a request
+    key = int(user_id)
+    if key not in cache:
+        cache[key] = bucket_confirmation._user_today(user_id)
+    return cache[key]
+
+
+def _user_now_for(user_id):
+    """
+    The user's own wall clock, as a naive datetime in their zone.
+
+    Naive on purpose: it stands in for datetime.now() at call sites that go on to
+    do arithmetic and comparisons against other naive values, and mixing an aware
+    datetime into those raises rather than being merely wrong. auto_balance._user_now
+    returns an aware one, so the tzinfo is dropped here rather than there, where
+    the awareness is wanted.
+    """
+    import auto_balance
+    if user_id is None:
+        return datetime.now()
+    try:
+        cache = g._user_now_cache
+    except AttributeError:
+        cache = g._user_now_cache = {}
+    except RuntimeError:
+        return auto_balance._user_now(user_id).replace(tzinfo=None)
+    key = int(user_id)
+    if key not in cache:
+        cache[key] = auto_balance._user_now(user_id).replace(tzinfo=None)
+    return cache[key]
+
+
+RECURRING_TABLES = ('recurring_income', 'recurring_expense', 'recurring_c_expense')
+
+
+def _recurring_start_date(table, recurring_id, user_id):
+    """
+    The start date a recurring already has, or None. Redis-first.
+
+    Used to tell "this start date is in the past" from "this start date is being
+    moved into the past". Only the second is worth refusing: the first describes
+    every recurring that has been running a while, and refusing it means its
+    amount can never be corrected without also changing the day it began.
+    """
+    if table not in RECURRING_TABLES:
+        raise ValueError(f'unknown recurring table {table}')
+
+    cached = _get_recurring_from_redis(table, user_id)
+    if cached:
+        for rec in cached:
+            if int(rec.get('id')) == int(recurring_id):
+                stored = rec.get('start_date')
+                return str(stored)[:10] if stored else None
+
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT start_date FROM {table} WHERE id = %s AND user_id = %s",
+            (recurring_id, user_id))
+        row = cursor.fetchone()
+        cursor.close()
+    return str(row[0])[:10] if row and row[0] else None
 
 
 def _bucket_cutoff_date(user_id):
@@ -9537,7 +9683,7 @@ def _bucket_cutoff_date(user_id):
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    now = datetime.now()
+    now = _user_now_for(current_user.id)
     fridays_by_month = {}
 
     # Fetch user data including goofy_week_mode, profile_picture, first_name, last_name, and balance_threshold
@@ -9707,6 +9853,11 @@ def dashboard():
             processed_list = processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
+            # Some but not all. A cell with three of four paid looked exactly like
+            # one with none paid, and partly-dealt-with is the state a person most
+            # wants to see.
+            partially_processed = 1 if (processed_flags and any(processed_flags)
+                                        and not all(processed_flags)) else 0
             category_id, week_key = key
             bucket_info = bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
@@ -9714,6 +9865,7 @@ def dashboard():
                 'date': week_key,
                 'total_amount': total_amount,
                 'processed': processed,
+                'partially_processed': partially_processed,
                 'pending': 1 if pending_count_map.get(key) else 0,
                 'pending_count': pending_count_map.get(key, 0),
                 'total_count': total_count_map.get(key, 0)
@@ -9781,6 +9933,11 @@ def dashboard():
             processed_list = expense_processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
+            # Some but not all. A cell with three of four paid looked exactly like
+            # one with none paid, and partly-dealt-with is the state a person most
+            # wants to see.
+            partially_processed = 1 if (processed_flags and any(processed_flags)
+                                        and not all(processed_flags)) else 0
             category_id, week_key = key
             bucket_info = expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
@@ -9788,6 +9945,7 @@ def dashboard():
                 'date': week_key,
                 'total_amount': total_amount,
                 'processed': processed,
+                'partially_processed': partially_processed,
                 'pending': 1 if expense_pending_count_map.get(key) else 0,
                 'pending_count': expense_pending_count_map.get(key, 0),
                 'total_count': expense_total_count_map.get(key, 0)
@@ -9857,6 +10015,11 @@ def dashboard():
             processed_list = c_expense_processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
+            # Some but not all. A cell with three of four paid looked exactly like
+            # one with none paid, and partly-dealt-with is the state a person most
+            # wants to see.
+            partially_processed = 1 if (processed_flags and any(processed_flags)
+                                        and not all(processed_flags)) else 0
             category_id, week_key = key
             bucket_info = c_expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
@@ -9864,6 +10027,7 @@ def dashboard():
                 'date': week_key,
                 'total_amount': total_amount,
                 'processed': processed,
+                'partially_processed': partially_processed,
                 'pending': 1 if c_expense_pending_count_map.get(key) else 0,
                 'pending_count': c_expense_pending_count_map.get(key, 0),
                 'total_count': c_expense_total_count_map.get(key, 0)
@@ -11835,90 +11999,6 @@ def check_and_initialize_totals():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
     
-@app.route('/update-processed-status-week-range', methods=['POST'])
-@login_required
-def update_processed_status_week_range():
-    from redis_crud import get_entries, bulk_update_entries
-    from datetime import datetime
-    
-    data = request.get_json()
-    category_id = data.get('category_id')
-    category_type = data.get('category_type')  # 'income', 'expense', or 'ca'
-    start_date = data.get('start_date')
-    end_date = data.get('end_date')
-    processed = data.get('processed')
-
-    if not category_id or not category_type or not start_date or not end_date or processed is None:
-        return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
-
-    try:
-        # Determine the table name
-        if category_type == 'income':
-            table_name = 'income_entries'
-        elif category_type == 'expense':
-            table_name = 'expense_entries'
-        elif category_type == 'ca':
-            table_name = 'c_expense_entries'
-        else:
-            return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
-
-        # Parse dates
-        start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
-        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
-        
-        # Get all entries for this category (Redis-first)
-        all_entries = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
-        
-        
-        # Filter entries within date range
-        entries_to_update = []
-        for entry in all_entries:
-            entry_date = entry.get('date')
-            # Handle both date objects and string dates
-            if isinstance(entry_date, str):
-                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
-            
-            if start_date_obj <= entry_date <= end_date_obj:
-                entries_to_update.append(entry)
-        
-        
-        if not entries_to_update:
-            return jsonify({'status': 'success', 'message': 'No entries found in date range'})
-        
-        # Prepare bulk update - convert processed to int
-        processed_int = int(processed)
-        updates = [{'id': entry['id'], 'processed': processed_int} for entry in entries_to_update]
-        
-        # Update using Redis-first approach
-        success = bulk_update_entries(table_name, updates, user_id=current_user.id)
-        
-        if success:
-            pass
-            
-            # Calculate if all entries in this date range for this category are now processed
-            all_entries_in_range = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
-            entries_in_date_range = []
-            for entry in all_entries_in_range:
-                entry_date = entry.get('date')
-                if isinstance(entry_date, str):
-                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
-                if start_date_obj <= entry_date <= end_date_obj:
-                    entries_in_date_range.append(entry)
-            
-            # Check if all entries are processed - convert to int for comparison
-            all_processed = all(int(entry.get('processed', 0)) == 1 for entry in entries_in_date_range) if entries_in_date_range else False
-            
-            return jsonify({
-                'status': 'success',
-                'all_processed': all_processed,
-                'entries_updated': len(updates)
-            })
-        else:
-            return jsonify({'status': 'error', 'message': 'Failed to update entries'}), 500
-
-    except Exception as e:
-        log_exception(app.logger, 'ENTRY', f"Error in update_processed_status_week_range: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
     
 @app.route('/hide_income_category', methods=['POST'])
 @login_required
@@ -12191,7 +12271,7 @@ def update_week_entry():
         entry_date_parsed = date_type.fromisoformat(entry_date)
     else:
         entry_date_parsed = entry_date
-    today = date_type.today()
+    today = _user_today_for(current_user.id)
     entry_is_bucket = entry_date_parsed >= today
     
     # Check for bucket entries and deplete them if this is a recurring category OR has manual buckets
@@ -12289,8 +12369,17 @@ def update_week_entry():
     # If delta is 0 (or amount is 0), don't create a new entry (just delete old ones)
     if delta_amount != 0:
         pass
+        # processed mirrors is_bucket, the same rule /dashboard-d/add_entry uses: a
+        # forecast is unpaid, a real entry is money that has already moved. Derived
+        # from entry_is_bucket rather than recomputed from a date, so it cannot
+        # disagree with the boundary this route deliberately keeps (see above).
+        #
+        # Omitting it used to mean processed=0 by default, so the same past-dated
+        # entry was born paid when typed on the day view and unpaid when typed
+        # here - and once the manual toggle went, there was no way to correct it.
         _update_entry_in_redis(table_name, current_user.id, category_id, entry_date, delta_amount,
-                              is_bucket=entry_is_bucket, original_amount=delta_amount if entry_is_bucket else None)
+                              is_bucket=entry_is_bucket, original_amount=delta_amount if entry_is_bucket else None,
+                              processed=0 if entry_is_bucket else 1)
         
         # Create bucket record for future-dated entries
         if entry_is_bucket:
@@ -12360,7 +12449,7 @@ def update_week_entry():
 @app.route('/dashboard_3m')
 @login_required
 def dashboard_3m():
-    now = datetime.now()
+    now = _user_now_for(current_user.id)
     fridays_by_month = {}
 
     # Fetch user data using connection pool
@@ -12499,6 +12588,11 @@ def dashboard_3m():
             processed_list = processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
+            # Some but not all. A cell with three of four paid looked exactly like
+            # one with none paid, and partly-dealt-with is the state a person most
+            # wants to see.
+            partially_processed = 1 if (processed_flags and any(processed_flags)
+                                        and not all(processed_flags)) else 0
             category_id, month_end = key
             bucket_info = bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
@@ -12506,6 +12600,7 @@ def dashboard_3m():
                 'date': month_end,
                 'total_amount': total_amount,
                 'processed': processed,
+                'partially_processed': partially_processed,
                 'pending': 1 if pending_count_map.get(key) else 0,
                 'pending_count': pending_count_map.get(key, 0),
                 'total_count': total_count_map.get(key, 0)
@@ -12570,6 +12665,11 @@ def dashboard_3m():
             processed_list = expense_processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
+            # Some but not all. A cell with three of four paid looked exactly like
+            # one with none paid, and partly-dealt-with is the state a person most
+            # wants to see.
+            partially_processed = 1 if (processed_flags and any(processed_flags)
+                                        and not all(processed_flags)) else 0
             category_id, month_end = key
             expense_bucket_info = expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
@@ -12577,6 +12677,7 @@ def dashboard_3m():
                 'date': month_end,
                 'total_amount': total_amount,
                 'processed': processed,
+                'partially_processed': partially_processed,
                 'pending': 1 if expense_pending_count_map.get(key) else 0,
                 'pending_count': expense_pending_count_map.get(key, 0),
                 'total_count': expense_total_count_map.get(key, 0)
@@ -12643,6 +12744,11 @@ def dashboard_3m():
             processed_list = c_expense_processed_map[key]
             processed_flags = [_processed_flag_is_true(p) for p in processed_list]
             processed = 1 if processed_flags and all(processed_flags) else 0
+            # Some but not all. A cell with three of four paid looked exactly like
+            # one with none paid, and partly-dealt-with is the state a person most
+            # wants to see.
+            partially_processed = 1 if (processed_flags and any(processed_flags)
+                                        and not all(processed_flags)) else 0
             category_id, month_end = key
             c_expense_bucket_info = c_expense_bucket_info_map.get(key, {'has_bucket': False, 'bucket_amount': 0, 'original_amount': 0, 'max_days_late': 0})
             entry_data = {
@@ -12650,6 +12756,7 @@ def dashboard_3m():
                 'date': month_end,
                 'total_amount': total_amount,
                 'processed': processed,
+                'partially_processed': partially_processed,
                 'pending': 1 if c_expense_pending_count_map.get(key) else 0,
                 'pending_count': c_expense_pending_count_map.get(key, 0),
                 'total_count': c_expense_total_count_map.get(key, 0)
@@ -13196,88 +13303,6 @@ def get_ca_balances_3m_batch():
         return jsonify({'status': 'error', 'message': 'Internal Server Error'}), 500
 
 
-@app.route('/update-processed-status-month-range', methods=['POST'])
-@login_required
-def update_processed_status_month_range():
-    from redis_crud import get_entries, bulk_update_entries
-    from datetime import datetime
-    
-    data = request.get_json()
-    category_id = data.get('category_id')
-    category_type = data.get('category_type')  # 'income' or 'expense'
-    start_date = data.get('start_date')
-    end_date = data.get('end_date')
-    processed = data.get('processed')
-
-    if not category_id or not category_type or not start_date or not end_date or processed is None:
-        return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
-
-    try:
-        # Determine the table name
-        if category_type == 'income':
-            table_name = 'income_entries'
-        elif category_type == 'expense':
-            table_name = 'expense_entries'
-        else:
-            return jsonify({'status': 'error', 'message': 'Invalid category type'}), 400
-
-        # Parse dates
-        start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
-        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
-        
-        # Get all entries for this category (Redis-first)
-        all_entries = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
-        
-        
-        # Filter entries within date range
-        entries_to_update = []
-        for entry in all_entries:
-            entry_date = entry.get('date')
-            # Handle both date objects and string dates
-            if isinstance(entry_date, str):
-                entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
-            
-            if start_date_obj <= entry_date <= end_date_obj:
-                entries_to_update.append(entry)
-        
-        
-        if not entries_to_update:
-            return jsonify({'status': 'success', 'message': 'No entries found in date range'})
-        
-        # Prepare bulk update - convert processed to int
-        processed_int = int(processed)
-        updates = [{'id': entry['id'], 'processed': processed_int} for entry in entries_to_update]
-        
-        # Update using Redis-first approach
-        success = bulk_update_entries(table_name, updates, user_id=current_user.id)
-        
-        if success:
-            pass
-            
-            # Calculate if all entries in this date range for this category are now processed
-            all_entries_in_range = get_entries(table_name, {'category_id': int(category_id)}, user_id=current_user.id)
-            entries_in_date_range = []
-            for entry in all_entries_in_range:
-                entry_date = entry.get('date')
-                if isinstance(entry_date, str):
-                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
-                if start_date_obj <= entry_date <= end_date_obj:
-                    entries_in_date_range.append(entry)
-            
-            # Check if all entries are processed - convert to int for comparison
-            all_processed = all(int(entry.get('processed', 0)) == 1 for entry in entries_in_date_range) if entries_in_date_range else False
-            
-            return jsonify({
-                'status': 'success',
-                'all_processed': all_processed,
-                'entries_updated': len(updates)
-            })
-        else:
-            return jsonify({'status': 'error', 'message': 'Failed to update entries'}), 500
-
-    except Exception as e:
-        log_exception(app.logger, 'ENTRY', f"Error in update_processed_status_month_range: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 ########################################################################################
 ############################### DASHBOARD MONTH OVERVIEW ###############################
@@ -18285,7 +18310,7 @@ def recurring_income():
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
 
     # Calculate December 31st, 3 years from now
-    current_date = date.today()
+    current_date = _user_today_for(current_user.id)
     no_end_date = date(current_date.year + 3, 12, 31)
 
     # Get bucket records and entries for calculating spent amounts
@@ -18295,7 +18320,7 @@ def recurring_income():
     
     # Create lookup for bucket records by category_id (use int for consistent comparison)
     # Track both current bucket and previous (latest past) bucket per category
-    today_str = date.today().isoformat()
+    today_str = _user_today_for(current_user.id).isoformat()
     bucket_by_category = {}
     prev_bucket_by_category = {}
     # First pass: group all buckets by category
@@ -18706,7 +18731,7 @@ def delete_recurring_income():
         
         # Convert to non-recurring instead of deleting the category
         # Keep past entries, remove future entries, remove recurring/bucket records
-        today = date.today()
+        today = _user_today_for(current_user.id)
         category_id_int = int(category_id)
         
         # 1. Remove future entries (today and onward), keep past entries
@@ -18883,9 +18908,19 @@ def update_recurring_income_inner(data, user_id):
             return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
         # Ensure that the start date is today or later
-        today = datetime.today().date()
+        # Today where the user is, not where the server is. datetime.today() is
+        # the server's date, and a server ahead of the user - UTC against the
+        # Americas, for the whole of their evening - reads their today as
+        # yesterday and refuses it.
+        #
+        # And only refuse a start date being *moved* into the past. A recurring
+        # that began months ago legitimately has one, and refusing that made it
+        # uneditable: no correcting the amount without also moving the day it
+        # started.
+        today = _user_today_for(user_id)
         if datetime.strptime(start_date, '%Y-%m-%d').date() < today:
-            return jsonify({'status': 'error', 'message': 'Start date cannot be earlier than today'}), 400
+            if str(_recurring_start_date('recurring_income', recurring_id, user_id)) != str(start_date):
+                return jsonify({'status': 'error', 'message': 'Start date cannot be earlier than today'}), 400
 
         # Ensure that the end date is not earlier than the start date
         if datetime.strptime(end_date, '%Y-%m-%d') < datetime.strptime(start_date, '%Y-%m-%d'):
@@ -19110,7 +19145,7 @@ def recurring_expense():
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
 
     # Calculate December 31st, 3 years from now
-    current_date = date.today()
+    current_date = _user_today_for(current_user.id)
     no_end_date = date(current_date.year + 3, 12, 31)
 
     # Get bucket records for calculating spent amounts
@@ -19118,7 +19153,7 @@ def recurring_expense():
     
     # Create lookup for bucket records by category_id (use int for consistent comparison)
     # Track both current bucket and previous (latest past) bucket per category
-    today_str = date.today().isoformat()
+    today_str = _user_today_for(current_user.id).isoformat()
     bucket_by_category = {}
     prev_bucket_by_category = {}
     _buckets_by_cat = {}
@@ -19554,7 +19589,7 @@ def delete_recurring_expense():
         
         # Convert to non-recurring instead of deleting the category
         # Keep past entries, remove future entries, remove recurring/bucket records
-        today = date.today()
+        today = _user_today_for(current_user.id)
         category_id_int = int(category_id)
         
         # Check if this is a payment category (is_credit_account=1) to also remove c_payment_entries
@@ -19753,9 +19788,19 @@ def update_recurring_expense_inner(data, user_id):
             return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
         # Ensure that the start date is today or later
-        today = datetime.today().date()
+        # Today where the user is, not where the server is. datetime.today() is
+        # the server's date, and a server ahead of the user - UTC against the
+        # Americas, for the whole of their evening - reads their today as
+        # yesterday and refuses it.
+        #
+        # And only refuse a start date being *moved* into the past. A recurring
+        # that began months ago legitimately has one, and refusing that made it
+        # uneditable: no correcting the amount without also moving the day it
+        # started.
+        today = _user_today_for(user_id)
         if datetime.strptime(start_date, '%Y-%m-%d').date() < today:
-            return jsonify({'status': 'error', 'message': 'Start date cannot be earlier than today'}), 400
+            if str(_recurring_start_date('recurring_expense', recurring_id, user_id)) != str(start_date):
+                return jsonify({'status': 'error', 'message': 'Start date cannot be earlier than today'}), 400
 
         # Ensure that the end date is not earlier than the start date
         if datetime.strptime(end_date, '%Y-%m-%d') < datetime.strptime(start_date, '%Y-%m-%d'):
@@ -20031,7 +20076,7 @@ def recurring_ca_expense():
     landing_page = user_data['landing_page'] if user_data and user_data['landing_page'] else 'dashboard_3m'
     currency_type = user_data['currency_type'] if user_data and 'currency_type' in user_data else 'USD'
 
-    current_date = date.today()
+    current_date = _user_today_for(current_user.id)
     no_end_date = date(current_date.year + 3, 12, 31)
 
     # Get bucket records for calculating spent amounts
@@ -20039,7 +20084,7 @@ def recurring_ca_expense():
     
     # Create lookup for bucket records by category_id (use int for consistent comparison)
     # Track both current bucket and previous (latest past) bucket per category
-    today_str = date.today().isoformat()
+    today_str = _user_today_for(current_user.id).isoformat()
     bucket_by_category = {}
     prev_bucket_by_category = {}
     _buckets_by_cat = {}
@@ -20484,7 +20529,7 @@ def delete_recurring_ca_expense():
         
         # Convert to non-recurring instead of deleting the category
         # Keep past entries, remove future entries, remove recurring/bucket records
-        today = date.today()
+        today = _user_today_for(current_user.id)
         category_id_int = int(category_id)
         
         # 1. Remove future entries (today and onward), keep past entries
@@ -20567,9 +20612,19 @@ def update_recurring_ca_expense_inner(data, user_id):
         if not all([recurring_id, amount, cadence_interval, cadence_unit, start_date, end_date]):
             return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
-        today = datetime.today().date()
+        # Today where the user is, not where the server is. datetime.today() is
+        # the server's date, and a server ahead of the user - UTC against the
+        # Americas, for the whole of their evening - reads their today as
+        # yesterday and refuses it.
+        #
+        # And only refuse a start date being *moved* into the past. A recurring
+        # that began months ago legitimately has one, and refusing that made it
+        # uneditable: no correcting the amount without also moving the day it
+        # started.
+        today = _user_today_for(user_id)
         if datetime.strptime(start_date, '%Y-%m-%d').date() < today:
-            return jsonify({'status': 'error', 'message': 'Start date cannot be earlier than today'}), 400
+            if str(_recurring_start_date('recurring_c_expense', recurring_id, user_id)) != str(start_date):
+                return jsonify({'status': 'error', 'message': 'Start date cannot be earlier than today'}), 400
         if datetime.strptime(end_date, '%Y-%m-%d') < datetime.strptime(start_date, '%Y-%m-%d'):
             return jsonify({'status': 'error', 'message': 'End date cannot be earlier than start date'}), 400
 
@@ -21301,7 +21356,7 @@ def check_negative_remainders(user_id):
     Checks the next 90 days for potential negative balances.
     """
     
-    today = date.today()
+    today = _user_today_for(user_id)
     check_until = today + timedelta(days=90)
     
     # Get daily totals/remainders from Redis
@@ -21382,7 +21437,7 @@ def check_and_hide_bud_category(bud_id):
     Check if all items for this bud are in the past.
     If so, hide the expense and c_expense categories for this bud.
     """
-    today = date.today()
+    today = _user_today_for(current_user.id)
     
     # Get all bud items for this bud
     all_bud_items = _get_bud_items_from_redis(current_user.id)
@@ -21760,7 +21815,7 @@ def delete_bud_item():
     if not item_id:
         return jsonify({'status': 'error', 'message': 'Missing item id'}), 400
 
-    today = date.today()
+    today = _user_today_for(current_user.id)
 
     # Get bud_item info from Redis first
     all_bud_items = _get_bud_items_from_redis(current_user.id)
@@ -21910,7 +21965,7 @@ def delete_bud():
     if not bud_id:
         return jsonify({'status': 'error', 'message': 'Missing bud_id'}), 400
 
-    today = date.today()
+    today = _user_today_for(current_user.id)
 
     # Get bud info from Redis first
     buds = _get_buds_from_redis(current_user.id)
@@ -22086,7 +22141,7 @@ def toggle_bud_active():
     data = request.get_json()
     bud_id = int(data.get('bud_id', 0))
     active = int(data.get('active', 0))
-    today = date.today()
+    today = _user_today_for(current_user.id)
 
     if not bud_id:
         return jsonify({'status': 'error', 'message': 'Missing bud_id'}), 400
@@ -22586,7 +22641,7 @@ def credit_accounts():
             cursor.close()
     
     # Calculate today's balances
-    today_str = date.today().strftime('%Y-%m-%d')
+    today_str = _user_today_for(current_user.id).strftime('%Y-%m-%d')
     ca_balances_today = {}
     for row in c_a_balances_d:
         row_date = row['date'] if isinstance(row['date'], str) else row['date'].strftime('%Y-%m-%d')
@@ -22768,7 +22823,7 @@ def add_credit_account():
     if recurring_payment and payment_category_id:
         try:
             # Calculate start date (next occurrence of due date)
-            today = date.today()
+            today = _user_today_for(current_user.id)
             if due_date == 'Last Day':
                 # Find next last day of month
                 if today.day == calendar.monthrange(today.year, today.month)[1]:
@@ -22918,7 +22973,7 @@ def add_credit_account():
     
     # Insert c_expense_entry for starting balance if provided
     if starting_balance and float(starting_balance) != 0.0:
-        today_str = date.today().strftime('%Y-%m-%d')
+        today_str = _user_today_for(current_user.id).strftime('%Y-%m-%d')
         
         # Add starting balance entry directly to Redis
         # (using helper would fail since account doesn't exist in MySQL yet)
@@ -23091,7 +23146,7 @@ def update_credit_account():
                 _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
             
             # Create recurring expense and entries
-            today = date.today()
+            today = _user_today_for(current_user.id)
             if due_date == 'Last Day':
                 last_day_current = calendar.monthrange(today.year, today.month)[1]
                 if today.day < last_day_current:
@@ -23235,7 +23290,7 @@ def update_credit_account():
             if payment_category and existing_recurring:
                 category_id = payment_category['id']
                 recurring_id = existing_recurring.get('id')
-                today_str = date.today().strftime('%Y-%m-%d')
+                today_str = _user_today_for(current_user.id).strftime('%Y-%m-%d')
                 
                 # Get expense entries for this category
                 expense_entries = _get_entries_from_redis('expense_entries', current_user.id) or []
@@ -24123,7 +24178,7 @@ def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
         if target_date_str:
             today = date.fromisoformat(target_date_str[:10])
         else:
-            today = date.today()
+            today = _user_today_for(user_id)
         target_date_str = today.strftime('%Y-%m-%d')
         day_before = today - timedelta(days=1)
         day_before_str = day_before.strftime('%Y-%m-%d')
@@ -24498,7 +24553,7 @@ def _auto_confirm_pending_entries(user_id):
 
                         if rec_row:
                             wage_bill = int(rec_row.get('wage_bill', 0) or 0)
-                            today = date_type.today()
+                            today = _user_today_for(user_id)
 
                             # Parse entry_date
                             if isinstance(entry_date, str):
@@ -26301,8 +26356,8 @@ def bank_create_recommended_categories():
         errors = []
         
         # Calculate 5 years from now for no_end_date categories
-        five_years_from_now = (datetime.now() + timedelta(days=365*5)).strftime('%Y-%m-%d')
-        today = datetime.now().strftime('%Y-%m-%d')
+        five_years_from_now = (_user_now_for(current_user.id) + timedelta(days=365*5)).strftime('%Y-%m-%d')
+        today = _user_now_for(current_user.id).strftime('%Y-%m-%d')
         
         # Process income categories - use tiered display_order (1.YYYY for ungrouped)
         # Get existing categories to compute starting display_order
