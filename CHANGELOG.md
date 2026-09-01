@@ -8,6 +8,27 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.10.2 — 2026-08-31
+
+### Fixed
+- **Moving an entry to another date could delete it.** Update immediately if you
+  use the move button on the day view - it affected income, expenses and credit
+  card entries alike.
+
+  The entry usually reappeared to be gone some minutes later rather than at
+  once, because it survived in the cache until the cache was next reloaded.
+  Moving it again did not help and made a second copy of the problem.
+
+  What went wrong: moving an entry wrote it at its new date and then deleted it
+  from the old one, and the deletion was recorded by the entry's own identifier -
+  the same identifier the newly written entry was using. The record of the
+  deletion then applied to the surviving entry. Moving now changes the date of
+  the entry itself and deletes nothing.
+
+  A second guard was added underneath: an identifier belonging to something that
+  still exists can no longer be recorded as deleted, whatever asks for it. Any
+  entry lost this way is not recoverable from within the app.
+
 ## 1.10.1 — 2026-08-30
 
 ### Fixed
