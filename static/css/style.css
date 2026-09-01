@@ -318,6 +318,53 @@ body {
     transform-origin: 15% 85%;
 }
 
+/* Updating Blankee - shares the hammer, its swing and the container above.
+   Only the logo and the countdown are new. */
+.app-update-container {
+    width: 90%;
+    max-width: 420px;
+}
+
+.app-update-logo {
+    display: block;
+    width: 84px;
+    height: 84px;
+    /* Breathing rather than spinning: the hammer beside it is the thing that
+       moves, and two competing animations read as a page in trouble. */
+    animation: appUpdatePulse 1.8s ease-in-out infinite;
+}
+
+@keyframes appUpdatePulse {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.06); }
+}
+
+/* Spans the container, so the bar reads as the width of the whole job. */
+.app-update-progress {
+    width: 100%;
+    height: 8px;
+    margin-top: 24px;
+    background-color: var(--secondary-lighter);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.app-update-progress-fill {
+    width: 100%;
+    height: 100%;
+    background-color: var(--primary);
+    border-radius: 4px;
+    /* Driven by JS setting the width once a second. Linear, because a countdown
+       that eases is a countdown that lies about how much time is left. */
+    transition: width 1s linear;
+}
+
+.app-update-countdown {
+    margin-top: 10px;
+    color: var(--secondary-dark);
+    font-size: 13px;
+}
+
 @keyframes hammerSwing {
     0% {
         transform: scaleX(-1) rotate(-45deg);

@@ -8,6 +8,24 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.11.0 — 2026-08-31
+
+### Added
+- **Updating now shows you what is happening.** Applying an update used to leave
+  the admin page as it was, with a notice that something had been requested -
+  while underneath, the application was being replaced and could not answer for
+  most of a minute.
+
+  There is now a screen for it: the Blankee mark with a hammer at work, the same
+  one shown while a new budget is being built, and a bar counting down the minute
+  a run takes. The page reloads itself at the end. If it comes back still running
+  the old version the update has not landed yet, so it waits out another minute
+  and tries again, up to ten times before it stops and says where the log is.
+
+  It knows the update arrived by checking which version is actually answering,
+  not by the updater reporting success - those are different things, and the
+  difference is exactly what an update screen exists to show.
+
 ## 1.10.4 — 2026-08-31
 
 ### Fixed
