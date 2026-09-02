@@ -671,6 +671,27 @@ def do_update(dry_run):
                 [f'cd {APP_DIR}', f'git verify-commit {target[:7]}'])
         step_done('signed by a trusted key')
 
+    # Land whatever is still only in Redis before the code changes underneath it.
+    #
+    # Redis outlives the reload, so this is not about the restart. It is about the
+    # migration that may follow - rows written under the old shape are better in
+    # MySQL before the shape changes - and about the machine being rolled back or
+    # rebooted after a bad update, when the unflushed part is the part nobody can
+    # reconstruct. Before the checkout on purpose: the code doing the flushing is
+    # then the code that wrote the data.
+    #
+    # Not fatal. Anything it misses stays in Redis for the normal worker, so a
+    # failed flush is worth saying out loud and not worth refusing an update over.
+    step('flush', 'Saving pending changes to the database')
+    rc, out = run([os.path.join(VENV_DIR, 'bin', 'python'),
+                   os.path.join(APP_DIR, 'install', 'flush_pending.py')],
+                  cwd=APP_DIR, env=creds, timeout=600)
+    if rc == 0:
+        step_done((out.strip().splitlines() or [''])[-1])
+    else:
+        step_done(f'could not flush pending changes (rc={rc}); continuing: '
+                  f'{out[-200:]}', ok=False)
+
     step('checkout', f'Moving to {target[:7]}')
     # No `git clean`: it deletes untracked-but-not-ignored files, and the
     # preflight has already refused a dirty tree, so it could only do harm.
