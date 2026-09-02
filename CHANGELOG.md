@@ -8,6 +8,30 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.14.0 — 2026-09-01
+
+### Changed
+- **The buffer card now shows your two low points instead of two balances.** What
+  it reported was the balance today and the balance the day before payday. Neither
+  answers the question the card exists for, which is whether you get there without
+  going under - a comfortable figure at both ends can still hide a bad week in the
+  middle.
+
+  It now names the lowest your balance is projected to reach before your next
+  payday, and the lowest across the whole forecast, each with the date it falls
+  on. The payday lines stay, because "until payday" needs them.
+
+  The first figure stops the day before payday: payday is what lifts you out, so
+  counting it would report the recovery rather than the dip.
+
+- The View Details button has been removed from the card.
+
+### Fixed
+- The Test a Bill icon was one that only exists in the paid Font Awesome set, so
+  on a standard installation it rendered as nothing at all. Both test buttons now
+  use icons that ship with the free set - a vial for a single purchase, vials for
+  something that repeats.
+
 ## 1.13.1 — 2026-09-01
 
 ### Changed
