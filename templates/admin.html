@@ -985,11 +985,28 @@
                                 + 'server: journalctl -u blankee-update', 'error', 15000);
                         return;
                     }
-                    // Finished, and the running application reports the commit the
-                    // run was heading for. Both halves matter: the updater saying
-                    // it worked and the new code actually being served are
-                    // different things.
-                    if (run.terminal && run.ok && wanted && here && here === wanted) {
+                    // Finished, the files are the ones the run was heading for,
+                    // and the process serving this page is the new one.
+                    //
+                    // Those last two are different claims and both are needed.
+                    // u.commit is parsed out of .git on every call, so it flips at
+                    // checkout - an old process still serving reports the new SHA
+                    // quite happily. u.version comes from read_version(), which
+                    // caches at import, so it only changes once the application has
+                    // actually reloaded. Checking the commit alone declared victory
+                    // while the old page was still being served, which is why the
+                    // screen finished and the version underneath had not moved.
+                    const versionHere = u.version;
+                    const versionWanted = (run.to || {}).version;
+                    const versionBefore = (run.from || {}).version;
+                    const filesReady = wanted && here && here === wanted;
+                    // A release that did not change the version leaves nothing to
+                    // observe, so fall back to the files.
+                    const processReady = (!versionWanted || versionWanted === versionBefore)
+                        ? filesReady
+                        : versionHere === versionWanted;
+
+                    if (run.terminal && run.ok && filesReady && processReady) {
                         rememberUpdate(null);
                         updateOverlay(false);
                         showToast('Updated to ' + ((run.to || {}).version || 'the latest version')

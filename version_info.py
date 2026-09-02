@@ -114,11 +114,16 @@ def deployed_commit():
     The commit this deployment is running, as
     {'sha', 'short', 'ref', 'branch', 'source'}, or {} if it cannot be told.
 
-    Read on every call and deliberately not cached. This is the one value that
-    can prove a reload actually happened: after an update the new process reads
-    the new SHA, and a value cached at import would either report the new commit
-    from a process still running the old code, or report the old one forever if
-    the reload silently failed.
+    Read on every call and deliberately not cached, so it always describes the
+    files on disk.
+
+    That makes it the wrong thing to ask whether a reload happened, which this
+    docstring used to claim it was. A process still running the old code reads
+    the new SHA from .git just as readily as a new one, so the value flips at
+    checkout and says nothing about which process answered. read_version() is
+    the per-process signal: it caches at import, so it only changes once the
+    application has actually been replaced. The update screen checks both - the
+    commit for "the files arrived", the version for "the new code is serving".
 
     Parsed out of .git rather than by running git, because the web application
     contains no subprocess use and this is not worth being the first. Note that
