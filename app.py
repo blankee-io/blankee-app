@@ -17017,6 +17017,78 @@ def set_user_timezone():
     return jsonify({'success': True})
 
 
+@app.route('/api/recurring-occurrences', methods=['POST'])
+@login_required
+def api_recurring_occurrences():
+    """
+    The dates a proposed recurring entry would land on. Creates nothing.
+
+    Behind Test a Bill, which asks what a bill *would* do before it exists. The
+    cadence rules live on the server because that is where the generators live:
+    working them out again in the browser would be a second implementation of
+    something already written three times, and a projection that disagrees with
+    what the app will actually generate is worse than no projection.
+
+    Reads nothing - no Redis, no MySQL. Everything it needs is in the request,
+    which is why it can answer while the user is still typing.
+    """
+    from bucket_utils import recurring_occurrence_dates
+
+    data = request.get_json(silent=True) or {}
+    unit = str(data.get('cadence_unit') or '').strip()
+    if unit not in ('days', 'weeks', 'months', 'years'):
+        return jsonify({'status': 'error', 'message': 'Unknown cadence'}), 400
+
+    try:
+        interval = int(data.get('cadence_interval') or 1)
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'Invalid interval'}), 400
+    if interval < 1:
+        return jsonify({'status': 'error', 'message': 'Invalid interval'}), 400
+
+    try:
+        start = datetime.strptime(str(data.get('start_date'))[:10], '%Y-%m-%d').date()
+        end = datetime.strptime(str(data.get('end_date'))[:10], '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'Invalid dates'}), 400
+    if end < start:
+        return jsonify({'status': 'error', 'message': 'End date is before the start date'}), 400
+
+    # A daily cadence over a decade is a large answer to build and a larger one to
+    # send. The forecast only reaches a few years out, so anything past that could
+    # not change the result.
+    horizon = start + timedelta(days=366 * 5)
+    if end > horizon:
+        end = horizon
+
+    weekdays = data.get('weekdays') or []
+    monthly_days = data.get('monthly_days') or []
+    try:
+        dates = recurring_occurrence_dates(
+            interval, unit, start, end,
+            weekdays=[str(w).lower() for w in weekdays if w],
+            monthly_days=[d for d in monthly_days if str(d).strip() != ''],
+            yearly_day=data.get('yearly_day') or None,
+            yearly_month=data.get('yearly_month') or None)
+    except Exception as e:
+        log_warning(logger, 'TEST_BILL', f"Could not work out the occurrences: {e}")
+        return jsonify({'status': 'error', 'message': 'Could not work out the dates'}), 400
+
+    # "Repeat this many times" instead of an end date. Taking the first N of the
+    # walk is the same answer as working an end date back from the interval, and
+    # cannot disagree with it.
+    try:
+        occurrences = int(data.get('occurrences') or 0)
+    except (TypeError, ValueError):
+        occurrences = 0
+    if occurrences > 0:
+        dates = dates[:occurrences]
+
+    return jsonify({'status': 'success',
+                    'dates': [d.isoformat() for d in dates],
+                    'count': len(dates)})
+
+
 @app.route('/api/buckets/pending', methods=['GET'])
 @login_required
 def api_buckets_pending():

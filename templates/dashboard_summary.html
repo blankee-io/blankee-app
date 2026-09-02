@@ -99,6 +99,9 @@
                         <button id="test-purchase-open-btn" class="test-purchase-open-btn">
                             <i class="fa-solid fa-calculator"></i> Test a Purchase
                         </button>
+                        <button id="test-bill-open-btn" class="test-purchase-open-btn">
+                            <i class="fa-solid fa-calendar-clock"></i> Test a Bill
+                        </button>
                         <a href="{{ url_for(landing_page) }}" class="view-details-btn">View Details</a>
                     </div>
                 </div>
@@ -175,6 +178,120 @@
                 </div>
                 <div id="test-purchase-result" class="test-purchase-result" style="display: none;">
                     <!-- Result message populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Bill Modal -->
+    {# The fields are the ones the add-recurring-expense form asks for, in the
+       same order and with the same names, so that describing a bill here and
+       creating it there are the same exercise. The dates it would fall on come
+       from the server rather than being worked out again in the browser - see
+       /api/recurring-occurrences. #}
+    <div id="test-bill-modal" class="test-purchase-modal">
+        <div class="test-purchase-modal-content">
+            <div class="test-purchase-modal-header">
+                <h3><i class="fa-solid fa-calendar-clock"></i> Test a Bill</h3>
+                <button id="test-bill-close" class="test-purchase-modal-close">&times;</button>
+            </div>
+            <div class="test-purchase-modal-body">
+                <p class="test-purchase-description">
+                    Describe a recurring bill to see whether it would take your balance
+                    below $0, when, and for how long - before you commit to it.
+                </p>
+
+                {# Field for field, the add-recurring-expense form: the same classes,
+                   the same order, the same day-of-month panel and date block. The two
+                   describe a bill identically because they are the same markup. Only
+                   the category and the submit differ, because this creates nothing. #}
+                <div class="test-bill-form">
+                    <label for="test-bill-amount">Recurring Amount<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The amount for each occurrence. Every occurrence inside the forecast is taken off, one after another.</span></span></label>
+                    <div class="currency-input-container">
+                        <span class="f-currency-symbol">$</span>
+                        <input type="number" class="recurring-amount" id="test-bill-amount" placeholder="0.00" step="0.01" min="0" inputmode="decimal">
+                    </div>
+
+                    <label for="test-bill-interval">Repeat Every<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">How often it recurs. The number and the unit together set the interval, so 2 and Week(s) means once a fortnight.</span></span></label>
+                    <div class="cadence-row">
+                        <input type="number" id="test-bill-interval" value="1" step="1" min="1">
+                        <select id="test-bill-unit">
+                            <option value="days">Day(s)</option>
+                            <option value="weeks">Week(s)</option>
+                            <option value="months" selected>Month(s)</option>
+                            <option value="years">Year(s)</option>
+                        </select>
+                    </div>
+
+                    <div id="test-bill-weekly" style="display:none;">
+                        <label>Repeat on:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which weekdays it falls on. The interval still applies, so every 2 weeks on Monday means alternate Mondays.</span></span></label>
+                        <div class="weekday"><input type="checkbox" value="monday"> Mo</div>
+                        <div class="weekday"><input type="checkbox" value="tuesday"> Tu</div>
+                        <div class="weekday"><input type="checkbox" value="wednesday"> We</div>
+                        <div class="weekday"><input type="checkbox" value="thursday"> Th</div>
+                        <div class="weekday"><input type="checkbox" value="friday"> Fr</div>
+                        <div class="weekday"><input type="checkbox" value="saturday"> Sa</div>
+                        <div class="weekday"><input type="checkbox" value="sunday"> Su</div>
+                    </div>
+
+                    <div id="test-bill-monthly" style="display:none;">
+                        <label>Days of the month:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which days of the month it falls on. Add more than one for something that recurs twice a month. Last Day follows the length of each month.</span></span></label>
+                        <div id="test-bill-monthly-container"></div>
+                        <button type="button" id="test-bill-add-day" class="add-day-btn">+ Add Another Day</button>
+                    </div>
+
+                    <div id="test-bill-yearly" style="display:none;">
+                        <label for="test-bill-yearday">Day of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The day of the month this yearly bill falls on.</span></span></label>
+                        <input type="number" id="test-bill-yearday" min="1" max="31">
+
+                        <label for="test-bill-yearmonth">Month of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The month this yearly bill falls in.</span></span></label>
+                        <select id="test-bill-yearmonth">
+                            <option value="1">January</option>
+                            <option value="2">February</option>
+                            <option value="3">March</option>
+                            <option value="4">April</option>
+                            <option value="5">May</option>
+                            <option value="6">June</option>
+                            <option value="7">July</option>
+                            <option value="8">August</option>
+                            <option value="9">September</option>
+                            <option value="10">October</option>
+                            <option value="11">November</option>
+                            <option value="12">December</option>
+                        </select>
+                    </div>
+
+                    <div class="date-row">
+                        <div class="date-label-row">
+                            <label for="test-bill-start">Start Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The first occurrence to test from.</span></span></label>
+                            <div class="end-date-container">
+                                <label for="test-bill-end">End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The last occurrence to test. Leave No End Date ticked to run to the end of the forecast.</span></span></label>
+                            </div>
+                        </div>
+                        <div class="date-input-row">
+                            <input type="date" id="test-bill-start">
+                            <div class="end-date-container">
+                                <input type="date" id="test-bill-end">
+                            </div>
+                        </div>
+                        <div class="date-checkbox-row">
+                            <span class="date-checkbox-label">Or</span>
+                            <input type="checkbox" id="test-bill-noend" checked>
+                            <label for="test-bill-noend">No End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Tests as far as the forecast reaches, which is as far as this can see.</span></span></label>
+                        </div>
+                        <div class="date-checkbox-row">
+                            <span class="date-checkbox-label">Or</span>
+                            <input type="checkbox" id="test-bill-use-occurrences">
+                            <label for="test-bill-use-occurrences">Repeat this many times:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Stop after this many occurrences instead of on a date.</span></span></label>
+                            <input type="number" id="test-bill-occurrences" min="1" class="test-bill-occurrences-input" disabled>
+                        </div>
+                    </div>
+
+                    <br>
+                    <button type="button" id="test-bill-btn">Test</button>
+                </div>
+
+                <div id="test-bill-result" class="test-purchase-result" style="display: none;">
                 </div>
             </div>
         </div>
@@ -1135,49 +1252,21 @@
         }
 
         // Test Purchase functionality
-        function testPurchase() {
-            const amountInput = document.getElementById('test-purchase-amount');
-            const resultDiv = document.getElementById('test-purchase-result');
-            const purchaseAmount = parseFloat(amountInput.value) || 0;
-            
-            if (purchaseAmount <= 0) {
-                resultDiv.style.display = 'block';
-                resultDiv.className = 'test-purchase-result warning';
-                resultDiv.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Please enter a valid amount greater than 0.';
-                return;
-            }
-            
-            // Get today's date (midnight)
+        // The forecast from today on, as it stands. Both tests start here.
+        function futureRemainderSeries() {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
-            
-            // Sort totalsRemaindersD by date ascending and filter to today and future
-            const futureRemainders = totalsRemaindersD
-                .map(tr => ({
-                    date: parseDate(tr.date),
-                    dateStr: tr.date,
-                    remainder: parseFloat(tr.remainder) || 0
-                }))
+            return totalsRemaindersD
+                .map(tr => ({ date: parseDate(tr.date), remainder: parseFloat(tr.remainder) || 0 }))
                 .filter(tr => tr.date && tr.date >= today)
                 .sort((a, b) => a.date - b.date);
-            
-            if (futureRemainders.length === 0) {
-                resultDiv.style.display = 'block';
-                resultDiv.className = 'test-purchase-result warning';
-                resultDiv.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> No future balance data available to test against.';
-                return;
-            }
-            
-            // Every day of the forecast, as it would look after the purchase.
-            // Computed here rather than asked of the server: totals_remainders_d
-            // is already on the page, read Redis-first by the route that rendered
-            // it, so a round trip would only be a slower way to reach the same
-            // numbers - and would read MySQL if the cache had gone cold.
+        }
+
+        // Reads a projected balance series and says where it goes wrong.
+        // Shared by Test a Purchase and Test a Bill so the two cannot drift into
+        // describing the same situation differently.
+        function projectionSummary(projected) {
             const DAY_MS = 86400000;
-            const projected = futureRemainders.map(tr => ({
-                date: tr.date,
-                balance: tr.remainder - purchaseAmount
-            }));
 
             // First occurrence wins: with a flat stretch at the bottom, the day it
             // first reaches the low point is the useful one to name.
@@ -1185,58 +1274,203 @@
             for (const p of projected) {
                 if (p.balance < lowest.balance) { lowest = p; }
             }
-
-            const firstNegIdx = projected.findIndex(p => p.balance < 0);
             const lowestLine = `Lowest projected balance: ${formatCurrency(lowest.balance)} on ${formatDateWithYear(lowest.date)}`;
 
-            resultDiv.style.display = 'block';
+            const firstNegIdx = projected.findIndex(p => p.balance < 0);
+            if (firstNegIdx === -1) { return { safe: true, lowestLine: lowestLine }; }
 
-            if (firstNegIdx !== -1) {
-                const firstNeg = projected[firstNegIdx];
+            const firstNeg = projected[firstNegIdx];
+            let recovery = null;
+            for (let i = firstNegIdx + 1; i < projected.length; i++) {
+                if (projected[i].balance >= 0) { recovery = projected[i]; break; }
+            }
 
-                // When it climbs back out. Measured in calendar days between the
-                // dates rather than by counting rows, so a gap in the forecast
-                // cannot silently shorten the answer.
-                let recovery = null;
-                for (let i = firstNegIdx + 1; i < projected.length; i++) {
-                    if (projected[i].balance >= 0) { recovery = projected[i]; break; }
-                }
-
-                let stretch;
-                if (recovery) {
-                    const days = Math.max(1, Math.round((recovery.date - firstNeg.date) / DAY_MS));
-                    stretch = `Below zero for ${days} day${days === 1 ? '' : 's'}, back above on ${formatDateWithYear(recovery.date)}`;
-                } else {
-                    // Say the horizon ran out rather than implying it recovers the
-                    // day after the last row, or that it stays negative forever.
-                    const last = projected[projected.length - 1];
-                    const days = Math.max(1, Math.round((last.date - firstNeg.date) / DAY_MS) + 1);
-                    stretch = `Below zero for at least ${days} day${days === 1 ? '' : 's'} - still negative on ${formatDateWithYear(last.date)}, the last day forecast`;
-                }
-
-                resultDiv.className = 'test-purchase-result danger';
-                resultDiv.innerHTML = `
-                    <i class="fa-solid fa-circle-exclamation"></i>
-                    <div class="test-result-message">
-                        <strong>Warning:</strong> Based on your entered income and expenses,
-                        a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> will bring your balance
-                        below $0 on <strong>${formatDateWithYear(firstNeg.date)}</strong>.
-                        <div class="test-result-balance">Projected balance that day: ${formatCurrency(firstNeg.balance)}</div>
-                        <div class="test-result-balance">${stretch}</div>
-                        <div class="test-result-balance">${lowestLine}</div>
-                    </div>
-                `;
+            // Calendar days between the dates rather than a count of rows, so a gap
+            // in the forecast cannot silently shorten the answer.
+            let stretch;
+            if (recovery) {
+                const days = Math.max(1, Math.round((recovery.date - firstNeg.date) / DAY_MS));
+                stretch = `Below zero for ${days} day${days === 1 ? '' : 's'}, back above on ${formatDateWithYear(recovery.date)}`;
             } else {
-                resultDiv.className = 'test-purchase-result success';
-                resultDiv.innerHTML = `
+                const last = projected[projected.length - 1];
+                const days = Math.max(1, Math.round((last.date - firstNeg.date) / DAY_MS) + 1);
+                stretch = `Below zero for at least ${days} day${days === 1 ? '' : 's'} - still negative on ${formatDateWithYear(last.date)}, the last day forecast`;
+            }
+            return { safe: false, firstNeg: firstNeg, stretch: stretch, lowestLine: lowestLine };
+        }
+
+        function testPurchase() {
+            const resultDiv = document.getElementById('test-purchase-result');
+            const purchaseAmount = parseFloat(document.getElementById('test-purchase-amount').value) || 0;
+
+            if (purchaseAmount <= 0) {
+                showTestResult(resultDiv, 'warning',
+                    '<i class="fa-solid fa-triangle-exclamation"></i> Please enter a valid amount greater than 0.');
+                return;
+            }
+
+            const series = futureRemainderSeries();
+            if (series.length === 0) {
+                showTestResult(resultDiv, 'warning',
+                    '<i class="fa-solid fa-triangle-exclamation"></i> No future balance data available to test against.');
+                return;
+            }
+
+            // A purchase made now comes off every day that follows.
+            const projected = series.map(tr => ({ date: tr.date, balance: tr.remainder - purchaseAmount }));
+            const summary = projectionSummary(projected);
+
+            if (summary.safe) {
+                showTestResult(resultDiv, 'success', `
                     <i class="fa-solid fa-circle-check"></i>
                     <div class="test-result-message">
                         <strong>Good news!</strong> Based on your entered income and expenses,
                         a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> does not bring your balance below $0.
-                        <div class="test-result-balance">${lowestLine}</div>
-                    </div>
-                `;
+                        <div class="test-result-balance">${summary.lowestLine}</div>
+                    </div>`);
+                return;
             }
+
+            showTestResult(resultDiv, 'danger', `
+                <i class="fa-solid fa-circle-exclamation"></i>
+                <div class="test-result-message">
+                    <strong>Warning:</strong> Based on your entered income and expenses,
+                    a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> will bring your balance
+                    below $0 on <strong>${formatDateWithYear(summary.firstNeg.date)}</strong>.
+                    <div class="test-result-balance">Projected balance that day: ${formatCurrency(summary.firstNeg.balance)}</div>
+                    <div class="test-result-balance">${summary.stretch}</div>
+                    <div class="test-result-balance">${summary.lowestLine}</div>
+                </div>`);
+        }
+
+        function showTestResult(el, kind, html) {
+            el.style.display = 'block';
+            el.className = 'test-purchase-result ' + kind;
+            el.innerHTML = html;
+        }
+
+        function toISODate(d) {
+            return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+        }
+
+        // Test a Bill: the same question, asked of something that repeats.
+        //
+        // The dates come from /api/recurring-occurrences rather than being worked
+        // out here. Those cadence rules already exist on the server, beside the
+        // generators that will actually create the entries, and a projection that
+        // disagrees with what the app would really do is worse than none.
+        function testBill() {
+            const resultDiv = document.getElementById('test-bill-result');
+            const amount = parseFloat(document.getElementById('test-bill-amount').value) || 0;
+            const interval = parseInt(document.getElementById('test-bill-interval').value, 10) || 0;
+            const unit = document.getElementById('test-bill-unit').value;
+            const warn = function (msg) {
+                showTestResult(resultDiv, 'warning',
+                    '<i class="fa-solid fa-triangle-exclamation"></i> ' + msg);
+            };
+
+            if (amount <= 0) { warn('Enter an amount greater than 0.'); return; }
+            if (interval < 1) { warn('Repeat every must be at least 1.'); return; }
+
+            const series = futureRemainderSeries();
+            if (series.length === 0) {
+                warn('No future balance data available to test against.');
+                return;
+            }
+            const lastForecast = series[series.length - 1].date;
+
+            const weekdays = Array.from(document.querySelectorAll(
+                '#test-bill-weekly input[type="checkbox"]:checked')).map(c => c.value);
+            if (unit === 'weeks' && weekdays.length === 0) {
+                warn('Pick at least one day of the week.'); return;
+            }
+            const monthlyDays = Array.from(document.querySelectorAll(
+                '#test-bill-monthly-container .monthly-day-select')).map(sel => sel.value);
+            if (unit === 'months' && monthlyDays.length === 0) {
+                warn('Pick at least one day of the month.'); return;
+            }
+
+            const start = document.getElementById('test-bill-start').value || toISODate(new Date());
+            const byCount = document.getElementById('test-bill-use-occurrences').checked;
+            const occurrences = byCount
+                ? (parseInt(document.getElementById('test-bill-occurrences').value, 10) || 0) : 0;
+            if (byCount && occurrences < 1) { warn('Enter how many times it repeats.'); return; }
+            // Counting occurrences still needs somewhere to stop walking, so it runs
+            // to the end of the forecast and the server takes the first N.
+            const noEnd = document.getElementById('test-bill-noend').checked || byCount;
+            const end = noEnd ? toISODate(lastForecast)
+                : (document.getElementById('test-bill-end').value || toISODate(lastForecast));
+            if (end < start) { warn('The end date is before the start date.'); return; }
+
+            warn('Working out the dates...');
+
+            $.ajax({
+                url: '/api/recurring-occurrences',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    cadence_interval: interval,
+                    cadence_unit: unit,
+                    start_date: start,
+                    end_date: end,
+                    weekdays: weekdays,
+                    monthly_days: monthlyDays,
+                    yearly_day: document.getElementById('test-bill-yearday').value || null,
+                    yearly_month: document.getElementById('test-bill-yearmonth').value || null,
+                    occurrences: occurrences
+                }),
+                success: function (res) {
+                    const dates = (res.dates || []).map(parseDate).filter(Boolean)
+                        .filter(d => d <= lastForecast);
+                    if (dates.length === 0) {
+                        warn('That bill would not fall due within the forecast.');
+                        return;
+                    }
+
+                    // Each occurrence comes off that day and every day after it, so
+                    // the effect accumulates rather than being one step down.
+                    let taken = 0;
+                    let next = 0;
+                    const projected = series.map(function (tr) {
+                        while (next < dates.length && dates[next] <= tr.date) {
+                            taken += amount;
+                            next++;
+                        }
+                        return { date: tr.date, balance: tr.remainder - taken };
+                    });
+
+                    const summary = projectionSummary(projected);
+                    const scale = dates.length + ' payment' + (dates.length === 1 ? '' : 's')
+                        + ' of ' + formatCurrency(amount) + ' within the forecast, first on '
+                        + formatDateWithYear(dates[0]);
+
+                    if (summary.safe) {
+                        showTestResult(resultDiv, 'success', `
+                            <i class="fa-solid fa-circle-check"></i>
+                            <div class="test-result-message">
+                                <strong>Good news!</strong> Based on your entered income and expenses,
+                                this bill does not bring your balance below $0.
+                                <div class="test-result-balance">${scale}</div>
+                                <div class="test-result-balance">${summary.lowestLine}</div>
+                            </div>`);
+                        return;
+                    }
+                    showTestResult(resultDiv, 'danger', `
+                        <i class="fa-solid fa-circle-exclamation"></i>
+                        <div class="test-result-message">
+                            <strong>Warning:</strong> Based on your entered income and expenses,
+                            this bill will bring your balance below $0 on
+                            <strong>${formatDateWithYear(summary.firstNeg.date)}</strong>.
+                            <div class="test-result-balance">Projected balance that day: ${formatCurrency(summary.firstNeg.balance)}</div>
+                            <div class="test-result-balance">${summary.stretch}</div>
+                            <div class="test-result-balance">${summary.lowestLine}</div>
+                            <div class="test-result-balance">${scale}</div>
+                        </div>`);
+                },
+                error: function (xhr) {
+                    warn(((xhr.responseJSON || {}).message) || 'Could not work out the dates.');
+                }
+            });
         }
 
         // Modal functions
@@ -1251,7 +1485,33 @@
             }, 100);
         }
         
+        // Assigned by the setup block below, which owns the fields it resets.
+        let resetTestBill = null;
+
+        function openTestBillModal() {
+            const modal = document.getElementById('test-bill-modal');
+            modal.style.display = 'flex';
+            document.body.classList.add('modal-open');
+            document.documentElement.classList.add('modal-open');
+            setTimeout(() => { document.getElementById('test-bill-amount').focus(); }, 100);
+        }
+
+        function closeTestBillModal() {
+            const modal = document.getElementById('test-bill-modal');
+            modal.style.display = 'none';
+            if (resetTestBill) { resetTestBill(); }
+            document.body.classList.remove('modal-open');
+            document.documentElement.classList.remove('modal-open');
+        }
+
         function closeTestPurchaseModal() {
+            // Same reason as the bill modal: a stale answer on reopening reads as
+            // the answer to whatever is typed next.
+            const purchaseResult = document.getElementById('test-purchase-result');
+            purchaseResult.style.display = 'none';
+            purchaseResult.innerHTML = '';
+            purchaseResult.className = 'test-purchase-result';
+            document.getElementById('test-purchase-amount').value = '';
             const modal = document.getElementById('test-purchase-modal');
             modal.style.display = 'none';
             document.body.classList.remove('modal-open');
@@ -1612,6 +1872,7 @@
                 { selector: '.summary-page-layout', text: 'This page summarizes your budget at a glance — buffer, trends, and upcoming expenses.' },
                 { selector: '.buffer-card', text: 'Your short-term buffer shows your current balance and projected amount until next payday.' },
                 { selector: '#test-purchase-open-btn', text: 'Test Purchase lets you simulate a purchase to see how it would affect your balance before you buy.' },
+                { selector: '#test-bill-open-btn', text: 'Test a Bill does the same for something that repeats: describe a recurring bill and see whether it would take you below zero, when, and for how long.' },
                 { selector: '#balance-graph-section', text: 'The balance trend chart shows how your balance changes over time.' },
                 { selector: '#trend-indicator', text: 'The arrow shows whether your balance is trending up or down. If you see a red <span class=\"tutorial-negative-badge\">!</span> badge on the header, it means your balance goes negative at some point in the future.' },
                 { selector: '#expense-buckets-section', text: 'Recurring expense buckets show what\'s been paid and what\'s still remaining this period.' },
@@ -1681,6 +1942,121 @@
             
             // Test purchase button click handler
             $('#test-purchase-btn').on('click', testPurchase);
+
+            // ---- Test a Bill ------------------------------------------------
+            // The day-of-month rows are built the way the recurring form builds
+            // them - a select plus a minus button, added by a button underneath -
+            // so the two behave the same and not merely look the same.
+            function testBillDayRow(selectedValue) {
+                const wrap = document.createElement('div');
+                wrap.className = 'monthly-day-select-container';
+
+                const select = document.createElement('select');
+                select.className = 'monthly-day-select';
+                for (let i = 1; i <= 31; i++) {
+                    const opt = new Option(String(i), String(i));
+                    if (selectedValue && String(selectedValue) === String(i)) { opt.selected = true; }
+                    select.appendChild(opt);
+                }
+                const last = new Option('Last Day', 'Last Day');
+                if (selectedValue === 'Last Day') { last.selected = true; }
+                select.appendChild(last);
+                wrap.appendChild(select);
+
+                const minus = document.createElement('button');
+                minus.type = 'button';
+                minus.className = 'remove-day-btn';
+                minus.textContent = '-';
+                minus.addEventListener('click', function () {
+                    const container = document.getElementById('test-bill-monthly-container');
+                    // Never leave it with nothing to say: one row always remains.
+                    if (container.querySelectorAll('.monthly-day-select-container').length > 1) {
+                        wrap.remove();
+                    }
+                });
+                wrap.appendChild(minus);
+                return wrap;
+            }
+
+            (function setUpTestBill() {
+                const container = document.getElementById('test-bill-monthly-container');
+                if (container && !container.children.length) {
+                    container.appendChild(testBillDayRow('1'));
+                }
+                const startInput = document.getElementById('test-bill-start');
+                if (startInput && !startInput.value) { startInput.value = toISODate(new Date()); }
+
+                function syncCadenceFields() {
+                    const unit = document.getElementById('test-bill-unit').value;
+                    document.getElementById('test-bill-weekly').style.display = unit === 'weeks' ? 'flex' : 'none';
+                    // block for monthly, flex for the other two - the stylesheet
+                    // says so in as many words ("Monthly options need display:
+                    // block, not flex"), and an inline style would have quietly
+                    // overruled it.
+                    document.getElementById('test-bill-monthly').style.display = unit === 'months' ? 'block' : 'none';
+                    document.getElementById('test-bill-yearly').style.display = unit === 'years' ? 'flex' : 'none';
+                }
+                // No End Date, an end date, or a number of repeats - one of the
+                // three, the same exclusivity the recurring form enforces.
+                function syncEndFields() {
+                    const noEnd = document.getElementById('test-bill-noend').checked;
+                    const byCount = document.getElementById('test-bill-use-occurrences').checked;
+                    document.getElementById('test-bill-end').disabled = noEnd || byCount;
+                    document.getElementById('test-bill-occurrences').disabled = !byCount;
+                }
+                $('#test-bill-unit').on('change', syncCadenceFields);
+                $('#test-bill-noend').on('change', function () {
+                    if (this.checked) { document.getElementById('test-bill-use-occurrences').checked = false; }
+                    syncEndFields();
+                });
+                $('#test-bill-use-occurrences').on('change', function () {
+                    if (this.checked) { document.getElementById('test-bill-noend').checked = false; }
+                    syncEndFields();
+                });
+                $('#test-bill-add-day').on('click', function () {
+                    document.getElementById('test-bill-monthly-container').appendChild(testBillDayRow(null));
+                });
+                // Exposed so closeTestBillModal can reach it: the sync helpers it
+                // needs live in here, and a modal that reopens showing the last
+                // answer invites reading it as the answer to the new question.
+                resetTestBill = function () {
+                    const result = document.getElementById('test-bill-result');
+                    result.style.display = 'none';
+                    result.innerHTML = '';
+                    result.className = 'test-purchase-result';
+
+                    document.getElementById('test-bill-amount').value = '';
+                    document.getElementById('test-bill-interval').value = '1';
+                    document.getElementById('test-bill-unit').value = 'months';
+                    document.querySelectorAll('#test-bill-weekly input[type="checkbox"]')
+                        .forEach(c => { c.checked = false; });
+
+                    const container = document.getElementById('test-bill-monthly-container');
+                    container.innerHTML = '';
+                    container.appendChild(testBillDayRow('1'));
+
+                    document.getElementById('test-bill-yearday').value = '';
+                    document.getElementById('test-bill-yearmonth').value = '1';
+                    document.getElementById('test-bill-start').value = toISODate(new Date());
+                    document.getElementById('test-bill-end').value = '';
+                    document.getElementById('test-bill-noend').checked = true;
+                    document.getElementById('test-bill-use-occurrences').checked = false;
+                    document.getElementById('test-bill-occurrences').value = '';
+
+                    syncCadenceFields();
+                    syncEndFields();
+                };
+
+                syncCadenceFields();
+                syncEndFields();
+            })();
+
+            $('#test-bill-open-btn').on('click', openTestBillModal);
+            $('#test-bill-close').on('click', closeTestBillModal);
+            $('#test-bill-modal').on('click', function(e) {
+                if (e.target === this) { closeTestBillModal(); }
+            });
+            $('#test-bill-btn').on('click', testBill);
             
             // Allow Enter key to trigger test
             $('#test-purchase-amount').on('keypress', function(e) {

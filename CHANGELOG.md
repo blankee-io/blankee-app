@@ -8,6 +8,28 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.13.0 — 2026-09-01
+
+### Added
+- **Test a Bill, beside Test a Purchase on the summary page.** Describe a
+  recurring bill the way you would when adding one - amount, how often, which
+  days, when it starts and stops - and see whether it would take you below $0,
+  on what date, for how long, and where your lowest point would be. If it never
+  does, it names the day your balance is at its lowest anyway.
+
+  It is the same form as Add Recurring Expense, field for field, so describing a
+  bill to test it and describing one to create it are the same exercise. Nothing
+  is created: it only answers the question.
+
+  The dates it counts on come from the same rules that generate real recurring
+  entries, rather than being worked out separately for the preview. A forecast
+  that quietly disagreed with what the app would actually do would be worse than
+  not offering one.
+
+### Fixed
+- Test a Purchase kept its last answer when reopened, so a fresh question could
+  be read against a stale verdict. Both it and Test a Bill now clear when closed.
+
 ## 1.12.1 — 2026-09-01
 
 ### Fixed

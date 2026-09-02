@@ -19,6 +19,129 @@ from log_config import get_logger, log_info, log_error, log_warning, log_excepti
 logger = get_logger(__name__)
 
 
+WEEKDAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday',
+                 'saturday', 'sunday']
+
+
+def recurring_occurrence_dates(cadence_interval, cadence_unit, start_date, end_date,
+                               weekdays=None, monthly_days=None,
+                               yearly_day=None, yearly_month=None):
+    """
+    The dates a recurring entry would land on, without creating anything.
+
+    A read-only twin of the walk inside generate_expense_entries and its income and
+    credit siblings, which decide dates and write rows in the same loop and so
+    cannot be asked what they would do. Written to match them exactly, quirks
+    included - a projection that disagrees with what the app will actually generate
+    is worse than no projection, because it looks authoritative.
+
+    Duplicated rather than extracted: those three generators are load-bearing write
+    paths, and refactoring them to share this belongs in its own change. What keeps
+    the duplication honest is that this is checked against the entries they really
+    produced - see the verification note in the plan.
+
+    Returns a sorted list of dates. Duplicates are kept: two occurrences on one day
+    is two occurrences of the money.
+    """
+    interval = max(1, int(cadence_interval or 1))
+    out = []
+    current_date = start_date
+
+    while current_date <= end_date:
+        delta = None
+
+        if cadence_unit == 'days':
+            out.append(current_date)
+            delta = timedelta(days=interval)
+
+        elif cadence_unit == 'weeks':
+            for weekday in (weekdays or []):
+                try:
+                    weekday_num = WEEKDAY_NAMES.index(str(weekday).lower())
+                except ValueError:
+                    continue
+                weekday_date = current_date + timedelta(
+                    days=(weekday_num - current_date.weekday()) % 7)
+                if start_date <= weekday_date <= end_date:
+                    out.append(weekday_date)
+            delta = timedelta(weeks=interval)
+
+        elif cadence_unit == 'months':
+            year, month = current_date.year, current_date.month
+            if monthly_days:
+                cleaned = []
+                for day in monthly_days:
+                    if str(day).lower() == 'last day':
+                        cleaned.append('Last Day')
+                    else:
+                        try:
+                            cleaned.append(int(day))
+                        except (TypeError, ValueError):
+                            continue
+                while True:
+                    for day in cleaned:
+                        try:
+                            if str(day).lower() == 'last day':
+                                day_num = calendar.monthrange(year, month)[1]
+                            else:
+                                day_num = int(day)
+                                if day_num > calendar.monthrange(year, month)[1]:
+                                    continue
+                            occ = date(year=year, month=month, day=day_num)
+                        except (TypeError, ValueError):
+                            continue
+                        if start_date <= occ <= end_date:
+                            out.append(occ)
+                    month += interval
+                    while month > 12:
+                        month -= 12
+                        year += 1
+                    if (year > end_date.year) or (year == end_date.year
+                                                  and month > end_date.month):
+                        break
+            else:
+                while True:
+                    occ = date(year=year, month=month, day=1)
+                    if occ > end_date:
+                        break
+                    if occ >= start_date:
+                        out.append(occ)
+                    month += interval
+                    while month > 12:
+                        month -= 12
+                        year += 1
+                    if (year > end_date.year) or (year == end_date.year
+                                                  and month > end_date.month):
+                        break
+            break  # months are walked whole, not stepped
+
+        elif cadence_unit == 'years':
+            year = start_date.year
+            while True:
+                try:
+                    occ = (date(year=year, month=int(yearly_month), day=int(yearly_day))
+                           if (yearly_day and yearly_month)
+                           else date(year=year, month=1, day=1))
+                except (TypeError, ValueError):
+                    year += interval
+                    if year > end_date.year + 1:
+                        break
+                    continue
+                if occ > end_date:
+                    break
+                if occ >= start_date:
+                    out.append(occ)
+                year += interval
+            break
+
+        if delta:
+            current_date += delta
+        else:
+            break
+
+    return sorted(out)
+
+
 def get_interval_bounds(entry_date, cadence_unit, cadence_interval, start_date, weekdays=None, monthly_days=None, yearly_day=None, yearly_month=None):
     """
     Calculate the start and end dates of the interval containing the given entry_date.
