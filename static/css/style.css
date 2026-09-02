@@ -9303,7 +9303,8 @@ transform: scale(1.2);
 .income-form-container label,
 .ca-form-container label,
 .expense-form-container label,
-.convert-recurring-form-container label {
+.convert-recurring-form-container label,
+.test-bill-form label {
     display: block;
     color: var(--text-dark);
     font-size: 14px;
@@ -9325,7 +9326,10 @@ transform: scale(1.2);
 .convert-recurring-form-container input[type="number"],
 .convert-recurring-form-container input[type="text"],
 .convert-recurring-form-container input[type="date"],
-.convert-recurring-form-container select {
+.convert-recurring-form-container select,
+.test-bill-form input[type="number"],
+.test-bill-form input[type="date"],
+.test-bill-form select {
     width: 100%;
     margin-top: 5px;
     margin-bottom: 10px;
@@ -9357,7 +9361,8 @@ transform: scale(1.2);
 .income-form-container button[type="submit"],
 .ca-form-container button[type="submit"],
 .expense-form-container button[type="submit"],
-.convert-recurring-form-container button[type="submit"] {
+.convert-recurring-form-container button[type="submit"],
+.test-bill-form #test-bill-btn {
     padding: 12px 24px;
     border: none;
     border-radius: 10px;
@@ -9373,6 +9378,7 @@ transform: scale(1.2);
 
 .income-form-container button[type="submit"]:hover,
 .ca-form-container button[type="submit"]:hover,
+.test-bill-form #test-bill-btn:hover,
 .expense-form-container button[type="submit"]:hover,
 .convert-recurring-form-container button[type="submit"]:hover {
     box-shadow: 0 4px 16px var(--shadow-lg);
@@ -9382,6 +9388,7 @@ transform: scale(1.2);
 
 .income-form-container button[type="submit"]:active,
 .ca-form-container button[type="submit"]:active,
+.test-bill-form #test-bill-btn:active,
 .expense-form-container button[type="submit"]:active,
 .convert-recurring-form-container button[type="submit"]:active {
     box-shadow: 0 1px 8px var(--shadow-lg);
@@ -9608,7 +9615,8 @@ transform: scale(1.2);
 #edit-weekly-options,
 #expense-weekly-options,
 #ca-weekly-options,
-#edit-category-weekly-options {
+#edit-category-weekly-options,
+#test-bill-weekly {
     display: flex;
     align-items: center;
     gap: 15px;
@@ -9632,7 +9640,8 @@ transform: scale(1.2);
 #expense-weekly-options .weekday,
 #ca-weekly-options .weekday,
 #edit-category-weekly-options .weekday,
-#convert-weekly-options .weekday {
+#convert-weekly-options .weekday,
+#test-bill-weekly .weekday {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -9648,6 +9657,9 @@ transform: scale(1.2);
 
 /* Monthly Options Label */
 #balance-monthly-options label,
+#test-bill-monthly label,
+#test-bill-weekly label,
+#test-bill-yearly label,
 #monthly-options label,
 #edit-monthly-options label,
 #expense-monthly-options label,
@@ -9661,6 +9673,7 @@ transform: scale(1.2);
 }
 
 /* Monthly Option Row */
+#test-bill-monthly-container div,
 #monthly-day-container div,
 #edit-monthly-day-container div,
 #edit-category-monthly-day-container div,
@@ -9737,6 +9750,9 @@ transform: scale(1.2);
 #edit-yearly-options,
 #weekly-options,
 #edit-weekly-options,
+#test-bill-monthly,
+#test-bill-weekly,
+#test-bill-yearly,
 #monthly-options,
 #edit-monthly-options,
 #expense-yearly-options,
@@ -9769,12 +9785,14 @@ transform: scale(1.2);
 #expense-weekly-options,
 #ca-weekly-options,
 #edit-category-weekly-options,
-#convert-weekly-options {
+#convert-weekly-options,
+#test-bill-weekly {
     justify-content: space-between;
 }
 
 /* Monthly options need display: block, not flex */
 #balance-monthly-options,
+#test-bill-monthly,
 #monthly-options,
 #edit-monthly-options,
 #expense-monthly-options,
@@ -13422,6 +13440,16 @@ transform: scale(1.2);
     font-size: 14px;
     color: var(--secondary-dark);
     line-height: 1.5;
+}
+
+/* Test a Bill borrows the add-recurring-expense form's fields wholesale - its
+   labels, inputs, cadence row, weekday toggles and currency container - by
+   joining those selector lists rather than restating them. Only the two things
+   that form does not have are described here. */
+/* The recurring form sets this width inline; here it is a class, so the two
+   inputs match without a style attribute. */
+.test-bill-occurrences-input {
+    width: 60px;
 }
 
 .test-purchase-input-row {
