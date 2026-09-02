@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.14.1 — 2026-09-01
+
+### Fixed
+- **The update screen finished before the new version was actually being served,
+  so the page still showed the old one until you refreshed it by hand.** It was
+  watching for the new code to arrive on disk, which happens the moment the files
+  are swapped - a few seconds before the application restarts and begins using
+  them. It now waits for the running application to report the new version, which
+  it can only do once it has genuinely restarted.
+
 ## 1.14.0 — 2026-09-01
 
 ### Changed
