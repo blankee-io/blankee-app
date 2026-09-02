@@ -75,15 +75,20 @@
             <div class="summary-left-column">
                 <div class="buffer-card">
                     <div class="buffer-card-header">Short-term Buffer</div>
-                    <div class="buffer-amount" id="buffer-amount">$0.00</div>
-                    <div class="buffer-subtitle">Until Next Payday</div>
-                    
+
+                    {# Two low points rather than two balances. What a balance today
+                       cannot tell you is whether you survive the gap to the next
+                       payday, and the lowest point in between is exactly that. #}
+                    <div class="buffer-subtitle">Lowest Until Payday</div>
+                    <div class="buffer-amount" id="lowest-payday-amount">$0.00</div>
+                    <div class="projected-label">on <span id="lowest-payday-date">--</span></div>
+
                     <div class="buffer-divider"></div>
-                    
-                    <div class="projected-label">Projected Balance on <span id="projected-date">--</span>:</div>
-                    <div class="projected-amount" id="projected-amount">$0.00</div>
-                    <div class="projected-subtitle">Includes upcoming bills & income</div>
-                    
+
+                    <div class="buffer-subtitle">Lowest in Forecast</div>
+                    <div class="projected-amount" id="lowest-forecast-amount">$0.00</div>
+                    <div class="projected-label">on <span id="lowest-forecast-date">--</span></div>
+
                     <div class="payday-info">
                         <span class="payday-item">
                             <i class="fa-regular fa-calendar"></i>
@@ -94,15 +99,14 @@
                             Days Until Payday: <strong id="days-until-payday">--</strong>
                         </span>
                     </div>
-                    
+
                     <div class="buffer-card-buttons">
                         <button id="test-purchase-open-btn" class="test-purchase-open-btn">
-                            <i class="fa-solid fa-calculator"></i> Test a Purchase
+                            <i class="fa-solid fa-vial"></i> Test a Purchase
                         </button>
                         <button id="test-bill-open-btn" class="test-purchase-open-btn">
-                            <i class="fa-solid fa-calendar-clock"></i> Test a Bill
+                            <i class="fa-solid fa-vials"></i> Test a Bill
                         </button>
-                        <a href="{{ url_for(landing_page) }}" class="view-details-btn">View Details</a>
                     </div>
                 </div>
             </div>
@@ -162,7 +166,7 @@
     <div id="test-purchase-modal" class="test-purchase-modal">
         <div class="test-purchase-modal-content">
             <div class="test-purchase-modal-header">
-                <h3><i class="fa-solid fa-calculator"></i> Test a Purchase</h3>
+                <h3><i class="fa-solid fa-vial"></i> Test a Purchase</h3>
                 <button id="test-purchase-close" class="test-purchase-modal-close">&times;</button>
             </div>
             <div class="test-purchase-modal-body">
@@ -192,7 +196,7 @@
     <div id="test-bill-modal" class="test-purchase-modal">
         <div class="test-purchase-modal-content">
             <div class="test-purchase-modal-header">
-                <h3><i class="fa-solid fa-calendar-clock"></i> Test a Bill</h3>
+                <h3><i class="fa-solid fa-vials"></i> Test a Bill</h3>
                 <button id="test-bill-close" class="test-purchase-modal-close">&times;</button>
             </div>
             <div class="test-purchase-modal-body">
@@ -575,112 +579,61 @@
             return nextPayday ? { date: nextPaydayDate, entry: nextPayday } : null;
         }
 
-        // Get current balance (today's remainder from totals_remainders_d)
-        function getCurrentBalance() {
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
-            
-            // Find today's or most recent remainder
-            let latestRemainder = null;
-            let latestDate = null;
-            
-            if (totalsRemaindersD && totalsRemaindersD.length > 0) {
-                totalsRemaindersD.forEach(tr => {
-                    const trDate = parseDate(tr.date);
-                    if (trDate && trDate <= today) {
-                        if (!latestDate || trDate > latestDate) {
-                            latestDate = trDate;
-                            latestRemainder = tr;
-                        }
-                    }
-                });
-            }
-            
-            if (latestRemainder) {
-                return parseFloat(latestRemainder.remainder) || 0;
-            }
-            
-            // Fallback to starting balance
-            if (startingBalance && startingBalance.amount) {
-                return parseFloat(startingBalance.amount) || 0;
-            }
-            
-            return 0;
-        }
 
-        // Calculate projected balance at a future date
-        function getProjectedBalance(targetDate) {
-            // Get the remainder for the target date if it exists
-            const targetStr = targetDate.toISOString().split('T')[0];
-            
-            if (totalsRemaindersD && totalsRemaindersD.length > 0) {
-                const targetRemainder = totalsRemaindersD.find(tr => tr.date === targetStr);
-                if (targetRemainder) {
-                    return parseFloat(targetRemainder.remainder) || 0;
-                }
-            }
-            
-            // Otherwise, calculate based on current balance and upcoming entries
-            let balance = getCurrentBalance();
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            // Add future income up to target date
-            incomeEntries.forEach(entry => {
-                const entryDate = parseDate(entry.date);
-                if (entryDate && entryDate > today && entryDate <= targetDate) {
-                    balance += parseFloat(entry.amount) || 0;
-                }
-            });
-            
-            // Subtract future expenses up to target date
-            expenseEntries.forEach(entry => {
-                const entryDate = parseDate(entry.date);
-                if (entryDate && entryDate > today && entryDate <= targetDate) {
-                    balance -= parseFloat(entry.amount) || 0;
-                }
-            });
-            
-            return balance;
-        }
 
         // Render the buffer summary card
+        //
+        // Two low points rather than two balances. A balance today says nothing
+        // about whether you clear the gap before the next payday; the lowest point
+        // inside that gap is the number that does. The second is the same question
+        // asked of everything forecast.
         function renderBufferCard() {
             const nextPayday = findNextPayday();
-            const currentBalance = getCurrentBalance();
-            
-            // Buffer amount element
-            const bufferEl = document.getElementById('buffer-amount');
-            bufferEl.textContent = formatCurrency(currentBalance);
-            bufferEl.className = currentBalance >= 0 ? 'buffer-amount positive' : 'buffer-amount summary_negative';
-            fitText(bufferEl, 42);
-            
+            const series = futureRemainderSeries();
+
+            function lowestIn(points) {
+                if (!points.length) { return null; }
+                // First occurrence wins, so a flat bottom reports the day you reach
+                // it rather than the day you leave it.
+                let low = points[0];
+                for (const p of points) {
+                    if (p.remainder < low.remainder) { low = p; }
+                }
+                return low;
+            }
+
+            function paint(amountId, dateId, point) {
+                const amountEl = document.getElementById(amountId);
+                const dateEl = document.getElementById(dateId);
+                if (!point) {
+                    amountEl.textContent = '--';
+                    amountEl.className = amountEl.className.replace(/ (positive|summary_negative)/g, '');
+                    dateEl.textContent = '--';
+                    return;
+                }
+                const base = amountId === 'lowest-payday-amount' ? 'buffer-amount' : 'projected-amount';
+                amountEl.textContent = formatCurrency(point.remainder);
+                amountEl.className = base + (point.remainder >= 0 ? ' positive' : ' summary_negative');
+                dateEl.textContent = formatDate(point.date);
+                fitText(amountEl, 42);
+            }
+
+            // Up to the day before payday: payday itself is what lifts you out, so
+            // including it would report the recovery rather than the dip.
+            const untilPayday = nextPayday
+                ? series.filter(p => p.date < nextPayday.date)
+                : [];
+            paint('lowest-payday-amount', 'lowest-payday-date', lowestIn(untilPayday));
+            paint('lowest-forecast-amount', 'lowest-forecast-date', lowestIn(series));
+
             if (nextPayday) {
-                const paydayDate = nextPayday.date;
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
-                const daysUntil = daysBetween(today, paydayDate);
-                
-                // Next payday info
-                document.getElementById('next-payday-date').textContent = formatDate(paydayDate);
-                document.getElementById('days-until-payday').textContent = daysUntil;
-                
-                // Projected balance (day before payday)
-                const projectedDate = new Date(paydayDate);
-                projectedDate.setDate(projectedDate.getDate() - 1);
-                const projectedBalance = getProjectedBalance(projectedDate);
-                
-                document.getElementById('projected-date').textContent = formatDate(projectedDate);
-                const projectedEl = document.getElementById('projected-amount');
-                projectedEl.textContent = formatCurrency(projectedBalance);
-                projectedEl.className = projectedBalance >= 0 ? 'projected-amount positive' : 'projected-amount summary_negative';
-                fitText(projectedEl, 42);
+                document.getElementById('next-payday-date').textContent = formatDate(nextPayday.date);
+                document.getElementById('days-until-payday').textContent = daysBetween(today, nextPayday.date);
             } else {
-                // No recurring income found
                 document.getElementById('next-payday-date').textContent = 'Not set';
                 document.getElementById('days-until-payday').textContent = '--';
-                document.getElementById('projected-date').textContent = 'N/A';
-                document.getElementById('projected-amount').textContent = '--';
             }
         }
 
@@ -1870,7 +1823,7 @@
             // Page tutorial
             startTutorial('tutorial_dashboard_summary', [
                 { selector: '.summary-page-layout', text: 'This page summarizes your budget at a glance — buffer, trends, and upcoming expenses.' },
-                { selector: '.buffer-card', text: 'Your short-term buffer shows your current balance and projected amount until next payday.' },
+                { selector: '.buffer-card', text: 'Your short-term buffer shows the lowest your balance is projected to reach before your next payday, and the lowest across the whole forecast.' },
                 { selector: '#test-purchase-open-btn', text: 'Test Purchase lets you simulate a purchase to see how it would affect your balance before you buy.' },
                 { selector: '#test-bill-open-btn', text: 'Test a Bill does the same for something that repeats: describe a recurring bill and see whether it would take you below zero, when, and for how long.' },
                 { selector: '#balance-graph-section', text: 'The balance trend chart shows how your balance changes over time.' },
