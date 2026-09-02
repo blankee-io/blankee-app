@@ -8,6 +8,20 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.13.1 — 2026-09-01
+
+### Changed
+- **Updating now saves everyone's pending changes to the database first.** Recent
+  work lives in the fast store for a few seconds before it is written down, and
+  an update is a poor moment to be holding any of it: a release may change the
+  shape of the database, and if an update goes badly and the machine is put back
+  as it was, whatever had not been written is the part nobody can reconstruct.
+
+  It runs before any code changes, so the version doing the saving is the version
+  that made the changes. Anything it cannot save stays where it is and is written
+  down as usual a few seconds later, so a failure here reports itself and does not
+  stop the update.
+
 ## 1.13.0 — 2026-09-01
 
 ### Added
