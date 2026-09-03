@@ -301,6 +301,48 @@
         </div>
     </div>
 
+    <!-- Test Result Modal -->
+    {# One modal for both tests. The answer has the same shape either way - the
+       balance as it stands, the same days with the thing applied, and the
+       findings underneath - and two copies of it would drift the way the eleven
+       hand-rolled overlays did.
+
+       The graph is the same markup as the Balance Trend on the page behind it,
+       .graph-container wrapping .graph-scroll-wrapper, so it scrolls and drags
+       identically. The legend is DOM rather than Chart.js's own because the
+       canvas is wider than the modal and scrolls: a legend drawn on it would
+       slide off the side. #}
+    <div id="test-result-modal" class="test-purchase-modal test-result-modal">
+        <div class="test-purchase-modal-content">
+            <div class="test-purchase-modal-header">
+                <h3><i class="fa-solid fa-chart-line"></i> <span id="test-result-title">Projected Balance</span></h3>
+                <button id="test-result-close" class="test-purchase-modal-close">&times;</button>
+            </div>
+            <div class="test-purchase-modal-body">
+                <div id="test-result-headline" class="test-purchase-result"></div>
+
+                <div class="test-result-legend">
+                    <span class="test-result-key">
+                        <span class="test-result-swatch test-result-swatch-now"></span>As it stands
+                    </span>
+                    <span class="test-result-key">
+                        <span class="test-result-swatch test-result-swatch-projected"></span>
+                        <span id="test-result-legend-projected">With this</span>
+                    </span>
+                </div>
+
+                <div class="graph-container test-result-graph" id="test-result-graph-container">
+                    <div class="graph-scroll-wrapper" id="test-result-scroll-wrapper">
+                        <canvas id="test-result-chart"></canvas>
+                    </div>
+                </div>
+                <p class="test-result-graph-hint">Each point is that month&rsquo;s lowest day. Drag or scroll sideways; hover a point for the figures.</p>
+
+                <div id="test-result-findings"></div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
@@ -1229,27 +1271,193 @@
             }
             const lowestLine = `Lowest projected balance: ${formatCurrency(lowest.balance)} on ${formatDateWithYear(lowest.date)}`;
 
-            const firstNegIdx = projected.findIndex(p => p.balance < 0);
-            if (firstNegIdx === -1) { return { safe: true, lowestLine: lowestLine }; }
-
-            const firstNeg = projected[firstNegIdx];
-            let recovery = null;
-            for (let i = firstNegIdx + 1; i < projected.length; i++) {
-                if (projected[i].balance >= 0) { recovery = projected[i]; break; }
+            // Every run of days below zero, not just the first one.
+            //
+            // Reporting only the first ended the story at "back above on <date>"
+            // while a deeper dip sat further out, and the reader had no way to know.
+            // A bill that went $177 under for two days in January and then $1,148
+            // under in May was described by its January dip, with the May figure
+            // underneath as the whole-forecast low: two lines that read as a
+            // contradiction, and the reassuring one leading.
+            const stretches = [];
+            for (let i = 0; i < projected.length; i++) {
+                if (projected[i].balance >= 0) { continue; }
+                const from = projected[i];
+                let low = from;
+                let j = i;
+                while (j < projected.length && projected[j].balance < 0) {
+                    if (projected[j].balance < low.balance) { low = projected[j]; }
+                    j++;
+                }
+                stretches.push({
+                    from: from,
+                    last: projected[j - 1],
+                    // null means it never comes back within the forecast, which is a
+                    // different claim from recovering on the last day.
+                    recovery: j < projected.length ? projected[j] : null,
+                    low: low
+                });
+                i = j; // the loop's own i++ steps past the recovery day
             }
+
+            if (stretches.length === 0) { return { safe: true, lowestLine: lowestLine }; }
 
             // Calendar days between the dates rather than a count of rows, so a gap
             // in the forecast cannot silently shorten the answer.
-            let stretch;
-            if (recovery) {
-                const days = Math.max(1, Math.round((recovery.date - firstNeg.date) / DAY_MS));
-                stretch = `Below zero for ${days} day${days === 1 ? '' : 's'}, back above on ${formatDateWithYear(recovery.date)}`;
+            const spanDays = function (s) {
+                return s.recovery
+                    ? Math.max(1, Math.round((s.recovery.date - s.from.date) / DAY_MS))
+                    : Math.max(1, Math.round((s.last.date - s.from.date) / DAY_MS) + 1);
+            };
+            const plural = function (n) { return n === 1 ? '' : 's'; };
+
+            const stretchLines = [];
+            if (stretches.length === 1) {
+                // Unchanged wording for the common case: one dip needs no preamble
+                // and no bullet.
+                const only = stretches[0];
+                const days = spanDays(only);
+                stretchLines.push(only.recovery
+                    ? `Below zero for ${days} day${plural(days)}, back above on ${formatDateWithYear(only.recovery.date)}`
+                    : `Below zero for at least ${days} day${plural(days)} - still negative on ${formatDateWithYear(only.last.date)}, the last day forecast`);
             } else {
-                const last = projected[projected.length - 1];
-                const days = Math.max(1, Math.round((last.date - firstNeg.date) / DAY_MS) + 1);
-                stretch = `Below zero for at least ${days} day${days === 1 ? '' : 's'} - still negative on ${formatDateWithYear(last.date)}, the last day forecast`;
+                const totalDays = stretches.reduce(function (n, st) { return n + spanDays(st); }, 0);
+                stretchLines.push({
+                    text: `Below zero in ${stretches.length} separate stretches, ${totalDays} day${plural(totalDays)} in total:`
+                });
+                // A bill that never quite clears can produce dozens of these. Past a
+                // point the count is the finding and the list is noise, so the rest
+                // are counted rather than named. The deepest gets its own line below
+                // whatever happens, so capping cannot hide the worst of them.
+                const MAX_LISTED = 10;
+                stretches.slice(0, MAX_LISTED).forEach(function (st) {
+                    const days = spanDays(st);
+                    const low = `, low ${formatCurrency(st.low.balance)}`;
+                    stretchLines.push({ indent: true, text: st.recovery
+                        ? `${formatDateWithYear(st.from.date)} - ${days} day${plural(days)}, back above on ${formatDateWithYear(st.recovery.date)}${low}`
+                        : `${formatDateWithYear(st.from.date)} - at least ${days} day${plural(days)}, still negative on ${formatDateWithYear(st.last.date)}, the last day forecast${low}` });
+                });
+                if (stretches.length > MAX_LISTED) {
+                    const more = stretches.length - MAX_LISTED;
+                    stretchLines.push({ indent: true, text: `and ${more} more stretch${more === 1 ? '' : 'es'} after that` });
+                }
             }
-            return { safe: false, firstNeg: firstNeg, stretch: stretch, lowestLine: lowestLine };
+
+            return {
+                safe: false,
+                firstNeg: stretches[0].from,
+                stretchLines: stretchLines,
+                lowestLine: lowestLine
+            };
+        }
+
+        // Renders what projectionSummary returned. A plain string is one line on its
+        // own; an object is a bullet under the preamble.
+        function stretchHtml(stretchLines) {
+            return stretchLines.map(function (line) {
+                const text = typeof line === 'string' ? line : line.text;
+                const cls = (typeof line !== 'string' && line.indent)
+                    ? 'test-result-balance test-result-stretch' : 'test-result-balance';
+                return `<div class="${cls}">${text}</div>`;
+            }).join('');
+        }
+
+        // Shows the answer to either test: the balance as it stands against the
+        // same days with the thing applied, and the findings underneath.
+        //
+        // Opens over the form rather than replacing it, so closing it puts the
+        // numbers back in front of you to adjust and ask again. The form modal
+        // keeps the body scroll lock it already took, so this deliberately does
+        // not touch .modal-open - taking it off on close would unlock the page
+        // while the form behind is still open.
+        function openTestResultModal(opts) {
+            document.getElementById('test-result-title').textContent = opts.title;
+            document.getElementById('test-result-legend-projected').textContent = opts.legend;
+
+            // The same helper the inline results used, so the headline in here and
+            // the warnings out there cannot end up looking like different things.
+            showTestResult(document.getElementById('test-result-headline'),
+                           opts.safe ? 'success' : 'danger', opts.headline);
+
+            document.getElementById('test-result-findings').innerHTML = opts.findings;
+
+            const modal = document.getElementById('test-result-modal');
+            modal.style.display = 'flex';
+
+            // After the modal is displayed, not before: Chart.js measures the canvas,
+            // and inside a display:none parent every measurement is zero.
+            renderScrollableChart({
+                chartId: 'test-result-chart',
+                containerId: 'test-result-graph-container',
+                scrollWrapperId: 'test-result-scroll-wrapper',
+                rawData: opts.rows,
+                dateField: 'date',
+                valueField: 'projected',
+                compareField: 'current',
+                compareLabel: 'As it stands',
+                compareColor: '#8C9BA5',
+                chartColor: '#2AAAA8',
+                chartLabel: opts.legend,
+                negativeColor: '#E45F1C',
+                zeroLine: true,
+                shadeNegative: true,
+                markLowest: true,
+                // A month per point, so the same spacing the Balance Trend graph uses.
+                pointSpacing: 55,
+                labelFormat: (d) => formatMonthYear(d),
+                // Each point is a month's worst day, so say which day that was - the
+                // month on the axis is not precise enough to act on.
+                pointTitle: function (r) {
+                    return formatMonthYear(r.date) + ' - low on ' + formatDateWithYear(r.lowDate);
+                }
+            });
+        }
+
+        function closeTestResultModal() {
+            const modal = document.getElementById('test-result-modal');
+            modal.style.display = 'none';
+            if (chartInstances['test-result-chart']) {
+                chartInstances['test-result-chart'].destroy();
+                delete chartInstances['test-result-chart'];
+            }
+        }
+
+        // The rows both tests hand the graph: one per month, carrying the balance
+        // as it stands and the balance with the thing applied.
+        //
+        // Not filterToMonthly, which keeps the last day of each month. Month-end is
+        // the wrong day to keep for this question: a bill that takes you under on
+        // the 10th and back over on the 12th leaves no trace in the 31st's balance,
+        // and the graph would say everything is fine while the list underneath it
+        // named two days below zero. So each month is represented by its *worst*
+        // day - the point of the graph is where the line gets closest to zero.
+        //
+        // Both values come off that same worst day rather than each line taking its
+        // own monthly minimum, so the gap between them is the real effect of the
+        // thing being tested on a real day, not two unrelated low points subtracted.
+        //
+        // The date carried is the first day of the month present in the series, not
+        // the worst day: it is what the x axis is labelled by, and it is what makes
+        // the first point come out as today so the Today marker lands on it. The
+        // worst day is kept alongside for the tooltip.
+        function testResultRows(series, projected) {
+            const byMonth = new Map();
+            series.forEach(function (tr, i) {
+                const d = tr.date;
+                const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+                const value = projected[i].balance;
+                const bucket = byMonth.get(key);
+                if (!bucket) {
+                    byMonth.set(key, {
+                        date: d, lowDate: d, current: tr.remainder, projected: value
+                    });
+                } else if (value < bucket.projected) {
+                    bucket.lowDate = d;
+                    bucket.current = tr.remainder;
+                    bucket.projected = value;
+                }
+            });
+            return Array.from(byMonth.values());
         }
 
         function testPurchase() {
@@ -1273,27 +1481,33 @@
             const projected = series.map(tr => ({ date: tr.date, balance: tr.remainder - purchaseAmount }));
             const summary = projectionSummary(projected);
 
-            if (summary.safe) {
-                showTestResult(resultDiv, 'success', `
-                    <i class="fa-solid fa-circle-check"></i>
-                    <div class="test-result-message">
-                        <strong>Good news!</strong> Based on your entered income and expenses,
-                        a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> does not bring your balance below $0.
-                        <div class="test-result-balance">${summary.lowestLine}</div>
-                    </div>`);
-                return;
-            }
+            // The inline area goes back to being for validation and progress only;
+            // the answer itself is the graph.
+            resultDiv.style.display = 'none';
 
-            showTestResult(resultDiv, 'danger', `
-                <i class="fa-solid fa-circle-exclamation"></i>
-                <div class="test-result-message">
-                    <strong>Warning:</strong> Based on your entered income and expenses,
-                    a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> will bring your balance
-                    below $0 on <strong>${formatDateWithYear(summary.firstNeg.date)}</strong>.
-                    <div class="test-result-balance">Projected balance that day: ${formatCurrency(summary.firstNeg.balance)}</div>
-                    <div class="test-result-balance">${summary.stretch}</div>
-                    <div class="test-result-balance">${summary.lowestLine}</div>
-                </div>`);
+            openTestResultModal({
+                title: 'A purchase of ' + formatCurrency(purchaseAmount),
+                legend: 'With this purchase',
+                safe: summary.safe,
+                rows: testResultRows(series, projected),
+                headline: summary.safe
+                    ? `<i class="fa-solid fa-circle-check"></i>
+                       <div class="test-result-message">
+                           <strong>Good news!</strong> Based on your entered income and expenses,
+                           a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> does not bring your balance below $0.
+                       </div>`
+                    : `<i class="fa-solid fa-circle-exclamation"></i>
+                       <div class="test-result-message">
+                           <strong>Warning:</strong> Based on your entered income and expenses,
+                           a purchase of <strong>${formatCurrency(purchaseAmount)}</strong> will bring your balance
+                           below $0 on <strong>${formatDateWithYear(summary.firstNeg.date)}</strong>.
+                       </div>`,
+                findings: summary.safe
+                    ? `<div class="test-result-balance">${summary.lowestLine}</div>`
+                    : `<div class="test-result-balance">Projected balance that day: ${formatCurrency(summary.firstNeg.balance)}</div>
+                       ${stretchHtml(summary.stretchLines)}
+                       <div class="test-result-balance">${summary.lowestLine}</div>`
+            });
         }
 
         function showTestResult(el, kind, html) {
@@ -1397,28 +1611,36 @@
                         + ' of ' + formatCurrency(amount) + ' within the forecast, first on '
                         + formatDateWithYear(dates[0]);
 
-                    if (summary.safe) {
-                        showTestResult(resultDiv, 'success', `
-                            <i class="fa-solid fa-circle-check"></i>
-                            <div class="test-result-message">
-                                <strong>Good news!</strong> Based on your entered income and expenses,
-                                this bill does not bring your balance below $0.
-                                <div class="test-result-balance">${scale}</div>
-                                <div class="test-result-balance">${summary.lowestLine}</div>
-                            </div>`);
-                        return;
-                    }
-                    showTestResult(resultDiv, 'danger', `
-                        <i class="fa-solid fa-circle-exclamation"></i>
-                        <div class="test-result-message">
-                            <strong>Warning:</strong> Based on your entered income and expenses,
-                            this bill will bring your balance below $0 on
-                            <strong>${formatDateWithYear(summary.firstNeg.date)}</strong>.
-                            <div class="test-result-balance">Projected balance that day: ${formatCurrency(summary.firstNeg.balance)}</div>
-                            <div class="test-result-balance">${summary.stretch}</div>
-                            <div class="test-result-balance">${summary.lowestLine}</div>
-                            <div class="test-result-balance">${scale}</div>
-                        </div>`);
+                    // Clears the "Working out the dates..." notice: the answer is
+                    // the graph now, and the inline area is for progress only.
+                    resultDiv.style.display = 'none';
+
+                    openTestResultModal({
+                        title: formatCurrency(amount) + ' every ' + interval + ' ' + unit.replace(/s$/, '')
+                               + (interval === 1 ? '' : 's'),
+                        legend: 'With this bill',
+                        safe: summary.safe,
+                        rows: testResultRows(series, projected),
+                        headline: summary.safe
+                            ? `<i class="fa-solid fa-circle-check"></i>
+                               <div class="test-result-message">
+                                   <strong>Good news!</strong> Based on your entered income and expenses,
+                                   this bill does not bring your balance below $0.
+                               </div>`
+                            : `<i class="fa-solid fa-circle-exclamation"></i>
+                               <div class="test-result-message">
+                                   <strong>Warning:</strong> Based on your entered income and expenses,
+                                   this bill will bring your balance below $0 on
+                                   <strong>${formatDateWithYear(summary.firstNeg.date)}</strong>.
+                               </div>`,
+                        findings: summary.safe
+                            ? `<div class="test-result-balance">${scale}</div>
+                               <div class="test-result-balance">${summary.lowestLine}</div>`
+                            : `<div class="test-result-balance">Projected balance that day: ${formatCurrency(summary.firstNeg.balance)}</div>
+                               ${stretchHtml(summary.stretchLines)}
+                               <div class="test-result-balance">${summary.lowestLine}</div>
+                               <div class="test-result-balance">${scale}</div>`
+                    });
                 },
                 error: function (xhr) {
                     warn(((xhr.responseJSON || {}).message) || 'Could not work out the dates.');
@@ -1451,6 +1673,7 @@
 
         function closeTestBillModal() {
             const modal = document.getElementById('test-bill-modal');
+            closeTestResultModal();
             modal.style.display = 'none';
             if (resetTestBill) { resetTestBill(); }
             document.body.classList.remove('modal-open');
@@ -1466,6 +1689,7 @@
             purchaseResult.className = 'test-purchase-result';
             document.getElementById('test-purchase-amount').value = '';
             const modal = document.getElementById('test-purchase-modal');
+            closeTestResultModal();
             modal.style.display = 'none';
             document.body.classList.remove('modal-open');
             document.documentElement.classList.remove('modal-open');
@@ -1500,7 +1724,28 @@
                 chartId, containerId, scrollWrapperId, dateIndicatorId, trendIndicatorId,
                 rawData, dateField, valueField, chartColor, chartLabel,
                 pointSpacing: customSpacing, labelFormat: customLabelFormat,
-                showNegativeWarning: showNegativeWarning
+                showNegativeWarning: showNegativeWarning,
+                // Optional second line, drawn dashed and behind the first. It reads
+                // another field off the same rows rather than taking a series of its
+                // own, so the two cannot come out of step: one row, one x position,
+                // both values.
+                compareField, compareLabel, compareColor,
+                // A rule at zero, and red for the parts of the line under it. Off by
+                // default - the account graphs are about a trend, and only the test
+                // graphs are about whether the line crosses.
+                zeroLine, negativeColor,
+                // Guards the canvas width. Browsers stop rendering a canvas somewhere
+                // past 16k pixels, and a daily series over a long forecast passes that
+                // at the spacing the monthly graphs use.
+                maxWidth,
+                // Shade the stretches that fall below zero, and call out the single
+                // worst point. Both off by default: the account graphs are about a
+                // trend and have nothing to mark.
+                shadeNegative, markLowest,
+                // Per-point tooltip heading, given the row it came from. Called
+                // after the sort rather than taking a ready-made array, so the
+                // headings cannot end up on the wrong points.
+                pointTitle
             } = config;
             
             if (!rawData || rawData.length === 0) {
@@ -1517,7 +1762,9 @@
                 .map(item => ({
                     date: parseDate(item[dateField || 'date']),
                     dateStr: item[dateField || 'date'],
-                    value: parseFloat(item[valueField || 'balance']) || 0
+                    value: parseFloat(item[valueField || 'balance']) || 0,
+                    compare: compareField ? (parseFloat(item[compareField]) || 0) : null,
+                    raw: item
                 }))
                 .filter(item => item.date)
                 .sort((a, b) => a.date - b.date);
@@ -1588,12 +1835,18 @@
                 }
             }
             
-            const pointSpacing = customSpacing || 25;
+            // One spacing for both the width and the scroll position below, so a
+            // clamped graph still lands on today rather than near it.
+            const cap = maxWidth || 16000;
+            const wanted = customSpacing || 25;
+            const pointSpacing = sortedData.length * wanted > cap
+                ? Math.max(2, cap / sortedData.length) : wanted;
             const minWidth = Math.max(sortedData.length * pointSpacing, 400);
             
             const labelFn = customLabelFormat || formatDateShort;
             const labels = sortedData.map(item => labelFn(item.date));
             const values = sortedData.map(item => item.value);
+            const pointTitles = pointTitle ? sortedData.map(item => pointTitle(item.raw)) : null;
             
             // Point styling
             const pointBgColors = sortedData.map((_, idx) => idx === todayIndex ? '#E45F1C' : '#fff');
@@ -1618,7 +1871,9 @@
                 afterDatasetsDraw: function(chart) {
                     if (todayIndex === -1) return;
                     const c = chart.ctx;
-                    const meta = chart.getDatasetMeta(0);
+                    // The comparison line is unshifted in front, so the main series is
+                    // not always dataset 0. Ask for it by name.
+                    const meta = chart.getDatasetMeta(chart.data.datasets.length - 1);
                     const point = meta.data[todayIndex];
                     if (point) {
                         c.save();
@@ -1631,25 +1886,192 @@
                 }
             };
             
+            // Under the line rather than over it, so the fill of the real series is
+            // not hidden behind the rule.
+            const zeroLinePlugin = {
+                id: 'zeroLine_' + chartId,
+                beforeDatasetsDraw: function (chart) {
+                    const y = chart.scales.y;
+                    if (!y || y.min > 0 || y.max < 0) { return; }
+                    const c = chart.ctx;
+                    c.save();
+                    c.beginPath();
+                    c.setLineDash([4, 4]);
+                    c.lineWidth = 1;
+                    c.strokeStyle = negativeColor || '#E45F1C';
+                    c.moveTo(chart.chartArea.left, y.getPixelForValue(0));
+                    c.lineTo(chart.chartArea.right, y.getPixelForValue(0));
+                    c.stroke();
+                    c.restore();
+                }
+            };
+
+            // The x where the line crosses zero between two points, in pixels.
+            // Banding from point to point instead would start the shading late and
+            // end it early by up to a whole month, which on a monthly axis is the
+            // difference between "that month" and "those two months".
+            function crossingX(meta, i, j) {
+                const a = meta.data[i], b = meta.data[j];
+                const ya = values[i], yb = values[j];
+                if ((ya < 0) === (yb < 0)) { return b.x; }
+                const t = ya / (ya - yb);
+                return a.x + (b.x - a.x) * t;
+            }
+
+            // Every run below zero, shaded. The same runs projectionSummary lists in
+            // words underneath, so the picture and the list cannot disagree.
+            const negativeBandPlugin = {
+                id: 'negBands_' + chartId,
+                beforeDatasetsDraw: function (chart) {
+                    const meta = chart.getDatasetMeta(chart.data.datasets.length - 1);
+                    if (!meta || !meta.data.length) { return; }
+                    const c = chart.ctx;
+                    const area = chart.chartArea;
+                    c.save();
+                    c.fillStyle = hexToRgba(negativeColor || '#E45F1C', 0.12);
+                    let i = 0;
+                    while (i < values.length) {
+                        if (values[i] >= 0) { i++; continue; }
+                        let j = i;
+                        while (j + 1 < values.length && values[j + 1] < 0) { j++; }
+                        const left = i > 0 ? crossingX(meta, i - 1, i) : meta.data[i].x;
+                        const right = j + 1 < values.length
+                            ? crossingX(meta, j, j + 1) : meta.data[j].x;
+                        c.fillRect(left, area.top, Math.max(right - left, 2), area.bottom - area.top);
+                        i = j + 1;
+                    }
+                    c.restore();
+                }
+            };
+
+            // The single worst point, named. It is the number the whole test turns
+            // on, and reading it off a line by eye is guesswork.
+            const lowestMarkerPlugin = {
+                id: 'lowest_' + chartId,
+                afterDatasetsDraw: function (chart) {
+                    const meta = chart.getDatasetMeta(chart.data.datasets.length - 1);
+                    if (!meta || !meta.data.length) { return; }
+                    let idx = 0;
+                    for (let k = 1; k < values.length; k++) {
+                        if (values[k] < values[idx]) { idx = k; }
+                    }
+                    const point = meta.data[idx];
+                    if (!point) { return; }
+                    const c = chart.ctx;
+                    const colour = values[idx] < 0 ? (negativeColor || '#E45F1C') : chartColor;
+                    const text = 'Low ' + formatCurrency(values[idx]);
+
+                    c.save();
+                    c.beginPath();
+                    c.arc(point.x, point.y, 5, 0, Math.PI * 2);
+                    c.fillStyle = colour;
+                    c.fill();
+                    c.lineWidth = 2;
+                    c.strokeStyle = '#fff';
+                    c.stroke();
+
+                    c.font = 'bold 10px sans-serif';
+                    const w = c.measureText(text).width;
+                    // Below the point rather than above when there is no room above,
+                    // and nudged inside the plot when the low sits at either edge.
+                    const above = point.y - 24 > chart.chartArea.top;
+                    const ty = above ? point.y - 12 : point.y + 20;
+                    let tx = point.x;
+                    if (tx - w / 2 < chart.chartArea.left) { tx = chart.chartArea.left + w / 2; }
+                    if (tx + w / 2 > chart.chartArea.right) { tx = chart.chartArea.right - w / 2; }
+
+                    // A plate behind it: the label sits over the shaded band and the
+                    // gridlines, and orange on pink is not readable.
+                    c.fillStyle = 'rgba(255, 255, 255, 0.85)';
+                    c.fillRect(tx - w / 2 - 3, ty - 9, w + 6, 12);
+                    c.fillStyle = colour;
+                    c.textAlign = 'center';
+                    c.fillText(text, tx, ty);
+                    c.restore();
+                }
+            };
+
+            const mainDataset = {
+                label: chartLabel,
+                data: values,
+                borderColor: chartColor,
+                backgroundColor: hexToRgba(chartColor, 0.1),
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointBackgroundColor: pointBgColors,
+                pointBorderColor: pointBorderColors,
+                pointRadius: pointRadii,
+                pointHoverRadius: 8
+            };
+
+            // Teal above zero, orange below it, split on the zero line itself.
+            //
+            // This was per-segment - the whole segment orange if either of its two
+            // ends was negative - and that colours the part above zero orange too.
+            // On a monthly axis a segment is a month wide, so a line climbing from
+            // -$777 in May to +$13.5K in June was drawn orange for its whole length
+            // and the graph appeared to claim the balance was negative for weeks
+            // when it was negative for two days.
+            //
+            // A canvas gradient down the plot area with both colour stops at the
+            // same offset gives a hard edge exactly where y=0 falls, so the colour
+            // changes where the line actually crosses. Scriptable rather than built
+            // once: the pixel position of zero moves with the scale and on resize,
+            // and Chart.js re-evaluates these on every draw.
+            function zeroSplitPaint(chart, above, below) {
+                const area = chart.chartArea;
+                // Called once before the first layout, when there is no area yet.
+                if (!area || area.bottom - area.top <= 0) { return above; }
+                const stop = Math.min(1, Math.max(0,
+                    (chart.scales.y.getPixelForValue(0) - area.top) / (area.bottom - area.top)));
+                const g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+                g.addColorStop(0, above);
+                g.addColorStop(stop, above);
+                g.addColorStop(stop, below);
+                g.addColorStop(1, below);
+                return g;
+            }
+
+            if (negativeColor) {
+                mainDataset.borderColor = function (c) {
+                    return zeroSplitPaint(c.chart, chartColor, negativeColor);
+                };
+                // The fill goes to the zero baseline, so the area under a dip is on
+                // the other side of the same line and wants the other colour.
+                mainDataset.backgroundColor = function (c) {
+                    return zeroSplitPaint(c.chart,
+                        hexToRgba(chartColor, 0.1), hexToRgba(negativeColor, 0.1));
+                };
+            }
+
+            const datasets = [mainDataset];
+            if (compareField) {
+                // Pushed in front of the main dataset so it draws underneath it, and
+                // given no fill or points: it is the reference, not the answer.
+                datasets.unshift({
+                    label: compareLabel || 'Now',
+                    data: sortedData.map(item => item.compare),
+                    borderColor: compareColor || '#8C9BA5',
+                    borderWidth: 2,
+                    borderDash: [5, 4],
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    pointHoverRadius: 5
+                });
+            }
+
             chartInstances[chartId] = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
-                    datasets: [{
-                        label: chartLabel,
-                        data: values,
-                        borderColor: chartColor,
-                        backgroundColor: hexToRgba(chartColor, 0.1),
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.3,
-                        pointBackgroundColor: pointBgColors,
-                        pointBorderColor: pointBorderColors,
-                        pointRadius: pointRadii,
-                        pointHoverRadius: 8
-                    }]
+                    datasets: datasets
                 },
-                plugins: [todayPlugin],
+                plugins: [todayPlugin]
+                    .concat(zeroLine ? [zeroLinePlugin] : [])
+                    .concat(shadeNegative ? [negativeBandPlugin] : [])
+                    .concat(markLowest ? [lowestMarkerPlugin] : []),
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
@@ -1658,8 +2080,18 @@
                         legend: { display: false },
                         tooltip: {
                             callbacks: {
+                                title: function (items) {
+                                    if (!pointTitles || !items.length) {
+                                        return items.length ? items[0].label : '';
+                                    }
+                                    return pointTitles[items[0].dataIndex] || items[0].label;
+                                },
                                 label: function(context) {
-                                    return formatCurrency(context.parsed.y);
+                                    // Bare amount while there is one line; with two, an
+                                    // unlabelled pair of figures says nothing.
+                                    const money = formatCurrency(context.parsed.y);
+                                    return context.chart.data.datasets.length > 1
+                                        ? context.dataset.label + ': ' + money : money;
                                 }
                             }
                         }
@@ -2029,9 +2461,19 @@
                 }
             });
             
-            // Close modal on Escape key
+            $('#test-result-close').on('click', closeTestResultModal);
+            $('#test-result-modal').on('click', function (e) {
+                if (e.target === this) { closeTestResultModal(); }
+            });
+
+            // Close modal on Escape key. The result modal opens over one of the two
+            // form modals, so it has to be checked first - otherwise one Escape
+            // closes the form underneath and leaves the graph sitting on nothing.
             $(document).on('keydown', function(e) {
-                if (e.key === 'Escape' && $('#test-purchase-modal').is(':visible')) {
+                if (e.key !== 'Escape') { return; }
+                if ($('#test-result-modal').is(':visible')) {
+                    closeTestResultModal();
+                } else if ($('#test-purchase-modal').is(':visible')) {
                     closeTestPurchaseModal();
                 }
             });

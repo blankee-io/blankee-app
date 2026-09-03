@@ -8,6 +8,30 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.15.0 — 2026-09-02
+
+### Added
+- **Test a Purchase and Test a Bill now answer with a projected balance graph.**
+  Two lines: your balance as it stands, and the same months with the purchase or
+  bill applied - so the gap between them is what the thing you are testing
+  actually costs you. Every stretch below zero is shaded, the worst point is
+  named on the graph itself, and the line turns orange only where it is genuinely
+  below $0. It opens over the form, so closing it puts your numbers back in front
+  of you to adjust and ask again. It scrolls and drags sideways like the Balance
+  Trend graph, and the written findings are still underneath it.
+
+  Each point is that month's *lowest* day rather than its last, so a bill that
+  takes you under for two days mid-month still shows up. Hovering a point says
+  which day that was.
+
+### Fixed
+- **Both tests described only the first stretch below zero, and stopped there.**
+  If your balance dipped, recovered, and then dipped again deeper later, the
+  answer read "back above on <date>" as though that were the end of it, with the
+  deeper figure sitting underneath as the lowest projected balance - two lines
+  that looked like a contradiction, and the reassuring one leading. Every stretch
+  is now listed, with its own dates and its own low point.
+
 ## 1.14.2 — 2026-09-02
 
 ### Fixed
