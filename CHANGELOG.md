@@ -8,6 +8,21 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.17.0 — 2026-09-03
+
+### Added
+- **A search box on the recurring income, expense and credit expense pages**, the
+  same one the dashboards have. It filters as you type, and the credit expense
+  page gets one per account. Searching a category keeps its scheduled raises and
+  price changes with it, rather than dropping them out of the result - those rows
+  show the date they take over instead of the name, and are matched on the
+  category they belong to.
+
+### Changed
+- **The cadence legend and the search sit on one line above the table**, the
+  legend on its left edge and the search on its right. The legend was centred on
+  a line of its own.
+
 ## 1.16.1 — 2026-09-03
 
 ### Fixed
