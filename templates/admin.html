@@ -678,7 +678,9 @@
             // fields, so hide all three outright rather than on a timer.
             nuEmailBubble.add(nuPasswordBubble).add(nuMatchBubble)
                 .css({ display: 'none', opacity: '0' });
-            $('#add-user-modal').show();
+            // display:flex, not .show(): .footer-modal is a flex container and
+            // jQuery would set display:block, which drops the centring.
+            $('#add-user-modal').css('display', 'flex');
             nuEmail.focus();
         }
 
