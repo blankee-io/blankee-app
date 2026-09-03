@@ -1678,9 +1678,13 @@ function _bucketItemHtml(item, symbol) {
     // that varies is Variable Income, spending you allot yourself an Allowance.
     var income = item.table === "income_entries";
     var credit = item.table === "c_expense_entries";
-    var kind = item.wage_bill
-        ? (income ? "Wage" : "Bill")
-        : (income ? "Variable Income" : "Allowance");
+    // A bundle is neither: it is one planned purchase out of a named list,
+    // so calling it a Bill told the user the wrong thing about what it is.
+    var kind = item.is_bundle
+        ? "Bundle"
+        : item.wage_bill
+            ? (income ? "Wage" : "Bill")
+            : (income ? "Variable Income" : "Allowance");
 
     // Three tones, not two. Credit spending is money out, but it leaves a card
     // rather than the bank, and telling them apart at a glance is the point of
@@ -1696,6 +1700,12 @@ function _bucketItemHtml(item, symbol) {
     var title = credit && item.account_name
         ? _bucketEscape(item.account_name) + " - " + _bucketEscape(item.category_name)
         : _bucketEscape(item.category_name);
+    // Which item, not just which bundle. A bundle bucket aggregates everything
+    // planned for one date, so the trip's name and an amount say nothing about
+    // what is actually being confirmed.
+    if (item.is_bundle && item.bundle_item) {
+        title += ': ' + _bucketEscape(item.bundle_item);
+    }
     return "" +
       '<div class="bucket-prompt-item ' + tone + '" data-entry-id="' + _bucketEscape(item.entry_id) +
           '" data-table="' + _bucketEscape(item.table) + '">' +
