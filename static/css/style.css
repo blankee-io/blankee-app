@@ -1167,6 +1167,7 @@ body {
 .footer-form-group input[type="email"],
 .footer-form-group input[type="password"],
 .footer-form-group input[type="number"],
+.footer-form-group input[type="date"],
 .footer-form-group select {
     width: 100%;
     height: 38px;
@@ -1186,6 +1187,7 @@ body {
 .footer-form-group input[type="email"]:focus,
 .footer-form-group input[type="password"]:focus,
 .footer-form-group input[type="number"]:focus,
+.footer-form-group input[type="date"]:focus,
 .footer-form-group select:focus {
     background-color: var(--text-light);
     border-color: var(--primary);
@@ -11536,23 +11538,50 @@ form button[type="submit"] {
     text-align: center;
 }
 
+/* The same add button the rest of the app uses: text and icon in the brand
+   teal on no background, growing slightly on hover. It was orange, which is
+   the accent colour reserved for expenses - on a page that is neither income
+   nor expense it just read as a different kind of button. */
 .add-bundle-btn {
     position: relative;
     align-self: flex-end;
-    width: 120px;
-    height: 35px;
-    padding: 0;
-    background-color: transparent;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    background: none;
     border: none;
-    border-radius: 50%;
-    color: white;
-    color: var(--accent);
+    color: var(--primary);
+    font-size: 15px;
+    line-height: 28px;
+    white-space: nowrap;
     cursor: pointer;
 }
 
 .add-bundle-btn:hover {
-    Color: var(--text-dark);
-    transform: scale(1.2);
+    color: var(--primary-hover);
+    background: none;
+    transform: scale(1.1);
+}
+
+/* The date picker's own indicator is the one browser-drawn part of the field.
+   Left alone it sits in the browser's blue, which is the only colour on the
+   form that belongs to no palette. */
+.footer-form-group input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.6;
+}
+
+.footer-form-group input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
+
+/* Safari and Chrome give a date input an intrinsic width and centre its text
+   on iOS; without these it comes out narrower than every other field in the
+   form and sits oddly against them. */
+.footer-form-group input[type="date"] {
+    min-height: 38px;
+    text-align: left;
 }
 
 .bundle-header {
@@ -11605,6 +11634,10 @@ form button[type="submit"] {
     padding-right: 10px;
     padding-left: 10px;
     box-sizing: border-box;
+    /* baseline is the initial value, and it lines cells up on their first line
+       of text - so on a narrow screen, where Payment Date wraps to two lines,
+       every other cell sat at the top of a taller row. */
+    vertical-align: middle;
 }
 
 .bundle-table th {
@@ -11693,22 +11726,30 @@ form button[type="submit"] {
     transform: scale(1.2);
 }
 
-.bundle-item-action-cell {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    box-sizing: border-box;
-}
+/* No flex here. display:flex on a <td> stops it being a table cell: it no
+   longer takes the row's height, vertical-align stops applying to it, and
+   height:100% has nothing definite to resolve against - so the button sat at
+   the top of any row tall enough to notice. There is one child in this cell,
+   so the cell's own alignment is all it needs.
 
+   width:100% was wrong too - it asked the actions column for the whole table
+   and squeezed the four columns that hold the content. */
 .bundle-table td.bundle-item-action-cell {
-    width: 100%;
-    height: 100%;
+    width: 1%;
     box-sizing: border-box;
+    text-align: right;
+    vertical-align: middle;
+    white-space: nowrap;
 }
 
 .delete-bundle-item-btn {
+    /* inline-flex centres the glyph inside the button's own box, which is a
+       different question from where that box sits in the row - the cell's
+       vertical-align settles that. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
     width: 20px;
     height: 20px;
     background: transparent;

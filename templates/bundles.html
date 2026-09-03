@@ -52,8 +52,10 @@
     <div class="main-container" id="main-container">
         <div class="bundles-title">
             
-            <span><i class="fa-solid fa-boxes-stacked"></i> Bundles&trade;</span>
-            <button id="add-bundle-btn" class="add-bundle-btn" type="button"><strong><i class="fa-solid fa-plus"></i> Add Bundle</strong></button>
+            <span>Bundles</span>
+            <button id="add-bundle-btn" class="add-bundle-btn" type="button" title="Add Bundle">
+                <i class="fa-solid fa-boxes-stacked"></i> Add Bundle
+            </button>
         </div>
         {% if bundles and bundles|length > 0 %}
             <div class="bundles-container"
@@ -140,7 +142,7 @@
             <div class="bundles-empty-info">
                 <h3>You don't have any Bundles!</h3>
                 <p>
-                    <strong>Bundles&trade;</strong> are small, focused budgets that integrate seamlessly into your main Blankee budget. 
+                    <strong>Bundles</strong> are small, focused budgets that integrate seamlessly into your main Blankee budget.  
                     They’re perfect for tracking individual <strong>Items</strong> for a project, trip, event, or any one-off activity.
                 </p>
                 <p>
@@ -153,11 +155,17 @@
         {% endif %}
     </div> 
 
-    <div id="bundle-input-overlay" class="bundle-input-overlay">
-        <!-- Floating input field for adding a new income category -->
-        <div id="bundle-input-container" class="bundle-input-container">
-            <input type="text" id="new-bundle" placeholder="New Bundle Name" maxlength="20">
-            <button id="confirm-add-bundle-btn" type="button"><i class="fa-solid fa-plus"></i></button>
+    <!-- Modal for adding a new bundle. Same markup as the add-category modal
+         on Manage Categories, so the two read as one control rather than two
+         inventions - this used to be a bare input with a plus button beside it. -->
+    <div id="bundle-input-overlay" class="category-input-overlay modal">
+        <div id="bundle-input-container" class="floating-input-container modal-content">
+            <h2 class="floating-input-title">Add Bundle</h2>
+            <input id="new-bundle" type="text" maxlength="20" placeholder="Bundle Name" />
+            <div class="floating-input-actions modal-buttons">
+                <button type="button" class="floating-input-cancel-btn" id="cancel-add-bundle-btn">Cancel</button>
+                <button id="confirm-add-bundle-btn" class="floating-input-confirm-btn" type="button">Create</button>
+            </div>
         </div>
     </div>
 
@@ -237,17 +245,33 @@
                 });
             }
 
-            // Toggle overlay visibility
+            function closeAddBundleModal() {
+                bundleInputOverlay.style.display = 'none';
+            }
+
             addBundleBtn.addEventListener('click', function() {
                 bundleInputOverlay.style.display = 'flex';
                 newBundleInput.value = '';
                 newBundleInput.focus();
             });
 
-            // Hide overlay when clicking outside the input container
-            bundleInputOverlay.addEventListener('click', function(e) {
+            document.getElementById('cancel-add-bundle-btn')
+                .addEventListener('click', closeAddBundleModal);
+
+            // mousedown, not click, and only on the backdrop itself - matching
+            // the add-category modal. With click, selecting text inside the box
+            // and releasing outside it counts as a click on the backdrop and
+            // throws away what was being typed.
+            bundleInputOverlay.addEventListener('mousedown', function(e) {
                 if (e.target === bundleInputOverlay) {
-                    bundleInputOverlay.style.display = 'none';
+                    closeAddBundleModal();
+                }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape'
+                        && bundleInputOverlay.style.display === 'flex') {
+                    closeAddBundleModal();
                 }
             });
 
@@ -273,7 +297,7 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'success') {
-                        bundleInputOverlay.style.display = 'none';
+                        closeAddBundleModal();
                         location.reload(); // Reload to show new bundle
                     } else {
                         showToast(data.message || 'Error adding bundle.', 'error');
