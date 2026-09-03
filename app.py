@@ -5981,7 +5981,7 @@ def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=
         log_error(app.logger, 'BUCKET', f"Error deleting future buckets from {table_name} in Redis: {e}")
 
 
-def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None, is_system=0):
+def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None, is_system=0, is_bud=0):
     """
     Sync an expense category to all credit accounts for a user.
     Creates a non-recurring c_expense_category for each credit account.
@@ -5995,6 +5995,7 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
         display_order: Display order from the expense_category
         group_id: Optional expense group ID — mapped to c_expense group via source_group_id
         is_system: Whether this is a system category (0 or 1)
+        is_bud: Whether this category belongs to a bud (0 or 1)
     
     Returns:
         Dictionary mapping account_id -> c_expense_category_id
@@ -6072,7 +6073,7 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
             'is_recurring': 0,  # Always non-recurring when synced
             'no_end_date': 0,
             'hidden': 0,
-            'is_bud': 0,
+            'is_bud': is_bud,
             'is_interest': 0,
             'is_auto_adjustment': 0,
             'is_system': is_system
@@ -6089,8 +6090,8 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
                 cursor.execute("""
                     INSERT INTO c_expense_categories 
                     (account_id, name, display_order, is_recurring, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
-                    VALUES (%s, %s, %s, 0, 0, 0, 0, 0, 0)
-                """, (account_id, category_name, new_display_order))
+                    VALUES (%s, %s, %s, 0, 0, %s, 0, 0, %s)
+                """, (account_id, category_name, new_display_order, is_bud, is_system))
                 new_id = cursor.lastrowid
                 conn.commit()
                 cursor.close()
@@ -21484,6 +21485,10 @@ def add_bud_item():
             cursor.close()
 
     if active:
+    # save_ca_daily_balance alone only refreshes the card. Money on the budget
+    # side needs the running totals recomputed too, or the balance trend keeps
+    # showing the old numbers until an unrelated edit happens to refresh it.
+        save_totals_remainders_d()
         save_ca_daily_balance()
         # Check if all bud items are in the past and hide category if so
         check_and_hide_bud_category(bud_id)
@@ -22099,6 +22104,11 @@ def update_bud_item():
 
     # Only run save_ca_daily_balance if account is not Blankee and bud is active
     account = bud_item.get('account', '').lower()
+    # save_ca_daily_balance alone only refreshes the card. Money on the budget
+    # side needs the running totals recomputed too, or the balance trend keeps
+    # showing the old numbers until an unrelated edit happens to refresh it.
+    if bud_active == 1:
+        save_totals_remainders_d()
     if account != "blankee" and bud_active == 1:
         save_ca_daily_balance()
     
@@ -22504,6 +22514,11 @@ def delete_bud_item():
     _delete_bud_item_in_redis(current_user.id, item_id)
         
     # Only run save_ca_daily_balance if account is not Blankee and bud is active
+    # save_ca_daily_balance alone only refreshes the card. Money on the budget
+    # side needs the running totals recomputed too, or the balance trend keeps
+    # showing the old numbers until an unrelated edit happens to refresh it.
+    if bud_active == 1:
+        save_totals_remainders_d()
     if account.lower() != "blankee" and bud_active == 1:
         save_ca_daily_balance()
     
@@ -22670,13 +22685,17 @@ def delete_bud():
                     if cat_row:
                         ca_category_ids_to_delete.add(cat_row['id'])
 
-        # Delete the bud's expense category if present
+        # Delete the bud's expense category if present.
+        # Redis-first, for the same reason as deactivation: a raw DELETE leaves the
+        # row in Redis and the flush worker writes it straight back. The mirror
+        # delete was also unscoped - the id came from a scoped read, so it was
+        # bounded in practice, but nothing in the statement itself said so.
         for bud_cat_id in bud_category_ids_to_delete:
-            cursor.execute("DELETE FROM expense_categories WHERE id = %s AND user_id = %s", (bud_cat_id, current_user.id))
+            _delete_category_in_redis('expense_categories', current_user.id, bud_cat_id)
 
         # Delete any c_expense_categories created for this bud
         for ca_cat_id in ca_category_ids_to_delete:
-            cursor.execute("DELETE FROM c_expense_categories WHERE id = %s", (ca_cat_id,))
+            _delete_category_in_redis('c_expense_categories', current_user.id, ca_cat_id)
 
         conn.commit()
         cursor.close()
@@ -22687,7 +22706,11 @@ def delete_bud():
 
     # Delete the bud itself from Redis
     _delete_bud_in_redis(current_user.id, bud_id)
-        
+
+    # save_ca_daily_balance alone only refreshes the card. Money on the budget
+    # side needs the running totals recomputed too, or the balance trend keeps
+    # showing the old numbers until an unrelated edit happens to refresh it.
+    save_totals_remainders_d()
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
 
@@ -22751,17 +22774,49 @@ def toggle_bud_active():
 
         if active == 1:
             if not bud_row.get('expense_category_id'):
-                cursor.execute("""
-                    SELECT COALESCE(MAX(display_order), 1.0) AS max_do FROM expense_categories WHERE user_id = %s AND FLOOR(display_order) = 1
-                """, (current_user.id,))
-                max_order_val = cursor.fetchone()['max_do']
-                new_display_order = round(float(max_order_val) + 0.0001, 4)
-                cursor.execute("""
-                    INSERT INTO expense_categories (user_id, name, display_order, is_bud, is_system)
-                    VALUES (%s, %s, %s, 1, 0)
-                """, (current_user.id, bud_name, new_display_order))
-                expense_category_id = cursor.lastrowid
-                
+                # Redis is the read path, so this category has to be created there
+                # or the dashboard cannot see it until the user is re-hydrated.
+                # It also has to be mirrored into every credit account the way an
+                # ordinary expense category is - going straight to MySQL skipped
+                # both, which is why bud categories only half-existed.
+                existing_cats = _get_categories_from_redis('expense_categories', current_user.id)
+                if existing_cats is None:
+                    cursor.execute(
+                        "SELECT * FROM expense_categories WHERE user_id = %s",
+                        (current_user.id,)
+                    )
+                    existing_cats = cursor.fetchall()
+                new_display_order = _next_display_order(existing_cats, tier=1)
+
+                expense_category_id = _add_category_to_redis(
+                    'expense_categories', current_user.id,
+                    {
+                        'user_id': current_user.id,
+                        'name': bud_name,
+                        'display_order': new_display_order,
+                        'group_id': None,
+                        'is_recurring': 0,
+                        'no_end_date': 0,
+                        'hidden': 0,
+                        'is_bud': 1,
+                        'is_interest': 0,
+                        'is_auto_adjustment': 0,
+                        'is_system': 0,
+                    }
+                )
+
+                if expense_category_id is None:
+                    # Redis unavailable - fall back to MySQL so activation still works.
+                    cursor.execute("""
+                        INSERT INTO expense_categories (user_id, name, display_order, is_bud, is_system)
+                        VALUES (%s, %s, %s, 1, 0)
+                    """, (current_user.id, bud_name, new_display_order))
+                    expense_category_id = cursor.lastrowid
+
+                _sync_expense_category_to_credit_accounts(
+                    current_user.id, bud_name, new_display_order, is_bud=1
+                )
+
                 # Update bud in Redis with new expense_category_id
                 bud_row['expense_category_id'] = expense_category_id
                 bud_row['active'] = active
@@ -22846,31 +22901,36 @@ def toggle_bud_active():
                     ca_id = _get_credit_account_by_name(current_user.id, account)
                     if not ca_id:
                         continue
-                    # Get or create c_expense_category for this bud (Redis-first)
-                    c_categories = _get_categories_from_redis('c_expense_categories', ca_id)
+                    # c_expense_categories is keyed by user_id, not by account_id -
+                    # passing ca_id here read and wrote another user's Redis keys and
+                    # dirtied their tables. The account is a filter on the rows, not
+                    # part of the key.
+                    c_categories = _get_categories_from_redis('c_expense_categories', current_user.id) or []
+                    account_cats = [c for c in c_categories if int(c.get('account_id', 0) or 0) == int(ca_id)]
                     bud_cat_id = None
-                    if c_categories:
-                        for cat in c_categories:
-                            if cat.get('name') == bud_name:
-                                bud_cat_id = cat['id']
-                                break
-                    
+                    for cat in account_cats:
+                        if cat.get('name') == bud_name:
+                            bud_cat_id = cat['id']
+                            break
+
                     if not bud_cat_id:
-                        # Create new category in Redis
-                        max_order = max([int(c.get('display_order', 0)) for c in c_categories], default=0) if c_categories else 0
+                        # Activation mirrors into every account up front, so reaching
+                        # here means the account was added since. Create the one that
+                        # is missing rather than re-running the whole fan-out.
                         category_data = {
                             'account_id': ca_id,
                             'name': bud_name,
-                            'display_order': max_order + 1,
+                            'display_order': _next_display_order(account_cats, tier=1),
                             'is_bud': 1,
                             'is_recurring': 0,
                             'no_end_date': 0,
                             'hidden': 0,
                             'is_interest': 0,
                             'is_auto_adjustment': 0,
+                            'is_system': 0,
                             'group_id': None
                         }
-                        bud_cat_id = _add_category_to_redis('c_expense_categories', ca_id, category_data)
+                        bud_cat_id = _add_category_to_redis('c_expense_categories', current_user.id, category_data)
                     
                     # Transfer any auto adjustment entries for items in this group
                     ca_auto_adj_transferred = False
@@ -22939,7 +22999,11 @@ def toggle_bud_active():
                                 if isinstance(entry_date, str):
                                     entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                                 
-                                if entry_date < today and auto_adj_id:
+                                # What survives deactivation is money that actually
+                                # moved, not money dated in the past. Branching on the
+                                # date deleted an entry settled earlier today outright;
+                                # a bucket is only a forecast, so it goes.
+                                if int(e.get('is_bucket', 0) or 0) == 0 and auto_adj_id:
                                     # Collect for Uncategorized (preserve bud_item_id)
                                     auto_adj_entries_to_create.append({
                                         'date': entry_date,
@@ -22992,7 +23056,8 @@ def toggle_bud_active():
                                 if isinstance(entry_date, str):
                                     entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                                 
-                                if entry_date < today and ca_auto_adj_id:
+                                # As above: settled money survives, forecasts do not.
+                                if int(e.get('is_bucket', 0) or 0) == 0 and ca_auto_adj_id:
                                     # Collect for Uncategorized (preserve bud_item_id)
                                     ca_auto_adj_entries_to_create.append({
                                         'date': entry_date,
@@ -23016,12 +23081,15 @@ def toggle_bud_active():
                                                  ca_auto_adj_entry['amount'], 
                                                  processed=1, bud_item_id=ca_auto_adj_entry['bud_item_id'])
 
-            # Delete the regular expense category if it exists
+            # Delete the regular expense category if it exists.
+            # Redis-first: a raw DELETE here left the row in Redis, and the flush
+            # worker faithfully wrote it back within about fifteen seconds - so the
+            # category returned on its own and deactivation looked flaky.
             if bud_row.get('expense_category_id'):
-                cursor.execute("""
-                    DELETE FROM expense_categories WHERE id = %s AND user_id = %s
-                """, (bud_row['expense_category_id'], current_user.id))
-                
+                _delete_category_in_redis(
+                    'expense_categories', current_user.id, bud_row['expense_category_id']
+                )
+
                 # Update bud in Redis - set inactive and remove expense_category_id
                 bud_row['active'] = active
                 bud_row['expense_category_id'] = None
@@ -23031,13 +23099,23 @@ def toggle_bud_active():
                 bud_row['active'] = active
                 _update_bud_in_redis(current_user.id, bud_row)
             
-            # Delete all credit account expense categories with this bud name
-            cursor.execute("""
-                DELETE FROM c_expense_categories 
-                WHERE name = %s 
-                AND account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
-                AND is_bud = 1
-            """, (bud_name, current_user.id))
+            # Delete all credit account expense categories with this bud name.
+            # Same story as above - through Redis, or the flush worker restores them.
+            mirror_cats = _get_categories_from_redis('c_expense_categories', current_user.id)
+            if mirror_cats is None:
+                cursor.execute("""
+                    SELECT c.id FROM c_expense_categories c
+                    INNER JOIN credit_accounts a ON c.account_id = a.id
+                    WHERE a.user_id = %s AND c.name = %s AND c.is_bud = 1
+                """, (current_user.id, bud_name))
+                mirror_ids = [row['id'] for row in cursor.fetchall()]
+            else:
+                mirror_ids = [
+                    c['id'] for c in mirror_cats
+                    if c.get('name') == bud_name and int(c.get('is_bud', 0) or 0) == 1
+                ]
+            for mirror_id in mirror_ids:
+                _delete_category_in_redis('c_expense_categories', current_user.id, mirror_id)
             
         else:
             # Update bud active status in Redis
@@ -23055,7 +23133,11 @@ def toggle_bud_active():
     else:
         # Add notification for deactivation
         add_notification(current_user.id, f"Bud '{bud_name}' has been deactivated.", kind='buds')
-        
+
+    # Activating or deactivating adds or removes money on a lot of days at once,
+    # and nothing here recomputed the running totals - so the balance trend stayed
+    # on the old numbers until some unrelated edit happened to refresh it.
+    save_totals_remainders_d()
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
 
