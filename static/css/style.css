@@ -13747,6 +13747,101 @@ transform: scale(1.2);
     opacity: 0.85;
 }
 
+/* ===== Test result modal =====================================================
+   The graph answer to Test a Purchase and Test a Bill. Wider than the two form
+   dialogs it opens over, because a balance line needs the room; everything else
+   about it - the sheet, the header, the body that scrolls while the header
+   stays - is .test-purchase-modal unchanged. */
+.test-result-modal .test-purchase-modal-content {
+    max-width: 760px;
+}
+
+/* Taller than the Balance Trend graph on the page. That one is a glance; this
+   one is the whole reason the modal opened. */
+.test-result-graph {
+    height: 260px;
+    border: 1px solid var(--secondary-lighter);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.test-result-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin: 4px 0 10px;
+    font-size: 12px;
+    color: var(--text-dark);
+}
+
+.test-result-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+/* A line, not a block: it stands for a line on the graph, and the dashes match
+   the dashed series it names. */
+.test-result-swatch {
+    display: inline-block;
+    width: 22px;
+    height: 0;
+    border-top-width: 3px;
+    border-top-style: solid;
+    border-radius: 2px;
+}
+
+.test-result-swatch-now {
+    border-top-style: dashed;
+    border-top-color: var(--secondary);
+}
+
+.test-result-swatch-projected {
+    border-top-color: var(--primary);
+}
+
+.test-result-graph-hint {
+    margin: 6px 0 14px;
+    font-size: 11px;
+    color: var(--secondary-dark);
+    text-align: center;
+}
+
+/* The headline sits inside the modal rather than on the page, so it does not
+   need the outer margin .test-purchase-result carries there. */
+.test-result-modal #test-result-headline {
+    margin: 0 0 14px;
+}
+
+@media (max-width: 600px) {
+    .test-result-graph {
+        height: 220px;
+        padding: 6px;
+    }
+}
+
+/* One stretch below zero out of several. Tighter than a standalone line and
+   indented under the count that introduces them, so the list reads as one
+   answer rather than several unrelated findings. The marker is drawn rather
+   than typed so it cannot be selected and pasted with the text. */
+.test-result-stretch {
+    position: relative;
+    margin-top: 3px;
+    padding-left: 14px;
+}
+
+.test-result-stretch::before {
+    content: "";
+    position: absolute;
+    top: 0.55em;
+    left: 3px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.6;
+}
+
 @media (max-width: 900px) {
     .summary-page-layout {
         flex-direction: column;
