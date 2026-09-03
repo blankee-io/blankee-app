@@ -24285,9 +24285,17 @@ def delete_credit_account():
         if account_name:
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
+                # Scoped through the parent bud: account names are not unique
+                # across users, so an unscoped match renames every other user's
+                # items that happen to share the name of this card.
                 cursor.execute(
-                    "UPDATE bud_items SET account = %s WHERE account = %s",
-                    ("deleted account", account_name)
+                    """
+                    UPDATE bud_items bi
+                    INNER JOIN buds b ON bi.bud_id = b.id
+                    SET bi.account = %s
+                    WHERE bi.account = %s AND b.user_id = %s
+                    """,
+                    ("deleted account", account_name, current_user.id)
                 )
                 conn.commit()
                 cursor.close()

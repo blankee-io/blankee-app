@@ -2692,9 +2692,15 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 if pending_deletes:
                     delete_ids = [int(id_str) for id_str in pending_deletes]
                     placeholders = ','.join(['%s'] * len(delete_ids))
+                    # bud_items has no user_id of its own, so the owner is reached
+                    # through its parent bud. Without the join an id in one user's
+                    # pending_deletes set deletes another user's row. Same shape as
+                    # the no-Redis-data path above.
                     cursor.execute(f"""
-                        DELETE FROM bud_items WHERE id IN ({placeholders})
-                    """, delete_ids)
+                        DELETE bi FROM bud_items bi
+                        INNER JOIN buds b ON bi.bud_id = b.id
+                        WHERE bi.id IN ({placeholders}) AND b.user_id = %s
+                    """, delete_ids + [user_id])
                     log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} bud_items from MySQL")
                 
                 # Track temp ID to real ID mappings for updating Redis
