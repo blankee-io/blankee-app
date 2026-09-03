@@ -119,22 +119,22 @@ def _defer_bundle_items(user_id, category_id, old_date, new_date):
     try:
         cats = list(redis_manager.get_table_cache('expense_categories', user_id) or [])
         cats += list(redis_manager.get_table_cache('c_expense_categories', user_id) or [])
-        bud_id = next(
-            (c.get('bud_id') for c in cats
+        bundle_id = next(
+            (c.get('bundle_id') for c in cats
              if c.get('id') is not None and int(c['id']) == int(category_id)
-             and c.get('bud_id') is not None),
+             and c.get('bundle_id') is not None),
             None
         )
-        if bud_id is None:
+        if bundle_id is None:
             return
 
-        items = redis_manager.get_table_cache('bud_items', user_id)
+        items = redis_manager.get_table_cache('bundle_items', user_id)
         if not items:
             return
 
         moved = 0
         for item in items:
-            if int(item.get('bud_id', 0) or 0) != int(bud_id):
+            if int(item.get('bundle_id', 0) or 0) != int(bundle_id):
                 continue
             if str(item.get('date'))[:10] != str(old_date)[:10]:
                 continue
@@ -142,9 +142,9 @@ def _defer_bundle_items(user_id, category_id, old_date, new_date):
             moved += 1
 
         if moved:
-            redis_manager.set_table_cache('bud_items', user_id, items)
+            redis_manager.set_table_cache('bundle_items', user_id, items)
             log_info(logger, 'BUCKET_CONFIRM',
-                     f"Deferred {moved} bundle item(s) for bundle {bud_id} "
+                     f"Deferred {moved} bundle item(s) for bundle {bundle_id} "
                      f"from {old_date} to {new_date}")
     except Exception as e:
         # A bucket that moved without its items is recoverable - the next edit
@@ -161,7 +161,7 @@ def _bundle_map(table, user_id):
         int(r['id']): r.get('name', '')
         for r in rows
         if r.get('id') is not None
-        and (r.get('bud_id') is not None or r.get('is_bud'))
+        and (r.get('bundle_id') is not None or r.get('is_bundle'))
     }
 
 
@@ -177,19 +177,19 @@ def _bundle_item_label(user_id, category_id, bucket_date, is_bundle):
     try:
         cats = redis_manager.get_table_cache('expense_categories', user_id) or []
         ccats = redis_manager.get_table_cache('c_expense_categories', user_id) or []
-        bud_id = next(
-            (c.get('bud_id') for c in list(cats) + list(ccats)
+        bundle_id = next(
+            (c.get('bundle_id') for c in list(cats) + list(ccats)
              if c.get('id') is not None and int(c['id']) == int(category_id)
-             and c.get('bud_id') is not None),
+             and c.get('bundle_id') is not None),
             None
         )
-        if bud_id is None:
+        if bundle_id is None:
             return ''
-        items = redis_manager.get_table_cache('bud_items', user_id) or []
+        items = redis_manager.get_table_cache('bundle_items', user_id) or []
         wanted = bucket_date.isoformat() if hasattr(bucket_date, 'isoformat') else str(bucket_date)
         names = [
             i.get('name') for i in items
-            if int(i.get('bud_id', 0) or 0) == int(bud_id)
+            if int(i.get('bundle_id', 0) or 0) == int(bundle_id)
             and str(i.get('date'))[:10] == wanted[:10]
             and i.get('name')
         ]

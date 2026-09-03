@@ -145,8 +145,8 @@
                             <tr data-category-id="{{ category.id }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-group-id="{{ category.group_id or '' }}" data-is-system="{{ category.is_system or 0 }}">
                                 <td class="category-cell">
                                     <span class="category-name">
-                                        {% if category.is_bud %}
-                                            <i class="fa-regular fa-seedling category-icon"></i>
+                                        {% if category.is_bundle %}
+                                            <i class="fa-regular fa-boxes-stacked category-icon"></i>
                                         {% elif category.is_savings and category.is_recurring %}
                                             <i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>
                                         {% elif category.is_savings %}
@@ -211,8 +211,8 @@
                             <tr data-category-id="{{ category.id }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-is-credit-account="{{ category.is_credit_account }}" data-group-id="{{ category.group_id or '' }}" data-is-system="{{ category.is_system or 0 }}">
                                 <td class="category-cell">
                                     <span class="category-name">
-                                        {% if category.is_bud %}
-                                            <i class="fa-regular fa-seedling category-icon"></i>
+                                        {% if category.is_bundle %}
+                                            <i class="fa-regular fa-boxes-stacked category-icon"></i>
                                         {% elif category.is_credit_account == 1 and category.is_recurring %}
                                             <i class="fa-kit fa-regular-credit-card-sync category-icon"></i>
                                         {% elif category.is_savings and category.is_recurring %}
@@ -294,8 +294,8 @@
                                 <tr data-category-id="{{ category.id }}" data-is-interest="{{ category.is_interest }}" data-is-auto-adjustment="{{ category.is_auto_adjustment }}" data-group-id="{{ category.group_id or '' }}" data-is-system="0">
                                     <td class="category-cell">
                                         <span class="category-name">
-                                            {% if category.is_bud %}
-                                                <i class="fa-regular fa-seedling category-icon"></i>
+                                            {% if category.is_bundle %}
+                                                <i class="fa-regular fa-boxes-stacked category-icon"></i>
                                             {% elif category.is_recurring %}
                                                 <i class="fa-regular fa-arrows-repeat category-icon"></i>
                                             {% else %}
@@ -702,7 +702,7 @@
         let expenseEntries = {{ expense_entries | tojson | safe }};
         let totals_remainders = {{ totals_remainders | tojson | safe }};
         let savingsEntries = {{ savings_entries | tojson | safe }};
-        let buds = {{ buds | tojson | safe }};
+        let bundles = {{ bundles | tojson | safe }};
 
         let c_expense_categories = [];
         const cExpenseCategoriesDiv = document.getElementById('c-expense-categories-data');
@@ -2320,11 +2320,11 @@
                     input.addEventListener('keydown', function(event) {
                         handleInputKeyNavigation(event, input);
                     });
-                } else if (!(catObj && catObj.is_bud == 1)) {
+                } else if (!(catObj && catObj.is_bundle == 1)) {
                     handleInputEdit(input, 'expense');
                 } else {
                     input.disabled = true;
-                    input.classList.add('bud-category-cell');
+                    input.classList.add('bundle-category-cell');
                     td.classList.add('readonly-cell');
                 }
 
@@ -2546,11 +2546,11 @@
                     input.addEventListener('keydown', function(event) {
                         handleInputKeyNavigation(event, input);
                     });
-                } else if (!(category && category.is_bud == 1)) {
+                } else if (!(category && category.is_bundle == 1)) {
                     handleInputEdit(input, 'ca');
                 } else {
                     input.disabled = true;
-                    input.classList.add('bud-category-cell');
+                    input.classList.add('bundle-category-cell');
                     td.classList.add('readonly-cell');
                 }
 
@@ -4944,8 +4944,8 @@
                                 // Decide which icon to show
                                 let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                                 if (catObj) {
-                                    if (catObj.is_bud == 1) {
-                                        iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                                    if (catObj.is_bundle == 1) {
+                                        iconHtml = '<i class="fa-regular fa-boxes-stacked category-icon"></i>';
                                     } else if ((type === 'expense') && catObj.is_credit_account == 1 && catObj.is_recurring == 1) {
                                         iconHtml = '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
                                     } else if (Number(catObj.is_savings) === 1 && catObj.is_recurring == 1) {
@@ -6938,14 +6938,14 @@
                     editingCategoryType = btn.getAttribute('data-category-type');
                     const currentName = btn.getAttribute('data-category-name');
 
-                    // Expense: Go to Buds if is_bud=1, Credit Accounts if is_credit_account=1
+                    // Expense: Go to Bundles if is_bundle=1, Credit Accounts if is_credit_account=1
                     if (editingCategoryType === 'expense') {
                         const catObj = expenseCategories.find(cat => String(cat.id) === String(editingCategoryId));
                         if (catObj) {
-                            if (catObj.is_bud == 1) {
-                                const budObj = buds && buds.find(b => String(b.expense_category_id) === String(editingCategoryId));
-                                if (budObj) {
-                                    window.location.href = `/buds?bud_id=${budObj.id}`;
+                            if (catObj.is_bundle == 1) {
+                                const bundleObj = bundles && bundles.find(b => String(b.expense_category_id) === String(editingCategoryId));
+                                if (bundleObj) {
+                                    window.location.href = `/bundles?bundle_id=${bundleObj.id}`;
                                     return;
                                 }
                             }
@@ -6958,14 +6958,14 @@
 
                     // Income: no special redirects needed
 
-                    // CA: Go to Buds if is_bud=1
+                    // CA: Go to Bundles if is_bundle=1
                     if (editingCategoryType === 'ca') {
                         const catObj = c_expense_categories.find(cat => String(cat.id) === String(editingCategoryId));
                         if (catObj) {
-                            if (catObj.is_bud == 1 && typeof buds !== "undefined") {
-                                const budObj = buds.find(b => String(b.expense_category_id) === String(editingCategoryId));
-                                if (budObj) {
-                                    window.location.href = `/buds?bud_id=${budObj.id}`;
+                            if (catObj.is_bundle == 1 && typeof bundles !== "undefined") {
+                                const bundleObj = bundles.find(b => String(b.expense_category_id) === String(editingCategoryId));
+                                if (bundleObj) {
+                                    window.location.href = `/bundles?bundle_id=${bundleObj.id}`;
                                     return;
                                 }
                             }

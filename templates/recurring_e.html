@@ -492,9 +492,9 @@
             const wrapper = input.closest('.category-input-wrapper');
             const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
             const hiddenInput = wrapper.querySelector('.category-hidden');
-            // Filter out already-recurring, bud, credit account payment, Starting Balance, and Uncategorized
+            // Filter out already-recurring, bundle, credit account payment, Starting Balance, and Uncategorized
             const categories = allExpenseCategories.filter(cat => 
-                cat.is_recurring != 1 && cat.is_bud != 1 &&
+                cat.is_recurring != 1 && cat.is_bundle != 1 &&
                 cat.is_credit_account != 1 &&
                 cat.name !== 'Starting Balance' && cat.name !== 'Uncategorized' &&
                 cat.name !== 'Interest Charge'

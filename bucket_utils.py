@@ -1156,7 +1156,7 @@ def _is_bundle_category(entry_table, category_id, user_id):
             return False
         for cat in json.loads(cached):
             if int(cat.get('id', 0) or 0) == int(category_id):
-                return bool(cat.get('is_bud')) or cat.get('bud_id') is not None
+                return bool(cat.get('is_bundle')) or cat.get('bundle_id') is not None
     except Exception:
         pass
     return False

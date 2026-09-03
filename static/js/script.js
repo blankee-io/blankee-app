@@ -149,12 +149,12 @@ function _removeToast(el) {
 /**
  * Return the icon HTML for a category based on its properties.
  * Works for income, expense, and credit account categories.
- * @param {object} cat  Category object with name, is_bud, is_recurring, is_credit_account, is_auto_adjustment, is_interest
+ * @param {object} cat  Category object with name, is_bundle, is_recurring, is_credit_account, is_auto_adjustment, is_interest
  * @returns {string} HTML string for the icon <i> element
  */
 function getCategoryIcon(cat) {
     if (!cat) return '<i class="fa-regular fa-folder category-icon"></i>';
-    if (cat.is_bud) return '<i class="fa-regular fa-seedling category-icon"></i>';
+    if (cat.is_bundle) return '<i class="fa-regular fa-seedling category-icon"></i>';
     if (cat.is_credit_account && cat.is_recurring) return '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
     if (Number(cat.is_savings) === 1 && cat.is_recurring) return '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
     if (Number(cat.is_savings) === 1) return '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
@@ -2121,7 +2121,7 @@ function refreshAfterBucketAnswers(changes) {
     // next time a dashboard is opened, and leave this page untouched.
     //
     // Deliberately not calling the page's own saveDailyTotalsAndRemainders as a
-    // fallback. Most of them redraw in place, but buds.html reloads inside it
+    // fallback. Most of them redraw in place, but bundles.html reloads inside it
     // and dashboard_summary.html's returns early unless one of its own edits set
     // a flag - so "call whatever the page has" quietly reloads on one page and
     // silently skips the recalculation on another. Pages that can redraw say so
