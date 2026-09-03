@@ -8,6 +8,39 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.16.0 — 2026-09-03
+
+### Added
+- **You can schedule a change to a recurring entry, and nothing moves until the
+  date you give it.** A raise on an income, a price change on an expense or a
+  credit-account expense: pick the date it takes effect, set the new amount - and
+  the cadence and end date too, if those are changing - and everything before
+  that date stays exactly as it is. As many as you like on the same category.
+
+  The table shows them as extra rows, indented under the original with the date
+  each one takes over, so a category reads as one entry with a history rather
+  than as several that happen to share a name. Removing one puts the previous
+  amount back over the period it covered.
+
+- **Test a Raise**, beside Test a Purchase and Test a Bill on the summary page.
+  Pick one of your recurring incomes, change what is changing, and see the
+  forecast with that in place of what is there now - a replacement rather than an
+  addition, so the graph shows what a raise, a cut or a new payday actually does
+  to your balance. Nothing is saved.
+
+### Fixed
+- **Dates outside the current year now show the year.** A bare "Jan 10" in a list
+  of this year's dates reads as ten months ago rather than four months away. This
+  affected the recurring tables and, more often, the buffer card - the lowest
+  point in a year-long forecast is routinely next year.
+- **Recurring expense buckets are ordered by when they come due**, soonest first.
+  They were in whatever order the categories arrived in, so the thing due this
+  week could be anywhere in the list.
+- **The action buttons on the recurring tables no longer sit outside their row.**
+  With three of them the third dropped onto a line of its own on a wide screen,
+  and on a phone they escaped the row entirely - one above it and one hanging
+  into the row below.
+
 ## 1.15.0 — 2026-09-02
 
 ### Added

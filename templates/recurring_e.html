@@ -67,11 +67,32 @@
                     </thead>
                     <tbody>
                         {% for record in recurring_expense_records %}
-                        <tr data-recurring-id="{{ record.id }}" data-cadence-interval="{{ record.cadence_interval }}" data-cadence-unit="{{ record.cadence_unit }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}1{% else %}0{% endif %}" data-wage-bill="{{ record.wage_bill }}">
+                        <tr class="{% if record.is_raise %}recurring-raise-row{% endif %}" data-recurring-id="{{ record.id }}" data-category-id="{{ record.category_id }}" data-category-name="{{ record.category_name }}" data-start-date="{{ record.start_date }}" data-amount="{{ record.amount }}" data-cadence-interval="{{ record.cadence_interval }}" data-cadence-unit="{{ record.cadence_unit }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}1{% else %}0{% endif %}" data-wage-bill="{{ record.wage_bill }}">
+                            {# A scheduled price change is the same expense later on, so it does not
+                               repeat the name - it says the date it takes over. Not editable
+                               either: renaming from one of these rows would rename the whole
+                               chain and read as though it had only renamed that row. #}
+                            {% if record.is_raise %}
+                            <td class="expense-category recurring-raise-label" data-column="category_name"><span class="raise-arrow"><i class="fa-solid fa-arrow-turn-down-right"></i></span><span class="raise-from">from {{ record.start_date | string | truncate(10, true, '') }}</span></td>
+                            {% else %}
                             <td class="editable expense-category" data-column="category_name">{{ record.category_name }}<span class="mobile-type-label">{{ 'Bill' if record.wage_bill == 1 else 'Allowance' }}</span></td>
+                            {% endif %}
+                            {# Type belongs to the whole recurring entry, not to one link of it - a
+                               price change cannot turn a Bill into an Allowance, and the form
+                               does not offer to. #}
+                            {% if record.is_raise %}
+                            <td class="expense-type raise-blank" data-column="type"></td>
+                            {% else %}
                             <td class="expense-type" data-column="type">{{ 'Bill' if record.wage_bill == 1 else 'Allowance' }}</td>
+                            {% endif %}
                             <td class="editable expense-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
                             <td class="editable expense-cadence" data-column="cadence" title="{{ record.cadence_description }}"><span class="cadence-top">{{ record.cadence_interval }} {% if record.cadence_unit == 'years' %}<i class="fa-solid fa-calendars"></i>{% elif record.cadence_unit == 'months' %}<i class="fa-solid fa-calendar-days"></i>{% elif record.cadence_unit == 'weeks' %}<i class="fa-solid fa-calendar-week"></i>{% else %}<i class="fa-solid fa-calendar-day"></i>{% endif %}</span>{% if record.cadence_unit == 'years' and record.yearly_month and record.yearly_day %}<span class="cadence-detail">{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][record.yearly_month | int] }} {{ record.yearly_day | ordinal }}</span>{% elif record.cadence_unit == 'months' and record.monthly_days %}<span class="cadence-detail">{{ record.monthly_days | ordinal }}</span>{% elif record.cadence_unit == 'weeks' and record.weekdays %}<span class="cadence-detail">{{ record.weekdays | replace('monday','Mo') | replace('tuesday','Tu') | replace('wednesday','We') | replace('thursday','Th') | replace('friday','Fr') | replace('saturday','Sa') | replace('sunday','Su') }}</span>{% endif %}</td>
+                            {# Current Status is the bucket for the period happening now, which
+                               belongs to whichever link is running today. A change that has not
+                               started yet has no such period. #}
+                            {% if record.is_raise %}
+                            <td class="expense-bucket raise-blank" data-column="bucket"></td>
+                            {% else %}
                             <td class="expense-bucket" data-column="bucket">
                                 {% set CUR = "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type %}
                                 {# Latest bucket beside the next one, for every kind. This was gated on
@@ -145,6 +166,7 @@
                                 {% endif %}
                                 {% endif %}
                             </td>
+                            {% endif %}
                             <td class="editable expense-start-date" data-column="start_date">{{ record.start_date[5:7] }}-{{ record.start_date[8:] }}-{{ record.start_date[2:4] }}<span class="mobile-end-date">→ {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}No End{% else %}{{ record.end_date[5:7] }}-{{ record.end_date[8:] }}-{{ record.end_date[2:4] }}{% endif %}</span></td>
                             <td class="editable expense-end-date" data-column="end_date">
                                 {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}
@@ -154,10 +176,20 @@
                                 {% endif %}
                             </td>
                             <td class="expense-actions">
+                                <div class="row-actions">
+                                {# On the last link only. A price change is scheduled against
+                                   the category and the server finds which link the date lands
+                                   in, so one button per chain is all that is needed. #}
+                                {% if record.is_chain_end %}
+                                <button class="raise-recurring-btn" title="Schedule a price change" onclick="openPriceChangeModal('{{ record.id }}')">
+                                    <i class="fa-solid fa-arrow-up-right-dots"></i>
+                                </button>
+                                {% endif %}
                                 <button class="edit-recurring-btn" onclick="openEditModal('{{ record.id }}')">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
                                 <button class="delete-recurring-btn" onclick="openRecurringDeleteModal('{{ record.id }}', event)"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
@@ -312,7 +344,8 @@
     <!-- Edit Recurring Expense Modal -->
     <div id="edit-expense-modal" class="modal">
         <div class="expense-form-container">
-            <h2>Edit Recurring Expense</h2>
+            <h2 id="edit-modal-title">Edit Recurring Expense</h2>
+            <p id="edit-change-note" class="edit-raise-note" style="display:none;"></p>
             <form id="edit-recurring-expense-form">
                 <input type="hidden" id="edit-recurring-id" name="recurring_id">  <!-- Hidden input for recurring ID -->
             
@@ -395,7 +428,7 @@
 
                 <div class="date-row">
                     <div class="date-label-row">
-                        <label for="edit-start-date">Start Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The first occurrence. Forecast entries are generated from this date forward, so a past date will create entries you can confirm.</span></span></label>
+                        <label for="edit-start-date"><span id="edit-start-date-label">Start Date</span><span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The first occurrence. Forecast entries are generated from this date forward, so a past date will create entries you can confirm.</span></span></label>
                         <div class="end-date-container" id="edit-end-date-label-container">
                             <label for="edit-end-date">End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The last occurrence. Leave it to No End Date to keep going indefinitely.</span></span></label>
                         </div>
@@ -422,7 +455,7 @@
                 </div>
 
 
-                <button type="submit">Save Changes</button>
+                <button type="submit" id="edit-submit">Save Changes</button>
             </form>            
         </div>        
     </div>
@@ -1381,8 +1414,67 @@
             });
         }
 
+        // Which question the edit dialog is currently asking: edit this recurring
+        // entry, or schedule a price change to it from a date. The fields are the same,
+        // so it reuses that form rather than standing up a second copy that would
+        // drift. Only the title, one label, the submit text and the endpoint differ.
+        let editChangeMode = 'edit';
+
+        function openPriceChangeModal(recurringId) {
+            editChangeMode = 'change';
+            openEditModal(recurringId);
+
+            const row = $(`tr[data-recurring-id="${recurringId}"]`);
+            $('#edit-modal-title').text('Schedule a Price Change');
+            $('#edit-start-date-label').text('Effective From');
+            $('#edit-submit').text('Schedule Price Change');
+
+            // A price change starts after today, never on or before it: the entries up to
+            // then are already forecast at the old amount and must not move.
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            $('#edit-start-date').attr('min', tomorrow.toISOString().slice(0, 10)).val('');
+
+            // The End Date fields, from this row rather than from the category.
+            // data-no-end-date ORs in the category's no_end_date, which is a fact
+            // about the category and not about one link of a chain - so a row with
+            // a real end date arrives here showing "No End Date" ticked. Judged per
+            // row instead: open-ended is the sentinel end date the rest of the app
+            // uses, or none at all.
+            const rowEnd = (row.attr('data-end-date') || '').trim();
+            const openEnded = !rowEnd || rowEnd === getFiveYearsFromNowEndDateString();
+            $('#edit-no-end-date-checkbox').prop('checked', openEnded);
+            $('#edit-end-date').val(openEnded ? '' : rowEnd);
+            $('#edit-no-end-date-checkbox').trigger('change');
+
+            let note = 'Everything before this date stays exactly as it is. '
+                     + 'This adds a row to the table from that date on.';
+            if (!openEnded) {
+                note += ' This currently ends on ' + rowEnd
+                      + ', so the price change has to start on or before then.';
+            }
+            $('#edit-change-note').text(note).show();
+
+            // Renaming the category from here would rename the whole chain, and the
+            // type belongs to the entry rather than to one link of it - the endpoint
+            // inherits both from the link it splits.
+            $('#edit-category-name').prop('readonly', true);
+            $('#edit-wage-bill-select').prop('disabled', true);
+        }
+
         function openEditModal(recurringId) {
             const modal = document.getElementById("edit-expense-modal");
+
+            // openPriceChangeModal calls this first and then overrides, so only
+            // reset the wording when this is a plain edit.
+            if (editChangeMode !== 'change') {
+                $('#edit-modal-title').text('Edit Recurring Expense');
+                $('#edit-start-date-label').text('Start Date');
+                $('#edit-submit').text('Save Changes');
+                $('#edit-change-note').hide().text('');
+                $('#edit-category-name').prop('readonly', false);
+                $('#edit-wage-bill-select').prop('disabled', false);
+            }
 
             // Set the min attribute for the start date to the browser's today
             document.getElementById('edit-start-date').setAttribute('min', getTodayDateString());
@@ -1390,7 +1482,12 @@
             // Fetch the data from the corresponding row
             const row = $(`tr[data-recurring-id="${recurringId}"]`);
 
-            const categoryName = row.find('.expense-category').clone().children().remove().end().text().trim();
+            // From the row's own attribute, not scraped out of the cell: a
+            // price-change row prints "from <date>" instead of the name, and the
+            // scrape returns an empty string for it - which would also make Edit
+            // on one of those rows fail, since the update route requires a name.
+            const categoryName = (row.attr('data-category-name') || '').trim()
+                || row.find('.expense-category').clone().children().remove().end().text().trim();
             const amountText = row.find('.expense-amount').text().trim();
             const amountValue = amountText.replace(/[^0-9.\-]/g, '');
             const startDate = row.find('.expense-start-date').clone().children().remove().end().text().trim();
@@ -1568,6 +1665,55 @@
                 formData.occurrences_count = null;
             }
 
+            // A price change is a different request against a different route: it adds a
+            // link to the chain rather than editing the row that was opened. The
+            // start date the form collected is the date it takes effect from.
+            if (editChangeMode === 'change') {
+                const row = $(`tr[data-recurring-id="${recurringId}"]`);
+                const changeData = {
+                    kind: 'expense',
+                    category_id: row.attr('data-category-id'),
+                    // The type select is disabled in this mode, so it comes off the
+                    // row. The server inherits it regardless.
+                    wage_bill: parseInt(row.attr('data-wage-bill'), 10) || 0,
+                    effective_date: formData.start_date,
+                    amount: formData.amount,
+                    cadence_interval: formData.cadence_interval,
+                    cadence_unit: formData.cadence_unit,
+                    end_date: formData.end_date,
+                    no_end_date: formData.no_end_date,
+                    weekdays: formData.weekdays,
+                    monthly_days: formData.monthly_days,
+                    yearly_day: formData.yearly_day,
+                    yearly_month: formData.yearly_month
+                };
+                if (!changeData.effective_date) {
+                    showToast('Pick the date the price change takes effect.', 'warning');
+                    return;
+                }
+                document.getElementById('loading-screen').style.display = 'flex';
+                $.ajax({
+                    url: '/schedule-recurring-change',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(changeData),
+                    success: function (response) {
+                        if (response.status === 'success') {
+                            saveDailyTotalsAndRemainders();
+                            location.reload();
+                        } else {
+                            document.getElementById('loading-screen').style.display = 'none';
+                            showToast('Error: ' + response.message, 'error');
+                        }
+                    },
+                    error: function (xhr) {
+                        document.getElementById('loading-screen').style.display = 'none';
+                        showToast('An error occurred: ' + xhr.responseText, 'error');
+                    }
+                });
+                return;
+            }
+
             document.getElementById('loading-screen').style.display = 'flex';
             $.ajax({
                 url: '/update-recurring-expense',
@@ -1620,6 +1766,13 @@
                 .catch(function() {});
         }, 600);
     });
+    
+        // Whatever closes it, the next open starts as an edit again. A dialog left
+        // in change mode because it was dismissed rather than submitted would
+        // schedule a price change the next time someone pressed Edit.
+        $(document).on('click', '#edit-expense-modal .close-modal', function () {
+            editChangeMode = 'edit';
+        });
     </script>
 {% include 'footer.html' %}
 

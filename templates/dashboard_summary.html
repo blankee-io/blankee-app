@@ -107,6 +107,9 @@
                         <button id="test-bill-open-btn" class="test-purchase-open-btn">
                             <i class="fa-solid fa-vials"></i> Test a Bill
                         </button>
+                        <button id="test-raise-open-btn" class="test-purchase-open-btn">
+                            <i class="fa-solid fa-flask-vial"></i> Test a Raise
+                        </button>
                     </div>
                 </div>
             </div>
@@ -209,7 +212,7 @@
                    the same order, the same day-of-month panel and date block. The two
                    describe a bill identically because they are the same markup. Only
                    the category and the submit differ, because this creates nothing. #}
-                <div class="test-bill-form">
+                <div class="cadence-form">
                     <label for="test-bill-amount">Recurring Amount<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The amount for each occurrence. Every occurrence inside the forecast is taken off, one after another.</span></span></label>
                     <div class="currency-input-container">
                         <span class="f-currency-symbol">$</span>
@@ -227,7 +230,7 @@
                         </select>
                     </div>
 
-                    <div id="test-bill-weekly" style="display:none;">
+                    <div id="test-bill-weekly" class="cadence-weekly" style="display:none;">
                         <label>Repeat on:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which weekdays it falls on. The interval still applies, so every 2 weeks on Monday means alternate Mondays.</span></span></label>
                         <div class="weekday"><input type="checkbox" value="monday"> Mo</div>
                         <div class="weekday"><input type="checkbox" value="tuesday"> Tu</div>
@@ -238,13 +241,13 @@
                         <div class="weekday"><input type="checkbox" value="sunday"> Su</div>
                     </div>
 
-                    <div id="test-bill-monthly" style="display:none;">
+                    <div id="test-bill-monthly" class="cadence-monthly" style="display:none;">
                         <label>Days of the month:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which days of the month it falls on. Add more than one for something that recurs twice a month. Last Day follows the length of each month.</span></span></label>
-                        <div id="test-bill-monthly-container"></div>
+                        <div id="test-bill-monthly-container" class="cadence-monthly-container"></div>
                         <button type="button" id="test-bill-add-day" class="add-day-btn">+ Add Another Day</button>
                     </div>
 
-                    <div id="test-bill-yearly" style="display:none;">
+                    <div id="test-bill-yearly" class="cadence-yearly" style="display:none;">
                         <label for="test-bill-yearday">Day of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The day of the month this yearly bill falls on.</span></span></label>
                         <input type="number" id="test-bill-yearday" min="1" max="31">
 
@@ -292,10 +295,127 @@
                     </div>
 
                     <br>
-                    <button type="button" id="test-bill-btn">Test</button>
+                    <button type="button" id="test-bill-btn" class="test-run-btn">Test</button>
                 </div>
 
                 <div id="test-bill-result" class="test-purchase-result" style="display: none;">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test a Raise Modal -->
+    {# Same fields as Test a Bill, in the same order, driven by the same
+       cadenceForm - only the prefix differs. Two extra things that a new bill
+       does not need: which existing recurring income this is a change to, and
+       the date the change takes effect from.
+
+       No "Repeat this many times" here. It answers "how long does this go on
+       for", which for something that already exists is what the end date says;
+       cadenceForm treats those fields as optional for exactly this. #}
+    <div id="test-raise-modal" class="test-purchase-modal">
+        <div class="test-purchase-modal-content">
+            <div class="test-purchase-modal-header">
+                <h3><i class="fa-solid fa-flask-vial"></i> Test a Raise</h3>
+                <button id="test-raise-close" class="test-purchase-modal-close">&times;</button>
+            </div>
+            <div class="test-purchase-modal-body">
+                <p class="test-purchase-description">
+                    Change one of your recurring incomes - a raise, a new payday, a
+                    different schedule - and see what your balance would look like
+                    with it, before anything is committed.
+                </p>
+
+                <div class="cadence-form">
+                    <label for="test-raise-category">Recurring Income<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which recurring income to change. Picking one fills the fields below with what it is today, so you only have to edit what is changing.</span></span></label>
+                    <select id="test-raise-category">
+                        <option value="">Choose an income...</option>
+                    </select>
+                    <p id="test-raise-current" class="test-raise-current"></p>
+
+                    <label for="test-raise-amount">Recurring Amount<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The new amount for each occurrence, replacing the current one from the effective date onwards.</span></span></label>
+                    <div class="currency-input-container">
+                        <span class="f-currency-symbol">$</span>
+                        <input type="number" class="recurring-amount" id="test-raise-amount" placeholder="0.00" step="0.01" min="0" inputmode="decimal">
+                    </div>
+
+                    <label for="test-raise-interval">Repeat Every<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">How often it recurs. The number and the unit together set the interval, so 2 and Week(s) means once a fortnight.</span></span></label>
+                    <div class="cadence-row">
+                        <input type="number" id="test-raise-interval" value="1" step="1" min="1">
+                        <select id="test-raise-unit">
+                            <option value="days">Day(s)</option>
+                            <option value="weeks">Week(s)</option>
+                            <option value="months" selected>Month(s)</option>
+                            <option value="years">Year(s)</option>
+                        </select>
+                    </div>
+
+                    <div id="test-raise-weekly" class="cadence-weekly" style="display:none;">
+                        <label>Repeat on:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which weekdays it falls on. The interval still applies, so every 2 weeks on Friday means alternate Fridays.</span></span></label>
+                        <div class="weekday"><input type="checkbox" value="monday"> Mo</div>
+                        <div class="weekday"><input type="checkbox" value="tuesday"> Tu</div>
+                        <div class="weekday"><input type="checkbox" value="wednesday"> We</div>
+                        <div class="weekday"><input type="checkbox" value="thursday"> Th</div>
+                        <div class="weekday"><input type="checkbox" value="friday"> Fr</div>
+                        <div class="weekday"><input type="checkbox" value="saturday"> Sa</div>
+                        <div class="weekday"><input type="checkbox" value="sunday"> Su</div>
+                    </div>
+
+                    <div id="test-raise-monthly" class="cadence-monthly" style="display:none;">
+                        <label>Days of the month:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which days of the month it falls on. Add more than one for something paid twice a month. Last Day follows the length of each month.</span></span></label>
+                        <div id="test-raise-monthly-container" class="cadence-monthly-container"></div>
+                        <button type="button" id="test-raise-add-day" class="add-day-btn">+ Add Another Day</button>
+                    </div>
+
+                    <div id="test-raise-yearly" class="cadence-yearly" style="display:none;">
+                        <label for="test-raise-yearday">Day of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The day of the month this yearly income falls on.</span></span></label>
+                        <input type="number" id="test-raise-yearday" min="1" max="31">
+
+                        <label for="test-raise-yearmonth">Month of the year:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The month this yearly income falls in.</span></span></label>
+                        <select id="test-raise-yearmonth">
+                            <option value="1">January</option>
+                            <option value="2">February</option>
+                            <option value="3">March</option>
+                            <option value="4">April</option>
+                            <option value="5">May</option>
+                            <option value="6">June</option>
+                            <option value="7">July</option>
+                            <option value="8">August</option>
+                            <option value="9">September</option>
+                            <option value="10">October</option>
+                            <option value="11">November</option>
+                            <option value="12">December</option>
+                        </select>
+                    </div>
+
+                    <div class="date-row">
+                        <div class="date-label-row">
+                            <label for="test-raise-start">Start Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Where the schedule counts from, which sets which days it lands on. Left as it is, the paydays stay where they are.</span></span></label>
+                            <div class="end-date-container">
+                                <label for="test-raise-end">End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The last occurrence. Leave No End Date ticked to run to the end of the forecast.</span></span></label>
+                            </div>
+                        </div>
+                        <div class="date-input-row">
+                            <input type="date" id="test-raise-start">
+                            <div class="end-date-container">
+                                <input type="date" id="test-raise-end">
+                            </div>
+                        </div>
+                        <div class="date-checkbox-row">
+                            <span class="date-checkbox-label">Or</span>
+                            <input type="checkbox" id="test-raise-noend" checked>
+                            <label for="test-raise-noend">No End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Tests as far as the forecast reaches, which is as far as this can see.</span></span></label>
+                        </div>
+                    </div>
+
+                    <label for="test-raise-from">Effective From<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The date the change takes effect. Occurrences before it are left exactly as they are, so a raise starting next quarter shows the gap before it lands. Income already confirmed as received is never altered.</span></span></label>
+                    <input type="date" id="test-raise-from" class="cadence-lone-date">
+
+                    <br>
+                    <button type="button" id="test-raise-btn" class="test-run-btn">Test</button>
+                </div>
+
+                <div id="test-raise-result" class="test-purchase-result" style="display: none;">
                 </div>
             </div>
         </div>
@@ -463,6 +583,10 @@
             wageBillLookup[r.category_id] = parseInt(r.wage_bill) || 0;
         });
         const incomeEntries = {{ income_entries | tojson | safe }};
+        // Recurring income, for Test a Raise: the categories are what the dropdown
+        // offers, the records are what picking one fills the form with.
+        const recurringIncomeCategories = {{ income_categories | tojson | safe }};
+        const recurringIncomeRecords = {{ recurring_income_records | tojson | safe }};
         const totalsRemaindersD = {{ totals_remainders_d | tojson | safe }};
         const totalsRemaindersW = {{ totals_remainders_w | tojson | safe }};
         const totalsRemaindersM = {{ totals_remainders_m | tojson | safe }};
@@ -534,8 +658,20 @@
             return new Date(dateStr);
         }
 
-        // Format date for display
+        // Format date for display, with the year only when it is not this year.
+        //
+        // "Mon ##" is what these labels want nearly all the time - the bucket rows
+        // and the buffer card are narrow columns and the year is noise in them. But
+        // the forecast runs past December, and a bare "Jan 10" sitting in a list of
+        // this year's dates reads as eight months ago rather than four months away.
+        //
+        // Delegating to formatDateWithYear rather than appending the year here, so
+        // there is one spelling of a full date in this file and not two that can
+        // drift apart.
         function formatDate(date) {
+            if (date.getFullYear() !== new Date().getFullYear()) {
+                return formatDateWithYear(date);
+            }
             const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             return months[date.getMonth()] + ' ' + date.getDate();
         }
@@ -1201,6 +1337,34 @@
             return row;
         }
 
+        // Categories paired with their buckets, soonest due first.
+        //
+        // The order used to be whatever order the categories arrived in, which is
+        // not an order at all from the reader's side: the thing due this week could
+        // be anywhere in the list. Sorting by the date each row actually shows puts
+        // what needs attention at the top.
+        //
+        // A category with no bucket ahead of it has no date to sort by and goes
+        // last, rather than sorting as the epoch and taking over the top of the
+        // list. Ties keep the order the categories came in, because Array.sort is
+        // stable - so two buckets due the same day do not shuffle between renders.
+        function bucketsInDueOrder(categories, bucketLookup) {
+            return categories
+                .map(function (category) {
+                    return {
+                        category: category,
+                        bucket: findCurrentBucket(category.id, bucketLookup),
+                        prevBucket: findPreviousBucket(category.id, bucketLookup)
+                    };
+                })
+                .sort(function (a, b) {
+                    if (!a.bucket && !b.bucket) { return 0; }
+                    if (!a.bucket) { return 1; }
+                    if (!b.bucket) { return -1; }
+                    return a.bucket.week_start - b.bucket.week_start;
+                });
+        }
+
         // Render expense buckets
         function renderExpenseBuckets() {
             const container = document.getElementById('expense-buckets-list');
@@ -1218,11 +1382,9 @@
                 return;
             }
             
-            visibleCategories.forEach(category => {
-                const bucket = findCurrentBucket(category.id, bucketLookup);
-                const prevBucket = findPreviousBucket(category.id, bucketLookup);
-                const row = createBucketRow(category, bucket, expenseEntries, null, prevBucket);
-                container.appendChild(row);
+            bucketsInDueOrder(visibleCategories, bucketLookup).forEach(function (item) {
+                container.appendChild(createBucketRow(
+                    item.category, item.bucket, expenseEntries, null, item.prevBucket));
             });
         }
 
@@ -1510,6 +1672,138 @@
             });
         }
 
+        // Test a Raise: the forecast with one recurring income replaced.
+        //
+        // Unlike the other two this is a substitution, not an addition, so it needs
+        // both halves: the occurrences that would stop happening and the ones that
+        // would happen instead. Income raises the balance, so what is taken out
+        // comes off and what is put in goes on.
+        function testRaise() {
+            const resultDiv = document.getElementById('test-raise-result');
+            const warn = function (msg) {
+                showTestResult(resultDiv, 'warning',
+                    '<i class="fa-solid fa-triangle-exclamation"></i> ' + msg);
+            };
+
+            const categoryId = parseInt(document.getElementById('test-raise-category').value, 10);
+            if (!categoryId) { warn('Pick a recurring income to change.'); return; }
+            const categoryName = document.getElementById('test-raise-category')
+                .selectedOptions[0].textContent;
+
+            const series = futureRemainderSeries();
+            if (series.length === 0) {
+                warn('No future balance data available to test against.');
+                return;
+            }
+            const lastForecast = series[series.length - 1].date;
+
+            const form = testRaiseForm.read(lastForecast);
+            if (form.error) { warn(form.error); return; }
+
+            // The forecast begins today, and today's balance already has every
+            // earlier occurrence baked into it. So the change can only take effect
+            // from the start of the series at the earliest - an effective date
+            // before that would subtract income that has already been counted once
+            // and report a balance that was never true.
+            const asked = parseDate(document.getElementById('test-raise-from').value)
+                || series[0].date;
+            const effective = asked > series[0].date ? asked : series[0].date;
+
+            // What stops happening: this category's forecast occurrences from the
+            // effective date on. Anything already confirmed as received is history
+            // rather than forecast, and a change to the schedule does not reach
+            // back and rewrite it.
+            const removedEntries = (incomeEntries || [])
+                .filter(function (e) {
+                    if (parseInt(e.category_id, 10) !== categoryId) { return false; }
+                    if (parseInt(e.processed, 10) === 1) { return false; }
+                    const d = parseDate(e.date);
+                    return d && d >= effective && d <= lastForecast;
+                })
+                .map(function (e) {
+                    return { date: parseDate(e.date), amount: parseFloat(e.amount) || 0 };
+                })
+                .sort(function (a, b) { return a.date - b.date; });
+
+            warn('Working out the dates...');
+
+            $.ajax({
+                url: '/api/recurring-occurrences',
+                method: 'POST',
+                contentType: 'application/json',
+                // The schedule's own start date goes to the server, not the
+                // effective date: the cadence counts from the start, so asking from
+                // somewhere in the middle can land every occurrence a week out.
+                // The dates that fall before the change are filtered off here
+                // instead, which keeps the phase exactly as it is.
+                data: JSON.stringify(form.payload),
+                success: function (res) {
+                    const addedDates = (res.dates || []).map(parseDate).filter(Boolean)
+                        .filter(function (d) { return d >= effective && d <= lastForecast; });
+
+                    if (addedDates.length === 0 && removedEntries.length === 0) {
+                        warn('That would not alter anything inside the forecast.');
+                        return;
+                    }
+
+                    let removed = 0, added = 0, ri = 0, ai = 0;
+                    const projected = series.map(function (tr) {
+                        while (ri < removedEntries.length && removedEntries[ri].date <= tr.date) {
+                            removed += removedEntries[ri].amount;
+                            ri++;
+                        }
+                        while (ai < addedDates.length && addedDates[ai] <= tr.date) {
+                            added += form.amount;
+                            ai++;
+                        }
+                        return { date: tr.date, balance: tr.remainder - removed + added };
+                    });
+
+                    const summary = projectionSummary(projected);
+                    const net = added - removed;
+                    const wasTotal = removedEntries.reduce(function (n, e) { return n + e.amount; }, 0);
+
+                    const replacedLine = removedEntries.length + ' occurrence'
+                        + (removedEntries.length === 1 ? '' : 's') + ' of ' + categoryName
+                        + ' worth ' + formatCurrency(wasTotal) + ' replaced by '
+                        + addedDates.length + ' of ' + formatCurrency(form.amount)
+                        + ', from ' + formatDateWithYear(effective);
+                    const netLine = 'Net effect across the forecast: '
+                        + (net >= 0 ? '+' : '') + formatCurrency(net);
+
+                    resultDiv.style.display = 'none';
+
+                    openTestResultModal({
+                        title: categoryName + ' at ' + formatCurrency(form.amount),
+                        legend: 'With this change',
+                        safe: summary.safe,
+                        rows: testResultRows(series, projected),
+                        headline: summary.safe
+                            ? `<i class="fa-solid fa-circle-check"></i>
+                               <div class="test-result-message">
+                                   <strong>Good news!</strong> With this change your balance
+                                   does not go below $0 at any point in the forecast.
+                               </div>`
+                            : `<i class="fa-solid fa-circle-exclamation"></i>
+                               <div class="test-result-message">
+                                   <strong>Warning:</strong> With this change your balance goes
+                                   below $0 on <strong>${formatDateWithYear(summary.firstNeg.date)}</strong>.
+                               </div>`,
+                        findings: (summary.safe
+                            ? ''
+                            : `<div class="test-result-balance">Projected balance that day: ${formatCurrency(summary.firstNeg.balance)}</div>
+                               ${stretchHtml(summary.stretchLines)}`)
+                            + `<div class="test-result-balance">${summary.lowestLine}</div>
+                               <div class="test-result-balance">${replacedLine}</div>
+                               <div class="test-result-balance">${netLine}</div>`
+                    });
+                },
+                error: function (xhr) {
+                    warn(((xhr.responseJSON || {}).message) || 'Could not work out the dates.');
+                }
+            });
+        }
+
         function showTestResult(el, kind, html) {
             el.style.display = 'block';
             el.className = 'test-purchase-result ' + kind;
@@ -1528,16 +1822,10 @@
         // disagrees with what the app would really do is worse than none.
         function testBill() {
             const resultDiv = document.getElementById('test-bill-result');
-            const amount = parseFloat(document.getElementById('test-bill-amount').value) || 0;
-            const interval = parseInt(document.getElementById('test-bill-interval').value, 10) || 0;
-            const unit = document.getElementById('test-bill-unit').value;
             const warn = function (msg) {
                 showTestResult(resultDiv, 'warning',
                     '<i class="fa-solid fa-triangle-exclamation"></i> ' + msg);
             };
-
-            if (amount <= 0) { warn('Enter an amount greater than 0.'); return; }
-            if (interval < 1) { warn('Repeat every must be at least 1.'); return; }
 
             const series = futureRemainderSeries();
             if (series.length === 0) {
@@ -1546,28 +1834,11 @@
             }
             const lastForecast = series[series.length - 1].date;
 
-            const weekdays = Array.from(document.querySelectorAll(
-                '#test-bill-weekly input[type="checkbox"]:checked')).map(c => c.value);
-            if (unit === 'weeks' && weekdays.length === 0) {
-                warn('Pick at least one day of the week.'); return;
-            }
-            const monthlyDays = Array.from(document.querySelectorAll(
-                '#test-bill-monthly-container .monthly-day-select')).map(sel => sel.value);
-            if (unit === 'months' && monthlyDays.length === 0) {
-                warn('Pick at least one day of the month.'); return;
-            }
-
-            const start = document.getElementById('test-bill-start').value || toISODate(new Date());
-            const byCount = document.getElementById('test-bill-use-occurrences').checked;
-            const occurrences = byCount
-                ? (parseInt(document.getElementById('test-bill-occurrences').value, 10) || 0) : 0;
-            if (byCount && occurrences < 1) { warn('Enter how many times it repeats.'); return; }
-            // Counting occurrences still needs somewhere to stop walking, so it runs
-            // to the end of the forecast and the server takes the first N.
-            const noEnd = document.getElementById('test-bill-noend').checked || byCount;
-            const end = noEnd ? toISODate(lastForecast)
-                : (document.getElementById('test-bill-end').value || toISODate(lastForecast));
-            if (end < start) { warn('The end date is before the start date.'); return; }
+            const form = testBillForm.read(lastForecast);
+            if (form.error) { warn(form.error); return; }
+            const amount = form.amount;
+            const interval = form.interval;
+            const unit = form.unit;
 
             warn('Working out the dates...');
 
@@ -1575,17 +1846,7 @@
                 url: '/api/recurring-occurrences',
                 method: 'POST',
                 contentType: 'application/json',
-                data: JSON.stringify({
-                    cadence_interval: interval,
-                    cadence_unit: unit,
-                    start_date: start,
-                    end_date: end,
-                    weekdays: weekdays,
-                    monthly_days: monthlyDays,
-                    yearly_day: document.getElementById('test-bill-yearday').value || null,
-                    yearly_month: document.getElementById('test-bill-yearmonth').value || null,
-                    occurrences: occurrences
-                }),
+                data: JSON.stringify(form.payload),
                 success: function (res) {
                     const dates = (res.dates || []).map(parseDate).filter(Boolean)
                         .filter(d => d <= lastForecast);
@@ -1660,6 +1921,10 @@
             }, 100);
         }
         
+        // Both assigned by the setup block in $(document).ready, which is where the
+        // markup exists to bind to. Declared out here because the test functions are
+        // top-level and cannot see inside that closure.
+        let testBillForm = null;
         // Assigned by the setup block below, which owns the fields it resets.
         let resetTestBill = null;
 
@@ -1676,6 +1941,25 @@
             closeTestResultModal();
             modal.style.display = 'none';
             if (resetTestBill) { resetTestBill(); }
+            document.body.classList.remove('modal-open');
+            document.documentElement.classList.remove('modal-open');
+        }
+
+        let testRaiseForm = null;
+        // Assigned by the setup block below, which owns the fields it resets.
+        let resetTestRaise = null;
+
+        function openTestRaiseModal() {
+            document.getElementById('test-raise-modal').style.display = 'flex';
+            document.body.classList.add('modal-open');
+            document.documentElement.classList.add('modal-open');
+            setTimeout(function () { document.getElementById('test-raise-category').focus(); }, 100);
+        }
+
+        function closeTestRaiseModal() {
+            closeTestResultModal();
+            document.getElementById('test-raise-modal').style.display = 'none';
+            if (resetTestRaise) { resetTestRaise(); }
             document.body.classList.remove('modal-open');
             document.documentElement.classList.remove('modal-open');
         }
@@ -2258,6 +2542,7 @@
                 { selector: '.buffer-card', text: 'Your short-term buffer shows the lowest your balance is projected to reach before your next payday, and the lowest across the whole forecast.' },
                 { selector: '#test-purchase-open-btn', text: 'Test Purchase lets you simulate a purchase to see how it would affect your balance before you buy.' },
                 { selector: '#test-bill-open-btn', text: 'Test a Bill does the same for something that repeats: describe a recurring bill and see whether it would take you below zero, when, and for how long.' },
+                { selector: '#test-raise-open-btn', text: 'Test a Raise takes one of your recurring incomes - a raise, a cut, a new payday - and shows the forecast with that change in place of what is there now.' },
                 { selector: '#balance-graph-section', text: 'The balance trend chart shows how your balance changes over time.' },
                 { selector: '#trend-indicator', text: 'The arrow shows whether your balance is trending up or down. If you see a red <span class=\"tutorial-negative-badge\">!</span> badge on the header, it means your balance goes negative at some point in the future.' },
                 { selector: '#expense-buckets-section', text: 'Recurring expense buckets show what\'s been paid and what\'s still remaining this period.' },
@@ -2332,111 +2617,331 @@
             // The day-of-month rows are built the way the recurring form builds
             // them - a select plus a minus button, added by a button underneath -
             // so the two behave the same and not merely look the same.
-            function testBillDayRow(selectedValue) {
-                const wrap = document.createElement('div');
-                wrap.className = 'monthly-day-select-container';
+            // ── The recurring cadence form ────────────────────────────────
+            //
+            // Test a Bill and Test a Raise ask for the same thing: an amount and
+            // a schedule, in the same fields and the same order as the
+            // add-recurring forms. All of it is keyed off an id prefix, so the two
+            // are one implementation behind two sets of markup rather than two
+            // copies that drift into different validation, different resets and
+            // different day rows.
+            //
+            // The markup contract for a prefix P:
+            //   P-amount  P-interval  P-unit
+            //   P-weekly (checkboxes)  P-monthly  P-monthly-container  P-add-day
+            //   P-yearly  P-yearday  P-yearmonth
+            //   P-start  P-end  P-noend  P-use-occurrences  P-occurrences
+            //
+            // P-use-occurrences and P-occurrences are optional; a form without
+            // them simply never counts by occurrence.
+            function cadenceForm(prefix) {
+                const el = function (suffix) {
+                    return document.getElementById(prefix + '-' + suffix);
+                };
 
-                const select = document.createElement('select');
-                select.className = 'monthly-day-select';
-                for (let i = 1; i <= 31; i++) {
-                    const opt = new Option(String(i), String(i));
-                    if (selectedValue && String(selectedValue) === String(i)) { opt.selected = true; }
-                    select.appendChild(opt);
-                }
-                const last = new Option('Last Day', 'Last Day');
-                if (selectedValue === 'Last Day') { last.selected = true; }
-                select.appendChild(last);
-                wrap.appendChild(select);
+                function dayRow(selectedValue) {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'monthly-day-select-container';
 
-                const minus = document.createElement('button');
-                minus.type = 'button';
-                minus.className = 'remove-day-btn';
-                minus.textContent = '-';
-                minus.addEventListener('click', function () {
-                    const container = document.getElementById('test-bill-monthly-container');
-                    // Never leave it with nothing to say: one row always remains.
-                    if (container.querySelectorAll('.monthly-day-select-container').length > 1) {
-                        wrap.remove();
+                    const select = document.createElement('select');
+                    select.className = 'monthly-day-select';
+                    for (let i = 1; i <= 31; i++) {
+                        const opt = new Option(String(i), String(i));
+                        if (selectedValue && String(selectedValue) === String(i)) { opt.selected = true; }
+                        select.appendChild(opt);
                     }
-                });
-                wrap.appendChild(minus);
-                return wrap;
-            }
+                    const last = new Option('Last Day', 'Last Day');
+                    if (selectedValue === 'Last Day') { last.selected = true; }
+                    select.appendChild(last);
+                    wrap.appendChild(select);
 
-            (function setUpTestBill() {
-                const container = document.getElementById('test-bill-monthly-container');
-                if (container && !container.children.length) {
-                    container.appendChild(testBillDayRow('1'));
+                    const minus = document.createElement('button');
+                    minus.type = 'button';
+                    minus.className = 'remove-day-btn';
+                    minus.textContent = '-';
+                    minus.addEventListener('click', function () {
+                        // Never leave it with nothing to say: one row always remains.
+                        if (el('monthly-container').querySelectorAll('.monthly-day-select-container').length > 1) {
+                            wrap.remove();
+                        }
+                    });
+                    wrap.appendChild(minus);
+                    return wrap;
                 }
-                const startInput = document.getElementById('test-bill-start');
-                if (startInput && !startInput.value) { startInput.value = toISODate(new Date()); }
 
-                function syncCadenceFields() {
-                    const unit = document.getElementById('test-bill-unit').value;
-                    document.getElementById('test-bill-weekly').style.display = unit === 'weeks' ? 'flex' : 'none';
+                function syncCadence() {
+                    const unit = el('unit').value;
+                    el('weekly').style.display = unit === 'weeks' ? 'flex' : 'none';
                     // block for monthly, flex for the other two - the stylesheet
                     // says so in as many words ("Monthly options need display:
                     // block, not flex"), and an inline style would have quietly
                     // overruled it.
-                    document.getElementById('test-bill-monthly').style.display = unit === 'months' ? 'block' : 'none';
-                    document.getElementById('test-bill-yearly').style.display = unit === 'years' ? 'flex' : 'none';
+                    el('monthly').style.display = unit === 'months' ? 'block' : 'none';
+                    el('yearly').style.display = unit === 'years' ? 'flex' : 'none';
                 }
+
                 // No End Date, an end date, or a number of repeats - one of the
                 // three, the same exclusivity the recurring form enforces.
-                function syncEndFields() {
-                    const noEnd = document.getElementById('test-bill-noend').checked;
-                    const byCount = document.getElementById('test-bill-use-occurrences').checked;
-                    document.getElementById('test-bill-end').disabled = noEnd || byCount;
-                    document.getElementById('test-bill-occurrences').disabled = !byCount;
+                function syncEnd() {
+                    const noEnd = el('noend').checked;
+                    const byCount = el('use-occurrences') ? el('use-occurrences').checked : false;
+                    el('end').disabled = noEnd || byCount;
+                    if (el('occurrences')) { el('occurrences').disabled = !byCount; }
                 }
-                $('#test-bill-unit').on('change', syncCadenceFields);
-                $('#test-bill-noend').on('change', function () {
-                    if (this.checked) { document.getElementById('test-bill-use-occurrences').checked = false; }
-                    syncEndFields();
+
+                function setMonthlyDays(days) {
+                    const container = el('monthly-container');
+                    container.innerHTML = '';
+                    const list = (days && days.length) ? days : ['1'];
+                    list.forEach(function (d) { container.appendChild(dayRow(String(d))); });
+                }
+
+                function reset() {
+                    el('amount').value = '';
+                    el('interval').value = '1';
+                    el('unit').value = 'months';
+                    document.querySelectorAll('#' + prefix + '-weekly input[type="checkbox"]')
+                        .forEach(function (c) { c.checked = false; });
+                    setMonthlyDays(null);
+                    el('yearday').value = '';
+                    el('yearmonth').value = '1';
+                    el('start').value = toISODate(new Date());
+                    el('end').value = '';
+                    el('noend').checked = true;
+                    if (el('use-occurrences')) { el('use-occurrences').checked = false; }
+                    if (el('occurrences')) { el('occurrences').value = ''; }
+                    syncCadence();
+                    syncEnd();
+                }
+
+                // Fill from a recurring_income / recurring_expense row, so that
+                // testing a change to one starts from what it actually is.
+                function fill(record) {
+                    reset();
+                    if (!record) { return; }
+                    el('amount').value = parseFloat(record.amount) || '';
+                    el('interval').value = parseInt(record.cadence_interval, 10) || 1;
+                    el('unit').value = record.cadence_unit || 'months';
+
+                    // Stored as a comma-separated string, which is also what an
+                    // empty value looks like once split - hence the filter.
+                    const weekdays = String(record.weekdays || '').split(',')
+                        .map(function (w) { return w.trim().toLowerCase(); })
+                        .filter(Boolean);
+                    document.querySelectorAll('#' + prefix + '-weekly input[type="checkbox"]')
+                        .forEach(function (c) { c.checked = weekdays.indexOf(c.value) !== -1; });
+
+                    // monthly_days is the list; monthly_day is the single-day column
+                    // it replaced, still populated on older rows.
+                    const monthly = String(record.monthly_days || record.monthly_day || '')
+                        .split(',').map(function (d) { return d.trim(); }).filter(Boolean);
+                    setMonthlyDays(monthly);
+
+                    if (record.yearly_day) { el('yearday').value = record.yearly_day; }
+                    if (record.yearly_month) { el('yearmonth').value = record.yearly_month; }
+
+                    if (record.start_date) { el('start').value = String(record.start_date).slice(0, 10); }
+                    if (record.end_date) {
+                        el('end').value = String(record.end_date).slice(0, 10);
+                        el('noend').checked = false;
+                    } else {
+                        el('end').value = '';
+                        el('noend').checked = true;
+                    }
+                    syncCadence();
+                    syncEnd();
+                }
+
+                // Everything the occurrence API and the projection need, or an
+                // { error } saying what is missing. One return shape, so callers do
+                // not each decide what counts as valid.
+                function read(lastForecast) {
+                    const amount = parseFloat(el('amount').value) || 0;
+                    const interval = parseInt(el('interval').value, 10) || 0;
+                    const unit = el('unit').value;
+
+                    if (amount <= 0) { return { error: 'Enter an amount greater than 0.' }; }
+                    if (interval < 1) { return { error: 'Repeat every must be at least 1.' }; }
+
+                    const weekdays = Array.from(document.querySelectorAll(
+                        '#' + prefix + '-weekly input[type="checkbox"]:checked')).map(c => c.value);
+                    if (unit === 'weeks' && weekdays.length === 0) {
+                        return { error: 'Pick at least one day of the week.' };
+                    }
+                    const monthlyDays = Array.from(document.querySelectorAll(
+                        '#' + prefix + '-monthly-container .monthly-day-select')).map(sel => sel.value);
+                    if (unit === 'months' && monthlyDays.length === 0) {
+                        return { error: 'Pick at least one day of the month.' };
+                    }
+
+                    const start = el('start').value || toISODate(new Date());
+                    const byCount = el('use-occurrences') ? el('use-occurrences').checked : false;
+                    const occurrences = byCount
+                        ? (parseInt(el('occurrences').value, 10) || 0) : 0;
+                    if (byCount && occurrences < 1) {
+                        return { error: 'Enter how many times it repeats.' };
+                    }
+                    // Counting occurrences still needs somewhere to stop walking, so
+                    // it runs to the end of the forecast and the server takes the
+                    // first N.
+                    const noEnd = el('noend').checked || byCount;
+                    const end = noEnd ? toISODate(lastForecast)
+                        : (el('end').value || toISODate(lastForecast));
+                    if (end < start) { return { error: 'The end date is before the start date.' }; }
+
+                    return {
+                        amount: amount,
+                        interval: interval,
+                        unit: unit,
+                        payload: {
+                            cadence_interval: interval,
+                            cadence_unit: unit,
+                            start_date: start,
+                            end_date: end,
+                            weekdays: weekdays,
+                            monthly_days: monthlyDays,
+                            yearly_day: el('yearday').value || null,
+                            yearly_month: el('yearmonth').value || null,
+                            occurrences: occurrences
+                        }
+                    };
+                }
+
+                function bind() {
+                    $('#' + prefix + '-unit').on('change', syncCadence);
+                    $('#' + prefix + '-noend').on('change', function () {
+                        if (this.checked && el('use-occurrences')) {
+                            el('use-occurrences').checked = false;
+                        }
+                        syncEnd();
+                    });
+                    if (el('use-occurrences')) {
+                        $('#' + prefix + '-use-occurrences').on('change', function () {
+                            if (this.checked) { el('noend').checked = false; }
+                            syncEnd();
+                        });
+                    }
+                    $('#' + prefix + '-add-day').on('click', function () {
+                        el('monthly-container').appendChild(dayRow(null));
+                    });
+                    if (!el('monthly-container').children.length) { setMonthlyDays(null); }
+                    if (!el('start').value) { el('start').value = toISODate(new Date()); }
+                    syncCadence();
+                    syncEnd();
+                }
+
+                return { el: el, bind: bind, reset: reset, fill: fill, read: read };
+            }
+
+            testBillForm = cadenceForm('test-bill');
+            testBillForm.bind();
+
+            testRaiseForm = cadenceForm('test-raise');
+
+            (function setUpTestRaise() {
+                const select = document.getElementById('test-raise-category');
+                if (!select) { return; }
+                testRaiseForm.bind();
+
+                // A category can only be changed if there is a recurring row behind
+                // it saying what it currently is, so the dropdown offers exactly
+                // those and nothing else.
+                const recordFor = {};
+                (recurringIncomeRecords || []).forEach(function (r) {
+                    recordFor[parseInt(r.category_id, 10)] = r;
                 });
-                $('#test-bill-use-occurrences').on('change', function () {
-                    if (this.checked) { document.getElementById('test-bill-noend').checked = false; }
-                    syncEndFields();
+
+                const offered = (recurringIncomeCategories || [])
+                    .filter(function (c) { return !c.hidden && recordFor[parseInt(c.id, 10)]; })
+                    .sort(function (a, b) {
+                        return String(a.name).localeCompare(String(b.name));
+                    });
+
+                offered.forEach(function (c) {
+                    select.appendChild(new Option(c.name, c.id));
                 });
-                $('#test-bill-add-day').on('click', function () {
-                    document.getElementById('test-bill-monthly-container').appendChild(testBillDayRow(null));
+
+                if (offered.length === 0) {
+                    select.disabled = true;
+                    select.options[0].textContent = 'No recurring income to change';
+                    document.getElementById('test-raise-btn').disabled = true;
+                }
+
+                // What the selected income is today, in words. The edited fields are
+                // being compared against this, so it has to be legible without
+                // reading the form back.
+                function describeCurrent(record) {
+                    const n = parseInt(record.cadence_interval, 10) || 1;
+                    const unit = record.cadence_unit || 'months';
+                    const every = n === 1 ? unit.replace(/s$/, '') : n + ' ' + unit;
+
+                    let detail = '';
+                    if (unit === 'weeks') {
+                        const days = String(record.weekdays || '').split(',')
+                            .map(function (w) { return w.trim(); }).filter(Boolean)
+                            .map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); });
+                        if (days.length) { detail = ' on ' + days.join(', '); }
+                    } else if (unit === 'months') {
+                        const days = String(record.monthly_days || record.monthly_day || '')
+                            .split(',').map(function (d) { return d.trim(); }).filter(Boolean);
+                        if (days.length) { detail = ' on the ' + days.join(', '); }
+                    }
+
+                    let span = '';
+                    if (record.end_date) {
+                        span = ', until ' + formatDateWithYear(parseDate(String(record.end_date).slice(0, 10)));
+                    }
+                    return 'Currently ' + formatCurrency(record.amount) + ' every '
+                        + every + detail + span + '.';
+                }
+
+                $('#test-raise-category').on('change', function () {
+                    const record = recordFor[parseInt(this.value, 10)];
+                    const currentEl = document.getElementById('test-raise-current');
+                    if (!record) {
+                        currentEl.textContent = '';
+                        testRaiseForm.reset();
+                        document.getElementById('test-raise-from').value = toISODate(new Date());
+                        return;
+                    }
+                    currentEl.textContent = describeCurrent(record);
+                    // Fills every field with what it is now, so the only thing left
+                    // to do is edit the part that is changing.
+                    testRaiseForm.fill(record);
                 });
-                // Exposed so closeTestBillModal can reach it: the sync helpers it
-                // needs live in here, and a modal that reopens showing the last
-                // answer invites reading it as the answer to the new question.
-                resetTestBill = function () {
-                    const result = document.getElementById('test-bill-result');
+
+                document.getElementById('test-raise-from').value = toISODate(new Date());
+
+                resetTestRaise = function () {
+                    const result = document.getElementById('test-raise-result');
                     result.style.display = 'none';
                     result.innerHTML = '';
                     result.className = 'test-purchase-result';
 
-                    document.getElementById('test-bill-amount').value = '';
-                    document.getElementById('test-bill-interval').value = '1';
-                    document.getElementById('test-bill-unit').value = 'months';
-                    document.querySelectorAll('#test-bill-weekly input[type="checkbox"]')
-                        .forEach(c => { c.checked = false; });
-
-                    const container = document.getElementById('test-bill-monthly-container');
-                    container.innerHTML = '';
-                    container.appendChild(testBillDayRow('1'));
-
-                    document.getElementById('test-bill-yearday').value = '';
-                    document.getElementById('test-bill-yearmonth').value = '1';
-                    document.getElementById('test-bill-start').value = toISODate(new Date());
-                    document.getElementById('test-bill-end').value = '';
-                    document.getElementById('test-bill-noend').checked = true;
-                    document.getElementById('test-bill-use-occurrences').checked = false;
-                    document.getElementById('test-bill-occurrences').value = '';
-
-                    syncCadenceFields();
-                    syncEndFields();
+                    select.value = '';
+                    document.getElementById('test-raise-current').textContent = '';
+                    testRaiseForm.reset();
+                    document.getElementById('test-raise-from').value = toISODate(new Date());
                 };
-
-                syncCadenceFields();
-                syncEndFields();
             })();
+            // Exposed so closeTestBillModal can reach it: a modal that reopens
+            // showing the last answer invites reading it as the answer to the new
+            // question.
+            resetTestBill = function () {
+                const result = document.getElementById('test-bill-result');
+                result.style.display = 'none';
+                result.innerHTML = '';
+                result.className = 'test-purchase-result';
+                testBillForm.reset();
+            };
 
             $('#test-bill-open-btn').on('click', openTestBillModal);
+            $('#test-raise-open-btn').on('click', openTestRaiseModal);
+            $('#test-raise-btn').on('click', testRaise);
+            $('#test-raise-close').on('click', closeTestRaiseModal);
+            $('#test-raise-modal').on('click', function (e) {
+                if (e.target === this) { closeTestRaiseModal(); }
+            });
             $('#test-bill-close').on('click', closeTestBillModal);
             $('#test-bill-modal').on('click', function(e) {
                 if (e.target === this) { closeTestBillModal(); }
@@ -2475,6 +2980,8 @@
                     closeTestResultModal();
                 } else if ($('#test-purchase-modal').is(':visible')) {
                     closeTestPurchaseModal();
+                } else if ($('#test-raise-modal').is(':visible')) {
+                    closeTestRaiseModal();
                 }
             });
         });
