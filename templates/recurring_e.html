@@ -41,13 +41,24 @@
                 <button id="add-expense-btn" class="add-expense-btn" type="button" title="Add Category"><i class="fa-kit fa-solid-arrows-repeat-circle-plus"></i></button>
             </div>
             <!-- Cadence Legend -->
-            <div class="cadence-legend">
-                <span class="cadence-legend-item"><i class="fa-solid fa-calendar-day"></i> Day</span>
-                <span class="cadence-legend-item"><i class="fa-solid fa-calendar-week"></i> Week</span>
-                <span class="cadence-legend-item"><i class="fa-solid fa-calendar-days"></i> Month</span>
-                <span class="cadence-legend-item"><i class="fa-solid fa-calendars"></i> Year</span>
-                <span class="cadence-legend-item"><i class="fa-solid fa-hand-holding-dollar" style="color: var(--success)"></i> Paid</span>
-                <span class="cadence-legend-item"><i class="fa-kit fa-solid-hand-holding-dollar-slash" style="color: var(--danger)"></i> Unpaid</span>
+            <div class="table-toolbar">
+                <div class="cadence-legend">
+                    <span class="cadence-legend-item"><i class="fa-solid fa-calendar-day"></i> Day</span>
+                    <span class="cadence-legend-item"><i class="fa-solid fa-calendar-week"></i> Week</span>
+                    <span class="cadence-legend-item"><i class="fa-solid fa-calendar-days"></i> Month</span>
+                    <span class="cadence-legend-item"><i class="fa-solid fa-calendars"></i> Year</span>
+                    <span class="cadence-legend-item"><i class="fa-solid fa-hand-holding-dollar" style="color: var(--success)"></i> Paid</span>
+                    <span class="cadence-legend-item"><i class="fa-kit fa-solid-hand-holding-dollar-slash" style="color: var(--danger)"></i> Unpaid</span>
+                </div>
+                {% if recurring_expense_records and recurring_expense_records|length > 0 %}
+                <div class="search-btn-container recurring-search expense">
+                        <button class="clear-filter-btn expense" id="expense-recurring-clear" type="button" title="Clear Filter">
+                            <i class="fa-solid fa-filter-slash"></i>
+                        </button>
+                        <input type="text" class="category-search-field expense" id="expense-recurring-search"
+                               placeholder="Search expense categories..." autocomplete="off">
+                    </div>
+                {% endif %}
             </div>
     
             <!-- The recurring expense table -->
@@ -200,6 +211,7 @@
                         </tr>
                     </tfoot>
                 </table>
+                <p class="recurring-search-empty" id="expense-recurring-empty" style="display:none;">No categories match that search.</p>
             {% else %}
                 <div class="recurring-expense-empty-info">
                     <h3>No Recurring Expenses Found</h3>
@@ -1772,6 +1784,15 @@
         // schedule a price change the next time someone pressed Edit.
         $(document).on('click', '#edit-expense-modal .close-modal', function () {
             editChangeMode = 'edit';
+        });
+    
+        recurringSearch.attach({
+            input: 'expense-recurring-search',
+            clear: 'expense-recurring-clear',
+            empty: 'expense-recurring-empty',
+            tbody: '.expense-recurring-table tbody',
+            odd: 'zebra-odd-expense',
+            even: 'zebra-even-expense'
         });
     </script>
 {% include 'footer.html' %}

@@ -4100,6 +4100,97 @@ transform: scale(1.2);
 
 /* Alternate rows for income and expense categories between white and light gray */
 
+/* The recurring tables stripe with :nth-child, which counts hidden rows too -
+   so a filtered list comes out with two of the same colour side by side
+   wherever the search hid one. While a search is active recurringSearch puts
+   these classes on instead, counting only what is displayed, and takes them off
+   again when the box is cleared so the plain CSS striping resumes.
+
+   The two do not compete: the :nth-child rules above carry
+   :not([class*="zebra-"]), so exactly one of the two applies to any given row.
+   Matching on specificity alone would not have worked - both selectors come to
+   (0,2,2), and it was only source order deciding, with the :nth-child rules
+   further down the file and therefore winning. */
+.income-recurring-table tbody tr.zebra-even-income { background-color: var(--primary-lighter); }
+.income-recurring-table tbody tr.zebra-odd-income { background-color: var(--primary-hover); }
+.expense-recurring-table tbody tr.zebra-even-expense { background-color: var(--accent-lighter); }
+.expense-recurring-table tbody tr.zebra-odd-expense { background-color: var(--accent-hover); }
+.ca-recurring-table tbody tr.zebra-even-expense { background-color: var(--accent-lighter); }
+.ca-recurring-table tbody tr.zebra-odd-expense { background-color: var(--accent-hover); }
+
+/* Shown only when a search matches nothing, so an empty table cannot be
+   mistaken for having no recurring entries at all. */
+.recurring-search-empty {
+    margin: 14px 0 0;
+    color: var(--secondary-dark);
+    font-size: 13px;
+    text-align: center;
+}
+
+/* One row across the top of the table: the cadence legend on the left, lined up
+   with the table's left edge, and the search on the right lined up with its
+   right edge.
+
+   The legend used to be centred on its own line. Centred, it read as a caption
+   for the page rather than as a key to the column it explains - and it left the
+   search stranded on a line of its own underneath. */
+.table-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+/* Left, not centred, and only as wide as it needs to be - otherwise it takes
+   the whole row and pushes the search onto the next line. */
+.table-toolbar .cadence-legend {
+    justify-content: flex-start;
+    width: auto;
+    flex: 0 1 auto;
+}
+
+/* The search box sits above its table rather than beside a chart, so it wants
+   the room the dashboard's version does not have. */
+.recurring-search {
+    max-width: 420px;
+    margin: 0 0 10px auto;
+}
+
+/* In the toolbar the row handles the spacing, and a narrower box leaves the
+   legend somewhere to sit on a medium screen. */
+.table-toolbar .recurring-search {
+    flex: 0 1 300px;
+    margin: 0;
+}
+
+/* Narrow enough that the two cannot share a line: the legend wraps to the top
+   and the search takes the full width under it, rather than both being
+   squeezed. */
+@media (max-width: 700px) {
+    .table-toolbar {
+        justify-content: center;
+    }
+
+    .table-toolbar .cadence-legend {
+        justify-content: center;
+        width: 100%;
+    }
+
+    .table-toolbar .recurring-search {
+        flex: 1 1 100%;
+        max-width: none;
+    }
+
+    .table-toolbar .category-search-field {
+        flex: 1 1 auto;
+        width: auto;
+        max-width: none;
+    }
+}
+
 .zebra-odd-income { background-color: var(--primary-hover); }
 .zebra-even-income { background-color: var(--primary-lighter); }
 .zebra-odd-expense { background-color: var(--accent-hover); }
@@ -8859,12 +8950,12 @@ transform: scale(1.2);
     color: white;
 }
 
-.income-recurring-table tbody tr:nth-child(even) {
+.income-recurring-table tbody tr:nth-child(even):not([class*="zebra-"]) {
     /* White for odd rows */
     background-color: var(--primary-lighter); 
 }
 
-.income-recurring-table tbody tr:nth-child(odd) {
+.income-recurring-table tbody tr:nth-child(odd):not([class*="zebra-"]) {
     background-color: var(--primary-hover);
 }
 
@@ -10362,12 +10453,12 @@ form button[type="submit"] {
     border-bottom-right-radius: 10px; 
 }
 
-.expense-recurring-table tbody tr:nth-child(even) {
+.expense-recurring-table tbody tr:nth-child(even):not([class*="zebra-"]) {
     /* White for odd rows */
     background-color: var(--accent-lighter); 
 }
 
-.expense-recurring-table tbody tr:nth-child(odd) {
+.expense-recurring-table tbody tr:nth-child(odd):not([class*="zebra-"]) {
     background-color: var(--accent-hover);
 }
 
@@ -10943,11 +11034,11 @@ form button[type="submit"] {
     border-bottom-right-radius: 10px; 
 }
 
-.ca-recurring-table tbody tr:nth-child(even) {
+.ca-recurring-table tbody tr:nth-child(even):not([class*="zebra-"]) {
     background-color: var(--accent-lighter); 
 }
 
-.ca-recurring-table tbody tr:nth-child(odd) {
+.ca-recurring-table tbody tr:nth-child(odd):not([class*="zebra-"]) {
     background-color: var(--accent-hover);
 }
 

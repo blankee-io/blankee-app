@@ -2878,3 +2878,87 @@ window.sortableAutoScroll = (function () {
 
     return { start: begin, stop: end };
 })();
+
+/* ── Search box for the recurring tables ─────────────────────────────────────
+ *
+ * The dashboards have one of these already, but theirs has to keep two tables
+ * in step and so only filters on blur and Enter. These pages are a single
+ * table, so this filters as you type, which is what a search box on a plain
+ * list should do.
+ *
+ * It matches on the row's data-category-name, not on what the row prints. A
+ * scheduled change - a raise, a price change - shows "from <date>" where the
+ * name would be, because the name belongs to the chain rather than to that row.
+ * Matching the printed text would drop those rows out from under the category
+ * they belong to and leave a search result that lies about what is scheduled.
+ *
+ * Striping is taken over while a search is running. These tables stripe with
+ * :nth-child, which counts every row whether it is displayed or not, so a
+ * filtered list comes out with two of the same colour side by side wherever a
+ * row was hidden. Clearing the box takes the classes off again and the
+ * stylesheet resumes - its :nth-child rules carry :not([class*="zebra-"]), so
+ * exactly one of the two ever applies to a row.
+ */
+window.recurringSearch = (function () {
+
+    function stripe(tbody, oddClass, evenClass) {
+        var rows = tbody.querySelectorAll('tr');
+        var index = 0;
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            row.classList.remove(oddClass, evenClass);
+            if (row.style.display === 'none') { continue; }
+            row.classList.add(index % 2 === 0 ? evenClass : oddClass);
+            index++;
+        }
+        return index;
+    }
+
+    function attach(opts) {
+        var input = document.getElementById(opts.input);
+        var tbody = document.querySelector(opts.tbody);
+        if (!input || !tbody) { return; }
+
+        var clear = opts.clear ? document.getElementById(opts.clear) : null;
+        var empty = opts.empty ? document.getElementById(opts.empty) : null;
+
+        function apply() {
+            var query = input.value.trim().toLowerCase();
+            var rows = tbody.querySelectorAll('tr');
+            var shown = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var name = (rows[i].getAttribute('data-category-name') || '').toLowerCase();
+                var match = !query || name.indexOf(query) !== -1;
+                rows[i].style.display = match ? '' : 'none';
+                if (match) { shown++; }
+            }
+
+            if (query) {
+                stripe(tbody, opts.odd, opts.even);
+            } else {
+                // Nothing filtered, so hand the striping back to the stylesheet.
+                // Its :nth-child rules skip any row carrying a zebra class, so
+                // they only resume once these are off.
+                for (var j = 0; j < rows.length; j++) {
+                    rows[j].classList.remove(opts.odd, opts.even);
+                }
+            }
+
+            if (empty) { empty.style.display = (query && shown === 0) ? '' : 'none'; }
+        }
+
+        input.addEventListener('input', apply);
+        if (clear) {
+            clear.addEventListener('click', function () {
+                input.value = '';
+                apply();
+                input.focus();
+            });
+        }
+
+        // Not called up front any more: with an empty box there is nothing to
+        // filter and the stylesheet's own striping is already correct.
+    }
+
+    return { attach: attach };
+})();
