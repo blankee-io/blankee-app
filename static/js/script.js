@@ -2683,3 +2683,198 @@ document.addEventListener("DOMContentLoaded", function () {
         if (el) { el.classList.remove("mobile-options-hidden"); }
     } catch (e) { /* never let this break a page */ }
 });
+
+/* ── Smooth auto-scroll while dragging a sortable row ────────────────────────
+ *
+ * jQuery UI's own scrolling (scroll: true, scrollSpeed: 5) is what made this
+ * jittery: it only runs inside _mouseDrag, so it advances one fixed 5px step
+ * per mousemove event - nothing at all while the pointer is held still - and it
+ * never tells the widget the page moved, so the dragged row slides out from
+ * under the cursor until the next event drags it back.
+ *
+ * This is a requestAnimationFrame loop instead, so scrolling is paced by the
+ * display and continues while the pointer is stationary, and the speed eases in
+ * with the square of how far into the trigger zone the pointer is.
+ *
+ * Four things here are deliberate, and each is a way the first version of this
+ * could have silently done nothing:
+ *
+ *   - The pointer is tracked in the capture phase. A drag has several
+ *     listeners on document, and anything calling stopPropagation on mousemove
+ *     would leave this reading a stale position for ever - which looks exactly
+ *     like "it does not scroll".
+ *   - It scrolls document.scrollingElement directly rather than calling
+ *     window.scrollBy, and reads back what actually moved. html carries
+ *     `overflow: hidden auto` here, so which element scrolls is worth being
+ *     explicit about.
+ *   - Sub-pixel steps are accumulated. Near the edge of the zone the speed is a
+ *     fraction of a pixel per frame, and an engine that rounds scrollTop to an
+ *     integer would throw all of it away and never move.
+ *   - After each scroll it dispatches a mousemove at the pointer's real
+ *     position. That is what keeps the helper under the cursor and the
+ *     placeholder in the right slot - jQuery UI listens for it during a drag.
+ *
+ * Used by the sortables on dashboard, dashboard_3m and manage_categories, which
+ * set scroll: false and call start/stop from their own handlers.
+ */
+window.sortableAutoScroll = (function () {
+    // How deep the trigger zone reaches from each edge, and the speed at the
+    // very edge of it. 10px per frame is ~600px/s at 60Hz: about two thirds of
+    // a screen a second at full tilt, which is quick enough to get down a long
+    // category list and slow enough to stop where you meant to.
+    //
+    // The easing below is squared, so this figure is only reached with the
+    // pointer hard against the edge - most of the zone is a good deal gentler
+    // than the number suggests.
+    var ZONE = 90;
+    var MAX_SPEED = 10;
+
+    var dragging = false;
+    var pointerX = 0;
+    var pointerY = 0;
+    var havePointer = false;
+    var remainder = 0;
+    var frame = null;
+
+    // Which element actually moves the page.
+    //
+    // Not just document.scrollingElement: this app has had html and body both
+    // able to scroll at once, and setting scrollTop on the one that is not the
+    // real scroller does nothing while the other keeps the view - which reads
+    // as the page refusing to scroll, or jumping when the two disagree. So the
+    // candidates are tried in order and the first that actually has somewhere
+    // to go is used, decided once per drag rather than every frame.
+    var chosen = null;
+
+    function pickScroller() {
+        var candidates = [document.scrollingElement, document.documentElement, document.body];
+        for (var i = 0; i < candidates.length; i++) {
+            var el = candidates[i];
+            if (el && el.scrollHeight > el.clientHeight + 1) { return el; }
+        }
+        return document.scrollingElement || document.documentElement;
+    }
+
+    function scroller() {
+        if (!chosen) { chosen = pickScroller(); }
+        return chosen;
+    }
+
+    // The navbar sticks to the top and the calendar nav sticks under it, so the
+    // top of the window is not the top of what can be seen. Anything pinned
+    // across the top counts, whatever it is pinned at.
+    function topInset() {
+        var inset = 0;
+        var pinned = document.querySelectorAll('.nav-bar, .calendarnav');
+        for (var i = 0; i < pinned.length; i++) {
+            var rect = pinned[i].getBoundingClientRect();
+            var style = window.getComputedStyle(pinned[i]);
+            var stuck = (style.position === 'fixed' || style.position === 'sticky');
+            if (stuck && rect.top <= rect.height && rect.bottom > inset) {
+                inset = rect.bottom;
+            }
+        }
+        return inset;
+    }
+
+    // Squared rather than linear: the first pixels into the zone barely move the
+    // page, which is what stops it snatching as the pointer crosses in.
+    function speedFor(depth) {
+        var t = Math.min(1, Math.max(0, depth / ZONE));
+        return t * t * MAX_SPEED;
+    }
+
+    function onPointer(event) {
+        var point = (event.touches && event.touches.length) ? event.touches[0] : event;
+        if (point && typeof point.clientY === 'number') {
+            pointerX = point.clientX;
+            pointerY = point.clientY;
+            havePointer = true;
+        }
+    }
+
+    function step() {
+        if (!dragging) { frame = null; return; }
+        frame = window.requestAnimationFrame(step);
+
+        // Until the pointer has been seen once, there is nothing to measure
+        // against and guessing would scroll in some arbitrary direction.
+        if (!havePointer) { return; }
+
+        var top = topInset();
+        var height = window.innerHeight;
+        var speed = 0;
+
+        if (pointerY - top < ZONE) {
+            speed = -speedFor(ZONE - (pointerY - top));
+        } else if (height - pointerY < ZONE) {
+            speed = speedFor(ZONE - (height - pointerY));
+        }
+
+        if (!speed) { remainder = 0; return; }
+
+        // Carry the fraction: a tenth of a pixel per frame is still 6px a
+        // second, and dropping it would make the shallow end of the zone dead.
+        remainder += speed;
+        var whole = remainder > 0 ? Math.floor(remainder) : Math.ceil(remainder);
+        if (!whole) { return; }
+        remainder -= whole;
+
+        var el = scroller();
+        var before = el.scrollTop;
+        el.scrollTop = before + whole;
+        if (el.scrollTop === before) {
+            // Either the page is against its end, or the wrong element was
+            // picked. Re-picking is cheap and self-correcting; at the end of the
+            // document it simply picks the same one again and nothing moves.
+            chosen = null;
+            return;
+        }
+
+        document.dispatchEvent(new MouseEvent('mousemove', {
+            bubbles: true,
+            cancelable: true,
+            clientX: pointerX,
+            clientY: pointerY
+        }));
+    }
+
+    function begin(event) {
+        dragging = true;
+        remainder = 0;
+        chosen = null;
+        if (event) {
+            onPointer(event.originalEvent || event);
+            // jQuery hands page coordinates even where client ones are missing.
+            if (!havePointer && typeof event.pageY === 'number') {
+                pointerX = event.pageX - window.scrollX;
+                pointerY = event.pageY - window.scrollY;
+                havePointer = true;
+            }
+        }
+        // Capture phase, so nothing further down can hide the pointer from us.
+        document.addEventListener('mousemove', onPointer, true);
+        document.addEventListener('touchmove', onPointer, true);
+        if (!frame) { frame = window.requestAnimationFrame(step); }
+    }
+
+    function end() {
+        dragging = false;
+        havePointer = false;
+        remainder = 0;
+        document.removeEventListener('mousemove', onPointer, true);
+        document.removeEventListener('touchmove', onPointer, true);
+        if (frame) {
+            window.cancelAnimationFrame(frame);
+            frame = null;
+        }
+    }
+
+    // sortable's stop callback always fires, including on a cancelled drag - but
+    // a loop that scrolls the page for ever is a bad enough failure that it is
+    // worth a second way out. Releasing the pointer ends it whatever happened.
+    document.addEventListener('mouseup', function () { if (dragging) { end(); } }, true);
+    document.addEventListener('touchend', function () { if (dragging) { end(); } }, true);
+
+    return { start: begin, stop: end };
+})();

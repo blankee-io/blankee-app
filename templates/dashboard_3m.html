@@ -5973,9 +5973,11 @@
                 $tbody.sortable({
                     containment: "parent",
                     axis: "y",
-                    scroll: true,
-                    scrollSensitivity: 30,
-                    scrollSpeed: 5,
+                    // Scrolling is handled by sortableAutoScroll in script.js, which
+                    // is frame-paced and eases in. jQuery UI's own only advances on a
+                    // mousemove and in fixed 5px steps, which is what made dragging
+                    // near the edge of the window jitter.
+                    scroll: false,
                     items: CATEGORY_ITEMS,
                     handle: ".sort-handle, .group-sort-handle",
                     tolerance: 'pointer',
@@ -6071,6 +6073,7 @@
                     cursor: "move",
                     appendTo: document.body,
                     start: function(event, ui) {
+                        sortableAutoScroll.start(event);
                         disableCategoryEditing();
                         isCategorySortActive = true;
                         const dragH = window.innerWidth <= 600 ? 40 : 20;
@@ -6227,6 +6230,7 @@
                         }
                     },
                     stop: function(event, ui) {
+                        sortableAutoScroll.stop();
                         // Unlock table column widths
                         const $sideTable = $tbody.closest('table');
                         $sideTable.css({ 'table-layout': '', 'width': '' });

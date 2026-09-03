@@ -8,6 +8,26 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.16.1 — 2026-09-03
+
+### Fixed
+- **Reordering categories now scrolls smoothly.** Dragging a category to the edge
+  of the window used to jerk the page along in steps, stop entirely if you held
+  still, and leave the row you were dragging lagging behind the cursor. It now
+  drifts - slowly near the edge of the zone, faster the closer you get - and
+  keeps going while you hold the row where it is.
+- **A second scrollbar appeared while dragging, and the two fought over the
+  page.** The dragged row is attached to the page body, and pushing it past the
+  bottom made the body scrollable in its own right.
+- **Turning on category editing knocked the names out of line with their
+  amounts.** The two are separate tables side by side, and the drag handles
+  edit mode adds made each row a fraction of a pixel taller - invisible on one
+  row, a third of a row out twenty rows down.
+- **The footer floated in the middle of short pages.** It now sits at the bottom,
+  with the page ending where it does.
+- The schedule-a-raise and price-change buttons had no hover, unlike the edit
+  button beside them.
+
 ## 1.16.0 — 2026-09-03
 
 ### Added
