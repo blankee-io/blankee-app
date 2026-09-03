@@ -14153,6 +14153,23 @@ def dashboard_summary():
             recurring_c_expense_records = list(cursor.fetchall())
             cursor.close()
     
+    # Get recurring income records. Unlike the two above this needs the whole
+    # template, not just wage_bill: Test a Raise prefills its form from it, so
+    # the cadence and the dates have to come along too.
+    recurring_income_records = _get_entries_from_redis('recurring_income', current_user.id)
+    if recurring_income_records is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, category_id, amount, start_date, end_date,
+                       cadence_interval, cadence_unit, weekdays,
+                       monthly_day, monthly_days, yearly_day, yearly_month, wage_bill
+                FROM recurring_income
+                WHERE user_id = %s
+            """, (current_user.id,))
+            recurring_income_records = list(cursor.fetchall())
+            cursor.close()
+
     # Get ALL income categories (for footer and finding next payday)
     all_income_categories = _get_categories_from_redis('income_categories', current_user.id)
     if all_income_categories is None:
@@ -14295,6 +14312,9 @@ def dashboard_summary():
         recurring_expense_records=recurring_expense_records,
         recurring_c_expense_records=recurring_c_expense_records,
         income_entries=income_entries,
+        income_categories=[c for c in (all_income_categories or [])
+                           if c.get('is_recurring') == 1],
+        recurring_income_records=recurring_income_records,
         totals_remainders_d=totals_remainders_d,
         totals_remainders_w=totals_remainders_w,
         totals_remainders_m=totals_remainders_m,
@@ -18483,6 +18503,8 @@ def recurring_income():
             record['prev_bucket_spent'] = None
             record['prev_bucket_date'] = None
 
+    recurring_income_records = _annotate_chain_rows(recurring_income_records)
+
     # Pass landing_page to the template
     # Get all income categories for the searchable dropdown
     all_income_categories = _get_categories_from_redis('income_categories', current_user.id)
@@ -18504,6 +18526,449 @@ def recurring_income():
         landing_page=landing_page,
         currency_type=currency_type
     )
+
+# ── Scheduled changes: a recurring entry as a chain of rows ──────────────────
+#
+# A raise on an income, or a price change on an expense, is not a field on the
+# recurring record - it is the next one. The rows for a category form a
+# contiguous, non-overlapping chain ordered by start_date: the original runs
+# until the day before the first change, that change until the day before the
+# next, and the last one carries the end date or runs on.
+#
+# Nothing new was needed to store this. Every recurring_* table already has
+# start_date and end_date, every generate_*_entries already tags each entry with
+# the recurring_id that produced it, and the three recurring templates already
+# render one table row per record. What follows is the arithmetic of splitting
+# and healing that chain, and it is written once for all three kinds because the
+# three tables are the same shape - three copies would drift the moment one of
+# them was fixed.
+#
+# The vocabulary differs on purpose where the user sees it: income gets a
+# "raise", expenses and credit-account expenses get a "price change". Same
+# mechanism, different word, because a rent rise is not a raise.
+_CHAIN_KINDS = {
+    'income': {
+        'recurring': 'recurring_income',
+        'entries': 'income_entries',
+        'categories': 'income_categories',
+        'label': 'raise',
+    },
+    'expense': {
+        'recurring': 'recurring_expense',
+        'entries': 'expense_entries',
+        'categories': 'expense_categories',
+        'label': 'price change',
+    },
+    'c_expense': {
+        'recurring': 'recurring_c_expense',
+        'entries': 'c_expense_entries',
+        'categories': 'c_expense_categories',
+        'label': 'price change',
+    },
+}
+
+
+def _chain_generate(kind, link, start_date, end_date, user_id):
+    """Lay entries for one link over a date range, whichever kind it is."""
+    weekdays = [w for w in str(link.get('weekdays') or '').split(',') if w]
+    monthly_days = [d for d in str(link.get('monthly_days')
+                                  or link.get('monthly_day') or '').split(',') if d]
+    args = (link['id'], link['category_id'], link['amount'],
+            link['cadence_interval'], link['cadence_unit'],
+            str(start_date)[:10], str(end_date)[:10],
+            weekdays, monthly_days, link.get('yearly_day'), link.get('yearly_month'),
+            user_id)
+    if kind == 'income':
+        generate_income_entries(*args)
+    elif kind == 'expense':
+        generate_expense_entries(*args)
+    else:
+        # The only difference in the three signatures: a credit-account expense
+        # belongs to an account as well as a category.
+        generate_ca_expense_entries(*args, account_id=link.get('account_id'))
+
+
+def _as_date(value):
+    """A date out of Redis (a string) or MySQL (a date), or None."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.strptime(str(value)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _open_ended_end_date(today=None):
+    """The date the app stores to mean "no end date": (this year + 3)-12-31.
+
+    There is no no_end_date column on any recurring_* table - the flag lives on
+    the category, which describes a category and so cannot describe one link of a
+    chain. What the rest of the app actually does is store this sentinel as the
+    end_date and compare against it: the three recurring routes derive
+    display_end_date that way, and getFiveYearsFromNowEndDateString in the three
+    templates computes the same value client-side. This is that convention in one
+    place, so a scheduled change agrees with the rows around it.
+    """
+    return date((today or date.today()).year + 3, 12, 31)
+
+
+def _chain_link_is_open_ended(link):
+    """Whether a link runs on indefinitely, judged per link.
+
+    Not from the category's no_end_date: that is per category, so on a chain it
+    says the same thing about every link, including the ones that now demand a
+    real end because a change took over after them.
+    """
+    end = _as_date(link.get('end_date'))
+    if end is None:
+        return True
+    return end >= _open_ended_end_date()
+
+
+def _recurring_chain(kind, user_id, category_id):
+    """Every recurring row for one category, oldest start first.
+
+    A category with no scheduled changes has a chain of one, which is what every
+    existing recurring entry is - so the single-row paths stay as they were.
+    """
+    spec = _CHAIN_KINDS[kind]
+    rows = _get_recurring_from_redis(spec['recurring'], user_id)
+    if rows is None:
+        extra = ', account_id' if kind == 'c_expense' else ''
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(f"""
+                SELECT id, category_id, amount, start_date, end_date, cadence_interval,
+                       cadence_unit, weekdays, monthly_day, monthly_days, yearly_day,
+                       yearly_month, wage_bill{extra}
+                FROM {spec['recurring']}
+                WHERE user_id = %s AND category_id = %s
+            """, (user_id, category_id))
+            rows = list(cursor.fetchall())
+            cursor.close()
+
+    chain = [r for r in (rows or [])
+             if int(r.get('category_id') or 0) == int(category_id)]
+    return sorted(chain, key=lambda r: _as_date(r.get('start_date')) or date.min)
+
+
+def _delete_chain_entries(kind, user_id, recurring_id, on_or_after=None):
+    """Drop a single link's generated entries, not the whole category's.
+
+    Scoped by recurring_id on purpose. The category-wide delete the three delete
+    routes do is right when there is one row and wrong the moment there are two:
+    it would take the other links' entries with it.
+    """
+    table = _CHAIN_KINDS[kind]['entries']
+    entries = _get_entries_from_redis(table, user_id)
+    if not entries:
+        return 0
+
+    kept, dropped_ids, dropped = [], [], 0
+    for e in entries:
+        matches = int(e.get('recurring_id') or 0) == int(recurring_id)
+        if matches and on_or_after is not None:
+            entry_date = _as_date(e.get('date'))
+            matches = bool(entry_date and entry_date >= on_or_after)
+        if matches:
+            dropped += 1
+            entry_id = e.get('id')
+            if entry_id and int(entry_id) > 0:
+                dropped_ids.append(str(entry_id))
+        else:
+            kept.append(e)
+
+    if dropped:
+        _set_entries_to_redis(table, user_id, kept)
+        if dropped_ids and app.config.get('REDIS_OK'):
+            pending_key = f"pending_deletes:{table}:{user_id}"
+            _redis_client.sadd(pending_key, *dropped_ids)
+            _redis_client.expire(pending_key, 604800)
+            _redis_client.sadd(f"dirty_tables:{user_id}", table)
+    return dropped
+
+
+def _cadence_aligned_start(start, not_before, interval, unit):
+    """The first occurrence on or after not_before that is still on the cadence.
+
+    The generators anchor the whole schedule on the start_date they are given:
+    they walk forward from there in interval steps. So a link cannot be extended
+    by generating "from the gap onwards" - handing it the gap start re-anchors
+    the cadence there and moves every occurrence. This finds the date the
+    original schedule would actually have landed on, so a fortnightly wage stays
+    on its own fortnight.
+    """
+    interval = max(1, int(interval or 1))
+    if not_before <= start:
+        return start
+
+    if unit in ('days', 'weeks'):
+        step = interval * (7 if unit == 'weeks' else 1)
+        gap = (not_before - start).days
+        # Ceiling division: the first multiple of step that reaches not_before.
+        steps = -(-gap // step)
+        return start + timedelta(days=steps * step)
+
+    if unit in ('months', 'years'):
+        per_step = interval * (12 if unit == 'years' else 1)
+        months = (not_before.year - start.year) * 12 + (not_before.month - start.month)
+        steps = max(0, -(-months // per_step))
+        aligned = start + relativedelta(months=steps * per_step)
+        # relativedelta clamps a 31st into a short month, which can land just
+        # before the gap; one more step clears it.
+        while aligned < not_before:
+            steps += 1
+            aligned = start + relativedelta(months=steps * per_step)
+        return aligned
+
+    return start
+
+
+def _extend_chain_link(kind, user_id, link, new_end):
+    """Lay entries over the range a link has just grown into - only that range.
+
+    Forward only, and never over dates the link already covered. Regenerating a
+    whole link would be simpler and is wrong: _create_bucket_entry_and_record
+    writes processed=0, so re-walking the past marks entries that have already
+    been received or paid as neither.
+    """
+    start = _as_date(link.get('start_date'))
+    old_end = _as_date(link.get('end_date'))
+    if not start or not new_end:
+        return
+    if old_end and old_end >= new_end:
+        return
+
+    gap_start = (old_end + timedelta(days=1)) if old_end else start
+    aligned = _cadence_aligned_start(start, gap_start,
+                                     link.get('cadence_interval'),
+                                     link.get('cadence_unit'))
+    if aligned > new_end:
+        return
+    _chain_generate(kind, link, aligned, new_end, user_id)
+
+
+def _delete_chain_link(kind, user_id, category_id, recurring_id):
+    """Remove one link and let the one before it take over its range.
+
+    Returns a message on success, or None when this category has no chain and the
+    caller should fall through to its own single-row behaviour.
+
+    Deleting a link is not "stop this entry" - it is "undo this change". The link
+    before it takes over the range the deleted one covered, up to the day before
+    the next surviving link starts, and the entry carries on at the older amount.
+    """
+    chain = _recurring_chain(kind, user_id, category_id)
+    if len(chain) <= 1:
+        return None
+
+    index = next((i for i, link in enumerate(chain)
+                  if int(link.get('id')) == int(recurring_id)), None)
+    if index is None:
+        return None
+
+    spec = _CHAIN_KINDS[kind]
+    doomed = chain[index]
+    doomed_end = doomed.get('end_date')
+    doomed_no_end = int(doomed.get('no_end_date') or 0)
+
+    # The link's own entries only. A category-wide sweep would take the other
+    # links' entries with it.
+    _delete_chain_entries(kind, user_id, doomed.get('id'))
+    _delete_recurring_in_redis(spec['recurring'], user_id, recurring_id)
+    try:
+        from redis_crud import delete_recurring_mismatch
+        delete_recurring_mismatch(spec['recurring'], recurring_id, user_id=user_id)
+    except Exception:
+        pass
+
+    if index == 0:
+        # Nothing precedes the first link, so nothing absorbs its range.
+        # Back-filling would apply a later amount to earlier dates, which is the
+        # one thing this feature exists not to do.
+        return 'Removed. This now begins at the next scheduled change.'
+
+    previous = dict(chain[index - 1])
+    grew_to = _as_date(doomed_end)
+    previous['end_date'] = str(doomed_end)[:10] if doomed_end else str(_open_ended_end_date())
+    previous['no_end_date'] = doomed_no_end
+    _update_recurring_in_redis(spec['recurring'], user_id, previous)
+    _extend_chain_link(kind, user_id, chain[index - 1], grew_to or _open_ended_end_date())
+    if doomed_no_end:
+        _update_category_in_redis(spec['categories'], user_id, category_id,
+                                  {'no_end_date': 1})
+    return f'The {spec["label"]} was removed; the previous amount now runs on.'
+
+
+def _annotate_chain_rows(records):
+    """Order rows so each category's chain reads top to bottom, and flag them.
+
+    Without the sort the rows arrive in whatever order Redis holds them and a
+    scheduled change can appear above the amount it replaced, which reads as
+    nonsense. is_raise says a row is a change rather than the original;
+    is_chain_end says it is the last link, which is the only row that gets the
+    "schedule a change" action.
+    """
+    records = sorted(records or [],
+                     key=lambda r: (str(r.get('category_name') or '').lower(),
+                                    _as_date(r.get('start_date')) or date.min))
+    seen = set()
+    for record in records:
+        key = int(record.get('category_id') or 0)
+        record['is_raise'] = key in seen
+        seen.add(key)
+
+    last = {}
+    for i, record in enumerate(records):
+        last[int(record.get('category_id') or 0)] = i
+    for i, record in enumerate(records):
+        record['is_chain_end'] = (last.get(int(record.get('category_id') or 0)) == i)
+    return records
+
+
+@app.route('/schedule-recurring-change', methods=['POST'])
+@login_required
+def schedule_recurring_change():
+    """Schedule a change to a recurring entry, taking effect on a future date.
+
+    Splits the chain: the link covering the effective date is truncated to the
+    day before it, and a new link starts on it. Nothing before that date moves,
+    which is the whole point - the entries already forecast at the old amount up
+    to the effective date are left exactly where they are.
+    """
+    data = request.get_json() or {}
+    kind = data.get('kind')
+    if kind not in _CHAIN_KINDS:
+        return jsonify({'status': 'error', 'message': 'Unknown recurring kind.'}), 400
+    spec = _CHAIN_KINDS[kind]
+
+    category_id = data.get('category_id')
+    effective_date = data.get('effective_date')
+    amount = data.get('amount')
+    cadence_interval = data.get('cadence_interval')
+    cadence_unit = data.get('cadence_unit')
+    end_date = data.get('end_date')
+    no_end_date = int(data.get('no_end_date') or 0)
+    weekdays = data.get('weekdays') or []
+    monthly_days = data.get('monthly_days') or []
+    yearly_day = data.get('yearly_day')
+    yearly_month = data.get('yearly_month')
+
+    if not all([category_id, effective_date, amount, cadence_interval, cadence_unit]):
+        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+
+    effective = _as_date(effective_date)
+    if not effective:
+        return jsonify({'status': 'error', 'message': 'Effective date is not a date.'}), 400
+
+    # A change in the past would rewrite amounts that have already been forecast
+    # or settled, which is the one thing this must never do.
+    today = _user_today_for(current_user.id)
+    if effective <= today:
+        return jsonify({'status': 'error',
+                        'message': f'A {spec["label"]} has to start after today.'}), 400
+
+    try:
+        chain = _recurring_chain(kind, current_user.id, category_id)
+        if not chain:
+            return jsonify({'status': 'error',
+                            'message': 'That category has nothing recurring to change.'}), 404
+
+        # The link the effective date lands in: the last one that starts on or
+        # before it. Anything later is a change already scheduled beyond this one.
+        target = None
+        for link in chain:
+            start = _as_date(link.get('start_date'))
+            if start and start <= effective:
+                target = link
+        if target is None:
+            return jsonify({'status': 'error',
+                            'message': 'That date is before this starts.'}), 400
+
+        target_end = _as_date(target.get('end_date'))
+        if not _chain_link_is_open_ended(target) and target_end and target_end < effective:
+            return jsonify({
+                'status': 'error',
+                'message': (f'This ends on {target_end.strftime("%b %d, %Y")}. '
+                            f'A {spec["label"]} has to start on or before then - to '
+                            'start it again later, change the end date first.')}), 400
+
+        if _as_date(target.get('start_date')) == effective:
+            return jsonify({'status': 'error',
+                            'message': 'There is already a change starting on that date.'}), 400
+
+        # Three cases. Asking for no end date must not inherit the split link's
+        # end_date: on something that really does stop, that is a date before the
+        # change even starts.
+        if no_end_date:
+            new_end = str(max(_open_ended_end_date(), effective))
+            new_no_end = 1
+        elif end_date:
+            new_end = str(end_date)[:10]
+            new_no_end = 0
+        else:
+            inherited = _as_date(target.get('end_date'))
+            if inherited and inherited >= effective:
+                new_end = str(inherited)
+                new_no_end = 1 if _chain_link_is_open_ended(target) else 0
+            else:
+                new_end = str(max(_open_ended_end_date(), effective))
+                new_no_end = 1
+
+        if _as_date(new_end) and _as_date(new_end) < effective:
+            return jsonify({'status': 'error',
+                            'message': 'The end date is before the change starts.'}), 400
+
+        # 1. Truncate the link being split, and drop the entries it no longer
+        #    covers - only the ones from the effective date on.
+        truncated = dict(target)
+        truncated['end_date'] = str(effective - timedelta(days=1))
+        truncated['no_end_date'] = 0
+        _update_recurring_in_redis(spec['recurring'], current_user.id, truncated)
+        _delete_chain_entries(kind, current_user.id, target['id'], effective)
+
+        # 2. The new link. Type and account come from the link it replaces: a
+        #    change to the amount is not a change to what kind of thing it is.
+        new_link = {
+            'user_id': current_user.id,
+            'category_id': int(category_id),
+            'category_name': target.get('category_name'),
+            'amount': float(amount),
+            'cadence_interval': cadence_interval,
+            'cadence_unit': cadence_unit,
+            'weekdays': ','.join(weekdays) if weekdays else None,
+            'monthly_days': ','.join(map(str, monthly_days)) if monthly_days else None,
+            'yearly_day': yearly_day if yearly_day else None,
+            'yearly_month': yearly_month if yearly_month else None,
+            'start_date': str(effective),
+            'end_date': new_end,
+            'no_end_date': new_no_end,
+            'wage_bill': target.get('wage_bill', 0)
+        }
+        if kind == 'c_expense':
+            new_link['account_id'] = target.get('account_id')
+        _update_recurring_in_redis(spec['recurring'], current_user.id, new_link)
+
+        _chain_generate(kind, new_link, effective, new_end, current_user.id)
+
+        # The category's own no_end_date follows the last link, which is what the
+        # tables read to decide whether to print an end date at all.
+        if new_no_end:
+            _update_category_in_redis(spec['categories'], current_user.id, category_id,
+                                      {'no_end_date': 1})
+
+        return jsonify({'status': 'success', 'recurring_id': new_link['id'],
+                        'message': f'{spec["label"].capitalize()} scheduled.'})
+
+    except Exception as e:
+        log_error(app.logger, 'RECURRING', f"Error scheduling {spec['label']}: {e}")
+        return jsonify({'status': 'error',
+                        'message': f'An error occurred while scheduling: {str(e)}'}), 500
+
 
 @app.route('/add-recurring-income', methods=['POST'])
 @login_required
@@ -18801,10 +19266,15 @@ def delete_recurring_income():
         if not category_id:
             return jsonify({'status': 'error', 'message': 'Category ID not found for recurring income.'}), 404
         
-        # Convert to non-recurring instead of deleting the category
-        # Keep past entries, remove future entries, remove recurring/bucket records
         today = _user_today_for(current_user.id)
         category_id_int = int(category_id)
+
+        # A category with scheduled changes is a chain of rows, and deleting one
+        # link of it is "undo this change" rather than "stop this income".
+        # Everything below is the single-link case and is untouched.
+        healed = _delete_chain_link('income', current_user.id, category_id_int, recurring_id)
+        if healed:
+            return jsonify({'status': 'success', 'message': healed})
         
         # 1. Remove future entries (today and onward), keep past entries
         entries = _get_entries_from_redis('income_entries', current_user.id)
@@ -19309,7 +19779,7 @@ def recurring_expense():
 
     return render_template(
         'recurring_e.html', 
-        recurring_expense_records=recurring_expense_records,
+        recurring_expense_records=_annotate_chain_rows(recurring_expense_records),
         expense_categories=all_expense_categories,
         profile_picture=profile_picture,
         first_name=first_name,
@@ -19658,6 +20128,13 @@ def delete_recurring_expense():
         
         if not category_id:
             return jsonify({'status': 'error', 'message': 'Category ID not found for recurring expense.'}), 404
+
+        # A category with scheduled changes is a chain of rows, and deleting
+        # one link of it is "undo this change" rather than "stop this". The
+        # single-link case below is untouched.
+        healed = _delete_chain_link('expense', current_user.id, int(category_id), recurring_id)
+        if healed:
+            return jsonify({'status': 'success', 'message': healed})
         
         # Convert to non-recurring instead of deleting the category
         # Keep past entries, remove future entries, remove recurring/bucket records
@@ -20228,7 +20705,7 @@ def recurring_ca_expense():
 
     return render_template(
         'recurring_ca_e.html',
-        recurring_ca_expense_records=recurring_ca_expense_records,
+        recurring_ca_expense_records=_annotate_chain_rows(recurring_ca_expense_records),
         credit_accounts=credit_accounts,  # <-- Pass this to the template
         ca_categories_for_dropdown=ca_categories_for_dropdown,  # <-- Available categories for new recurring
         profile_picture=profile_picture,
@@ -20581,6 +21058,13 @@ def delete_recurring_ca_expense():
         
         if not category_id:
             return jsonify({'status': 'error', 'message': 'Category ID not found for recurring CA expense.'}), 404
+
+        # A category with scheduled changes is a chain of rows, and deleting
+        # one link of it is "undo this change" rather than "stop this". The
+        # single-link case below is untouched.
+        healed = _delete_chain_link('c_expense', current_user.id, int(category_id), recurring_id)
+        if healed:
+            return jsonify({'status': 'success', 'message': healed})
         
         # Get account_id from Redis or MySQL
         cached_categories = _get_categories_from_redis('c_expense_categories', current_user.id)

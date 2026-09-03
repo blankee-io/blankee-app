@@ -67,11 +67,33 @@
                     </thead>
                     <tbody>
                         {% for record in recurring_income_records %}
-                        <tr data-recurring-id="{{ record.id }}" data-cadence-interval="{{ record.cadence_interval }}" data-cadence-unit="{{ record.cadence_unit }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}1{% else %}0{% endif %}" data-wage-bill="{{ record.wage_bill }}">
+                        <tr class="{% if record.is_raise %}recurring-raise-row{% endif %}" data-recurring-id="{{ record.id }}" data-category-id="{{ record.category_id }}" data-category-name="{{ record.category_name }}" data-start-date="{{ record.start_date }}" data-amount="{{ record.amount }}" data-cadence-interval="{{ record.cadence_interval }}" data-cadence-unit="{{ record.cadence_unit }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}1{% else %}0{% endif %}" data-wage-bill="{{ record.wage_bill }}">
+                            {# A raise is the same income later on, so it does not repeat the name -
+                               it says the date it takes over. Not editable either: renaming
+                               the category on a raise row would rename the whole chain and
+                               read as though it had only renamed that row. #}
+                            {% if record.is_raise %}
+                            <td class="income-category recurring-raise-label" data-column="category_name"><span class="raise-arrow"><i class="fa-solid fa-arrow-turn-down-right"></i></span><span class="raise-from">from {{ record.start_date | string | truncate(10, true, '') }}</span></td>
+                            {% else %}
                             <td class="editable income-category" data-column="category_name">{{ record.category_name }}<span class="mobile-type-label">{{ 'Wages' if record.wage_bill == 1 else 'Variable' }}</span></td>
+                            {% endif %}
+                            {# Type belongs to the whole income, not to one link of it - a raise
+                               cannot change Wages to Variable, and the form does not offer to.
+                               Repeating it down the chain says it is a property of each row. #}
+                            {% if record.is_raise %}
+                            <td class="income-type raise-blank" data-column="type"></td>
+                            {% else %}
                             <td class="income-type" data-column="type">{{ 'Wages' if record.wage_bill == 1 else 'Variable' }}</td>
+                            {% endif %}
                             <td class="editable income-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
                             <td class="editable income-cadence" data-column="cadence" title="{{ record.cadence_description }}"><span class="cadence-top">{{ record.cadence_interval }} {% if record.cadence_unit == 'years' %}<i class="fa-solid fa-calendars"></i>{% elif record.cadence_unit == 'months' %}<i class="fa-solid fa-calendar-days"></i>{% elif record.cadence_unit == 'weeks' %}<i class="fa-solid fa-calendar-week"></i>{% else %}<i class="fa-solid fa-calendar-day"></i>{% endif %}</span>{% if record.cadence_unit == 'years' and record.yearly_month and record.yearly_day %}<span class="cadence-detail">{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][record.yearly_month | int] }} {{ record.yearly_day | ordinal }}</span>{% elif record.cadence_unit == 'months' and record.monthly_days %}<span class="cadence-detail">{{ record.monthly_days | ordinal }}</span>{% elif record.cadence_unit == 'weeks' and record.weekdays %}<span class="cadence-detail">{{ record.weekdays | replace('monday','Mo') | replace('tuesday','Tu') | replace('wednesday','We') | replace('thursday','Th') | replace('friday','Fr') | replace('saturday','Sa') | replace('sunday','Su') }}</span>{% endif %}</td>
+                            {# Current Status is the bucket for the period happening now, which
+                               belongs to whichever link is running today. On a raise that has not
+                               started yet there is no such period, and showing the active link's
+                               bucket against a future row would claim it had already begun. #}
+                            {% if record.is_raise %}
+                            <td class="income-bucket raise-blank" data-column="bucket"></td>
+                            {% else %}
                             <td class="income-bucket" data-column="bucket">
                                 {% set CUR = "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type %}
                                 {# Latest bucket beside the next one, for every kind. This was gated on
@@ -145,6 +167,7 @@
                                 {% endif %}
                                 {% endif %}
                             </td>
+                            {% endif %}
                             <td class="editable income-start-date" data-column="start_date">{{ record.start_date[5:7] }}-{{ record.start_date[8:] }}-{{ record.start_date[2:4] }}<span class="mobile-end-date">→ {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}No End{% else %}{{ record.end_date[5:7] }}-{{ record.end_date[8:] }}-{{ record.end_date[2:4] }}{% endif %}</span></td>
                             <td class="editable income-end-date" data-column="end_date">
                                 {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}
@@ -154,10 +177,22 @@
                                 {% endif %}
                             </td>
                             <td class="income-actions">
+                                <div class="row-actions">
+                                {# On the last link only. A raise is scheduled against the
+                                   category, and the server finds which link the date lands
+                                   in - so one button per chain is all that is needed, and
+                                   three of them stacked down a chain would suggest they did
+                                   different things. #}
+                                {% if record.is_chain_end %}
+                                <button class="raise-recurring-btn" title="Schedule a raise" onclick="openRaiseModal('{{ record.id }}')">
+                                    <i class="fa-solid fa-arrow-up-right-dots"></i>
+                                </button>
+                                {% endif %}
                                 <button class="edit-recurring-btn" onclick="openEditModal('{{ record.id }}')">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
                                 <button class="delete-recurring-btn" onclick="openRecurringDeleteModal('{{ record.id }}', event)"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
@@ -311,7 +346,12 @@
     <!-- Edit Recurring Income Modal -->
     <div id="edit-income-modal" class="modal">
         <div class="income-form-container">
-            <h2>Edit Recurring Income</h2>
+            {# This dialog asks two questions: edit this recurring income, or add a
+               raise to it from a date. The fields are identical, so openRaiseModal
+               rewords these four hooks rather than there being a second copy of the
+               form to keep in step. #}
+            <h2 id="edit-modal-title">Edit Recurring Income</h2>
+            <p id="edit-change-note" class="edit-change-note" style="display:none;"></p>
             <form id="edit-recurring-income-form">
                 <input type="hidden" id="edit-recurring-id" name="recurring_id">  <!-- Hidden input for recurring ID -->
             
@@ -392,7 +432,7 @@
 
                 <div class="date-row">
                     <div class="date-label-row">
-                        <label for="edit-start-date">Start Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The first occurrence. Forecast entries are generated from this date forward, so a past date will create entries you can confirm.</span></span></label>
+                        <label for="edit-start-date"><span id="edit-start-date-label">Start Date</span><span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The first occurrence. Forecast entries are generated from this date forward, so a past date will create entries you can confirm.</span></span></label>
                         <div class="end-date-container" id="edit-end-date-label-container">
                             <label for="edit-end-date">End Date<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The last occurrence. Leave it to No End Date to keep going indefinitely.</span></span></label>
                         </div>
@@ -419,7 +459,7 @@
                 </div>
 
 
-                <button type="submit">Save Changes</button>
+                <button type="submit" id="edit-submit">Save Changes</button>
             </form>            
         </div>        
     </div>
@@ -622,6 +662,12 @@
         // Open Modal for Add Income
         const addIncomeModal = document.getElementById("add-income-modal");
         const editIncomeModal = document.getElementById("edit-income-modal");
+        // Whatever closes it, the next open starts as an edit again. A modal that
+        // stays in raise mode because it was dismissed rather than submitted would
+        // schedule a raise the next time someone pressed Edit.
+        $(document).on('click', '#edit-income-modal .close-modal, #edit-income-cancel', function () {
+            editIncomeMode = 'edit';
+        });
         const btn = document.getElementById("add-income-btn");
         const span = document.getElementsByClassName("close-btn")[0];
 
@@ -1354,8 +1400,77 @@
             });
         }
 
+        // Which question the edit modal is currently asking. A raise wants the
+        // same fields as an edit - amount, cadence, end date - so it reuses that
+        // form rather than standing up a second copy of it that would drift.
+        // Only the title, one label, the submit text and the endpoint differ.
+        let editIncomeMode = 'edit';
+
+        function openRaiseModal(recurringId) {
+            editIncomeMode = 'raise';
+            openEditModal(recurringId);
+
+            const row = $(`tr[data-recurring-id="${recurringId}"]`);
+            $('#edit-modal-title').text('Schedule a Raise');
+            $('#edit-start-date-label').text('Effective From');
+            $('#edit-submit').text('Schedule Raise');
+
+            // A raise starts after today, never on or before it: the entries up to
+            // then are already forecast at the old amount and must not move.
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const min = tomorrow.toISOString().slice(0, 10);
+            $('#edit-start-date').attr('min', min).val('');
+
+            // The End Date fields, from this row rather than from the category.
+            //
+            // The row's data-no-end-date ORs in income_categories.no_end_date,
+            // which is a fact about the category and not about one link of a
+            // chain - so a row with a real end date arrived here showing "No End
+            // Date" ticked. Ticking it then asked for a raise running forever on
+            // an income that stops, and the server refused with a message about
+            // an end date the form had hidden. Judged per row instead: open-ended
+            // is the sentinel end date the rest of the app uses, or none at all.
+            const rowEnd = (row.attr('data-end-date') || '').trim();
+            const openEnded = !rowEnd || rowEnd === getFiveYearsFromNowEndDateString();
+            $('#edit-no-end-date-checkbox').prop('checked', openEnded);
+            $('#edit-end-date').val(openEnded ? '' : rowEnd);
+            $('#edit-no-end-date-checkbox').trigger('change');
+
+            // The amount stays prefilled with what it is now, so the new one is
+            // typed against the old one rather than into an empty box.
+            let note = 'Everything before this date stays exactly as it is. '
+                     + 'This adds a row to the table from that date on.';
+            if (!openEnded) {
+                note += ' This income currently ends on ' + rowEnd
+                      + ', so the raise has to start on or before then.';
+            }
+            $('#edit-change-note').text(note).show();
+            // Renaming the category from here would rename the whole chain.
+            $('#edit-category-name').prop('readonly', true);
+
+            // Nor is the type something a raise changes: Wages and Variable are
+            // settled differently by the buckets, so switching one halfway
+            // through would leave two kinds of the same income side by side. The
+            // endpoint already ignores whatever is submitted and inherits the
+            // type of the link it splits, so this is the form agreeing with it
+            // rather than a second rule.
+            $('#edit-wage-bill-select').prop('disabled', true);
+        }
+
         function openEditModal(recurringId) {
             const modal = document.getElementById("edit-income-modal");
+
+            // openRaiseModal calls this first and then overrides, so only reset the
+            // wording when this is a plain edit.
+            if (editIncomeMode !== 'raise') {
+                $('#edit-modal-title').text('Edit Recurring Income');
+                $('#edit-start-date-label').text('Start Date');
+                $('#edit-submit').text('Save Changes');
+                $('#edit-change-note').hide().text('');
+                $('#edit-category-name').prop('readonly', false);
+                $('#edit-wage-bill-select').prop('disabled', false);
+            }
 
             // Set the min attribute for the start date to the browser's today
             document.getElementById('edit-start-date').setAttribute('min', getTodayDateString());
@@ -1363,7 +1478,15 @@
             // Fetch the data from the corresponding row
             const row = $(`tr[data-recurring-id="${recurringId}"]`);
 
-            const categoryName = row.find('.income-category').clone().children().remove().end().text().trim();
+            // From the row's own attribute, not scraped out of the cell.
+            //
+            // A raise row's category cell prints "from <date>" instead of the
+            // name - the name belongs to the chain, not to that row - and the
+            // scrape returned an empty string for it. That left the raise form
+            // with a blank Category Name, and would have made Edit on a raise row
+            // fail too: update-recurring-income requires category_name.
+            const categoryName = (row.attr('data-category-name') || '').trim()
+                || row.find('.income-category').clone().children().remove().end().text().trim();
             const amountText = row.find('.income-amount').text().trim();
             const amountValue = amountText.replace(/[^0-9.\-]/g, '');
             const startDate = row.find('.income-start-date').clone().children().remove().end().text().trim();
@@ -1545,6 +1668,56 @@
                 formData.end_date = getFiveYearsFromNowEndDateString();
             }
 
+            // A raise is a different request against a different route: it adds a
+            // link to the chain rather than editing the row that was opened. The
+            // start date the form collected is the date it takes effect from.
+            if (editIncomeMode === 'raise') {
+                const row = $(`tr[data-recurring-id="${recurringId}"]`);
+                const raiseData = {
+                    kind: 'income',
+                    category_id: row.attr('data-category-id'),
+                    // The select is disabled in raise mode, so this comes off the
+                    // row. The server inherits the type regardless; sending it
+                    // keeps the request honest about what was asked for.
+                    wage_bill: parseInt(row.attr('data-wage-bill'), 10) || 0,
+                    effective_date: formData.start_date,
+                    amount: formData.amount,
+                    cadence_interval: formData.cadence_interval,
+                    cadence_unit: formData.cadence_unit,
+                    end_date: formData.end_date,
+                    no_end_date: formData.no_end_date,
+                    weekdays: formData.weekdays,
+                    monthly_days: formData.monthly_days,
+                    yearly_day: formData.yearly_day,
+                    yearly_month: formData.yearly_month
+                };
+                if (!raiseData.effective_date) {
+                    showToast('Pick the date the raise takes effect.', 'warning');
+                    return;
+                }
+                document.getElementById('loading-screen').style.display = 'flex';
+                $.ajax({
+                    url: '/schedule-recurring-change',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(raiseData),
+                    success: function (response) {
+                        if (response.status === 'success') {
+                            saveDailyTotalsAndRemainders();
+                            location.reload();
+                        } else {
+                            document.getElementById('loading-screen').style.display = 'none';
+                            showToast('Error: ' + response.message, 'error');
+                        }
+                    },
+                    error: function (xhr) {
+                        document.getElementById('loading-screen').style.display = 'none';
+                        showToast('An error occurred: ' + xhr.responseText, 'error');
+                    }
+                });
+                return;
+            }
+
             document.getElementById('loading-screen').style.display = 'flex';   
             $.ajax({
                 url: '/update-recurring-income',
@@ -1623,10 +1796,10 @@
                         '<td class="income-bucket" data-column="bucket"><span class="status-paid" title="Received"><i class="fa-solid fa-hand-holding-dollar"></i></span></td>' +
                         '<td class="editable income-start-date" data-column="start_date">25/01/01<span class="mobile-end-date">\u2192 No End</span></td>' +
                         '<td class="editable income-end-date" data-column="end_date">No End</td>' +
-                        '<td class="income-actions">' +
+                        '<td class="income-actions"><div class="row-actions">' +
                             '<button class="edit-recurring-btn tutorial-temp-btn"><i class="fa-solid fa-pen-to-square"></i></button>' +
                             '<button class="delete-recurring-btn tutorial-temp-btn"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>' +
-                        '</td>';
+                        '</div></td>';
 
                     var tempRow2 = document.createElement('tr');
                     tempRow2.className = 'tutorial-temp-row';
@@ -1641,10 +1814,10 @@
                         '</td>' +
                         '<td class="editable income-start-date" data-column="start_date">25/06/01<span class="mobile-end-date">\u2192 No End</span></td>' +
                         '<td class="editable income-end-date" data-column="end_date">No End</td>' +
-                        '<td class="income-actions">' +
+                        '<td class="income-actions"><div class="row-actions">' +
                             '<button class="edit-recurring-btn tutorial-temp-btn"><i class="fa-solid fa-pen-to-square"></i></button>' +
                             '<button class="delete-recurring-btn tutorial-temp-btn"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>' +
-                        '</td>';
+                        '</div></td>';
 
                     var tbody = existingTable.querySelector('tbody');
                     if (tbody) {
