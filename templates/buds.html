@@ -373,7 +373,8 @@
             // Show modal when Add new item link is clicked
             $addBudItemsLink.on('click', function(e) {
                 e.preventDefault();
-                $('#add-bud-item-modal').show();
+                // display:flex, not .show() - see .footer-modal in style.css.
+                $('#add-bud-item-modal').css('display', 'flex');
                 // Clear the form
                 $('#add-bud-item-form')[0].reset();
                 // Focus on first input

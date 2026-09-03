@@ -654,7 +654,7 @@ document.addEventListener("DOMContentLoaded", function() {
         // Function to open the modal with a specific message
         function openModal(message) {
             loginMessage.textContent = message;
-            loginModal.style.display = "block";
+            loginModal.style.display = "flex";
             setTimeout(function() {
                 loginModal.style.display = "none";
             }, 3000); // Auto-close modal after 3 seconds
@@ -682,7 +682,7 @@ document.addEventListener("DOMContentLoaded", function() {
             // Function to open the modal with a specific message and auto-close it after 3 seconds
             function openModal(message) {
                 successMessage.textContent = message;
-                successModal.style.display = "block";
+                successModal.style.display = "flex";
                 setTimeout(function() {
                     successModal.style.display = "none";
                     // Clear the URL parameters after the modal is closed
