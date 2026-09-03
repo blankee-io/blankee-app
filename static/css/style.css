@@ -8918,11 +8918,59 @@ transform: scale(1.2);
     text-align: right !important; 
 }    
 
-.income-actions {
+/* The actions cell is a plain table cell again, and the row of icons inside it
+   is what flexes.
+   These were display:flex themselves, which stops an element being a table cell -
+   and that produced three separate faults in a row: height stopped behaving as a
+   minimum so the stacked icons overflowed, the row would not grow to fit them,
+   and vertical-align had nothing to act on so they sat at the top of a tall row.
+   A wrapper costs one div and removes all three. */
+.income-actions,
+.expense-actions,
+.ca-actions {
     padding-right: 12px !important;
     padding-left: 2px !important;
-    text-align: right !important; 
-}   
+    text-align: right !important;
+    vertical-align: middle;
+}
+
+.row-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    white-space: nowrap;
+}
+
+/* No height override here any more. The cells are table cells again, so the
+   35px and 55px the shared th/td rules give them are minimums that the cell
+   grows past - which is what a table does without being asked. */
+
+/* What three of them actually need: 3 x (20px icon + 5px gap) plus the cell's
+   own 12px of right padding. A min-width, so the percentage widths on the other
+   columns give way rather than this one being squeezed. */
+.income-recurring-table th.income-action-col,
+.income-recurring-table td.income-actions,
+.expense-recurring-table th.expense-action-col,
+.expense-recurring-table td.expense-actions,
+.ca-recurring-table th.ca-action-col,
+.ca-recurring-table td.ca-actions {
+    min-width: 87px;
+}
+
+/* The buttons carry their own right margin, and the last one does not need it
+   inside a flex row that is already right-aligned. */
+.row-actions > button:last-child {
+    margin-right: 0;
+}
+
+/* A raise row has no Type and no Current Status - both belong to the income as a
+   whole, not to one link of its chain. The cells stay, so the columns still line
+   up; they are simply empty. */
+.raise-blank {
+    color: transparent;
+}
+
 
 .income-recurring-table tfoot tr {
     background-color: var(--secondary);
@@ -9160,11 +9208,13 @@ transform: scale(1.2);
         width: 14%;
     }
 
+    /* 45px fitted two icons and nothing more. Three need the room, and the
+       min-width above is what keeps them on one line. */
     .income-recurring-table th.income-action-col,
     .income-recurring-table td.income-action-col {
-        width: 45px;
-        min-width: 45px;
-        max-width: 45px;
+        width: 87px;
+        min-width: 87px;
+        max-width: 87px;
     }
 }
 
@@ -9249,8 +9299,34 @@ transform: scale(1.2);
     .income-recurring-table th.income-start-date-col,
     .income-recurring-table td.income-start-date { width: 18%; }
 
+    /* Stacked on a phone, not shrunk. Three full-size icons in a row is a
+       quarter of the screen width and the other columns cannot spare it; three
+       shrunk to 16px are hard to hit. A column costs height, which a table row
+       here already has plenty of. */
     .income-recurring-table th.income-action-col,
-    .income-recurring-table td.income-actions { width: 7%; }
+    .income-recurring-table td.income-actions,
+    .expense-recurring-table th.expense-action-col,
+    .expense-recurring-table td.expense-actions,
+    .ca-recurring-table th.ca-action-col,
+    .ca-recurring-table td.ca-actions { width: 34px; min-width: 34px; }
+
+    .row-actions {
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .income-actions,
+    .expense-actions,
+    .ca-actions {
+        padding-right: 2px !important;
+    }
+
+    /* The right margin was spacing them along a row; in a column it just pushes
+       them off centre. */
+    .row-actions > button {
+        margin-right: 0;
+    }
 }
 
 /* General Reset */
@@ -9446,7 +9522,7 @@ transform: scale(1.2);
 .ca-form-container label,
 .expense-form-container label,
 .convert-recurring-form-container label,
-.test-bill-form label {
+.cadence-form label {
     display: block;
     color: var(--text-dark);
     font-size: 14px;
@@ -9469,9 +9545,9 @@ transform: scale(1.2);
 .convert-recurring-form-container input[type="text"],
 .convert-recurring-form-container input[type="date"],
 .convert-recurring-form-container select,
-.test-bill-form input[type="number"],
-.test-bill-form input[type="date"],
-.test-bill-form select {
+.cadence-form input[type="number"],
+.cadence-form input[type="date"],
+.cadence-form select {
     width: 100%;
     margin-top: 5px;
     margin-bottom: 10px;
@@ -9504,7 +9580,7 @@ transform: scale(1.2);
 .ca-form-container button[type="submit"],
 .expense-form-container button[type="submit"],
 .convert-recurring-form-container button[type="submit"],
-.test-bill-form #test-bill-btn {
+.cadence-form .test-run-btn {
     padding: 12px 24px;
     border: none;
     border-radius: 10px;
@@ -9520,7 +9596,7 @@ transform: scale(1.2);
 
 .income-form-container button[type="submit"]:hover,
 .ca-form-container button[type="submit"]:hover,
-.test-bill-form #test-bill-btn:hover,
+.cadence-form .test-run-btn:hover,
 .expense-form-container button[type="submit"]:hover,
 .convert-recurring-form-container button[type="submit"]:hover {
     box-shadow: 0 4px 16px var(--shadow-lg);
@@ -9530,7 +9606,7 @@ transform: scale(1.2);
 
 .income-form-container button[type="submit"]:active,
 .ca-form-container button[type="submit"]:active,
-.test-bill-form #test-bill-btn:active,
+.cadence-form .test-run-btn:active,
 .expense-form-container button[type="submit"]:active,
 .convert-recurring-form-container button[type="submit"]:active {
     box-shadow: 0 1px 8px var(--shadow-lg);
@@ -9752,13 +9828,22 @@ transform: scale(1.2);
 }
 
 /* Weekly Options */
+/* The .cadence-* selectors here and below are the markup contract that
+   cadenceForm() expects, in style.css terms. They were #test-bill-* ids, so the
+   second form built on that module - Test a Raise - matched none of these rules
+   and rendered as bare browser controls: unaligned weekday checkboxes and a
+   grey submit button. A class covers every form the module drives, including
+   whatever is added next.
+
+   The long id lists beside them belong to the recurring forms on other pages
+   and are left alone; this is not the change that unifies those. */
 #balance-weekly-options,
 #weekly-options,
 #edit-weekly-options,
 #expense-weekly-options,
 #ca-weekly-options,
 #edit-category-weekly-options,
-#test-bill-weekly {
+.cadence-weekly {
     display: flex;
     align-items: center;
     gap: 15px;
@@ -9783,7 +9868,7 @@ transform: scale(1.2);
 #ca-weekly-options .weekday,
 #edit-category-weekly-options .weekday,
 #convert-weekly-options .weekday,
-#test-bill-weekly .weekday {
+.cadence-weekly .weekday {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -9799,9 +9884,9 @@ transform: scale(1.2);
 
 /* Monthly Options Label */
 #balance-monthly-options label,
-#test-bill-monthly label,
-#test-bill-weekly label,
-#test-bill-yearly label,
+.cadence-monthly label,
+.cadence-weekly label,
+.cadence-yearly label,
 #monthly-options label,
 #edit-monthly-options label,
 #expense-monthly-options label,
@@ -9815,7 +9900,7 @@ transform: scale(1.2);
 }
 
 /* Monthly Option Row */
-#test-bill-monthly-container div,
+.cadence-monthly-container div,
 #monthly-day-container div,
 #edit-monthly-day-container div,
 #edit-category-monthly-day-container div,
@@ -9892,9 +9977,9 @@ transform: scale(1.2);
 #edit-yearly-options,
 #weekly-options,
 #edit-weekly-options,
-#test-bill-monthly,
-#test-bill-weekly,
-#test-bill-yearly,
+.cadence-monthly,
+.cadence-weekly,
+.cadence-yearly,
 #monthly-options,
 #edit-monthly-options,
 #expense-yearly-options,
@@ -9928,13 +10013,13 @@ transform: scale(1.2);
 #ca-weekly-options,
 #edit-category-weekly-options,
 #convert-weekly-options,
-#test-bill-weekly {
+.cadence-weekly {
     justify-content: space-between;
 }
 
 /* Monthly options need display: block, not flex */
 #balance-monthly-options,
-#test-bill-monthly,
+.cadence-monthly,
 #monthly-options,
 #edit-monthly-options,
 #expense-monthly-options,
@@ -13745,6 +13830,86 @@ transform: scale(1.2);
     margin-top: 8px;
     font-size: 13px;
     opacity: 0.85;
+}
+
+/* ===== Raises on a recurring income =========================================
+   A category with raises is several rows of this table: the original, then one
+   per change, ordered by start date. The rows are indented under the first so
+   they read as one income with a history rather than as separate incomes that
+   happen to share a name. */
+.recurring-raise-row .income-category,
+.recurring-raise-label {
+    padding-left: 18px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.raise-arrow {
+    margin-right: 5px;
+    color: var(--primary);
+    opacity: 0.7;
+}
+
+.raise-from {
+    font-weight: 500;
+}
+
+/* A tint down the left of a raise row, so the chain is visible as a block even
+   when the rows are tall enough that the indent alone is easy to lose. */
+.recurring-raise-row > td:first-child {
+    box-shadow: inset 3px 0 0 var(--primary-lighter);
+}
+
+/* The line the edit dialog shows when it is asking for a raise rather than an
+   edit. Says what a raise does not touch, which is the reassurance the feature
+   turns on. */
+.edit-raise-note {
+    margin: -6px 0 16px;
+    padding: 10px 12px;
+    background-color: var(--primary-lighter);
+    border-radius: 8px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: left;
+}
+
+/* The same measurements and the same colour as .edit-recurring-btn beside it.
+   These two do the same kind of thing - change this recurring income - so one
+   of them arriving in the brand teal read as the primary action in a row where
+   it is not. */
+.raise-recurring-btn {
+    position: relative;
+    width: 20px;
+    height: 20px;
+    margin-right: 5px;
+    background-color: transparent;
+    border: none;
+    border-radius: 50%;
+    color: var(--secondary-dark);
+    cursor: pointer;
+}
+
+/* Effective From stands on its own rather than in a Start/End pair, and a date
+   input stretched across the whole dialog reads as a different kind of field
+   from the two above it. */
+.cadence-lone-date {
+    max-width: 240px;
+}
+
+/* The line under the dropdown in Test a Raise, saying what the selected income
+   is today. It is the reference the edited fields are being compared against, so
+   it reads as a caption rather than as another field. */
+.test-raise-current {
+    margin: 6px 0 14px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--secondary-dark);
+}
+
+.test-raise-current:empty {
+    display: none;
 }
 
 /* ===== Test result modal =====================================================
