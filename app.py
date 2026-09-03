@@ -5981,7 +5981,7 @@ def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=
         log_error(app.logger, 'BUCKET', f"Error deleting future buckets from {table_name} in Redis: {e}")
 
 
-def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None, is_system=0, is_bud=0):
+def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None, is_system=0, is_bud=0, bud_id=None):
     """
     Sync an expense category to all credit accounts for a user.
     Creates a non-recurring c_expense_category for each credit account.
@@ -5996,7 +5996,9 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
         group_id: Optional expense group ID — mapped to c_expense group via source_group_id
         is_system: Whether this is a system category (0 or 1)
         is_bud: Whether this category belongs to a bud (0 or 1)
-    
+        bud_id: The bud this category mirrors, or None for an ordinary category.
+            This is the join key - name is not, and never was reliable.
+
     Returns:
         Dictionary mapping account_id -> c_expense_category_id
     """
@@ -6024,11 +6026,25 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
         # Check if category already exists for this account (avoid duplicates)
         existing_categories = _get_categories_from_redis('c_expense_categories', user_id)
         if existing_categories:
-            existing_cat = next(
-                (cat for cat in existing_categories 
-                 if cat.get('account_id') == account_id and cat.get('name') == category_name),
-                None
-            )
+            if bud_id is not None:
+                # A bundle's mirror is identified by the bundle, not by its name.
+                # Two bundles can share a name; matching on it put them both on
+                # one category and merged their spending.
+                existing_cat = next(
+                    (cat for cat in existing_categories
+                     if cat.get('account_id') == account_id
+                     and cat.get('bud_id') is not None
+                     and int(cat['bud_id']) == int(bud_id)),
+                    None
+                )
+            else:
+                existing_cat = next(
+                    (cat for cat in existing_categories
+                     if cat.get('account_id') == account_id
+                     and cat.get('name') == category_name
+                     and cat.get('bud_id') is None),
+                    None
+                )
             if existing_cat:
                 # Already exists, return the existing ID
                 created_map[account_id] = existing_cat.get('id')
@@ -6074,6 +6090,7 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
             'no_end_date': 0,
             'hidden': 0,
             'is_bud': is_bud,
+            'bud_id': bud_id,
             'is_interest': 0,
             'is_auto_adjustment': 0,
             'is_system': is_system
@@ -6088,10 +6105,10 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO c_expense_categories 
-                    (account_id, name, display_order, is_recurring, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
-                    VALUES (%s, %s, %s, 0, 0, %s, 0, 0, %s)
-                """, (account_id, category_name, new_display_order, is_bud, is_system))
+                    INSERT INTO c_expense_categories
+                    (account_id, name, display_order, is_recurring, hidden, is_bud, bud_id, is_interest, is_auto_adjustment, is_system)
+                    VALUES (%s, %s, %s, 0, 0, %s, %s, 0, 0, %s)
+                """, (account_id, category_name, new_display_order, is_bud, bud_id, is_system))
                 new_id = cursor.lastrowid
                 conn.commit()
                 cursor.close()
@@ -6223,7 +6240,14 @@ def _sync_rename_to_credit_accounts(user_id, old_name, new_name):
             if cached:
                 categories = json.loads(cached)
                 for cat in categories:
-                    if cat.get('name') == old_name and not cat.get('is_interest') and not cat.get('is_auto_adjustment'):
+                    # A mirror with a bud_id belongs to a bundle and is renamed by
+                    # the bundle, through its id. Without this an ordinary category
+                    # that happens to share a bundle's name renamed the bundle's
+                    # mirrors on every card as a side effect.
+                    if (cat.get('name') == old_name
+                            and cat.get('bud_id') is None
+                            and not cat.get('is_interest')
+                            and not cat.get('is_auto_adjustment')):
                         cat['name'] = new_name
                         renamed_count += 1
                 if renamed_count > 0:
@@ -6238,6 +6262,7 @@ def _sync_rename_to_credit_accounts(user_id, old_name, new_name):
         cursor.execute("""
             UPDATE c_expense_categories SET name = %s
             WHERE name = %s AND is_interest = 0 AND is_auto_adjustment = 0
+              AND bud_id IS NULL
               AND account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
         """, (new_name, old_name, user_id))
         conn.commit()
@@ -6268,10 +6293,13 @@ def _sync_delete_to_credit_accounts(user_id, category_name):
     if not c_categories:
         return
     
-    # Find matching categories (skip system categories)
-    matching_cats = [cat for cat in c_categories 
-                     if cat.get('name') == category_name 
-                     and not cat.get('is_interest') 
+    # Find matching categories (skip system categories, and skip bundles -
+    # a mirror with a bud_id is deleted by its bundle, through its id, not by
+    # an ordinary category that happens to share the name)
+    matching_cats = [cat for cat in c_categories
+                     if cat.get('name') == category_name
+                     and cat.get('bud_id') is None
+                     and not cat.get('is_interest')
                      and not cat.get('is_auto_adjustment')]
     
     if not matching_cats:
@@ -7026,6 +7054,124 @@ def _get_c_expense_category_by_name(account_id, category_name, user_id=None):
         result = cursor.fetchone()
         cursor.close()
         return result['id'] if result else None
+
+def _get_bundle_category_for_account(user_id, account_id, bud_id):
+    """Find a bundle's mirror category on one credit account, by id.
+
+    Replaces matching c_expense_categories.name against buds.name. Name was
+    never a safe key: two bundles can share one, and c_expense_categories had
+    no uniqueness constraint, so both landed on a single category and their
+    spending merged.
+
+    Rows created before add_bundle_ids.sql ran, or by a version that did not
+    stamp bud_id, still have it NULL. Those fall back to the name match, which
+    is what they were found by anyway - so this is no worse than before for
+    them, and exact for everything since.
+
+    Returns:
+        The c_expense_category id, or None.
+    """
+    if bud_id is None:
+        return None
+
+    categories = _get_categories_from_redis('c_expense_categories', user_id)
+    if categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                """
+                SELECT c.* FROM c_expense_categories c
+                INNER JOIN credit_accounts a ON c.account_id = a.id
+                WHERE a.user_id = %s
+                """,
+                (user_id,)
+            )
+            categories = cursor.fetchall()
+            cursor.close()
+
+    account_cats = [c for c in categories
+                    if int(c.get('account_id', 0) or 0) == int(account_id)]
+
+    for cat in account_cats:
+        if cat.get('bud_id') is not None and int(cat['bud_id']) == int(bud_id):
+            return cat.get('id')
+
+    # Legacy fallback: an unstamped mirror, found the old way.
+    all_buds = _get_buds_from_redis(user_id) or []
+    bud_name = next((b.get('name') for b in all_buds
+                     if int(b.get('id', 0) or 0) == int(bud_id)), None)
+    if not bud_name:
+        return None
+    for cat in account_cats:
+        if cat.get('name') == bud_name and int(cat.get('is_bud', 0) or 0) == 1:
+            return cat.get('id')
+    return None
+
+
+def _ensure_bundle_categories(user_id, bud_row):
+    """Make sure a bundle has its budget category and a mirror on every card.
+
+    Activation used to create the budget category only, and mint the per-card
+    ones lazily the first time an item on that card was processed - so a card
+    added after activation never got one, and the item's spending fell through
+    to Uncategorized.
+
+    Redis-first throughout, and idempotent: safe to call on every activation
+    and from the repair pass.
+
+    Returns:
+        The bundle's expense_category id, or None if it could not be created.
+    """
+    bud_id = int(bud_row['id'])
+    bud_name = bud_row.get('name')
+    category_id = bud_row.get('expense_category_id')
+
+    existing_cats = _get_categories_from_redis('expense_categories', user_id)
+    if existing_cats is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT * FROM expense_categories WHERE user_id = %s", (user_id,))
+            existing_cats = cursor.fetchall()
+            cursor.close()
+
+    # The budget category, if it has gone missing or was never made.
+    known = {int(c['id']) for c in existing_cats if c.get('id') is not None}
+    if not category_id or int(category_id) not in known:
+        display_order = _next_display_order(existing_cats, tier=1)
+        category_id = _add_category_to_redis(
+            'expense_categories', user_id,
+            {
+                'user_id': user_id,
+                'name': bud_name,
+                'display_order': display_order,
+                'group_id': None,
+                'is_recurring': 0,
+                'no_end_date': 0,
+                'hidden': 0,
+                'is_bud': 1,
+                'is_interest': 0,
+                'is_auto_adjustment': 0,
+                'is_system': 0,
+            }
+        )
+    else:
+        display_order = next(
+            (c.get('display_order') for c in existing_cats
+             if int(c['id']) == int(category_id)),
+            _next_display_order(existing_cats, tier=1)
+        )
+
+    if category_id is None:
+        return None
+
+    # And one mirror per card, stamped with the bundle id so it can be found
+    # again without going through the name.
+    _sync_expense_category_to_credit_accounts(
+        user_id, bud_name, display_order, is_bud=1, bud_id=bud_id
+    )
+    return category_id
+
 
 def _get_bud_items_from_redis(user_id):
     """Get bud_items from Redis."""
@@ -21395,6 +21541,29 @@ def add_bud():
     if not bud_name:
         return jsonify({'status': 'error', 'message': 'Bud name required.'}), 400
 
+    # A bud mints an expense category of the same name when it is activated.
+    # Nothing checked for a clash, so a bud named after an existing category
+    # produced two categories with one name - and then the rename and delete
+    # syncs, which match on name, could not tell them apart.
+    existing_cats = _get_categories_from_redis('expense_categories', current_user.id)
+    if existing_cats is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT name FROM expense_categories WHERE user_id = %s",
+                (current_user.id,)
+            )
+            existing_cats = cursor.fetchall()
+            cursor.close()
+    clash = next((c for c in existing_cats
+                  if (c.get('name') or '').strip().lower() == bud_name.lower()), None)
+    if clash:
+        return jsonify({
+            'status': 'error',
+            'message': f"You already have an expense category called '{bud_name}'. "
+                       "Pick a different name."
+        }), 400
+
     # Insert to MySQL first to get real ID
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -21450,13 +21619,20 @@ def add_bud_item():
         if not bud:
             return jsonify({'status': 'error', 'message': 'Parent bud not found'}), 404
 
+    # Resolve the card once, here, and store its id alongside the name. The
+    # name stays for now because a lot of code still reads it; the id is what
+    # survives the card being renamed.
+    credit_account_id = None
+    if account and account.lower() not in ('blankee', 'deleted account'):
+        credit_account_id = _get_credit_account_by_name(current_user.id, account)
+
     # Insert to MySQL first to get real ID
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
-            INSERT INTO bud_items (bud_id, account, name, value, date, description)
-            VALUES (%s, %s, %s, %s, %s, NULL)
-        """, (bud_id, account, name, float(value), date_val))
+            INSERT INTO bud_items (bud_id, account, credit_account_id, name, value, date, description)
+            VALUES (%s, %s, %s, %s, %s, %s, NULL)
+        """, (bud_id, account, credit_account_id, name, float(value), date_val))
         new_item_id = cursor.lastrowid
         conn.commit()
         cursor.close()
@@ -21466,6 +21642,7 @@ def add_bud_item():
         'id': new_item_id,
         'bud_id': bud_id,
         'account': account,
+        'credit_account_id': credit_account_id,
         'name': name,
         'value': float(value),
         'date': date_val,
@@ -22040,7 +22217,9 @@ def check_and_hide_bud_category(bud_id):
     c_categories = _get_categories_from_redis('c_expense_categories', current_user.id)
     if c_categories:
         for cat in c_categories:
-            if cat.get('name') == bud_name and cat.get('is_bud'):
+            # By id. On a name match this hid every bundle of the same name, on
+            # every card, whenever any one of them ran out of future items.
+            if cat.get('bud_id') is not None and int(cat['bud_id']) == int(bud_id):
                 _update_category_in_redis('c_expense_categories', current_user.id,
                                         cat['id'],
                                         {'hidden': 1 if all_in_past else 0})
@@ -22076,6 +22255,15 @@ def update_bud_item():
 
     # Update the field
     bud_item[field] = value if field != 'value' else float(value)
+
+    # Keep the card id in step with the name. The name is what the UI sends;
+    # the id is what survives the card being renamed.
+    if field == 'account':
+        if value and value.lower() not in ('blankee', 'deleted account'):
+            bud_item['credit_account_id'] = _get_credit_account_by_name(
+                current_user.id, value)
+        else:
+            bud_item['credit_account_id'] = None
 
     # Update in Redis
     _update_bud_item_in_redis(current_user.id, bud_item)
@@ -22676,14 +22864,12 @@ def delete_bud():
                                              ca_auto_adj_entry['amount'], 
                                              processed=1, bud_item_id=None)
 
-                # Track CA categories created for this bud (by bud name)
-                if bud_name:
-                    cursor.execute("""
-                        SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s
-                    """, (account_id, bud_name))
-                    cat_row = cursor.fetchone()
-                    if cat_row:
-                        ca_category_ids_to_delete.add(cat_row['id'])
+                # Track CA categories created for this bud, by id - a name
+                # match here deleted another bundle's category off this card.
+                bundle_cat_id = _get_bundle_category_for_account(
+                    current_user.id, account_id, bud_id)
+                if bundle_cat_id:
+                    ca_category_ids_to_delete.add(bundle_cat_id)
 
         # Delete the bud's expense category if present.
         # Redis-first, for the same reason as deactivation: a raw DELETE leaves the
@@ -22773,58 +22959,16 @@ def toggle_bud_active():
                 ca_auto_adj_ids[ca_id] = ca_auto_adj['id']
 
         if active == 1:
-            if not bud_row.get('expense_category_id'):
-                # Redis is the read path, so this category has to be created there
-                # or the dashboard cannot see it until the user is re-hydrated.
-                # It also has to be mirrored into every credit account the way an
-                # ordinary expense category is - going straight to MySQL skipped
-                # both, which is why bud categories only half-existed.
-                existing_cats = _get_categories_from_redis('expense_categories', current_user.id)
-                if existing_cats is None:
-                    cursor.execute(
-                        "SELECT * FROM expense_categories WHERE user_id = %s",
-                        (current_user.id,)
-                    )
-                    existing_cats = cursor.fetchall()
-                new_display_order = _next_display_order(existing_cats, tier=1)
+            # The budget category and one mirror per card, all Redis-first and
+            # all stamped with this bud's id. Called unconditionally: it is
+            # idempotent, and running it every time is also what repairs a bud
+            # activated before a card was added, which used to be left without a
+            # mirror there for good.
+            expense_category_id = _ensure_bundle_categories(current_user.id, bud_row)
 
-                expense_category_id = _add_category_to_redis(
-                    'expense_categories', current_user.id,
-                    {
-                        'user_id': current_user.id,
-                        'name': bud_name,
-                        'display_order': new_display_order,
-                        'group_id': None,
-                        'is_recurring': 0,
-                        'no_end_date': 0,
-                        'hidden': 0,
-                        'is_bud': 1,
-                        'is_interest': 0,
-                        'is_auto_adjustment': 0,
-                        'is_system': 0,
-                    }
-                )
-
-                if expense_category_id is None:
-                    # Redis unavailable - fall back to MySQL so activation still works.
-                    cursor.execute("""
-                        INSERT INTO expense_categories (user_id, name, display_order, is_bud, is_system)
-                        VALUES (%s, %s, %s, 1, 0)
-                    """, (current_user.id, bud_name, new_display_order))
-                    expense_category_id = cursor.lastrowid
-
-                _sync_expense_category_to_credit_accounts(
-                    current_user.id, bud_name, new_display_order, is_bud=1
-                )
-
-                # Update bud in Redis with new expense_category_id
-                bud_row['expense_category_id'] = expense_category_id
-                bud_row['active'] = active
-                _update_bud_in_redis(current_user.id, bud_row)
-            else:
-                # Update bud active status in Redis
-                bud_row['active'] = active
-                _update_bud_in_redis(current_user.id, bud_row)
+            bud_row['expense_category_id'] = expense_category_id
+            bud_row['active'] = active
+            _update_bud_in_redis(current_user.id, bud_row)
 
             # Get list of bud_item_ids for this bud to check against auto adjustments
             bud_item_ids = [int(item['id']) for item in bud_items]
@@ -22901,36 +23045,19 @@ def toggle_bud_active():
                     ca_id = _get_credit_account_by_name(current_user.id, account)
                     if not ca_id:
                         continue
-                    # c_expense_categories is keyed by user_id, not by account_id -
-                    # passing ca_id here read and wrote another user's Redis keys and
-                    # dirtied their tables. The account is a filter on the rows, not
-                    # part of the key.
-                    c_categories = _get_categories_from_redis('c_expense_categories', current_user.id) or []
-                    account_cats = [c for c in c_categories if int(c.get('account_id', 0) or 0) == int(ca_id)]
-                    bud_cat_id = None
-                    for cat in account_cats:
-                        if cat.get('name') == bud_name:
-                            bud_cat_id = cat['id']
-                            break
-
+                    # By id, not by name: two bundles can share a name, and
+                    # matching on it put both on one category.
+                    bud_cat_id = _get_bundle_category_for_account(
+                        current_user.id, ca_id, bud_id)
                     if not bud_cat_id:
-                        # Activation mirrors into every account up front, so reaching
-                        # here means the account was added since. Create the one that
-                        # is missing rather than re-running the whole fan-out.
-                        category_data = {
-                            'account_id': ca_id,
-                            'name': bud_name,
-                            'display_order': _next_display_order(account_cats, tier=1),
-                            'is_bud': 1,
-                            'is_recurring': 0,
-                            'no_end_date': 0,
-                            'hidden': 0,
-                            'is_interest': 0,
-                            'is_auto_adjustment': 0,
-                            'is_system': 0,
-                            'group_id': None
-                        }
-                        bud_cat_id = _add_category_to_redis('c_expense_categories', current_user.id, category_data)
+                        # _ensure_bundle_categories mirrors into every card above,
+                        # so this only fires if that failed. Retry rather than
+                        # silently dropping the item's spending.
+                        _ensure_bundle_categories(current_user.id, bud_row)
+                        bud_cat_id = _get_bundle_category_for_account(
+                            current_user.id, ca_id, bud_id)
+                        if not bud_cat_id:
+                            continue
                     
                     # Transfer any auto adjustment entries for items in this group
                     ca_auto_adj_transferred = False
@@ -23037,11 +23164,10 @@ def toggle_bud_active():
                         continue
                     ca_id = ca_row['id']
                     ca_auto_adj_id = ca_auto_adj_ids.get(ca_id)
-                    cursor.execute("SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s", (ca_id, bud_name))
-                    cat_row = cursor.fetchone()
-                    if not cat_row:
+                    bud_cat_id = _get_bundle_category_for_account(
+                        current_user.id, ca_id, bud_id)
+                    if not bud_cat_id:
                         continue
-                    bud_cat_id = cat_row['id']
                     
                     # Get and filter c_expense entries from Redis
                     c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
@@ -23099,20 +23225,21 @@ def toggle_bud_active():
                 bud_row['active'] = active
                 _update_bud_in_redis(current_user.id, bud_row)
             
-            # Delete all credit account expense categories with this bud name.
-            # Same story as above - through Redis, or the flush worker restores them.
+            # Delete this bundle's mirror categories - by id, so deactivating
+            # one bundle cannot take another of the same name down with it.
+            # Through Redis, or the flush worker restores them.
             mirror_cats = _get_categories_from_redis('c_expense_categories', current_user.id)
             if mirror_cats is None:
                 cursor.execute("""
                     SELECT c.id FROM c_expense_categories c
                     INNER JOIN credit_accounts a ON c.account_id = a.id
-                    WHERE a.user_id = %s AND c.name = %s AND c.is_bud = 1
-                """, (current_user.id, bud_name))
+                    WHERE a.user_id = %s AND c.bud_id = %s
+                """, (current_user.id, bud_id))
                 mirror_ids = [row['id'] for row in cursor.fetchall()]
             else:
                 mirror_ids = [
                     c['id'] for c in mirror_cats
-                    if c.get('name') == bud_name and int(c.get('is_bud', 0) or 0) == 1
+                    if c.get('bud_id') is not None and int(c['bud_id']) == int(bud_id)
                 ]
             for mirror_id in mirror_ids:
                 _delete_category_in_redis('c_expense_categories', current_user.id, mirror_id)
@@ -24363,18 +24490,37 @@ def delete_credit_account():
                 account_name = account_row['name'] if account_row else None
                 cursor.close()
 
-        # Update bud_items that reference this account
-        if account_name:
+        # Update bud_items that reference this account.
+        # Redis-first: writing only to MySQL left the old account name in the
+        # Redis blob, and the flush worker put it back within about fifteen
+        # seconds. Matched on credit_account_id where the item has one, so a
+        # card renamed before it was deleted is still recognised.
+        deleted_acct_id = actual_id_to_delete if actual_id_to_delete else account_id
+        bud_items = _get_bud_items_from_redis(current_user.id)
+        if bud_items is not None:
+            for item in bud_items:
+                item_acct = item.get('credit_account_id')
+                matches = (
+                    (item_acct is not None and deleted_acct_id
+                     and int(item_acct) == int(deleted_acct_id))
+                    or (item_acct is None and account_name
+                        and item.get('account') == account_name)
+                )
+                if matches:
+                    item['account'] = 'deleted account'
+                    item['credit_account_id'] = None
+                    _update_bud_item_in_redis(current_user.id, item)
+        elif account_name:
+            # Redis unavailable. Scoped through the parent bud: account names
+            # are not unique across users, so an unscoped match renames every
+            # other user's items that share the name of this card.
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
-                # Scoped through the parent bud: account names are not unique
-                # across users, so an unscoped match renames every other user's
-                # items that happen to share the name of this card.
                 cursor.execute(
                     """
                     UPDATE bud_items bi
                     INNER JOIN buds b ON bi.bud_id = b.id
-                    SET bi.account = %s
+                    SET bi.account = %s, bi.credit_account_id = NULL
                     WHERE bi.account = %s AND b.user_id = %s
                     """,
                     ("deleted account", account_name, current_user.id)
