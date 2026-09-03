@@ -59,6 +59,18 @@ ALTER TABLE `c_expense_entries` RENAME COLUMN `bud_item_id` TO `bundle_item_id`;
 -- ----- 3. the constraint names -----
 -- Renaming a constraint means dropping and re-adding it. The FK is recreated
 -- immediately, so nothing is unprotected for longer than this statement pair.
+--
+-- EXPECTED NOISE: the first three pairs normally fail, and that is correct.
+-- RENAME TABLE already renamed those constraints - InnoDB rewrites a foreign
+-- key called <old_table>_ibfk_N to <new_table>_ibfk_N when the table moves - so
+-- the DROP reports "Can't DROP" and the ADD reports "Duplicate foreign key
+-- constraint name". They are kept anyway: they cost nothing when MySQL has
+-- already done the work, and they are the safety net if a version ever does
+-- not. verify() is what decides whether the end state is right.
+--
+-- The last two pairs are NOT redundant. They sit on expense_entries and
+-- c_expense_entries, which are not renamed here, and their names do not follow
+-- the _ibfk_N convention - so nothing renames them automatically.
 ALTER TABLE `bundle_items` DROP FOREIGN KEY `bud_items_ibfk_1`;
 ALTER TABLE `bundle_items`
   ADD CONSTRAINT `bundle_items_ibfk_1`
